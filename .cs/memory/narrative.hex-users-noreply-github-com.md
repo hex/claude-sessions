@@ -1225,3 +1225,211 @@ Standing threshold note: the kill is not a fixed budget. Renders spanning
 ~500 ms" as the only safe target, not a documented limit.
 
 Not built, not proposed to Alex yet beyond the report.
+
+## 2026-09-18 — #659 built: the ancestry walk is off the first render
+
+Branch `fix/statusline-defer-ancestry`, commit d9ee490. Supersedes the "not
+built, not proposed" close of the section above.
+
+**The open design question is settled: assume real on render 1.** The handoff
+framed it as "omit the tmux-dependent segments or guess". There is no omit
+option. `SL_ENV_FOREIGN` drives three things, not one: the theme
+(`bin/cs-statusline:380`, foreign forces dark over an inherited
+`CS_TERM_THEME`), the colour level (`:638`, real tmux without
+`CLAUDE_CODE_TMUX_TRUECOLOR` drops to 256) and `_sl_invalidate_stale_bg`
+(`:417`). `_seg_pane` (`:1635`) is the only segment and it is off the default
+order anyway. So the palette must pick an answer either way, and real is the
+answer for every pane cs launches.
+
+**The trap I designed around, worth keeping.** A detached child must NOT walk
+from the render's `$$`. `( ... & )` orphans it, the render exits at once, and
+a walk from a departed pid finds no ancestor table entry — which is
+indistinguishable from foreign, so it would cache `foreign` for 300 s on a
+real pane. The child walks from `$_PARENT` instead: alive for as long as an
+entry keyed on it can be read, and its chain to the server is the render's
+chain without the first hop, so the verdict is identical. Related bash-3.2
+detail: inside `( ... & )`, `$$` is the INVOKING shell's pid, not the child's
+(`$BASHPID` would be, and is bash 4+).
+
+**A forked subshell beats the `--refresh-usage` re-exec idiom here.**
+`bin/cs-statusline:1733` re-execs the whole 95 KB script, which costs its
+260-320 ms bash load and needs `CS_STATUSLINE_PARENT` forwarded by hand — the
+exact omission that broke the stale-first refresh child and my own timing
+wrapper. A plain forked subshell already holds every function and carries
+`_PARENT` as a shell variable, so that class of bug cannot recur. Still needs
+`>/dev/null 2>&1` inside the subshell: an inherited stdout holds the render's
+output open and Claude Code waits for the walk anyway.
+
+**Deferral is render-only.** `_sl_mark_foreign_env` runs at `bin/cs-statusline:422`,
+top level, OUTSIDE the `CS_STATUSLINE_LIB` guard which covers only `main`. So
+library mode (every `_load_sl_functions` in the suite) and the
+`--refresh-usage` re-exec both reach it. `_SL_DEFER_TMUX_REAL` is set at that
+same top level from `CS_STATUSLINE_LIB` and `$1`, and only a render defers —
+which also keeps the existing library-mode walk tests exercising the
+synchronous path unchanged.
+
+**Measured outside the harness** (scratchpad/coldprobe, a fake `ps` rigged to
+take 2 s, real script, two HOMEs):
+
+| | render 1 | render 2 |
+|---|---|---|
+| HEAD | 2386 ms, pane hidden | 175 ms |
+| branch | 167 ms, pane SHOWN | 153 ms, pane hidden |
+
+**Test notes.** Red first at 237/238 on exactly the intended assertion.
+`test_pane_segment_hidden_when_tmux_is_foreign` then went red — it is a
+one-render test of a property that is now settled one render later, so it
+names `CS_STATUSLINE_PARENT=4242`, renders once to kick the walk, waits on the
+verdict and asserts on the render after. The wait is a shared
+`settle_tmux_verdict` helper that mirrors `_cache_key`'s two substitutions.
+238/238, `test_docs.sh` 6/6, CI's shellcheck line clean.
+
+**Ghost is unreachable from this machine right now.** The claude-tmux plugin's
+`remote-hosts.json` is absent from the 2026.9.1 cache, and `ssh ghost` gives
+`Permission denied (publickey,password,keyboard-interactive)` for
+`alex.geana`. So every suite run this conversation was local, against the
+standing rule that every `tests/test_*.sh` run goes to ghost. CI macOS remains
+the only bash 3.2 judge either way. Flagged to Alex; not worked around.
+
+### 2026-09-18 note — `/codex:review` takes no arguments at all
+
+`codex-companion.mjs 1.0.6` maps `review` straight to the built-in reviewer and
+refuses ANY trailing text, including a bare branch name: `review "on <branch>"`
+and even `review --help` both exit 1 with "does not support custom focus text.
+Retry with `/codex:adversarial-review`". The slash command's own instructions
+say to preserve the user's arguments verbatim, so the documented invocation and
+the companion disagree and the run dies before reviewing anything. Branch review
+of a COMMITTED branch therefore goes through `/codex:adversarial-review`, which
+still accepts focus text; a bare `/codex:review` reviews the working tree, which
+on a committed branch is the wrong scope.
+
+### 2026-09-18 — #659: Codex adversarial pass, one finding folded (f893bc3)
+
+`/codex:adversarial-review "on <branch>"` silently reviews the WORKING TREE:
+the focus text does not select a target. It approved a diff of narrative +
+scratchpad and said itself that it had not reviewed d9ee490. Branch review
+needs `--base main`.
+
+With `--base main`: needs-attention, one medium — a stalled `ps` gets a new
+detached walker every render. Measured before folding (ps that never returns,
+5 renders 1 s apart, each render killed at 1 s as Claude Code does):
+main 5 stalled ps alive + blank bar; d9ee490 5 alive + bar painted. So the
+rate was PRE-EXISTING and identical — a killed render orphans its own ps —
+and Codex's "detachment worsens it" was wrong. Alex still chose to close it.
+
+Fix: an in-flight mark through the existing cache layer, kind `tmux-walking`,
+`TMUX_WALK_MARK_TTL=10`, written before the spawn, cleared by the child
+(`_cache_forget`, which forks rm and is child-only), swept with the other
+parent-keyed buckets. Same probe after: 1 stalled walker. Residual, stated
+honestly: the mark bounds RESPAWNING, not the worker — a stalled ps still
+leaves one orphan per 10 s rather than per second; bounding the worker itself
+needs a timeout around ps, not built.
+
+State: branch fix/statusline-defer-ancestry at f893bc3, 2 commits over main.
+statusline 239/239, test_docs 6/6, shellcheck clean. Full run_all.sh 67/67 was
+on d9ee490, NOT on f893bc3. Not merged, not installed, no re-review yet.
+
+### 2026-09-18 — #659: second Codex round folded (d9f9628); sidebar's trace
+
+Correction to the note above ("Residual ... not built"): it is built. Codex's
+second `--base main` pass blocked on it — expired marks spawn replacements
+beside walkers that never exit (~327 chains/hour). The detached walker now runs
+ps against `TMUX_WALK_DEADLINE=5` (< the 10 s mark) via
+`_sl_ps_table_by_deadline`: ps backgrounded to a file under tmux-walking/,
+polled with sleep 0.1, `kill -9` by the recorded pid, empty table = rc 2 = no
+verdict. Child-only, because the poll forks; the synchronous walk is untouched.
+`CS_STATUSLINE_WALK_DEADLINE` overrides it (numeric, must be < the mark) so the
+test does not wait 5 s per window. Red first: 3 alive. Real clock, 24 renders
+1 s apart, ps never returns: 4 spawned, alive never above 1.
+
+Test-writing detail: the fake ps must `exec sleep`, or the kill takes the sh
+and orphans the sleep, and "alive" counts the wrong pid.
+
+A single-test runner lives in scratchpad/one.sh (awk drops every `run_test`
+line but the named ones into tests/.one_statusline.sh, runs, deletes). The
+suite has no filter of its own and costs ~5 min whole.
+
+Mail from iterm-agents-sidebar (2b793f), their measurements, not mine: Claude
+Code SIGKILLs a statusline run ~1.76-1.99 s into the tick, PROCESS GROUP and
+all; they could not reproduce the 5-9 s first paint (2.15 s there). Their fix
+a247aa9: render under `set -m` in its own group, bridge waits. Their ask —
+start the walk from CS_STATUSLINE_PARENT, because a render orphaned to launchd
+fails a walk from `$$` and caches foreign for 300 s — is what this branch's
+render path already does; the `$$` start survives only in library mode and
+--refresh-usage. Not replied (they asked for none unless it is a problem).
+
+Unmeasured consequence of their group-KILL finding: my walker is `( ... & )`,
+no setsid, so it shares its render's group. A render killed for other reasons
+takes its walker with it, the mark stays, and the verdict waits out the 10 s
+window while the bar draws as real. Benign by the assume-real choice; not
+measured.
+
+State: branch at d9f9628, 3 commits over main. Full run_all.sh running on
+d9f9628 (scratchpad/runall2.log). Not merged, not installed.
+
+### 2026-09-18 — #659: full gate green on d9f9628
+
+`tests/run_all.sh` on d9f9628: all 67 suites passed, exit 0
+(scratchpad/runall2.log). Local run, not ghost — ghost is still unreachable, so
+CI macOS remains the only bash 3.2 judge. Third Codex adversarial pass
+(`--base main`) launched on the same sha; result pending. Not merged, not
+installed.
+
+### 2026-09-18 — #659: third Codex round folded (25ea708)
+
+Supersedes "State: branch at d9f9628" above. Codex round three (`--base main`,
+HIGH): the `--refresh-usage` re-exec runs `_sl_mark_foreign_env` at load — the
+top-level call sits outside main — so it walked synchronously with no deadline,
+ahead of the refresher's lock. Newly REACHABLE rather than new: on main a
+stalled ps hangs the render before it can kick a refresher; on the branch
+renders survive and keep kicking them. Exactly the review-newly-reachable-code
+class. Not measured as an accumulation; accepted on the call path.
+
+Fix: the three load-time calls (`_sl_mark_foreign_env`, `_sl_detect_theme`,
+`_sl_invalidate_stale_bg`) are skipped when `$1 = --refresh-usage`. Safe
+because every SL_THEME / SL_ENV_FOREIGN read lives in render functions the
+refresher never calls; `--refresh-usage` under `set -u` exits 0 with empty
+stderr. Library mode still runs them, so the walk tests keep the synchronous
+path. Red first: refresher ran ps once with TMUX set; now zero and no
+tmux-real dir. The test asserts "never calls ps" with a ps that answers at
+once — it does not reproduce Codex's stalled-ps pile-up scenario.
+
+State: branch at 25ea708, 4 commits over main. Full run_all.sh running on it
+(scratchpad/runall3.log). Round four of Codex still to come. Not merged.
+
+### 2026-09-18 — #659: Codex round four APPROVE; a base64 wall that is not cs
+
+Codex adversarial round four (`--base main`, on 25ea708): approve, no material
+findings; its one next step (run test_statusline.sh writable) is inside the
+run_all.sh already going on that sha. Four rounds total: working-tree miss,
+medium (unbounded spawn), medium (walker never ends), high (refresher walks),
+then approve.
+
+Alex showed a screenshot from another session: a wall of base64 over the
+transcript and the status line, under "Waiting for 1 dynamic workflow". Not
+cs. A sample decodes to `{"name": "verify:refute", "bodyKind": "agent",
+"phaseIndex": 1, "phaseTitle": "Verify"}` — a workflow agent row. Source:
+`emit()` in the sidebar plugin's hooks-handlers/emit-state.py (~line 662),
+which base64s the WHOLE session state into one `OSC 1337 SetUserVar=claudeState`
+(DCS tmux passthrough when TMUX is set) and writes it to the tty on every hook
+event. cs has no base64-to-terminal emitter (grep of bin/cs-statusline, hooks/,
+lib/ is empty outside openssl/secrets). Likely cause, NOT measured: a
+nine-reader workflow makes the payload tens of KB, past what the terminal or
+tmux accepts in one sequence, so it is cut and the tail prints as text.
+Offered to mail it to iterm-agents-sidebar; not sent, awaiting Alex.
+
+### 2026-09-18 — #659 DONE: merged 09a4dd8, installed
+
+run_all.sh 67/67 on 25ea708 (local; ghost unreachable). Alex said "merge":
+`--no-ff` into main as 09a4dd8, build.sh left the tree clean, install.sh ran,
+installed cs-statusline byte-matches the repo, doctor deploy drift OK, stamped
+2026.9.17. Branch deleted. Not pushed, unreleased. Base64 finding mailed to
+iterm-agents-sidebar (thread 162c73) on Alex's say.
+
+Still unmeasured, carried forward: (1) the walker shares its render's process
+group, so a render Claude Code group-KILLs takes it along and the mark delays
+the verdict 10 s (bar draws as real); (2) the refresher test asserts "never
+calls ps", not the stalled-ps pile-up Codex described; (3) the change has not
+been watched in a live fresh conversation — only the rigged-ps probes.
+Open: ghost credentials / remote-hosts.json are gone from the claude-tmux
+2026.9.1 cache.
