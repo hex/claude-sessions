@@ -1409,6 +1409,18 @@ _make_ps_table() {
     chmod +x "$TEST_TMPDIR/fakebin/ps"
 }
 
+# Block until the detached child a render spawned has left its ancestry
+# verdict for parent $1 and the TMUX claim $2, so the next render reads a
+# settled answer rather than racing one. Non-zero if it never arrives.
+settle_tmux_verdict() {
+    local key="$1,$2" n=0
+    key=${key//\//-}; key=${key//[^A-Za-z0-9._,-]/_}   # as _cache_key sanitises
+    while [ ! -s "$HOME/.cache/cs/tmux-real/$key" ] && [ "$n" -lt 200 ]; do
+        n=$((n + 1)); sleep 0.05
+    done
+    [ -s "$HOME/.cache/cs/tmux-real/$key" ]
+}
+
 # The pane id is a claim about where this conversation lives, and TMUX_PANE is
 # inherited alongside TMUX. Rendering it for a process that is not in that
 # server prints a pane belonging to someone else's terminal.
@@ -1418,7 +1430,12 @@ test_pane_segment_hidden_when_tmux_is_foreign() {
     _make_ps_table foreign 12345
     export TMUX="/tmp/tmux-1000/default,12345,0" TMUX_PANE="%7"
     export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    # Named, so the verdict the first render's child writes is the one the
+    # render below looks up: a pipeline gives each render its own parent.
+    export CS_STATUSLINE_PARENT=4242
     local out
+    run_sl "$FIXTURE_DOCS" >/dev/null   # kicks the walk off the render path
+    settle_tmux_verdict 4242 "$TMUX" || { echo "  FAIL: no verdict was written"; return 1; }
     out=$(run_sl "$FIXTURE_DOCS")
     assert_output_not_contains "$out" "◫" \
         "pane id must not render for a tmux membership this process does not have" || return 1
@@ -3900,6 +3917,38 @@ test_unusable_ps_verdict_is_not_cached() {
 }
 
 run_test test_unusable_ps_verdict_is_not_cached
+
+# A conversation's first render is the only one that has ever paid for the
+# ancestry walk, and it is the render Claude Code kills. It no longer waits:
+# the verdict is taken as real, the walk runs in a detached child under the
+# render's own parent identity, and the next render — a second later — reads
+# what the child left. A foreign environment is corrected by then; a real one,
+# which is every pane cs launches, never sees a wrong palette at all.
+test_first_render_defers_the_ancestry_walk() {
+    export CS_TERM_THEME=light FORCE_COLOR=0
+    export CS_STATUSLINE_SEGMENTS=pane
+    export TMUX="/tmp/fake,2216,0" TMUX_PANE="%7"
+    # Named, because a pipeline gives each render a different parent and the
+    # verdict the child writes must be the one the next render looks up.
+    export CS_STATUSLINE_PARENT=4242
+    _make_ps_chain "2216:1"   # the server is nobody's ancestor: foreign
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    local json='{"session_id":"sid-1"}'
+    local first second
+    first=$(run_sl "$json")
+    assert_output_contains_f "$first" "7" \
+        "the first render draws the pane instead of walking the tree" || return 1
+    settle_tmux_verdict 4242 "$TMUX" \
+        || { echo "  FAIL: the detached walk left no verdict"; return 1; }
+    second=$(run_sl "$json")
+    grep -qF -- "7" <<< "$second" && {
+        echo "  FAIL: the second render must read the foreign verdict the child cached"
+        return 1
+    }
+    return 0
+}
+
+run_test test_first_render_defers_the_ancestry_walk
 
 # The org id is kept for ORG_CACHE_TTL under the config path, so an account
 # swap shows within five minutes and a render never walks the config twice in

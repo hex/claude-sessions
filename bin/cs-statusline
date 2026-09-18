@@ -231,20 +231,36 @@ TMUX_REAL_CACHE_TTL=300
 _sl_tmux_is_real() {
     [ -n "${TMUX:-}" ] || return 1
     local srv start
-    srv=${TMUX#*,}; srv=${srv%%,*}
-    case "$srv" in ''|*[!0-9]*) return 1 ;; esac
+    _sl_tmux_server || return 1
+    srv="$_SRV"
     start=${1:-$$}
     # A caller that names a start pid is a test of the walk itself; only the
     # render's own question is cached.
-    local ident="" verdict
+    local ident=""
     if [ -z "${1:-}" ]; then _sl_parent_pid; ident="$_PARENT,$TMUX"; fi
+    _sl_tmux_cached_walk "$start" "$srv" "$ident"
+}
+
+# The tmux server pid from the TMUX claim, in _SRV. Non-zero when the claim
+# carries no pid to check, which is not a tmux this process can be inside.
+_sl_tmux_server() {
+    _SRV=${TMUX#*,}; _SRV=${_SRV%%,*}
+    case "$_SRV" in ''|*[!0-9]*) return 1 ;; esac
+}
+
+# The walk with its cache around it: $1 start pid, $2 server pid, $3 the
+# identity to key the verdict on, empty to answer without reading or writing
+# an entry. Returns the walk's own verdict, with an unanswerable ps read as
+# real (see _sl_tmux_walk) and left uncached.
+_sl_tmux_cached_walk() {
+    local ident="$3" verdict
     if [ -n "$ident" ] && _cache_read tmux-real "$ident" "$TMUX_REAL_CACHE_TTL"; then
         case "$_CACHE_TEXT" in
             real) return 0 ;;
             foreign) return 1 ;;
         esac
     fi
-    _sl_tmux_walk "$start" "$srv"
+    _sl_tmux_walk "$1" "$2"
     local rc=$?
     if [ -n "$ident" ] && [ "$rc" -ne 2 ]; then
         verdict=foreign; [ "$rc" -eq 0 ] && verdict=real
@@ -289,7 +305,43 @@ _sl_tmux_walk() {  # start-pid server-pid
 _sl_mark_foreign_env() {
     SL_ENV_FOREIGN=""
     [ -n "${TMUX:-}" ] || return 0
+    [ -n "${_SL_DEFER_TMUX_REAL:-}" ] && _sl_defer_tmux_verdict && return 0
     _sl_tmux_is_real || SL_ENV_FOREIGN=1
+}
+
+# The ancestry verdict, kept off a conversation's first render.
+#
+# It is the one cost a render pays exactly once: it appears in a conversation's
+# first render and in none after, and the first render is the one Claude Code
+# kills for running too long. So on a miss this render answers real — what
+# every pane cs launches is — and a detached child does the walk and leaves the
+# verdict where the render a second later reads it. A foreign environment draws
+# its own terminal's palette for one render and is corrected on the next; a
+# real one never sees a wrong palette at all.
+#
+# The child walks from the PARENT, not from this render. The subshell orphans
+# it, this render exits at once, and a pid that has gone has no ancestors to
+# walk. The parent is the conversation, alive for as long as an entry keyed on
+# it can be read, and its chain to the server is this render's chain without
+# the first hop — the same verdict, from a pid that stays.
+#
+# Returns 0 when SL_ENV_FOREIGN is settled, 1 when the caller must walk here.
+_sl_defer_tmux_verdict() {
+    _sl_tmux_server || return 1
+    _sl_parent_pid
+    local ident="$_PARENT,$TMUX"
+    if _cache_read tmux-real "$ident" "$TMUX_REAL_CACHE_TTL"; then
+        case "$_CACHE_TEXT" in
+            real)    return 0 ;;
+            foreign) SL_ENV_FOREIGN=1; return 0 ;;
+        esac
+    fi
+    # Detached, and with descriptors of its own: an inherited stdout holds the
+    # render's output open, and Claude Code would wait on the walk after all.
+    # A ps that cannot answer leaves no entry, so the next render spawns
+    # another child — the cost of the walk it replaced, not a new one.
+    ( _sl_tmux_cached_walk "$_PARENT" "$_SRV" "$ident" >/dev/null 2>&1 & ) >/dev/null 2>&1
+    return 0
 }
 
 # The terminal cs measured, found by the one identity a render can establish
@@ -418,6 +470,13 @@ _sl_invalidate_stale_bg() {
         CS_TERM_BG_RGB=""
     fi
 }
+
+# Only a render defers the walk. The library mode the test suite sources and
+# the --refresh-usage re-exec both take the verdict in hand: neither paints a
+# bar, and a re-exec that spawned its own walker would fork for an answer
+# nobody reads.
+_SL_DEFER_TMUX_REAL=""
+[ "${CS_STATUSLINE_LIB:-}" = "1" ] || [ "${1:-}" = "--refresh-usage" ] || _SL_DEFER_TMUX_REAL=1
 
 _sl_mark_foreign_env
 _sl_detect_theme
