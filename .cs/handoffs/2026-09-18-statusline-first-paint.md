@@ -160,3 +160,87 @@ finding and the two open questions). Nothing is committed for it yet.
 Written from live context at roughly 45%, no compaction. Pass two appends the
 recoverable sections (request history, concepts, file map, pending tasks,
 current state).
+
+## 4. Primary Request and Intent
+
+The conversation woke on `.cs/handoffs/2026-09-17-wrap-key-live-check.md` and
+ran its next step (the live wrap-key measurement, #653), then #640. After the
+merge Alex asked three questions in a row, each answered from the installed
+2.1.276 bundle rather than docs: "tell me about context compact enforcin"
+(→ auto-compact enforcement), "is there an enforcement for rotation?"
+(→ the suggest/offer/force ladder), then "it should be on by default", which
+became #654. Then the iTerm tab-title question (routed away), then "one thing
+I noticed when I open a session is that the statusline doesnt appear imediatly
+but after a few seconds, why is that?" and, mid-turn, "can we bypass this
+somehow?" pointing at the folder-trust dialog. That last pair is what this
+handoff carries forward — neither is finished.
+
+## 5. Key Technical Concepts
+
+- **cs-rotate** is a Claude Code function-hooks mod (TypeScript, fake-engine
+  unit tests under `mods/cs-rotate/test/`). Its `forceThreshold()` decides the
+  forced-rotation percentage; `claude plugin validate` inventories the env
+  names a module reads, so a name it does not spell is refused.
+- The **status line** runs per render with the session JSON on stdin, at
+  `refreshInterval: 1`. On this machine it is registered to the sidebar's
+  `statusline-bridge.sh`, which publishes the payload to
+  `~/.claude/agents-sidebar-status/<ppid>.json` and then execs the previously
+  configured status line (cs-statusline).
+- **The ladder cs uses for context pressure**: nudge at 65% (the
+  narrative-reminder Stop hook), band at 40% (`CS_ROTATE_BUTTON_CTX`), force at
+  80% (`CS_ROTATE_FORCE_CTX`, now the default).
+
+## 6. Files and Code Sections
+
+On main, `git log --oneline 740579d~3..740579d` covers #654:
+- `mods/cs-rotate/hooks/register.tsx`: `export const FORCE_DEFAULT = 80`;
+  `forceThreshold()` returns FORCE_DEFAULT when unset, `undefined` for `off`
+  (any case) or all-zeros, the number for digits, and FORCE_DEFAULT for
+  anything else — *a typo must not quietly disable a rotation someone relies
+  on*, the inverse of the rule that applied while the knob was opt-in.
+- `lib/75-launch.sh`: `_rotate_force_notice`, `_rotate_force_threshold`,
+  `_rotate_force_notice_file` (marker at
+  `${XDG_CONFIG_HOME:-$HOME/.config}/cs/rotate-force-notice`), called from the
+  launch card just before the blank line that closes it.
+- `tests/test_mod_rotate.sh` `test_mod_force_default_matches_the_launch_notice`
+  pins the TypeScript literal against the bash fallback and the spelling of
+  `off` in both.
+- `tests/test_rotation.sh`: three notice tests (printed once, silent when off,
+  quotes an overridden threshold), sourcing `lib/75-launch.sh` directly.
+- `docs/hooks.md`, `docs/configuration.md`, `README.md`, `CHANGELOG.md` all
+  state the 80% default and the `off` spelling.
+
+For the next step:
+- `bin/cs-statusline:1733` (forked usage refresh), `:892` (`_num_or`, 3-digit
+  cap), `:1346` (Retry-After, 15 digits then clamped to `USAGE_MAX_BACKOFF`
+  3600).
+- `~/.claude-sessions/iterm-agents-sidebar/plugin/statusline-bridge.sh` — the
+  ABOUTME block carries the overrun claim to test.
+- `~/.claude.json` → `projects[<dir>].hasTrustDialogAccepted`.
+
+## 7. Pending Tasks
+
+Native list (session-keyed, inherited through the `/clear`):
+- **#554 pending (PARKED)**: SessionStart notice for tool calls left pending.
+- **#606 pending (POSTPONED)**: cs --remote via Claude Remote Control.
+- Everything else is completed, including #640, #653 and #654.
+- NOT in the list, and both belong to this handoff: the first-paint measurement
+  and the folder-trust decision.
+
+## 8. Current Work
+
+`main` is at **740579d**, clean except untracked `scratchpad/`. It is **34+
+commits ahead of origin, nothing pushed, and unreleased** — `cs -version` still
+reports 2026.9.17 while main carries #640 and #654 on top of it. Installed and
+verified after each merge: `cs` byte-matches `bin/cs`, the cs-rotate mod matches
+its deployed copy, `cs -doctor` says deploy drift OK (its two warnings are
+long-standing: the sidebar status-line bridge, and the untracked scratchpad).
+
+Forced rotation is live from this merge on, so a conversation that ends a turn
+past 80% writes a handoff and counts down 20 s to the `/clear` by itself. The
+once-per-machine notice has **not** fired yet on this machine — no
+`~/.config/cs/rotate-force-notice` — so the next `cs <name>` launch prints it.
+
+## Completeness (pass two)
+
+Nothing cut.
