@@ -1310,3 +1310,41 @@ machine. 5a0258d.
   200K window; on a 1M context the absolute headroom at 80% is far larger, so
   the forcing may fire earlier than it needs to. Nobody has measured where
   auto-compact actually lands on either.
+
+## 2026-09-18 — statusline first paint, and the folder-trust flag
+
+Alex asked why the bar takes a few seconds to appear at session open. Measured
+on this machine, 2.1.276:
+
+- **It is not cs's render cost.** cs-statusline warm: 0.16-0.21 s. With an
+  empty `~/.cache/cs` (HOME pointed at an empty dir): 0.26-0.69 s. Through the
+  sidebar bridge: 0.5-1.5 s, the high end being the first cold fork. All inside
+  the 1 s refreshInterval.
+- xtrace profile of one warm render (920 lines, 0.434 s traced): the four
+  forks that cost are `jq` on the stdin payload (133 ms), the `mv` publishing
+  `.cs/local/context-pct` (81 ms), `ps -ax` (79 ms), the ancestry `awk` (59 ms)
+  and `tmux display-message` (58 ms). Nothing pathological, but that is the
+  floor per tick.
+- Live probe (throwaway `slprobe` in a tmux window): the bridge published its
+  first payload **1.7 s after launch**, so the command runs early. The bar was
+  never seen — the FOLDER-TRUST DIALOG was blocking that session, which is
+  itself part of what a new session waits through.
+- **Still unknown**: whether Claude Code withholds the first paint until its UI
+  settles or kills a first render that overruns. Needs one probe in a session
+  with no dialog. Do not claim a cause until then.
+
+**Folder trust is a single per-project flag.** `~/.claude.json` →
+`projects["<dir>"].hasTrustDialogAccepted: true`, the only trust key in the
+file (222 projects here, all using it). `getHomeTrustDialogAccepted` and
+`checkHasTrustDialogAccepted` are the bundle's readers. No CLI flag or setting
+turns the dialog off; `--dangerously-skip-permissions` is the permission mode,
+unrelated. cs creates a new session's directory itself, so it COULD set the
+flag at creation. Two things to settle first: scope (a cs-created dir is cs's
+to vouch for, an ADOPTED repo is not), and that `~/.claude.json` is rewritten
+constantly by every live claude — a read-modify-write from cs can clobber a
+concurrent write of theirs, which matters far more than losing our own flag.
+
+Trap I hit: a "cold cache" probe that did `cp -R ~/.claude-sessions` to a temp
+HOME wrote 30 GB before I killed it. The sessions root is enormous; never copy
+it to simulate anything. Pointing HOME at an EMPTY dir was the right probe and
+took a second.
