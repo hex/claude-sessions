@@ -1348,3 +1348,58 @@ Trap I hit: a "cold cache" probe that did `cp -R ~/.claude-sessions` to a temp
 HOME wrote 30 GB before I killed it. The sessions root is enormous; never copy
 it to simulate anything. Pointing HOME at an EMPTY dir was the right probe and
 took a second.
+
+## 2026-09-18 — Status-line first paint: the render is killed by the next tick
+
+Measured on Claude Code 2.1.276, fresh conversations (`n` at cs's "Continue
+previous conversation?") in directories already carrying
+`hasTrustDialogAccepted: true`, on a dedicated tmux server (`-L slsweep2`).
+Probe scripts and logs: scratchpad/slpaint2.sh, slsweep.sh, slsweep2.sh,
+scratchpad/out/.
+
+**Claude Code applies no status-line timeout. It kills the in-flight render when
+the next `refreshInterval` tick comes due.** Each arm's command logged `start`
+before and `end` after its own work, so a missing `end` is a killed render:
+
+| command | refreshInterval | starts | ends | painted |
+|---|---|---|---|---|
+| sleep 0.2 | 1 | 2 | 1 | yes, +10.9 s |
+| sleep 1.2 | 1 | 30 | 1 | yes, +35.9 s |
+| sleep 2.0 | 1 | 117 | 0 | never (40 s) |
+| sleep 3.0 | 1 | 207 | 1 | no (60 s) |
+| sleep 2.0 | 5 | 2 | 1 | yes, +27.6 s |
+| sleep 4.0 | 10 | 1 | 1 | yes, +15.9 s |
+| bridge -> cs-statusline | 1 | 33 | 2 | yes, +18.3 s after the conversation started |
+
+The interval pairs are the discriminator: a 2 s render dies 117 times under a
+1 s interval and survives on its first attempt under a 5 s one; a 4 s render
+survives under a 10 s one. A fixed timeout cannot produce that.
+
+`~/.claude/settings.json` registers the sidebar bridge with
+`refreshInterval: 1`, so cs's cold render (handoff: 1.51 s bridged, first fork)
+loses that race repeatedly and the bar stays blank until a render fits under a
+second. That is Alex's "a few seconds".
+
+The first hypothesis in the handoff is **rejected**: Claude Code does not
+withhold the first paint. A 0.2 s command painted 0.19 s after its first
+surviving invocation, and the first invocation lands ~2.8-3.4 s after the
+conversation starts (three runs: 2.84, 2.93, and 3.02 s after the keypress).
+
+Traps worth keeping:
+
+- **`refreshInterval` is not just a poll cadence — it is the render's deadline.**
+  A status line with no `refreshInterval` at all is invoked ONCE per event and
+  not on a timer; the first probe measured zero invocations in 60 s because the
+  arm omitted it. Every arm must spell the production value.
+- **cs's live-duplicate guard voids back-to-back probe runs.** Reusing one
+  session name across arms gave `Error: Session <name> is already running
+  elsewhere` on every second run (3 of 9 arms void, silently: an empty grep
+  looks exactly like "not painted yet"). Give each arm its own trusted session
+  name, or wait for the previous claude to exit.
+- **A marker taken from the session name matches cs's own launch card.** The
+  first "real" arm reported a 2.58 s paint that was the banner, not the bar.
+  Every arm now appends a sentinel its command alone can print.
+- **Trust is keyed on the exact directory path and survives the directory.**
+  `~/.claude.json` still trusts paths whose directories are long gone, so
+  `cs <old-spike-name>` launches with no dialog and no write to that file —
+  which is how this ran without touching a file every live claude rewrites.
