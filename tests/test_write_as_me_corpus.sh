@@ -451,6 +451,37 @@ test_supplementary_source_appended_under_its_heading() {
     [ "$head" -gt "$ack" ] || { echo "  FAIL: source (line $head) must follow the short-ack appendix (line $ack)"; return 1; }
 }
 
+test_supplementary_sources_in_name_order_and_counted() {
+    add_msg "$(proj_file projA)" "here is a genuinely typed message about the build system"
+    add_source b-second.md "[dm, 2026-08-02]" "the second source body" "---"
+    add_source a-first.md "[dm, 2026-08-01]" "the first source body" "---"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    local first second rule count
+    first=$(grep -n '^## Supplementary source: a-first.md$' "$(corpus_path)" | cut -d: -f1)
+    second=$(grep -n '^## Supplementary source: b-second.md$' "$(corpus_path)" | cut -d: -f1)
+    [ -n "$first" ] && [ -n "$second" ] && [ "$first" -lt "$second" ] \
+        || { echo "  FAIL: want a-first.md (line ${first:-none}) before b-second.md (line ${second:-none})"; return 1; }
+    rule=$(grep -n '^---$' "$(corpus_path)" | head -1 | cut -d: -f1)
+    count=$(grep -n '^Supplementary sources: 2 files$' "$(corpus_path)" | cut -d: -f1)
+    [ -n "$count" ] && [ "$count" -lt "$rule" ] \
+        || { echo "  FAIL: stats header should count 2 files above the first rule (count line ${count:-none}, rule line $rule)"; return 1; }
+}
+
+test_no_sources_leaves_the_corpus_as_it_was() {
+    add_msg "$(proj_file projA)" "here is a genuinely typed message about the build system"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero without a sources dir"; return 1; }
+    if grep -q "Supplementary" "$(corpus_path)"; then
+        echo "  FAIL: a build with no sources dir mentions supplementary sources"; return 1
+    fi
+    mkdir -p "$CS_SESSIONS_ROOT/.voice/sources"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero on an empty sources dir"; return 1; }
+    if grep -q "Supplementary" "$(corpus_path)"; then
+        echo "  FAIL: a build with an empty sources dir mentions supplementary sources"; return 1
+    fi
+    assert_file_contains "$(corpus_path)" "genuinely typed message about the build" \
+        "transcript body still lands" || return 1
+}
+
 run_test test_typed_string_message_lands_in_corpus
 run_test test_array_text_parts_join
 run_test test_tool_result_only_entry_dropped
@@ -478,5 +509,7 @@ run_test test_uppercase_opaque_run_redacted
 run_test test_shas_and_paths_survive_redaction
 
 run_test test_supplementary_source_appended_under_its_heading
+run_test test_supplementary_sources_in_name_order_and_counted
+run_test test_no_sources_leaves_the_corpus_as_it_was
 
 report_results

@@ -122,12 +122,18 @@ if [ "$kept" -eq 0 ]; then
     exit 1
 fi
 
+sources=0
+for src in "$VOICE_DIR/sources/"*.md; do
+    [ -f "$src" ] && sources=$((sources + 1))
+done
+
 jq -r -s \
     --arg built "$(date '+%Y-%m-%d %H:%M')" \
     --argjson scanned "$files_scanned" \
     --argjson failed "$files_failed" \
     --argjson max "$MAX_MESSAGES" \
-    --argjson short "$SHORT_CHARS" '
+    --argjson short "$SHORT_CHARS" \
+    --argjson sources "$sources" '
     map(select(.drop == null)) as $typed
     | (map(select(.drop == "sentinel")) | length) as $n_sentinel
     | (map(select(.drop == "paste")) | length) as $n_paste
@@ -148,10 +154,12 @@ jq -r -s \
          + "\(($long | length) - ($uniq | length)) duplicates collapsed)"
          + (if ($uniq | length) > $max then ", capped at \($max)" else "" end)),
         "Short acks in appendix: \($acks | length) occurrences, \($appendix | length) distinct",
-        "Dropped: \($n_sentinel) harness-injected, \($n_paste) pastes over 2000 chars, \($n_nottyped) non-typed, \($n_machine) machine-authored",
-        "",
-        "---"
+        "Dropped: \($n_sentinel) harness-injected, \($n_paste) pastes over 2000 chars, \($n_nottyped) non-typed, \($n_machine) machine-authored"
       ]
+      + (if $sources > 0
+         then ["Supplementary sources: \($sources) file\(if $sources == 1 then "" else "s" end)"]
+         else [] end)
+      + ["", "---"]
       + ($body | map("[\(.proj), \(.ts[0:10])]\n\(.text)\n---"))
       + ["", "## Short-ack frequency (top \($appendix | length))", ""]
       + ($appendix | map("  \(.n)  \(.text)"))
