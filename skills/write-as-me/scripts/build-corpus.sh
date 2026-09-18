@@ -18,6 +18,56 @@ if [ ! -d "$TRANSCRIPTS_ROOT" ]; then
     exit 1
 fi
 
+# Shared by the transcript pass and the supplementary-source pass.
+LOOKS_SECRET_DEF='
+    # A line is credential-shaped if it carries a keyword=value pair, a known
+    # token family prefix, credentials embedded in a URL, or a high-entropy
+    # run. Prefix families are listed because keyword matching alone misses
+    # every token pasted on its own. This stays best-effort by nature: a
+    # deny-list cannot enumerate every secret, so the corpus is written to a
+    # 0700 directory and the profile is told never to copy anything
+    # credential-shaped out of it.
+    def looks_secret:
+          test("(api[_-]?key|token|secret|password|passwd|bearer)[[:space:]]*[=:][[:space:]]*[^[:space:]]+"; "i")
+       # The bearer value must look like a token, not a word. A plain 12+
+       # character run matches ordinary English (bearer authentication,
+       # bearer authorization, bearer responsibility), so require at least
+       # one non-letter in the captured value.
+       or ([match("bearer[[:space:]]+([A-Za-z0-9._~+/=-]{12,})"; "gi").captures[0].string]
+           | any(test("[^A-Za-z]")))
+       or test("\\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{16,}")
+       or test("\\bglpat-[A-Za-z0-9_-]{16,}")
+       or test("\\bxox[baprs]-[A-Za-z0-9-]{10,}")
+       or test("\\bsk[-_](live|test)[-_][A-Za-z0-9]{16,}"; "i")
+       # Anchored on the issuer rather than on `sk-` alone. A bare `sk-`
+       # rule fires on ordinary hyphenated prose (task-, risk-, disk-), and
+       # a run of 16 unbroken alnum never matches this shape anyway because
+       # the `api03-` segment breaks it.
+       or test("\\bsk-ant-[A-Za-z0-9_-]{16,}"; "i")
+       or test("\\bnpm_[A-Za-z0-9]{16,}")
+       or test("\\bAKIA[0-9A-Z]{12,}")
+       or test("\\bAIza[A-Za-z0-9_-]{20,}")
+       or test("\\beyJ[A-Za-z0-9_-]{8,}\\.eyJ[A-Za-z0-9_-]{8,}")
+       or test("[a-z][a-z0-9+.-]*://[^/[:space:]]+:[^@[:space:]]+@")
+       # A long opaque run, but only when it looks encoded rather than
+       # typed. Three conditions, each excluding a real shape that is not a
+       # secret. Rejecting pure lowercase hex keeps a 40-char git SHA out.
+       # Counting slashes keeps deep paths out: `/` sits in the class above,
+       # so a build path stays one unbroken run, and any digit in it (IL2CPP
+       # in a Unity tree, a versioned directory) would otherwise qualify; an
+       # encoded blob carries at most an incidental slash while a path is
+       # mostly slashes. Requiring a digit and a letter keeps prose runs out.
+       # Case is deliberately NOT required in both directions: an all-caps
+       # token of 40+ characters is a credential, and there is no benign
+       # engineering shape of that form.
+       # NOTE: no apostrophes in this block. The whole jq program is a
+       # single-quoted bash string, so one would terminate it.
+       or ([match("[A-Za-z0-9+/=]{40,}"; "g").string]
+           | any(test("[0-9]") and test("[A-Za-z]")
+                 and ((test("^[0-9a-f]+$")) | not)
+                 and (([match("/"; "g")] | length) <= 1)));
+'
+
 workdir="$(mktemp -d)"
 trap 'rm -rf "$workdir"' EXIT
 
@@ -34,53 +84,7 @@ while IFS= read -r f; do
     [ -n "$f" ] || continue
     files_scanned=$((files_scanned + 1))
     proj="$(basename "$(dirname "$f")")"
-    if ! jq -cR --arg proj "$proj" --argjson paste "$PASTE_CHARS" '
-        # A line is credential-shaped if it carries a keyword=value pair, a known
-        # token family prefix, credentials embedded in a URL, or a high-entropy
-        # run. Prefix families are listed because keyword matching alone misses
-        # every token pasted on its own. This stays best-effort by nature: a
-        # deny-list cannot enumerate every secret, so the corpus is written to a
-        # 0700 directory and the profile is told never to copy anything
-        # credential-shaped out of it.
-        def looks_secret:
-              test("(api[_-]?key|token|secret|password|passwd|bearer)[[:space:]]*[=:][[:space:]]*[^[:space:]]+"; "i")
-           # The bearer value must look like a token, not a word. A plain 12+
-           # character run matches ordinary English (bearer authentication,
-           # bearer authorization, bearer responsibility), so require at least
-           # one non-letter in the captured value.
-           or ([match("bearer[[:space:]]+([A-Za-z0-9._~+/=-]{12,})"; "gi").captures[0].string]
-               | any(test("[^A-Za-z]")))
-           or test("\\b(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{16,}")
-           or test("\\bglpat-[A-Za-z0-9_-]{16,}")
-           or test("\\bxox[baprs]-[A-Za-z0-9-]{10,}")
-           or test("\\bsk[-_](live|test)[-_][A-Za-z0-9]{16,}"; "i")
-           # Anchored on the issuer rather than on `sk-` alone. A bare `sk-`
-           # rule fires on ordinary hyphenated prose (task-, risk-, disk-), and
-           # a run of 16 unbroken alnum never matches this shape anyway because
-           # the `api03-` segment breaks it.
-           or test("\\bsk-ant-[A-Za-z0-9_-]{16,}"; "i")
-           or test("\\bnpm_[A-Za-z0-9]{16,}")
-           or test("\\bAKIA[0-9A-Z]{12,}")
-           or test("\\bAIza[A-Za-z0-9_-]{20,}")
-           or test("\\beyJ[A-Za-z0-9_-]{8,}\\.eyJ[A-Za-z0-9_-]{8,}")
-           or test("[a-z][a-z0-9+.-]*://[^/[:space:]]+:[^@[:space:]]+@")
-           # A long opaque run, but only when it looks encoded rather than
-           # typed. Three conditions, each excluding a real shape that is not a
-           # secret. Rejecting pure lowercase hex keeps a 40-char git SHA out.
-           # Counting slashes keeps deep paths out: `/` sits in the class above,
-           # so a build path stays one unbroken run, and any digit in it (IL2CPP
-           # in a Unity tree, a versioned directory) would otherwise qualify; an
-           # encoded blob carries at most an incidental slash while a path is
-           # mostly slashes. Requiring a digit and a letter keeps prose runs out.
-           # Case is deliberately NOT required in both directions: an all-caps
-           # token of 40+ characters is a credential, and there is no benign
-           # engineering shape of that form.
-           # NOTE: no apostrophes in this block. The whole jq program is a
-           # single-quoted bash string, so one would terminate it.
-           or ([match("[A-Za-z0-9+/=]{40,}"; "g").string]
-               | any(test("[0-9]") and test("[A-Za-z]")
-                     and ((test("^[0-9a-f]+$")) | not)
-                     and (([match("/"; "g")] | length) <= 1)));
+    if ! jq -cR --arg proj "$proj" --argjson paste "$PASTE_CHARS" "$LOOKS_SECRET_DEF"'
         fromjson? | select(type == "object")
         | select(.type == "user")
         | select((.isMeta // false) | not)
@@ -122,12 +126,18 @@ if [ "$kept" -eq 0 ]; then
     exit 1
 fi
 
+sources=0
+for src in "$VOICE_DIR/sources/"*.md; do
+    [ -f "$src" ] && sources=$((sources + 1))
+done
+
 jq -r -s \
     --arg built "$(date '+%Y-%m-%d %H:%M')" \
     --argjson scanned "$files_scanned" \
     --argjson failed "$files_failed" \
     --argjson max "$MAX_MESSAGES" \
-    --argjson short "$SHORT_CHARS" '
+    --argjson short "$SHORT_CHARS" \
+    --argjson sources "$sources" '
     map(select(.drop == null)) as $typed
     | (map(select(.drop == "sentinel")) | length) as $n_sentinel
     | (map(select(.drop == "paste")) | length) as $n_paste
@@ -148,15 +158,32 @@ jq -r -s \
          + "\(($long | length) - ($uniq | length)) duplicates collapsed)"
          + (if ($uniq | length) > $max then ", capped at \($max)" else "" end)),
         "Short acks in appendix: \($acks | length) occurrences, \($appendix | length) distinct",
-        "Dropped: \($n_sentinel) harness-injected, \($n_paste) pastes over 2000 chars, \($n_nottyped) non-typed, \($n_machine) machine-authored",
-        "",
-        "---"
+        "Dropped: \($n_sentinel) harness-injected, \($n_paste) pastes over 2000 chars, \($n_nottyped) non-typed, \($n_machine) machine-authored"
       ]
+      + (if $sources > 0
+         then ["Supplementary sources: \($sources) file\(if $sources == 1 then "" else "s" end)"]
+         else [] end)
+      + ["", "---"]
       + ($body | map("[\(.proj), \(.ts[0:10])]\n\(.text)\n---"))
       + ["", "## Short-ack frequency (top \($appendix | length))", ""]
       + ($appendix | map("  \(.n)  \(.text)"))
       ) | join("\n")
 ' "$workdir/all.jsonl" > "$workdir/corpus.md"
+
+# Supplementary sources are writing no transcript holds (an exported chat,
+# say), kept by hand under sources/. The corpus is rebuilt wholesale, so they
+# are appended on every build, in name order, each under a heading naming its
+# file. A source's own leading title line is dropped in favour of that heading,
+# and its lines pass the same credential-shape redactor as the transcripts: a
+# hand-scrubbed file is still one missed paste away from the corpus.
+for src in "$VOICE_DIR/sources/"*.md; do
+    [ -f "$src" ] || continue
+    {
+        printf '\n## Supplementary source: %s\n\n' "$(basename "$src")"
+        awk 'NR == 1 && /^# / { next } { print }' "$src" \
+            | jq -rR "$LOOKS_SECRET_DEF"' if looks_secret then "[redacted line]" else . end'
+    } >> "$workdir/corpus.md"
+done
 
 mkdir -p "$VOICE_DIR"
 chmod 700 "$VOICE_DIR"
