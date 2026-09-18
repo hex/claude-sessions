@@ -482,6 +482,22 @@ test_no_sources_leaves_the_corpus_as_it_was() {
         "transcript body still lands" || return 1
 }
 
+test_supplementary_source_credential_lines_redacted() {
+    add_msg "$(proj_file projA)" "here is a genuinely typed message about the build system"
+    add_source chat-export.md "[dm, 2026-08-02]" "the line before the pasted token" \
+        "use $(cred_fixtures | head -1) for the deploy" "---"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    if grep -qF "$(cred_fixtures | head -1)" "$(corpus_path)"; then
+        echo "  FAIL: a credential-shaped line in a source reached the corpus"; return 1
+    fi
+    local after
+    after=$(sed -n '/^## Supplementary source: chat-export.md$/,$p' "$(corpus_path)")
+    grep -qF "[redacted line]" <<<"$after" \
+        || { echo "  FAIL: the source's credential line was not replaced by the redaction marker"; return 1; }
+    grep -qF "the line before the pasted token" <<<"$after" \
+        || { echo "  FAIL: redaction took a neighbouring line with it"; return 1; }
+}
+
 run_test test_typed_string_message_lands_in_corpus
 run_test test_array_text_parts_join
 run_test test_tool_result_only_entry_dropped
@@ -511,5 +527,6 @@ run_test test_shas_and_paths_survive_redaction
 run_test test_supplementary_source_appended_under_its_heading
 run_test test_supplementary_sources_in_name_order_and_counted
 run_test test_no_sources_leaves_the_corpus_as_it_was
+run_test test_supplementary_source_credential_lines_redacted
 
 report_results
