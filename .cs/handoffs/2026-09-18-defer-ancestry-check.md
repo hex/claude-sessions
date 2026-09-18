@@ -184,3 +184,83 @@ preserving, but they are the only record of how each number was taken.
 
 Written from live context at roughly 45%, no compaction. Every fact above is
 first-hand from this conversation. Pass two appends the recoverable sections.
+
+## 4. Primary Request and Intent
+
+The conversation woke on `.cs/handoffs/2026-09-18-statusline-first-paint.md` and
+ran its next step: find why the status line takes seconds to appear at session
+open. That measurement is finished and is section 3's tables. Alex then dropped
+the folder-trust half, took a Fable pass on the fix direction, sent the bridge
+finding to the sidebar session, approved building the cs-side fix, watched it
+get built and then killed by a second Fable pass, and finally approved the
+narrower fix that the corrected measurement pointed at — which is this handoff's
+Next Step.
+
+The through-line: **the complaint was one thing, and it decomposed into three
+owners** — the bridge (~6 s, handed away), cs-statusline's cold render (1-3 s,
+#659, the work), and Claude Code's own 2-4 s startup floor (nobody's).
+
+## 5. Key Technical Concepts
+
+- **`bin/cs-statusline`** is standalone, not assembled by `build.sh` (unlike
+  `bin/cs`). ~1700 lines, 95 KB, bash 3.2 + BSD compatible. `CS_STATUSLINE_LIB=1`
+  sources it as a library without running `main`, which is how the test suite
+  reaches internal helpers.
+- **The cache layer** it already has, and which #659 should reuse rather than
+  reinvent: `_cache_read <kind> <identity> <max-age>` and
+  `_cache_write <kind> <identity> <text>`, entries at
+  `~/.cache/cs/<kind>/<key>` as `epoch<TAB>identity\ntext`. Identity-guarded and
+  torn-read-safe: a half-written entry, a missing file or a foreign identity is
+  a miss, never a wrong answer. `_cache_key` sanitises; `_sl_parent_pid` sets
+  `_PARENT` from `$PPID` or `CS_STATUSLINE_PARENT`.
+- **The fork diet** (#632, #648) is a deliberate, tested property: a warm render
+  forks 2 (bash + jq), 3 on bash 3.2 where a `date` fills the shared clock memo.
+  Any change that raises this is wrong unless argued explicitly.
+- **The pulse** is second-parity at two sites, which is why `refreshInterval`
+  is not a free knob.
+
+## 6. Files and Code Sections
+
+- `bin/cs-statusline:1733` — the detached-child idiom to copy for #659.
+- `bin/cs-statusline:1571` and `:1923` — the two second-parity pulse sites.
+- `bin/cs-statusline` `_sl_tmux_is_real` (around :229-251, `TMUX_REAL_CACHE_TTL=300`)
+  — the ancestry verdict to defer; `_cache_write tmux-real "$ident" "$verdict"`
+  is its write.
+- `bin/cs-statusline` `_render` — two `printf '%s\n' "$out"` sites, plain mode
+  and capsule mode, which is where the dropped branch published its frame.
+- `lib/70-statusline.sh:95` — where cs registers `refreshInterval: 1`.
+- `tests/test_statusline.sh` — 240 tests; `run_sl "$PAYLOAD"` is the driver,
+  `_load_sl_functions` the library-mode entry, `setup()` gives each test a
+  private `HOME` and `CS_SESSIONS_ROOT`.
+- `tests/test_install.sh:909` — pins `refreshInterval` at 1.
+- `~/.claude/settings.json` — `statusLine.command` is the sidebar bridge, which
+  then execs cs-statusline; `refreshInterval: 1`.
+- `~/.claude-sessions/iterm-agents-sidebar/plugin/statusline-bridge.sh` — the
+  handed-over arm. Not ours to edit.
+
+## 7. Pending Tasks
+
+Native list (keyed to the session, survives the `/clear`; reconcile against it
+rather than mirroring this):
+
+- **#659 pending** — defer the tmux ancestry check. This handoff's Next Step.
+- **#554 pending (PARKED)** — SessionStart notice for tool calls left pending.
+- **#606 pending (POSTPONED)** — cs --remote via Claude Remote Control.
+- #655, #656, #657, #658 completed this conversation. Everything else was
+  already closed.
+
+## 8. Current Work
+
+Nothing in flight. `main` is at a85ee08 and clean; the only branch from this
+conversation is `feat/statusline-stale-first` at d51ed4d, parked unmerged and
+not to be revived (section 2). No tests are failing on main. Two Fable subagents
+(`fable-statusline`, `fable-stalefirst`) were spawned and have both reported and
+gone idle; nothing waits on them.
+
+The next conversation starts clean at step one of the Next Step: decide what the
+bar draws on render 1 while the ancestry verdict is unknown, then build red-first
+or close #659 as not-built.
+
+## Completeness (pass two)
+
+Nothing cut.
