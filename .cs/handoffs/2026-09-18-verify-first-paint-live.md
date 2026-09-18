@@ -2,7 +2,8 @@
 parent: 93a26e53-349e-497f-b923-e180dbeaedf4
 created: 2026-09-18T12:57:31Z
 purpose: watch the merged ancestry deferral paint a real fresh conversation's first status line, since every measurement so far used a rigged ps
-status: unconsumed
+status: consumed
+consumed_by: b313aa25-c142-4ea4-b80a-a415f4035756
 ---
 
 ## 1. Next Step

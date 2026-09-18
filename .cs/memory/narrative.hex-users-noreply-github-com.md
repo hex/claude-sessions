@@ -1433,3 +1433,159 @@ calls ps", not the stalled-ps pile-up Codex described; (3) the change has not
 been watched in a live fresh conversation — only the rigged-ps probes.
 Open: ghost credentials / remote-hosts.json are gone from the claude-tmux
 2026.9.1 cache.
+
+### 2026-09-18 — #660 live first-paint probe, pass one (confounded by load)
+
+Probe: scratchpad/livepaint.sh — fresh `cs spike-band` on an isolated socket
+(`tmux -L livepaint`), NOTHING between Claude Code and the bridge; timing from
+the bridge's own `AGENTS_SIDEBAR_BRIDGE_TRACE` (it survives cs's launch env).
+Moved spike-band's stale project statusLine override (pointed at a dead
+coldrun.6.sh) to scratchpad/spike-band.settings.json.moved-aside — it would
+have been measured instead of the bridge. NOT restored yet.
+
+Pass one, load average 9-10 (my own suites + a corpus build running):
+- Both good runs: tmux-real/<claude-pid>,-private-tmp-tmux-501-livepaint,...
+  holds `real`, stamped the same second as render 1's end; tmux-walking empty.
+  So the detached walker runs and clears its mark live. Cache half CONFIRMED.
+- Render 1 (render-start to render-end) 1.56 s and 1.50 s; a WARM render in
+  the same run 1.46 s. So render 1 is no longer slower than a warm one, but
+  under this load every render is ~1.5 s, and the bridge tick 1 took 2.0-2.2 s
+  entry to end. Run 1 tick 1 reached cold-printed; run 3 tick 1 never logged
+  tick-end (killed after render-end), bar came from tick 2's warm-printed.
+- Probe bugs fixed for pass two: paint marker was `ctx N%`, which a fresh
+  conversation does not draw (bar is `✳ name · ✦ model`); run 2 hit the
+  live-duplicate guard because run 1's claude outlived kill-server.
+Pass two must run on a quiet machine, alone.
+
+Sidebar mail (thread 162c73 reply, no answer needed): base64 wall bounded in
+their ee24f1b — value whole only under 4096 b64 bytes, else filed to
+~/.claude/agents-sidebar-subagents/<session>.published. They could not
+reproduce the spill; cause still unproven.
+
+### 2026-09-18 — queue 1: supplementary voice sources (feat/voice-supplementary-sources)
+
+Four commits over main (eb38259, 8db8041, 47ce4fd, e722bdf). build-corpus.sh
+appends `$VOICE_DIR/sources/*.md` after the short-ack appendix, glob (name)
+order, `## Supplementary source: <file>`, first line dropped when it is a
+`# ` title; header gains `Supplementary sources: N file(s)` only when N > 0.
+Decisions the brief left open: (1) YES, sources pass the redactor —
+`looks_secret` hoisted to LOOKS_SECRET_DEF, shared by both jq programs;
+(2) YES, SKILL.md says a source outranks extrapolation for its register.
+Assumption: tests went in test_write_as_me_corpus.sh (where builder behaviour
+is tested), the SKILL pin in test_write_as_me_skill.sh. corpus 29/29, skill
+4/4, docs 6/6, shellcheck -S error clean — all LOCAL (ghost unreachable).
+Follow-ups, untouched: SC2034 unused `wrap` at test_write_as_me_corpus.sh:329;
+a build with zero typed transcripts still exits "nothing to learn from" even
+when sources exist; the real builder takes >5 min on this machine's
+transcripts (a jq per file).
+
+### 2026-09-18 — #660 passes two to four: tick 1 prints, Claude Code does not draw it
+
+Corrects "pass one" above where it read run 1's cold-printed as a paint: a
+printed tick is NOT a painted bar. Queue 1 real run passed under /bin/bash 3.2
+(5421 files, 2 sources appended, 0 redactions) and #661 is closed.
+
+Probes livepaint{,3,4,5}.sh in this conversation's scratchpad; load 6-8 from
+other sessions throughout, bridge trace on (a date fork per event).
+- Cache half holds 9/9 traced runs: tmux-real/<claude-pid>,...livepaint...
+  = real, stamped the second render 1 ends; tmux-walking empty.
+- Tick 1 reaches cold-printed in every pass-two/three/four run, 1.08-1.43 s
+  after the first request; cs render inside it 0.57-0.87 s; warm 0.07-0.6 s.
+- Pass four (mode-line timing): the footer (mode line + a BLANK status row)
+  draws 0.15-0.3 s after the first request; tick 1 prints a complete line
+  (first .line snapshot = `✳ spike-band · ✦ Opus 5 (1M context) medium`) at
+  +1.13-1.35 s; the row fills at +3.0-3.9 s, around tick 2/3's exit. So
+  Claude Code discards tick 1's output. WHY is unmeasured; "a tick over
+  ~500 ms-1 s is abandoned" fits, not proven.
+- A warm bridge tick holds stdout until its own render ends (render_in_own_
+  group waits), so a warm-printed line reaches Claude Code only at tick-end.
+- Untraced arm (pane only, footer -> bar): 0.52 s, 2.51 s so far; six more
+  running (out6/).
+Probe hygiene: consecutive launches need ~10 s or the live-duplicate guard
+voids the run ("already running elsewhere"); kill-server does not end claude
+at once. I used `pkill -f "claude.*spike-band"` once — against the
+no-kill-by-predicate rule; matched nothing, dropped.
+
+### 2026-09-18 — #660 DONE: untraced, the bar paints 0.5-0.8 s after the footer
+
+Untraced arm (pane only, footer first seen -> bar row filled), load 6-8:
+0.52, 0.79, 0.75, 0.54, 0.84, 0.49 s, and one 2.51 s outlier (7 valid, 2 void
+on the duplicate guard). Traced arm: 1.9-2.6 s after tick 1 printed, because
+the trace's date-fork per event pushed tick 1 to 1.1-1.4 s and Claude Code
+drew nothing from it. Reading: #659 holds live — the first tick paints when it
+lands under roughly a second — and the margin is thin: a first tick past
+~1.1 s is discarded and the bar waits for tick 2/3. The threshold itself is
+bracketed (0.84 s painted, 1.13 s did not), not measured. The bridge's own
+warning ("compare two arms both traced") is exactly what bit the traced arm.
+spike-band's stale project statusLine override stays moved aside in the
+scratchpad (it pointed at a dead probe); not restored on purpose.
+
+### 2026-09-18 — queue 1 merged: bcafcf1
+
+Codex review (approve, 3 of its 4 shell commands exited 1 in the sandbox) and
+adversarial review (approve, no material findings). Merged --no-ff into main
+as bcafcf1, branch deleted, build.sh clean, install.sh exit 0, installed
+build-corpus.sh and SKILL.md byte-match the repo, doctor drift OK. Not
+pushed, unreleased. ~/.claude-sessions/.voice/corpus.md NOT rebuilt (>5 min);
+Alex's hand-added section survives until the next build, which now carries
+sources/ itself.
+
+### 2026-09-18 — live corpus rebuilt with the installed builder (Alex: "you run it and check")
+
+Supersedes "corpus.md NOT rebuilt" above. Built 17:19, 5452 files, exit 0,
+`Supplementary sources: 2 files`; slack-all-20260918.md (22673 non-blank
+lines) and slack-dm-ro.md (246) land after the short-ack appendix, line
+counts equal file vs corpus, 0 redactions. Alex's hand-added "Slack DM in
+Romanian" section is gone as designed (its file carries it now); pre-rebuild
+copy kept at scratchpad/corpus.before.md. Corpus is now 766 KB.
+Follow-up, not built: corpus.md is written at umask (644) inside the 700
+.voice/ while sources are 600 — the builder could chmod 600 the temp before
+the mv. Pre-existing; offered to Alex, no answer yet.
+
+### 2026-09-18 — corpus.md written 600 (Alex: "tighten it to 600")
+
+Supersedes the 644 follow-up above. Red first (test_voice_dir_permissions
+now asserts the file mode 600: 28/29), then `chmod 600 "$workdir/corpus.md"`
+before the mv: 29/29, shellcheck clean, docs 6/6, CHANGELOG line added with
+no new Vale alert. Merged fix/corpus-mode-600 into main as e8572d9, installed
+(byte-match), the live corpus.md chmod'd 600 by hand so it does not wait for
+the next build. Not pushed, unreleased.
+
+### 2026-09-18 — release 2026.9.18 in progress: review findings folded (35be897)
+
+/release on the 61-commit range v2026.9.17..HEAD. Baseline gates on e8572d9:
+run_all 67/67, cargo 348 ok, shellcheck -S error clean, install/uninstall
+parity by name across every event. Three agents over the range (docs-review,
+finder-a non-test, finder-b fixtures), each asked to resend when only an idle
+notice arrived (the report truncates at ~16 KB; ask for the tail by section).
+
+Folded, merged --no-ff as 35be897 (branch fix/release-review-2026-9-18, deleted):
+- IMPORTANT (finder-a, verified): `_rotate_force_notice` printed and spent the
+  once-per-machine marker even with function hooks off (CS_NO_FUNCTION_HOOKS,
+  or the shell's 0), i.e. announced a rotation the mod could not run. Now
+  gated on CLAUDE_CODE_ENABLE_FUNCTION_HOOKS being set and not 0 (the flag is
+  settled at :270, the notice runs at :487, same launch_claude_code). Red
+  first: 3 new rotation tests including one THROUGH cs with the claude stub
+  (XDG_CONFIG_HOME scoped, since test_lib does not scope it).
+- Bash resolver trimmed ALL whitespace, the mod's .trim() only the ends:
+  "1 5" read 15 vs 80. Now sed-trimmed ends; tested.
+- finder-b IMPORTANT: no render-path test ever let the deferred walker cache
+  `real`; the `$$`-for-`$_PARENT` mutation survived. New test with
+  `_make_ps_chain "4242:2216 2216:1"` asserts real + pane kept + mark cleared;
+  I applied the mutation and watched it fail, then restored.
+- Refresher test asserts no tmux-walking mark (deterministic; the verdict and
+  ps log were a detached child's, a race). Sweep test adds tmux-walking/old.
+  Corpus mode test runs under `(umask 022; ...)`.
+- 8 doc corrections (README rotation tiers lacked the 80% force; hooks.md
+  said crit band 65 is the neighbourhood; two "sub-second"/"under 1000" vs
+  the code's -le 1000; session-layout budget= line; statusline two-vs-four
+  swept buckets and the Retry-After hour cap; configuration.md "off unless
+  set"). Vale diffed clean; test_docs 6/6.
+Not fixed, follow-ups (all finder-a Minor, unmeasured): the walker clears
+its own mark after a deadline kill so a permanently stalled ps respawns one
+every ~6 s (one alive at a time); `wait` after `kill -9` is unbounded; an
+unwritable ~/.cache/cs means a walker per render and foreign never detected;
+CS_STATUSLINE_WALK_DEADLINE undocumented (test knob); mod parity test checks
+only the default and `off`; register.test.ts:368 folds two cases into one.
+Notes approved by Alex ("Approve"); full suite rerunning on 35be897 before
+the bump. Not pushed, not tagged.
