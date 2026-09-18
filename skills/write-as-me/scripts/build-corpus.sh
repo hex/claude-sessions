@@ -187,5 +187,6 @@ done
 
 mkdir -p "$VOICE_DIR"
 chmod 700 "$VOICE_DIR"
+chmod 600 "$workdir/corpus.md"
 mv "$workdir/corpus.md" "$VOICE_DIR/corpus.md"
 echo "write-as-me: corpus built at $VOICE_DIR/corpus.md ($kept typed messages considered)"
