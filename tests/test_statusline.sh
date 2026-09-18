@@ -3950,6 +3950,45 @@ test_first_render_defers_the_ancestry_walk() {
 
 run_test test_first_render_defers_the_ancestry_walk
 
+# A `ps` that never answers must not mint a walker a second. The render that
+# spawns one marks the walk in flight, and every render inside
+# TMUX_WALK_MARK_TTL renders without spawning another; past the TTL one render
+# tries again, so a walk whose child died leaves nothing wedged.
+test_a_stalled_walk_is_not_respawned_every_render() {
+    export CS_TERM_THEME=light FORCE_COLOR=0
+    export CS_STATUSLINE_SEGMENTS=pane
+    export TMUX="/tmp/fake,2216,0" TMUX_PANE="%7"
+    export CS_STATUSLINE_PARENT=4242
+    # A ps that never returns within the run: each invocation records itself,
+    # so the count of records is the count of walkers spawned.
+    mkdir -p "$TEST_TMPDIR/fakebin"
+    export STALLLOG="$TEST_TMPDIR/stalled"
+    : > "$STALLLOG"
+    printf '#!/bin/sh\necho x >> "$STALLLOG"\nsleep 30\n' > "$TEST_TMPDIR/fakebin/ps"
+    chmod +x "$TEST_TMPDIR/fakebin/ps"
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    local json='{"session_id":"sid-1"}' i=0 spawned
+    while [ "$i" -lt 4 ]; do
+        i=$((i + 1))
+        CS_STATUSLINE_NOW=$((1000 + i)) run_sl "$json" >/dev/null
+    done
+    # Give the children time to reach their ps before counting.
+    local n=0
+    while [ ! -s "$STALLLOG" ] && [ "$n" -lt 100 ]; do n=$((n + 1)); sleep 0.05; done
+    sleep 0.3
+    spawned=$(wc -l < "$STALLLOG" | tr -d ' ')
+    assert_eq "1" "$spawned" "four renders inside the TTL must spawn one walker" || return 1
+    # Past the mark's TTL a render tries again, so a dead child cannot wedge
+    # the verdict for the rest of the conversation.
+    CS_STATUSLINE_NOW=1012 run_sl "$json" >/dev/null   # past TMUX_WALK_MARK_TTL (10)
+    n=0
+    while [ "$(wc -l < "$STALLLOG" | tr -d ' ')" -lt 2 ] && [ "$n" -lt 100 ]; do n=$((n + 1)); sleep 0.05; done
+    spawned=$(wc -l < "$STALLLOG" | tr -d ' ')
+    assert_eq "2" "$spawned" "past the TTL one render walks again" || return 1
+}
+
+run_test test_a_stalled_walk_is_not_respawned_every_render
+
 # The org id is kept for ORG_CACHE_TTL under the config path, so an account
 # swap shows within five minutes and a render never walks the config twice in
 # that time.

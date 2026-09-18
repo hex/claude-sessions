@@ -102,6 +102,13 @@ _cache_write() {
     { printf '%s\t%s\n%s\n' "$_NOW" "$2" "$3" > "$d/$_CACHE_KEY"; } 2>/dev/null || true
 }
 
+# Drop kind $1's entry for identity $2, so the next read is a miss. Best
+# effort, and it forks: no render path calls it.
+_cache_forget() {
+    _cache_key "$2"; [ -n "$_CACHE_KEY" ] || return 0
+    rm -f "$HOME/.cache/cs/$1/$_CACHE_KEY" 2>/dev/null || true
+}
+
 # The process the per-conversation caches are keyed on. Claude Code is the
 # render's parent and the same for every render of a conversation, so PPID is
 # the key. A program Claude Code runs in this script's place (a status-line
@@ -228,6 +235,15 @@ _sl_theme_from_colorfgbg() {
 # long. The walk itself is two forks (ps and awk), so a hit saves both.
 TMUX_REAL_CACHE_TTL=300
 
+# How long a walk that has been spawned is assumed to still be running. A walk
+# that can answer takes a fraction of a second (155-415 ms measured), so this
+# only ever gates a `ps` that has stalled: without it such a walk is respawned
+# every render, once a second, per conversation, for as long as the session is
+# open, and each one waits on a `ps` that never returns. Past the TTL one
+# render tries again, so a child that died before clearing its mark wedges
+# nothing.
+TMUX_WALK_MARK_TTL=10
+
 _sl_tmux_is_real() {
     [ -n "${TMUX:-}" ] || return 1
     local srv start
@@ -336,11 +352,18 @@ _sl_defer_tmux_verdict() {
             foreign) SL_ENV_FOREIGN=1; return 0 ;;
         esac
     fi
+    # One walk in flight at a time. The mark is written before the spawn and
+    # cleared by the child, so a render on the common path pays one file write
+    # on a miss and nothing at all on a hit, and no fork either way.
+    _cache_read tmux-walking "$ident" "$TMUX_WALK_MARK_TTL" && return 0
+    _cache_write tmux-walking "$ident" "walking"
     # Detached, and with descriptors of its own: an inherited stdout holds the
     # render's output open, and Claude Code would wait on the walk after all.
-    # A ps that cannot answer leaves no entry, so the next render spawns
-    # another child — the cost of the walk it replaced, not a new one.
-    ( _sl_tmux_cached_walk "$_PARENT" "$_SRV" "$ident" >/dev/null 2>&1 & ) >/dev/null 2>&1
+    # A ps that answers with a failure leaves no verdict but does clear the
+    # mark, so the next render walks again — the cost of the walk it replaced,
+    # not a new one.
+    ( { _sl_tmux_cached_walk "$_PARENT" "$_SRV" "$ident"
+        _cache_forget tmux-walking "$ident"; } >/dev/null 2>&1 & ) >/dev/null 2>&1
     return 0
 }
 
@@ -1258,7 +1281,7 @@ _refresh_usage() {
     # idle. The render never forks to sweep, so this worker does it. The other
     # buckets are keyed on identities that repeat and stay small.
     local bucket
-    for bucket in tmux-client tmux-real tty; do
+    for bucket in tmux-client tmux-real tmux-walking tty; do
         [ -d "$HOME/.cache/cs/$bucket" ] || continue
         find "$HOME/.cache/cs/$bucket" -maxdepth 1 -type f -mmin +60 -delete 2>/dev/null
     done
