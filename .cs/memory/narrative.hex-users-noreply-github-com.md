@@ -1420,3 +1420,14 @@ not the sidebar bridge's — so this is cs's to fix, not a hand-off. The 31-of-3
 kill rate in the real arm is a probe-environment number (leftover probe claudes
 loading the machine); the warm steady-state kill rate in an ordinary session is
 NOT measured here.
+
+### Folder-trust bypass: dropped, do not re-propose
+
+Alex, 2026-09-18: "drop it the pre-accept trust". The only mechanism available
+is writing `projects["<dir>"].hasTrustDialogAccepted` into `~/.claude.json`
+before `exec claude` — there is no CLI flag and no setting that disables the
+dialog. Rejected on cost, not on feasibility: it would be cs's FIRST write to a
+515 KB file owned by another program, carrying 145 top-level keys and a block of
+per-turn telemetry per project that every live claude rewrites, in exchange for
+one keypress per newly created directory. And trust is keyed on the exact path
+and outlives the directory, so that keypress is paid once per path ever used.
