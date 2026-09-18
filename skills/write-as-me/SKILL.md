@@ -11,6 +11,11 @@ from a distilled profile document, never from improvisation.
 - Profile: `${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}/.voice/profile.md`
 - Corpus: `${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}/.voice/corpus.md`
 - Builder: `~/.claude/skills/write-as-me/scripts/build-corpus.sh`
+- Supplementary sources: `${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}/.voice/sources/*.md`
+  — writing no transcript holds (an exported chat, sent mail), kept by hand.
+  Entries mirror the corpus: `[tag, YYYY-MM-DD]`, the text, then `---`. The
+  builder appends each file to the corpus under `## Supplementary source:
+  <file name>` on every build and redacts credential-shaped lines in it.
 
 ## Flow
 
@@ -45,7 +50,10 @@ write the profile with exactly these sections:
   starts, punctuation weight, contraction use) and typical length. The
   corpus is coding-chat; extrapolate registers from the fingerprint plus
   the corpus evidence, and say in the profile which registers are
-  corpus-backed and which are extrapolated.
+  corpus-backed and which are extrapolated. A supplementary source is
+  direct evidence for the register and language it covers, so there it
+  outranks extrapolation from coding-chat: describe that register from the
+  source, and name the source in the profile.
 - `## Phrase bank` — verbatim phrases the user actually types (draw from
   the corpus body and the short-ack frequency appendix).
 - `## Languages` — languages observed and where they are used.

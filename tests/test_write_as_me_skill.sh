@@ -37,8 +37,15 @@ test_write_as_me_skill_defines_the_profile_shape() {
     assert_file_contains "$SKILL" "## Provenance" "provenance stamp present" || return 1
 }
 
+test_write_as_me_skill_ranks_supplementary_sources() {
+    assert_file_contains "$SKILL" "\.voice/sources/" "names where supplementary sources live" || return 1
+    assert_file_contains "$SKILL" "## Supplementary source:" "names the corpus heading a source lands under" || return 1
+    assert_file_contains "$SKILL" "outranks extrapolation" "a source beats an extrapolated register" || return 1
+}
+
 run_test test_write_as_me_skill_exists_with_frontmatter
 run_test test_write_as_me_skill_teaches_the_drafting_rules
 run_test test_write_as_me_skill_defines_the_profile_shape
+run_test test_write_as_me_skill_ranks_supplementary_sources
 
 report_results
