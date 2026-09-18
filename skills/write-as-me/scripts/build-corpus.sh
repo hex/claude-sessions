@@ -158,6 +158,18 @@ jq -r -s \
       ) | join("\n")
 ' "$workdir/all.jsonl" > "$workdir/corpus.md"
 
+# Supplementary sources are writing no transcript holds (an exported chat,
+# say), kept by hand under sources/. The corpus is rebuilt wholesale, so they
+# are appended on every build, in name order, each under a heading naming its
+# file. A source's own leading title line is dropped in favour of that heading.
+for src in "$VOICE_DIR/sources/"*.md; do
+    [ -f "$src" ] || continue
+    {
+        printf '\n## Supplementary source: %s\n\n' "$(basename "$src")"
+        awk 'NR == 1 && /^# / { next } { print }' "$src"
+    } >> "$workdir/corpus.md"
+done
+
 mkdir -p "$VOICE_DIR"
 chmod 700 "$VOICE_DIR"
 mv "$workdir/corpus.md" "$VOICE_DIR/corpus.md"

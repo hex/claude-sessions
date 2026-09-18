@@ -427,6 +427,30 @@ test_shas_and_paths_survive_redaction() {
         "a deep source path containing a digit must not trigger redaction" || return 1
 }
 
+# Write supplementary source file $1 (a bare name) with body lines $2...
+add_source() {
+    local name="$1"; shift
+    mkdir -p "$CS_SESSIONS_ROOT/.voice/sources"
+    printf '%s\n' "$@" > "$CS_SESSIONS_ROOT/.voice/sources/$name"
+}
+
+test_supplementary_source_appended_under_its_heading() {
+    add_msg "$(proj_file projA)" "here is a genuinely typed message about the build system"
+    add_source chat-export.md "# Exported chat" "" "[dm, 2026-08-02]" "salut, ai un minut pentru deploy" "---"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    assert_file_contains "$(corpus_path)" "^## Supplementary source: chat-export.md$" \
+        "source sits under a heading naming its file" || return 1
+    assert_file_contains "$(corpus_path)" "salut, ai un minut pentru deploy" \
+        "source body survives the rebuild" || return 1
+    if grep -qF "# Exported chat" "$(corpus_path)"; then
+        echo "  FAIL: the source's own title line was copied into the corpus"; return 1
+    fi
+    local ack head
+    ack=$(grep -n '^## Short-ack frequency' "$(corpus_path)" | cut -d: -f1)
+    head=$(grep -n '^## Supplementary source: chat-export.md$' "$(corpus_path)" | cut -d: -f1)
+    [ "$head" -gt "$ack" ] || { echo "  FAIL: source (line $head) must follow the short-ack appendix (line $ack)"; return 1; }
+}
+
 run_test test_typed_string_message_lands_in_corpus
 run_test test_array_text_parts_join
 run_test test_tool_result_only_entry_dropped
@@ -452,5 +476,7 @@ run_test test_hyphenated_prose_survives_redaction
 run_test test_bearer_followed_by_a_plain_word_survives
 run_test test_uppercase_opaque_run_redacted
 run_test test_shas_and_paths_survive_redaction
+
+run_test test_supplementary_source_appended_under_its_heading
 
 report_results
