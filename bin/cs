@@ -7384,6 +7384,41 @@ _handoff_is_local() {  # handoff_file, session_dir
 # only exists where the status line is installed, so the readout is a bonus and
 # never a reason to fail a launch. 10# because a stamp like 08 is a hard
 # arithmetic error read as octal.
+# The forcing ships on, so a machine that has never been told gets one notice
+# at launch and never again. Marker under the config dir, beside the status
+# line's caps answer; an unwritable config dir prints the notice every launch
+# rather than aborting the launch, which is the harmless half of the trade.
+_rotate_force_notice_file() {
+    echo "${XDG_CONFIG_HOME:-$HOME/.config}/cs/rotate-force-notice"
+}
+
+# Mirrors forceThreshold() in mods/cs-rotate/hooks/register.tsx: unset is the
+# default, `off` (any case) and zero turn it off, digits move it, and anything
+# else is the default rather than silence. KEEP IN SYNC with that resolver.
+_rotate_force_threshold() {  # -> prints the percentage, or nothing when off
+    local raw="${CS_ROTATE_FORCE_CTX-}"
+    raw="$(printf '%s' "$raw" | tr -d '[:space:]')"
+    [ -z "$raw" ] && { echo 80; return 0; }
+    case "$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')" in
+        off) return 0 ;;
+    esac
+    case "$raw" in
+        *[!0-9]*) echo 80; return 0 ;;
+        *) [ "$((10#$raw))" -eq 0 ] && return 0; echo "$((10#$raw))" ;;
+    esac
+}
+
+_rotate_force_notice() {
+    local pct f
+    pct="$(_rotate_force_threshold)"
+    [ -n "$pct" ] || return 0
+    f="$(_rotate_force_notice_file)"
+    [ -f "$f" ] && return 0
+    printf '%s\n' "cs now rotates a conversation on its own once it ends a turn past ${pct}% context: it writes a handoff, then counts down 20 seconds to the /clear (press 1 to go now, type anything to stop it)."
+    printf '%s\n' "To turn that off, export CS_ROTATE_FORCE_CTX=off; to move it, set a percentage. Said once per machine."
+    mkdir -p "$(dirname "$f")" 2>/dev/null && { printf '%s\n' "notified" > "$f"; } 2>/dev/null || true
+}
+
 _resume_context_pct() {  # session_dir
     local f="$1/.cs/local/context-pct" v=""
     [ -f "$f" ] || return 0
@@ -7779,6 +7814,10 @@ EOF
             ((++bar_idx))
         fi
     fi
+    # One notice per machine that the forcing is on, after the card so it reads
+    # as news about cs rather than a fact about this session.
+    _rotate_force_notice
+
     echo ""
 
     # Set terminal tab title and color. The tab color is the session's

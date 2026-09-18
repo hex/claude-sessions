@@ -331,9 +331,14 @@ appears only for a marker the hook accepts: a bare basename, a file in
 an aborted rotation left naming a handoff since consumed or gone, leaves the
 rotate button in place.
 
-The mod can also press the button for you. With `CS_ROTATE_FORCE_CTX=<percent>`
-in the shell that launches cs (off unless set, and off for a value that is not
-a number), the end of a turn whose context reads at or past that percentage
+The mod presses the button for you by default. The forcing is **on at 80%**;
+`CS_ROTATE_FORCE_CTX=<percent>` in the shell that launches cs moves it,
+`CS_ROTATE_FORCE_CTX=off` (or `0`) turns it off, and a value that is neither —
+a typo — is the default rather than silence, since a value nobody can read must
+not quietly disable a rotation you are relying on. The first launch on a machine
+that has not been told prints one notice naming the threshold and the way out,
+and records it in `${XDG_CONFIG_HOME:-~/.config}/cs/rotate-force-notice`. The
+end of a turn whose context reads at or past that percentage
 runs `/rotate` as if you had pressed `1`, once per conversation: the mod
 records the conversation id in `.cs/local/cs-rotate.forced` before it schedules
 the run, so a `/rotate` that fails is not tried again at the end of every turn. A run

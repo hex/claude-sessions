@@ -340,21 +340,41 @@ test('with CS_ROTATE_FORCE_CTX set, a turn ending past it schedules /rotate from
   expect(ran).toEqual([{ command: 'rotate', args: '' }])
 })
 
-test('without CS_ROTATE_FORCE_CTX a turn ending at 100% forces nothing', async () => {
-  percent = 100
+test('without CS_ROTATE_FORCE_CTX a turn ending past the 80% default forces a rotation', async () => {
+  percent = 80
+  await turnComplete()
+  expect(timers.map(t => t.kind)).toEqual(['after'])
+  await fireAfter()
+  expect(ran).toEqual([{ command: 'rotate', args: '' }])
+})
+
+test('under the default a turn ending below 80% forces nothing', async () => {
+  percent = 79
   await turnComplete()
   expect(timers).toEqual([])
   expect(ran).toEqual([])
+})
+
+test('CS_ROTATE_FORCE_CTX=off, and 0, turn the forcing off entirely', async () => {
+  for (const value of ['off', 'OFF', '0']) {
+    envVars.CS_ROTATE_FORCE_CTX = value
+    percent = 100
+    await turnComplete()
+    expect(timers).toEqual([])
+    expect(ran).toEqual([])
+  }
 })
 
 test('below the force threshold, or with an unusable value, a turn ending forces nothing', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   percent = 69
   await turnComplete()
+  // An unusable value is the default, not "off": a typo must not quietly
+  // disable a rotation the person is relying on. 100 is past 80, so it forces.
   envVars.CS_ROTATE_FORCE_CTX = 'critical'
   percent = 100
   await turnComplete()
-  expect(timers).toEqual([])
+  expect(timers.map(t => t.kind)).toEqual(['after'])
 })
 
 test('a forced rotation runs once per conversation, and a failed /rotate is not retried', async () => {
@@ -488,7 +508,8 @@ test('a countdown reaching zero re-checks the handoff: one consumed meanwhile cl
   expect(ran).toEqual([])
 })
 
-test('without force, or outside the lead, an armed handoff starts no countdown and prompt.submit passes through', async () => {
+test('with the forcing off, or outside the lead, an armed handoff starts no countdown and prompt.submit passes through', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = 'off'
   arm(); percent = 80
   await turnComplete()
   envVars.CS_ROTATE_FORCE_CTX = '70'

@@ -64,6 +64,11 @@ export const FORCED = '.cs/local/cs-rotate.forced'
 // down before the mod runs the /clear itself. Pressing the button or sending a
 // prompt stops it.
 export const GRACE_SECONDS = 20
+// The percentage a turn must end past for the mod to rotate on its own. Above
+// the 65% nudge, so the ladder stays suggest -> offer -> force, and below where
+// Claude Code's own auto-compact lands, so a handoff is written while the
+// conversation is still whole.
+export const FORCE_DEFAULT = 80
 
 // The pane the first grace of a session opens beside the band: what the
 // handoff will do next, read while the count runs. It carries no keys, so
@@ -221,11 +226,17 @@ function numberOr(raw: string | undefined, fallback: number): number {
   return raw !== undefined && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : fallback
 }
 
-// Off unless CS_ROTATE_FORCE_CTX names a percentage. `claude plugin validate`
-// lists what a module reads, and a name it does not spell is refused.
+// On at FORCE_DEFAULT unless CS_ROTATE_FORCE_CTX says otherwise: `off` (any
+// case) and `0` turn the forcing off, a percentage moves it, and anything else
+// — a typo — is the default rather than silence, because a value nobody can
+// read must not quietly disable a rotation the person is relying on.
+// `claude plugin validate` lists what a module reads, and a name it does not
+// spell is refused.
 async function forceThreshold($: EngineInterface): Promise<number | undefined> {
-  const raw = await $.env.get("CS_ROTATE_FORCE_CTX")
-  return raw !== undefined && /^\d+$/.test(raw.trim()) ? Number(raw.trim()) : undefined
+  const raw = (await $.env.get("CS_ROTATE_FORCE_CTX"))?.trim()
+  if (raw === undefined || raw === '') return FORCE_DEFAULT
+  if (raw.toLowerCase() === 'off' || /^0+$/.test(raw)) return undefined
+  return /^\d+$/.test(raw) ? Number(raw) : FORCE_DEFAULT
 }
 
 // A conversation id the mod has not met yet is the current one from here on,

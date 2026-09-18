@@ -2039,6 +2039,49 @@ test_ctx_tiers_are_silent_for_a_teammate() {
     assert_output_contains "$out" "stopping point" "the lead is still warned" || return 1
 }
 
+# Forced rotation ships on. A machine that has not been told so gets one
+# notice at launch, naming the threshold and the way out; after that the marker
+# keeps it quiet. The notice is skipped where the forcing is off, since there is
+# nothing to announce.
+test_force_notice_prints_once_per_machine() {
+    local home="$TEST_TMPDIR/notice-home"
+    mkdir -p "$home"
+    local out
+    out=$(HOME="$home" XDG_CONFIG_HOME="$home/.config" bash -c '
+        . "'"$SCRIPT_DIR"'/../lib/75-launch.sh"
+        _rotate_force_notice; _rotate_force_notice' 2>&1) || return 1
+    assert_output_contains "$out" "80%" "the notice names the threshold" || return 1
+    assert_output_contains "$out" "CS_ROTATE_FORCE_CTX=off" "and the way out" || return 1
+    [ "$(grep -c 'CS_ROTATE_FORCE_CTX=off' <<< "$out")" = "1" ] \
+        || { echo "  FAIL: the notice printed more than once"; return 1; }
+    assert_file_exists "$home/.config/cs/rotate-force-notice" "the marker records it" || return 1
+}
+
+test_force_notice_is_silent_when_the_forcing_is_off() {
+    local home="$TEST_TMPDIR/notice-off"
+    mkdir -p "$home"
+    local out
+    out=$(HOME="$home" XDG_CONFIG_HOME="$home/.config" CS_ROTATE_FORCE_CTX=off bash -c '
+        . "'"$SCRIPT_DIR"'/../lib/75-launch.sh"
+        _rotate_force_notice' 2>&1) || return 1
+    [ -z "$out" ] || { echo "  FAIL: a machine with the forcing off was told about it: $out"; return 1; }
+    [ ! -f "$home/.config/cs/rotate-force-notice" ] \
+        || { echo "  FAIL: a marker was written with nothing to announce"; return 1; }
+}
+
+test_force_notice_names_an_overridden_threshold() {
+    local home="$TEST_TMPDIR/notice-override"
+    mkdir -p "$home"
+    local out
+    out=$(HOME="$home" XDG_CONFIG_HOME="$home/.config" CS_ROTATE_FORCE_CTX=55 bash -c '
+        . "'"$SCRIPT_DIR"'/../lib/75-launch.sh"
+        _rotate_force_notice' 2>&1) || return 1
+    assert_output_contains "$out" "55%" "the notice quotes the threshold in force" || return 1
+}
+
+run_test test_force_notice_prints_once_per_machine
+run_test test_force_notice_is_silent_when_the_forcing_is_off
+run_test test_force_notice_names_an_overridden_threshold
 run_test test_ctx_warning_fires_once_in_band
 run_test test_ctx_tiers_are_silent_for_a_teammate
 run_test test_ctx_warning_survives_an_interleaved_teammate
