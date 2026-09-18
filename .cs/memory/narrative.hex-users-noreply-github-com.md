@@ -1191,3 +1191,37 @@ Code and the render must name the real parent in `CS_STATUSLINE_PARENT`**, which
 is exactly what a status-line bridge does and why the bridged arm behaved while
 the direct arm did not. Re-running with it set; the bash-startup and per-fork
 figures above are per-process costs and stand either way.
+
+### 2026-09-18 — Correction: the cold cost is NOT diffuse, it is the ancestry check
+
+The section above concluded "diffuse, not one dominant fork" and said there is
+no single cold-only cost to defer. **That was read off the runs with the broken
+wrapper parent and is wrong.** With `CS_STATUSLINE_PARENT` named, three fresh
+conversations agree:
+
+| | render 1 (cold) | renders 2+ |
+|---|---|---|
+| run 4 | KILLED, span 1058 ms — ps 251, awk 164 | survive, 111-616 ms — jq only |
+| run 5 | KILLED, span 636 ms — ps 83, awk 72 | mostly survive — jq, sometimes tmux |
+| run 6 | KILLED, span 618 ms — ps 113, awk 84 | survive, 249-755 ms — jq, sometimes tmux |
+
+**`ps` and its `awk` appear in render 1 and never again.** That is the tmux
+ancestry verdict (`_sl_tmux_is_real`), cached for 300 s on `$_PARENT,$TMUX`,
+and it runs at LOAD time before `main` — which is why it precedes `jq`. It costs
+155-415 ms on top of ~260-320 ms of bash, and in all three runs the first render
+died while renders 2-3 lived.
+
+So there IS a single cold-only cost, it is the one Fable's fifth option was
+shaped for, and deferring it would plausibly bring render 1 under the kill
+threshold and paint on the first invocation instead of the third. Steady state
+would be untouched: renders 2+ already never fork `ps`.
+
+Second correction to the same section: the earlier "ps forks on every render"
+was the wrapper artifact. The cache works exactly as designed once the parent is
+stable.
+
+Standing threshold note: the kill is not a fixed budget. Renders spanning
+617-1058 ms died; one at 755 ms lived and one at 322 ms died. Treat "under
+~500 ms" as the only safe target, not a documented limit.
+
+Not built, not proposed to Alex yet beyond the report.
