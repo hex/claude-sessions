@@ -2,7 +2,8 @@
 parent: 601bd3d4-a5e2-4f9a-a65e-1587ba90a07e
 created: 2026-09-18T10:21:44Z
 purpose: build the deferred tmux ancestry check so a fresh conversation's first status-line render paints instead of being killed
-status: unconsumed
+status: consumed
+consumed_by: 93a26e53-349e-497f-b923-e180dbeaedf4
 ---
 
 ## 1. Next Step
