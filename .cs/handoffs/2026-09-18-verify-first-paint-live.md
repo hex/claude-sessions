@@ -190,3 +190,119 @@ discovered:**
 
 Written from live context at ~42%, no compaction. Every fact above is
 first-hand from this conversation. Pass two appends the recoverable sections.
+
+## 4. Primary Request and Intent
+
+This conversation woke on `.cs/handoffs/2026-09-18-defer-ancestry-check.md` and
+ran its next step: build **#659**, deferring the tmux ancestry check off the
+cold render path. The handoff left one design question open (what the bar draws
+while the verdict is unknown), which section 2 records as decided.
+
+Alex's role through it: he ran each `/codex:adversarial-review` himself (the
+command is his, not mine), chose to close the stalled-`ps` leak after being
+told it was pre-existing, said "mail it, yes" to handing the base64 finding to
+the sidebar, and said "merge" once the suite came back green and Codex
+approved.
+
+The through-line from the ORIGINAL complaint (the bar takes seconds to appear):
+it decomposed into three owners — the sidebar bridge (~6 s, handed away, they
+have since fixed their half), cs-statusline's cold render (1-3 s, this work),
+and Claude Code's own 2-4 s startup floor (nobody's).
+
+## 5. Key Technical Concepts
+
+- **`bin/cs-statusline`** is standalone, NOT assembled by `build.sh` (unlike
+  `bin/cs`). ~1750 lines, bash 3.2 + BSD compatible. `CS_STATUSLINE_LIB=1`
+  sources it as a library without running `main` — how the suite reaches
+  internal helpers.
+- **The cache layer**: `_cache_read <kind> <identity> <max-age>`,
+  `_cache_write <kind> <identity> <text>`, and now `_cache_forget <kind>
+  <identity>` (which forks `rm`, so no render path calls it). Entries live at
+  `~/.cache/cs/<kind>/<key>` as `epoch<TAB>identity\ntext`. Identity-guarded
+  and torn-read-safe: a half-written entry, a missing file or a foreign
+  identity is a miss, never a wrong answer.
+- **The fork diet** (#632, #648) is a tested property: a warm render forks 2
+  (bash + jq), 3 on bash 3.2 where a `date` fills the shared clock memo. Any
+  change that raises this is wrong unless argued explicitly. #659 did not
+  touch it — `test_warm_render_forks_only_the_interpreter_and_jq` stayed green
+  untouched throughout.
+- **The kill is not a fixed budget** (inherited from the previous handoff,
+  measured there): renders spanning 618-1058 ms died; one at 755 ms lived and
+  one at 322 ms died. Treat "under ~500 ms" as the only safe target. The
+  sidebar's independent measurement (~1.76-1.99 s, group-KILL) is in section 3
+  and does not obviously agree — worth reconciling if it ever matters.
+
+## 6. Files and Code Sections
+
+- `bin/cs-statusline` `_sl_defer_tmux_verdict` — the render-path entry. Reads
+  the `tmux-real` cache; on a miss checks the `tmux-walking` mark, writes it,
+  and spawns:
+  ```bash
+  ( { _SL_WALK_DEADLINE="$deadline"
+      _sl_tmux_cached_walk "$_PARENT" "$_SRV" "$ident"
+      _cache_forget tmux-walking "$ident"; } >/dev/null 2>&1 & ) >/dev/null 2>&1
+  ```
+  The `>/dev/null 2>&1` inside the subshell is load-bearing: an inherited
+  stdout holds the render's output open and Claude Code waits for the walk
+  anyway.
+- `bin/cs-statusline` `_sl_ps_table_by_deadline` — backgrounds `ps` to a file
+  under `tmux-walking/`, polls with `sleep 0.1`, `kill -9` by the recorded pid,
+  empty table = rc 2 = no verdict cached. Child-only, because the poll forks.
+- `bin/cs-statusline` `_sl_tmux_cached_walk` / `_sl_tmux_server` — extracted
+  from `_sl_tmux_is_real` so the child and the synchronous path share one body.
+- `bin/cs-statusline`, the load-time block (~:534): `_SL_DEFER_TMUX_REAL` is
+  set unless `CS_STATUSLINE_LIB=1`, and the three settle calls
+  (`_sl_mark_foreign_env`, `_sl_detect_theme`, `_sl_invalidate_stale_bg`) are
+  skipped entirely when `$1 = --refresh-usage`. **This block sits OUTSIDE the
+  `CS_STATUSLINE_LIB` guard, which only covers `main`** — that is why library
+  mode and the re-exec both reached it, and how Codex round four's finding
+  existed at all.
+- `bin/cs-statusline` the sweeper (~:1275) — `for bucket in tmux-client
+  tmux-real tmux-walking tty` now includes the new kind.
+- `bin/cs-statusline:1571` and `:1923` — the two second-parity pulse sites.
+- `tests/test_statusline.sh` — 239 tests. New: `test_first_render_defers_the_ancestry_walk`,
+  `test_a_stalled_walk_is_not_respawned_every_render`,
+  `test_a_stalled_walker_is_killed_before_its_mark_expires`,
+  `test_usage_refresher_never_walks_the_process_tree`. Changed:
+  `test_pane_segment_hidden_when_tmux_is_foreign` now renders once to kick the
+  walk, waits via `settle_tmux_verdict`, then asserts on the render after.
+- `docs/statusline.md` — the cache table row and the "foreign tmux" section
+  both updated; `CHANGELOG.md` has the Unreleased Performance entry.
+- **Probe scripts**, untracked, in this conversation's scratchpad
+  (`/private/tmp/claude-501/.../93a26e53-.../scratchpad/`): `coldprobe/`,
+  `stall/probe.sh`, `stall/windows.sh`, `one.sh`, and the `runall*.log` gate
+  logs. Throwaway, but the only record of how each number was taken.
+- `~/.claude-sessions/iterm-agents-sidebar/plugin/hooks-handlers/emit-state.py`
+  — `emit()` ~line 662, the base64 source. Not ours to edit.
+
+## 7. Pending Tasks
+
+The native list is keyed to the session and survives the `/clear`; reconcile
+against it rather than mirroring this.
+
+- **#659 COMPLETED** this conversation — merged 09a4dd8, installed, drift OK.
+- **#554 pending (PARKED)** — SessionStart notice for tool calls left pending
+  at the end of the previous conversation.
+- **#606 pending (POSTPONED)** — `cs --remote` via Claude Remote Control.
+- Everything else in the list is already closed.
+
+**Not a native task, but queued and deferred four times this conversation:** a
+`cs -queue` task from `firstborn-server` — make `write-as-me`'s
+`build-corpus.sh` append `.voice/sources/*.md` so supplementary voice sources
+survive a corpus rebuild. Full brief at
+`~/.claude-sessions/.voice/builder-sources-request.md`. It is a walk-away-run
+task; Alex declined to start it each time while #659 was open. It is now
+unblocked.
+
+## 8. Current Work
+
+Nothing in flight. main is at 09a4dd8 plus this handoff's commits; the only
+uncommitted paths are the narrative (committed by step 8 of the rotation) and
+untracked `scratchpad/`. No branches from this conversation survive —
+`fix/statusline-defer-ancestry` was deleted after the merge. Nothing is pushed;
+cs is still ~45 commits ahead of origin and unreleased at 2026.9.17.
+
+## Completeness (pass two)
+
+Nothing cut. Written from the same live context as pass one, no compaction
+between the two passes.
