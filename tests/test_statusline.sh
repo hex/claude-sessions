@@ -2439,8 +2439,8 @@ test_refresh_prunes_the_pid_keyed_caches() {
     make_usage_shims 200 "$USAGE_BODY"
     use_scratch_usage_env
     local cache="$HOME/.cache/cs"
-    mkdir -p "$cache/tmux-client" "$cache/tmux-real" "$cache/tty" "$cache/git"
-    TZ=UTC touch -t 202608270730.00 "$cache/tmux-client/old" "$cache/tmux-real/old" "$cache/tty/old" "$cache/git/old"
+    mkdir -p "$cache/tmux-client" "$cache/tmux-real" "$cache/tmux-walking" "$cache/tty" "$cache/git"
+    TZ=UTC touch -t 202608270730.00 "$cache/tmux-client/old" "$cache/tmux-real/old" "$cache/tmux-walking/old" "$cache/tty/old" "$cache/git/old"
     touch "$cache/tmux-client/fresh" "$cache/tmux-real/fresh" "$cache/tty/fresh"
     PATH="$USAGE_BINDIR:$PATH" CS_STATUSLINE_NOW=1787816000 bash "$SL" --refresh-usage
     assert_not_exists "$cache/tmux-client/old" "an old tmux-client entry must be swept" || return 1
@@ -3950,6 +3950,35 @@ test_first_render_defers_the_ancestry_walk() {
 
 run_test test_first_render_defers_the_ancestry_walk
 
+# The other half of the deferral: the child walks from the render's PARENT,
+# the pid every render of a conversation shares, and a pane cs launched has
+# the tmux server above that pid. A walk started from the render's own pid —
+# gone by the time the child looks — would answer foreign for every real pane
+# and hide the pane id from the second render on, with the test above green.
+test_the_deferred_walk_starts_from_the_parent_and_caches_real() {
+    export CS_TERM_THEME=light FORCE_COLOR=0
+    export CS_STATUSLINE_SEGMENTS=pane
+    export TMUX="/tmp/fake,2216,0" TMUX_PANE="%7"
+    export CS_STATUSLINE_PARENT=4242
+    _make_ps_chain "4242:2216 2216:1"   # the parent sits under the server: real
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    local json='{"session_id":"sid-1"}'
+    local second key
+    run_sl "$json" >/dev/null
+    settle_tmux_verdict 4242 "$TMUX" \
+        || { echo "  FAIL: the detached walk left no verdict"; return 1; }
+    key="4242,$TMUX"; key=${key//\//-}; key=${key//[^A-Za-z0-9._,-]/_}
+    assert_eq "real" "$(tail -1 "$HOME/.cache/cs/tmux-real/$key")" \
+        "a parent under the tmux server is cached as real" || return 1
+    second=$(run_sl "$json")
+    assert_output_contains_f "$second" "7" \
+        "the second render keeps the pane id on the real verdict" || return 1
+    [ ! -e "$HOME/.cache/cs/tmux-walking/$key" ] \
+        || { echo "  FAIL: the child must clear its in-flight mark"; return 1; }
+}
+
+run_test test_the_deferred_walk_starts_from_the_parent_and_caches_real
+
 # A `ps` that never answers must not mint a walker a second. The render that
 # spawns one marks the walk in flight, and every render inside
 # TMUX_WALK_MARK_TTL renders without spawning another; past the TTL one render
@@ -4042,6 +4071,11 @@ test_usage_refresher_never_walks_the_process_tree() {
     assert_eq "0" "$(wc -l < "$PSLOG" | tr -d ' ')" "the refresher must not run ps" || return 1
     [ ! -d "$HOME/.cache/cs/tmux-real" ] \
         || { echo "  FAIL: the refresher must not write an ancestry verdict"; return 1; }
+    # The verdict and the ps log are a detached child's, which may land after
+    # these asserts; the in-flight mark is the refresher's own synchronous
+    # write, so its absence is the deterministic proof that no walk was kicked.
+    [ ! -d "$HOME/.cache/cs/tmux-walking" ] \
+        || { echo "  FAIL: the refresher must not mark a walk in flight"; return 1; }
 }
 
 run_test test_usage_refresher_never_walks_the_process_tree
