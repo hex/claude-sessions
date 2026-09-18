@@ -7397,7 +7397,7 @@ _rotate_force_notice_file() {
 # else is the default rather than silence. KEEP IN SYNC with that resolver.
 _rotate_force_threshold() {  # -> prints the percentage, or nothing when off
     local raw="${CS_ROTATE_FORCE_CTX-}"
-    raw="$(printf '%s' "$raw" | tr -d '[:space:]')"
+    raw="$(printf '%s' "$raw" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     [ -z "$raw" ] && { echo 80; return 0; }
     case "$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')" in
         off) return 0 ;;
@@ -7410,6 +7410,10 @@ _rotate_force_threshold() {  # -> prints the percentage, or nothing when off
 
 _rotate_force_notice() {
     local pct f
+    # The mod that forces is a function-hooks plugin: without the loader flag
+    # (withheld by CS_NO_FUNCTION_HOOKS, or 0 from the shell) nothing rotates,
+    # so there is nothing to announce and the marker must stay unspent.
+    case "${CLAUDE_CODE_ENABLE_FUNCTION_HOOKS:-}" in ''|0) return 0 ;; esac
     pct="$(_rotate_force_threshold)"
     [ -n "$pct" ] || return 0
     f="$(_rotate_force_notice_file)"

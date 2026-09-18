@@ -2047,7 +2047,7 @@ test_force_notice_prints_once_per_machine() {
     local home="$TEST_TMPDIR/notice-home"
     mkdir -p "$home"
     local out
-    out=$(HOME="$home" XDG_CONFIG_HOME="$home/.config" bash -c '
+    out=$(HOME="$home" XDG_CONFIG_HOME="$home/.config" CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 bash -c '
         . "'"$SCRIPT_DIR"'/../lib/75-launch.sh"
         _rotate_force_notice; _rotate_force_notice' 2>&1) || return 1
     assert_output_contains "$out" "80%" "the notice names the threshold" || return 1
@@ -2073,15 +2073,72 @@ test_force_notice_names_an_overridden_threshold() {
     local home="$TEST_TMPDIR/notice-override"
     mkdir -p "$home"
     local out
-    out=$(HOME="$home" XDG_CONFIG_HOME="$home/.config" CS_ROTATE_FORCE_CTX=55 bash -c '
+    out=$(HOME="$home" XDG_CONFIG_HOME="$home/.config" CS_ROTATE_FORCE_CTX=55 CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 bash -c '
         . "'"$SCRIPT_DIR"'/../lib/75-launch.sh"
         _rotate_force_notice' 2>&1) || return 1
     assert_output_contains "$out" "55%" "the notice quotes the threshold in force" || return 1
 }
 
+# The rotate mod is a function-hooks plugin, so without the loader flag no
+# rotation is forced however the threshold reads. Announcing one anyway would
+# describe a rotation that never comes, and burn the once-per-machine marker
+# before the day the flag is on and the forcing really starts.
+test_force_notice_is_silent_when_function_hooks_are_off() {
+    local home="$TEST_TMPDIR/notice-nohooks"
+    mkdir -p "$home"
+    local out
+    out=$(env -u CLAUDE_CODE_ENABLE_FUNCTION_HOOKS HOME="$home" XDG_CONFIG_HOME="$home/.config" bash -c '
+        . "'"$SCRIPT_DIR"'/../lib/75-launch.sh"
+        _rotate_force_notice' 2>&1) || return 1
+    [ -z "$out" ] || { echo "  FAIL: flag unset: announced a rotation the mod cannot run: $out"; return 1; }
+    out=$(CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=0 HOME="$home" XDG_CONFIG_HOME="$home/.config" bash -c '
+        . "'"$SCRIPT_DIR"'/../lib/75-launch.sh"
+        _rotate_force_notice' 2>&1) || return 1
+    [ -z "$out" ] || { echo "  FAIL: flag 0: announced a rotation the mod cannot run: $out"; return 1; }
+    [ ! -f "$home/.config/cs/rotate-force-notice" ] \
+        || { echo "  FAIL: the marker was spent with nothing to announce"; return 1; }
+}
+
+# Both readers of CS_ROTATE_FORCE_CTX must agree on every spelling, and the
+# mod's trims only the ends: "1 5" is a typo, so the default, not fifteen.
+test_force_threshold_trims_only_the_ends_like_the_mod() {
+    local got
+    got=$(CS_ROTATE_FORCE_CTX="1 5" bash -c '. "'"$SCRIPT_DIR"'/../lib/75-launch.sh"; _rotate_force_threshold')
+    assert_eq "80" "$got" "an inner space is a typo, read as the default" || return 1
+    got=$(CS_ROTATE_FORCE_CTX=" 55 " bash -c '. "'"$SCRIPT_DIR"'/../lib/75-launch.sh"; _rotate_force_threshold')
+    assert_eq "55" "$got" "outer whitespace is trimmed" || return 1
+    got=$(CS_ROTATE_FORCE_CTX=" off" bash -c '. "'"$SCRIPT_DIR"'/../lib/75-launch.sh"; _rotate_force_threshold')
+    assert_eq "" "$got" "off survives outer whitespace" || return 1
+}
+
+# The notice is only worth anything if a launch prints it: the unit tests above
+# call the function, this one goes through cs.
+test_launch_prints_the_force_notice_once_and_only_with_hooks_on() {
+    _stub_claude
+    local cfg="$TEST_TMPDIR/notice-cfg" out
+    out=$(env -u CLAUDE_CODE_ENABLE_FUNCTION_HOOKS -u CS_NO_FUNCTION_HOOKS XDG_CONFIG_HOME="$cfg" \
+        "$CS_BIN" "notice-on" </dev/null 2>&1 || true)
+    assert_output_contains "$out" "STUB_ARGS:" "the launch reached claude" || return 1
+    assert_output_contains "$out" "cs now rotates a conversation on its own" "a launch with hooks on announces the forcing" || return 1
+    assert_file_exists "$cfg/cs/rotate-force-notice" "and records it" || return 1
+    out=$(env -u CLAUDE_CODE_ENABLE_FUNCTION_HOOKS -u CS_NO_FUNCTION_HOOKS XDG_CONFIG_HOME="$cfg" \
+        "$CS_BIN" "notice-again" </dev/null 2>&1 || true)
+    assert_output_contains "$out" "STUB_ARGS:" "the second launch reached claude" || return 1
+    assert_output_not_contains "$out" "cs now rotates" "the second launch on the machine is quiet" || return 1
+    rm -f "$cfg/cs/rotate-force-notice"
+    out=$(env -u CLAUDE_CODE_ENABLE_FUNCTION_HOOKS CS_NO_FUNCTION_HOOKS=1 XDG_CONFIG_HOME="$cfg" \
+        "$CS_BIN" "notice-nohooks" </dev/null 2>&1 || true)
+    assert_output_contains "$out" "STUB_ARGS:" "the opted-out launch reached claude" || return 1
+    assert_output_not_contains "$out" "cs now rotates" "a launch without function hooks announces nothing" || return 1
+    [ ! -f "$cfg/cs/rotate-force-notice" ] || { echo "  FAIL: the marker was spent by a launch that forces nothing"; return 1; }
+}
+
 run_test test_force_notice_prints_once_per_machine
 run_test test_force_notice_is_silent_when_the_forcing_is_off
 run_test test_force_notice_names_an_overridden_threshold
+run_test test_force_notice_is_silent_when_function_hooks_are_off
+run_test test_force_threshold_trims_only_the_ends_like_the_mod
+run_test test_launch_prints_the_force_notice_once_and_only_with_hooks_on
 run_test test_ctx_warning_fires_once_in_band
 run_test test_ctx_tiers_are_silent_for_a_teammate
 run_test test_ctx_warning_survives_an_interleaved_teammate
