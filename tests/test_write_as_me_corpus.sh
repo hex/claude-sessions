@@ -238,6 +238,8 @@ test_voice_dir_permissions() {
     local mode
     mode=$(_file_mode "$CS_SESSIONS_ROOT/.voice")
     assert_eq "700" "$mode" ".voice directory should be private" || return 1
+    mode=$(_file_mode "$(corpus_path)")
+    assert_eq "600" "$mode" "corpus.md should be private to the owner" || return 1
 }
 
 test_corrupt_line_skipped_not_fatal() {
