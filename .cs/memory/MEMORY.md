@@ -134,3 +134,4 @@
 - [Codex via plugin](feedback_codex_via_plugin.md): use /codex: (codex:rescue skill or agent), never raw `codex exec` from Bash
 - [PATH shim execs an absolute path](project_path_shim_exec_absolute.md): `exec find "$@"` / zsh `command -v` recurses into the shim; #642 was the shim measuring itself
 - [shellcheck is a CI-only lane](project_shellcheck_ci_only_lane.md): tests/run_all.sh never runs it; run CI's shellcheck line locally before pushing any .sh
+- [Abort never deletes published files](project_abort_never_deletes_published.md): delete only what this run created; order staging so failure leaves nothing
