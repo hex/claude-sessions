@@ -1431,3 +1431,7 @@ dialog. Rejected on cost, not on feasibility: it would be cs's FIRST write to a
 per-turn telemetry per project that every live claude rewrites, in exchange for
 one keypress per newly created directory. And trust is keyed on the exact path
 and outlives the directory, so that keypress is paid once per path ever used.
+
+Measured while deciding: `~/.claude.json` took **13 distinct size/mtime states
+in 60 s** (~one write every 4.6 s) with nothing unusual running. The handoff's
+OPEN RISK was real — a read-modify-write from cs would have had to survive that.
