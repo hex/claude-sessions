@@ -4024,6 +4024,28 @@ test_a_stalled_walker_is_killed_before_its_mark_expires() {
 
 run_test test_a_stalled_walker_is_killed_before_its_mark_expires
 
+# The usage refresher paints no bar, so it has no use for the terminal's theme
+# or the ancestry verdict behind it. It must not run the walk at all: a ps that
+# stalls would hold every refresher short of its lock, and the renders that
+# keep surviving would keep launching more.
+test_usage_refresher_never_walks_the_process_tree() {
+    export TMUX="/tmp/fake,2216,0" TMUX_PANE="%7"
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage"; mkdir -p "$CS_USAGE_DIR"
+    mkdir -p "$TEST_TMPDIR/fakebin"
+    export PSLOG="$TEST_TMPDIR/pslog"
+    : > "$PSLOG"
+    printf '#!/bin/sh\necho x >> "$PSLOG"\necho "2216 1"\n' > "$TEST_TMPDIR/fakebin/ps"
+    printf '#!/bin/sh\nexit 1\n' > "$TEST_TMPDIR/fakebin/curl"
+    chmod +x "$TEST_TMPDIR/fakebin/ps" "$TEST_TMPDIR/fakebin/curl"
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    bash "$SL" --refresh-usage >/dev/null 2>&1
+    assert_eq "0" "$(wc -l < "$PSLOG" | tr -d ' ')" "the refresher must not run ps" || return 1
+    [ ! -d "$HOME/.cache/cs/tmux-real" ] \
+        || { echo "  FAIL: the refresher must not write an ancestry verdict"; return 1; }
+}
+
+run_test test_usage_refresher_never_walks_the_process_tree
+
 # The org id is kept for ORG_CACHE_TTL under the config path, so an account
 # swap shows within five minutes and a render never walks the config twice in
 # that time.

@@ -531,16 +531,20 @@ _sl_invalidate_stale_bg() {
     fi
 }
 
-# Only a render defers the walk. The library mode the test suite sources and
-# the --refresh-usage re-exec both take the verdict in hand: neither paints a
-# bar, and a re-exec that spawned its own walker would fork for an answer
-# nobody reads.
+# Only a render defers the walk; the library mode the test suite sources takes
+# the verdict in hand, so the walk's own tests run it where they can see it.
 _SL_DEFER_TMUX_REAL=""
-[ "${CS_STATUSLINE_LIB:-}" = "1" ] || [ "${1:-}" = "--refresh-usage" ] || _SL_DEFER_TMUX_REAL=1
+[ "${CS_STATUSLINE_LIB:-}" = "1" ] || _SL_DEFER_TMUX_REAL=1
 
-_sl_mark_foreign_env
-_sl_detect_theme
-_sl_invalidate_stale_bg
+# The usage refresher paints no bar, so it settles none of this: no ancestry
+# walk, no theme, no tmux client lookup. A walk here would run with no deadline
+# ahead of the refresher's lock, and a ps that stalls would hold every
+# refresher short of it while the renders kept launching more.
+if [ "${1:-}" != "--refresh-usage" ]; then
+    _sl_mark_foreign_env
+    _sl_detect_theme
+    _sl_invalidate_stale_bg
+fi
 
 # Parsed stdin fields (filled by _parse_stdin).
 SL_SESSION=""; SL_CTX=""; SL_MODEL=""; SL_EFFORT=""
