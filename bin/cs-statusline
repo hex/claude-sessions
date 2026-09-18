@@ -102,6 +102,13 @@ _cache_write() {
     { printf '%s\t%s\n%s\n' "$_NOW" "$2" "$3" > "$d/$_CACHE_KEY"; } 2>/dev/null || true
 }
 
+# Drop kind $1's entry for identity $2, so the next read is a miss. Best
+# effort, and it forks: no render path calls it.
+_cache_forget() {
+    _cache_key "$2"; [ -n "$_CACHE_KEY" ] || return 0
+    rm -f "$HOME/.cache/cs/$1/$_CACHE_KEY" 2>/dev/null || true
+}
+
 # The process the per-conversation caches are keyed on. Claude Code is the
 # render's parent and the same for every render of a conversation, so PPID is
 # the key. A program Claude Code runs in this script's place (a status-line
@@ -228,23 +235,53 @@ _sl_theme_from_colorfgbg() {
 # long. The walk itself is two forks (ps and awk), so a hit saves both.
 TMUX_REAL_CACHE_TTL=300
 
+# How long a walk that has been spawned is assumed to still be running. A walk
+# that can answer takes a fraction of a second (155-415 ms measured), so this
+# only ever gates a `ps` that has stalled: without it such a walk is respawned
+# every render, once a second, per conversation, for as long as the session is
+# open, and each one waits on a `ps` that never returns. Past the TTL one
+# render tries again, so a child that died before clearing its mark wedges
+# nothing.
+TMUX_WALK_MARK_TTL=10
+
+# How long the detached walker waits on its ps before killing it. Shorter than
+# the mark, so a stalled walker is gone before the render that replaces it can
+# be spawned: at most one is ever alive.
+TMUX_WALK_DEADLINE=5
+
 _sl_tmux_is_real() {
     [ -n "${TMUX:-}" ] || return 1
     local srv start
-    srv=${TMUX#*,}; srv=${srv%%,*}
-    case "$srv" in ''|*[!0-9]*) return 1 ;; esac
+    _sl_tmux_server || return 1
+    srv="$_SRV"
     start=${1:-$$}
     # A caller that names a start pid is a test of the walk itself; only the
     # render's own question is cached.
-    local ident="" verdict
+    local ident=""
     if [ -z "${1:-}" ]; then _sl_parent_pid; ident="$_PARENT,$TMUX"; fi
+    _sl_tmux_cached_walk "$start" "$srv" "$ident"
+}
+
+# The tmux server pid from the TMUX claim, in _SRV. Non-zero when the claim
+# carries no pid to check, which is not a tmux this process can be inside.
+_sl_tmux_server() {
+    _SRV=${TMUX#*,}; _SRV=${_SRV%%,*}
+    case "$_SRV" in ''|*[!0-9]*) return 1 ;; esac
+}
+
+# The walk with its cache around it: $1 start pid, $2 server pid, $3 the
+# identity to key the verdict on, empty to answer without reading or writing
+# an entry. Returns the walk's own verdict, with an unanswerable ps read as
+# real (see _sl_tmux_walk) and left uncached.
+_sl_tmux_cached_walk() {
+    local ident="$3" verdict
     if [ -n "$ident" ] && _cache_read tmux-real "$ident" "$TMUX_REAL_CACHE_TTL"; then
         case "$_CACHE_TEXT" in
             real) return 0 ;;
             foreign) return 1 ;;
         esac
     fi
-    _sl_tmux_walk "$start" "$srv"
+    _sl_tmux_walk "$1" "$2"
     local rc=$?
     if [ -n "$ident" ] && [ "$rc" -ne 2 ]; then
         verdict=foreign; [ "$rc" -eq 0 ] && verdict=real
@@ -267,7 +304,11 @@ _sl_tmux_walk() {  # start-pid server-pid
     # because a tool failure is not evidence of the negative, and scoring it as
     # one makes a genuine pane render dark and lose its pane id.
     local table
-    table=$(ps -ax -o pid=,ppid= 2>/dev/null) || table=""
+    if [ -n "${_SL_WALK_DEADLINE:-}" ]; then
+        _sl_ps_table_by_deadline "$_SL_WALK_DEADLINE"; table="$_PS_TABLE"
+    else
+        table=$(ps -ax -o pid=,ppid= 2>/dev/null) || table=""
+    fi
     [ -n "$table" ] || return 2
     printf '%s\n' "$table" | awk -v p="$start" -v s="$srv" '
         { pp[$1] = $2 }
@@ -282,6 +323,27 @@ _sl_tmux_walk() {  # start-pid server-pid
         }'
 }
 
+# The ps table in _PS_TABLE, empty when ps has not answered within $1 seconds.
+# A ps that stalls is killed by the pid recorded at its start, so the walker
+# that ran it ends too: nothing outlives the deadline. It polls with sleep, a
+# fork a tick, which is why only the detached walker takes this path.
+_sl_ps_table_by_deadline() {
+    _PS_TABLE=""
+    local out="$HOME/.cache/cs/tmux-walking/.ps.$$.$RANDOM" pid ticks=$(( $1 * 10 ))
+    ps -ax -o pid=,ppid= > "$out" 2>/dev/null &
+    pid=$!
+    while [ "$ticks" -gt 0 ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 0.1; ticks=$((ticks - 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null
+    elif wait "$pid" 2>/dev/null; then
+        _PS_TABLE=$(< "$out")
+    fi
+    rm -f "$out" 2>/dev/null || true
+}
+
 # Whether the environment describes a terminal this process is not in. Settled
 # once per render, before anything reads it: an explicit CS_TERM_THEME pin
 # short-circuits theme detection, but the pane id still needs to know, and
@@ -289,7 +351,57 @@ _sl_tmux_walk() {  # start-pid server-pid
 _sl_mark_foreign_env() {
     SL_ENV_FOREIGN=""
     [ -n "${TMUX:-}" ] || return 0
+    [ -n "${_SL_DEFER_TMUX_REAL:-}" ] && _sl_defer_tmux_verdict && return 0
     _sl_tmux_is_real || SL_ENV_FOREIGN=1
+}
+
+# The ancestry verdict, kept off a conversation's first render.
+#
+# It is the one cost a render pays exactly once: it appears in a conversation's
+# first render and in none after, and the first render is the one Claude Code
+# kills for running too long. So on a miss this render answers real — what
+# every pane cs launches is — and a detached child does the walk and leaves the
+# verdict where the render a second later reads it. A foreign environment draws
+# its own terminal's palette for one render and is corrected on the next; a
+# real one never sees a wrong palette at all.
+#
+# The child walks from the PARENT, not from this render. The subshell orphans
+# it, this render exits at once, and a pid that has gone has no ancestors to
+# walk. The parent is the conversation, alive for as long as an entry keyed on
+# it can be read, and its chain to the server is this render's chain without
+# the first hop — the same verdict, from a pid that stays.
+#
+# Returns 0 when SL_ENV_FOREIGN is settled, 1 when the caller must walk here.
+_sl_defer_tmux_verdict() {
+    _sl_tmux_server || return 1
+    _sl_parent_pid
+    local ident="$_PARENT,$TMUX"
+    if _cache_read tmux-real "$ident" "$TMUX_REAL_CACHE_TTL"; then
+        case "$_CACHE_TEXT" in
+            real)    return 0 ;;
+            foreign) SL_ENV_FOREIGN=1; return 0 ;;
+        esac
+    fi
+    # One walk in flight at a time. The mark is written before the spawn and
+    # cleared by the child, so a render on the common path pays one file write
+    # on a miss and nothing at all on a hit, and no fork either way.
+    _cache_read tmux-walking "$ident" "$TMUX_WALK_MARK_TTL" && return 0
+    _cache_write tmux-walking "$ident" "walking"
+    # Detached, and with descriptors of its own: an inherited stdout holds the
+    # render's output open, and Claude Code would wait on the walk after all.
+    # A ps that answers with a failure leaves no verdict but does clear the
+    # mark, so the next render walks again — the cost of the walk it replaced,
+    # not a new one.
+    local deadline="$TMUX_WALK_DEADLINE"
+    case "${CS_STATUSLINE_WALK_DEADLINE:-}" in
+        ''|*[!0-9]*|0*) ;;
+        *) [ "$CS_STATUSLINE_WALK_DEADLINE" -lt "$TMUX_WALK_MARK_TTL" ] \
+               && deadline="$CS_STATUSLINE_WALK_DEADLINE" ;;
+    esac
+    ( { _SL_WALK_DEADLINE="$deadline"
+        _sl_tmux_cached_walk "$_PARENT" "$_SRV" "$ident"
+        _cache_forget tmux-walking "$ident"; } >/dev/null 2>&1 & ) >/dev/null 2>&1
+    return 0
 }
 
 # The terminal cs measured, found by the one identity a render can establish
@@ -419,9 +531,20 @@ _sl_invalidate_stale_bg() {
     fi
 }
 
-_sl_mark_foreign_env
-_sl_detect_theme
-_sl_invalidate_stale_bg
+# Only a render defers the walk; the library mode the test suite sources takes
+# the verdict in hand, so the walk's own tests run it where they can see it.
+_SL_DEFER_TMUX_REAL=""
+[ "${CS_STATUSLINE_LIB:-}" = "1" ] || _SL_DEFER_TMUX_REAL=1
+
+# The usage refresher paints no bar, so it settles none of this: no ancestry
+# walk, no theme, no tmux client lookup. A walk here would run with no deadline
+# ahead of the refresher's lock, and a ps that stalls would hold every
+# refresher short of it while the renders kept launching more.
+if [ "${1:-}" != "--refresh-usage" ]; then
+    _sl_mark_foreign_env
+    _sl_detect_theme
+    _sl_invalidate_stale_bg
+fi
 
 # Parsed stdin fields (filled by _parse_stdin).
 SL_SESSION=""; SL_CTX=""; SL_MODEL=""; SL_EFFORT=""
@@ -1199,7 +1322,7 @@ _refresh_usage() {
     # idle. The render never forks to sweep, so this worker does it. The other
     # buckets are keyed on identities that repeat and stay small.
     local bucket
-    for bucket in tmux-client tmux-real tty; do
+    for bucket in tmux-client tmux-real tmux-walking tty; do
         [ -d "$HOME/.cache/cs/$bucket" ] || continue
         find "$HOME/.cache/cs/$bucket" -maxdepth 1 -type f -mmin +60 -delete 2>/dev/null
     done

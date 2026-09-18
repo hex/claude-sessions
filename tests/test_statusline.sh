@@ -1409,6 +1409,18 @@ _make_ps_table() {
     chmod +x "$TEST_TMPDIR/fakebin/ps"
 }
 
+# Block until the detached child a render spawned has left its ancestry
+# verdict for parent $1 and the TMUX claim $2, so the next render reads a
+# settled answer rather than racing one. Non-zero if it never arrives.
+settle_tmux_verdict() {
+    local key="$1,$2" n=0
+    key=${key//\//-}; key=${key//[^A-Za-z0-9._,-]/_}   # as _cache_key sanitises
+    while [ ! -s "$HOME/.cache/cs/tmux-real/$key" ] && [ "$n" -lt 200 ]; do
+        n=$((n + 1)); sleep 0.05
+    done
+    [ -s "$HOME/.cache/cs/tmux-real/$key" ]
+}
+
 # The pane id is a claim about where this conversation lives, and TMUX_PANE is
 # inherited alongside TMUX. Rendering it for a process that is not in that
 # server prints a pane belonging to someone else's terminal.
@@ -1418,7 +1430,12 @@ test_pane_segment_hidden_when_tmux_is_foreign() {
     _make_ps_table foreign 12345
     export TMUX="/tmp/tmux-1000/default,12345,0" TMUX_PANE="%7"
     export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    # Named, so the verdict the first render's child writes is the one the
+    # render below looks up: a pipeline gives each render its own parent.
+    export CS_STATUSLINE_PARENT=4242
     local out
+    run_sl "$FIXTURE_DOCS" >/dev/null   # kicks the walk off the render path
+    settle_tmux_verdict 4242 "$TMUX" || { echo "  FAIL: no verdict was written"; return 1; }
     out=$(run_sl "$FIXTURE_DOCS")
     assert_output_not_contains "$out" "◫" \
         "pane id must not render for a tmux membership this process does not have" || return 1
@@ -3900,6 +3917,134 @@ test_unusable_ps_verdict_is_not_cached() {
 }
 
 run_test test_unusable_ps_verdict_is_not_cached
+
+# A conversation's first render is the only one that has ever paid for the
+# ancestry walk, and it is the render Claude Code kills. It no longer waits:
+# the verdict is taken as real, the walk runs in a detached child under the
+# render's own parent identity, and the next render — a second later — reads
+# what the child left. A foreign environment is corrected by then; a real one,
+# which is every pane cs launches, never sees a wrong palette at all.
+test_first_render_defers_the_ancestry_walk() {
+    export CS_TERM_THEME=light FORCE_COLOR=0
+    export CS_STATUSLINE_SEGMENTS=pane
+    export TMUX="/tmp/fake,2216,0" TMUX_PANE="%7"
+    # Named, because a pipeline gives each render a different parent and the
+    # verdict the child writes must be the one the next render looks up.
+    export CS_STATUSLINE_PARENT=4242
+    _make_ps_chain "2216:1"   # the server is nobody's ancestor: foreign
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    local json='{"session_id":"sid-1"}'
+    local first second
+    first=$(run_sl "$json")
+    assert_output_contains_f "$first" "7" \
+        "the first render draws the pane instead of walking the tree" || return 1
+    settle_tmux_verdict 4242 "$TMUX" \
+        || { echo "  FAIL: the detached walk left no verdict"; return 1; }
+    second=$(run_sl "$json")
+    grep -qF -- "7" <<< "$second" && {
+        echo "  FAIL: the second render must read the foreign verdict the child cached"
+        return 1
+    }
+    return 0
+}
+
+run_test test_first_render_defers_the_ancestry_walk
+
+# A `ps` that never answers must not mint a walker a second. The render that
+# spawns one marks the walk in flight, and every render inside
+# TMUX_WALK_MARK_TTL renders without spawning another; past the TTL one render
+# tries again, so a walk whose child died leaves nothing wedged.
+test_a_stalled_walk_is_not_respawned_every_render() {
+    export CS_TERM_THEME=light FORCE_COLOR=0
+    export CS_STATUSLINE_SEGMENTS=pane
+    export TMUX="/tmp/fake,2216,0" TMUX_PANE="%7"
+    export CS_STATUSLINE_PARENT=4242
+    # A ps that never returns within the run: each invocation records itself,
+    # so the count of records is the count of walkers spawned.
+    mkdir -p "$TEST_TMPDIR/fakebin"
+    export STALLLOG="$TEST_TMPDIR/stalled"
+    : > "$STALLLOG"
+    printf '#!/bin/sh\necho x >> "$STALLLOG"\nsleep 30\n' > "$TEST_TMPDIR/fakebin/ps"
+    chmod +x "$TEST_TMPDIR/fakebin/ps"
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    local json='{"session_id":"sid-1"}' i=0 spawned
+    while [ "$i" -lt 4 ]; do
+        i=$((i + 1))
+        CS_STATUSLINE_NOW=$((1000 + i)) run_sl "$json" >/dev/null
+    done
+    # Give the children time to reach their ps before counting.
+    local n=0
+    while [ ! -s "$STALLLOG" ] && [ "$n" -lt 100 ]; do n=$((n + 1)); sleep 0.05; done
+    sleep 0.3
+    spawned=$(wc -l < "$STALLLOG" | tr -d ' ')
+    assert_eq "1" "$spawned" "four renders inside the TTL must spawn one walker" || return 1
+    # Past the mark's TTL a render tries again, so a dead child cannot wedge
+    # the verdict for the rest of the conversation.
+    CS_STATUSLINE_NOW=1012 run_sl "$json" >/dev/null   # past TMUX_WALK_MARK_TTL (10)
+    n=0
+    while [ "$(wc -l < "$STALLLOG" | tr -d ' ')" -lt 2 ] && [ "$n" -lt 100 ]; do n=$((n + 1)); sleep 0.05; done
+    spawned=$(wc -l < "$STALLLOG" | tr -d ' ')
+    assert_eq "2" "$spawned" "past the TTL one render walks again" || return 1
+}
+
+run_test test_a_stalled_walk_is_not_respawned_every_render
+
+# The mark only spaces walkers out; what keeps them from piling up is that a
+# walker gives its ps a deadline shorter than the mark and kills it by the pid
+# it recorded. Across mark windows a ps that never answers leaves nothing alive.
+test_a_stalled_walker_is_killed_before_its_mark_expires() {
+    export CS_TERM_THEME=light FORCE_COLOR=0
+    export CS_STATUSLINE_SEGMENTS=pane
+    export TMUX="/tmp/fake,2216,0" TMUX_PANE="%7"
+    export CS_STATUSLINE_PARENT=4242 CS_STATUSLINE_WALK_DEADLINE=1
+    mkdir -p "$TEST_TMPDIR/fakebin"
+    export STALLLOG="$TEST_TMPDIR/stalled"
+    : > "$STALLLOG"
+    printf '#!/bin/sh\necho "$$" >> "$STALLLOG"\nexec sleep 30\n' > "$TEST_TMPDIR/fakebin/ps"
+    chmod +x "$TEST_TMPDIR/fakebin/ps"
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    local json='{"session_id":"sid-1"}' now p alive n
+    for now in 1001 1012 1023; do
+        CS_STATUSLINE_NOW=$now run_sl "$json" >/dev/null
+        n=0
+        while [ "$(wc -l < "$STALLLOG" | tr -d ' ')" -lt $(( (now - 990) / 11 )) ] && [ "$n" -lt 100 ]; do
+            n=$((n + 1)); sleep 0.05
+        done
+        sleep 1.6   # past the one-second deadline
+    done
+    assert_eq "3" "$(wc -l < "$STALLLOG" | tr -d ' ')" "each mark window spawns one walker" || return 1
+    alive=0
+    while read -r p; do kill -0 "$p" 2>/dev/null && alive=$((alive + 1)); done < "$STALLLOG"
+    assert_eq "0" "$alive" "no stalled ps outlives its deadline" || return 1
+    # The killed walk is a ps that could not answer: no verdict, and the pane
+    # still draws as real.
+    [ ! -e "$HOME/.cache/cs/tmux-real/4242,-tmp-fake,2216,0" ] \
+        || { echo "  FAIL: a killed walk must not leave a verdict"; return 1; }
+}
+
+run_test test_a_stalled_walker_is_killed_before_its_mark_expires
+
+# The usage refresher paints no bar, so it has no use for the terminal's theme
+# or the ancestry verdict behind it. It must not run the walk at all: a ps that
+# stalls would hold every refresher short of its lock, and the renders that
+# keep surviving would keep launching more.
+test_usage_refresher_never_walks_the_process_tree() {
+    export TMUX="/tmp/fake,2216,0" TMUX_PANE="%7"
+    export CS_USAGE_DIR="$TEST_TMPDIR/usage"; mkdir -p "$CS_USAGE_DIR"
+    mkdir -p "$TEST_TMPDIR/fakebin"
+    export PSLOG="$TEST_TMPDIR/pslog"
+    : > "$PSLOG"
+    printf '#!/bin/sh\necho x >> "$PSLOG"\necho "2216 1"\n' > "$TEST_TMPDIR/fakebin/ps"
+    printf '#!/bin/sh\nexit 1\n' > "$TEST_TMPDIR/fakebin/curl"
+    chmod +x "$TEST_TMPDIR/fakebin/ps" "$TEST_TMPDIR/fakebin/curl"
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    bash "$SL" --refresh-usage >/dev/null 2>&1
+    assert_eq "0" "$(wc -l < "$PSLOG" | tr -d ' ')" "the refresher must not run ps" || return 1
+    [ ! -d "$HOME/.cache/cs/tmux-real" ] \
+        || { echo "  FAIL: the refresher must not write an ancestry verdict"; return 1; }
+}
+
+run_test test_usage_refresher_never_walks_the_process_tree
 
 # The org id is kept for ORG_CACHE_TTL under the config path, so an account
 # swap shows within five minutes and a render never walks the config twice in
