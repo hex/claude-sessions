@@ -1253,3 +1253,60 @@ findings"), which is why asking for "5, 6, 7" got 1-4 resent twice.
 
 Eleven commits on fix/v2026.9.16-minors. Everything green again after the
 fold (spawn 39/39, statusline 237/237, harness 9/9, shellcheck clean).
+
+## 2026-09-18 — auto-compact enforcement, read from the 2.1.276 bundle
+
+Alex asked what enforces compaction, then whether rotation has an equivalent.
+Read from the installed binary, not docs:
+
+- Auto-compact has a proactive path at a threshold and a REACTIVE one: the
+  summary is "generated in the background at the autocompact threshold and
+  swapped in when prompt-too-long fired". So the real backstop is the API
+  rejecting the prompt; the threshold is an estimate. There is a circuit
+  breaker and an `autocompact_thrashing` signal for compaction that keeps
+  firing without freeing enough.
+- Knobs: `/autocompact`, `--autocompact <auto|tokens>`,
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `autoCompactWindow`. `/context` shows an
+  "Autocompact buffer" row (the reserved headroom).
+- **`CLAUDE_CODE_DISABLE_1M_CONTEXT` is not a ceiling**, in the bundle's own
+  words: "the …K limit isn't enforced for …, so this session can grow past it.
+  To enforce it, set CLAUDE_CODE_AUTO_COMPACT_WINDOW=". Only the auto-compact
+  window caps a session.
+- cs's own enforcement ladder for the same problem: nudge at 65, band at 40
+  (CS_ROTATE_BUTTON_CTX), and `CS_ROTATE_FORCE_CTX` as the only forcing one —
+  opt-in, 20 s grace, once per conversation via `.cs/local/cs-rotate.forced`,
+  with the birth check refusing a threshold below the conversation's starting
+  context. It fires only at a turn boundary, so a single ballooning turn still
+  meets auto-compact first.
+
+## 2026-09-18 — forced rotation ships on at 80% (#654, feat/force-rotate-default)
+
+Alex, mid-turn: "it should be on by default". Asked two concrete either/ors
+(threshold, rollout) and he took both recommendations: 80%, announced once per
+machine. 5a0258d.
+
+- **The typo rule inverts when a knob goes from opt-in to default.** While the
+  forcing was off unless set, an unreadable `CS_ROTATE_FORCE_CTX` meaning
+  "off" was harmless. Now that people rely on the rotation, a typo silently
+  disabling it is the worse failure, so an unusable value reads as the default
+  and only `off`/`0` disable. Four rows pinned in the bun suite. This is the
+  opposite of the scope-budget rule (`a typo must not silence grounding`) only
+  in spelling — both make the typo land on the SAFE side, which changed when
+  the default did.
+- The notice is a plain print, not a prompt: `_rotate_force_notice` in
+  lib/75-launch.sh, marker at `${XDG_CONFIG_HOME:-~/.config}/cs/rotate-force-notice`
+  beside the statusline caps answer. Silent when the forcing is off (nothing to
+  announce, and no marker written, so turning it back on still announces).
+- **Two resolvers now decide the same thing** — `forceThreshold()` in the mod
+  (TypeScript) and `_rotate_force_threshold` in lib/75-launch.sh (bash, for the
+  notice's wording). They are kept together by a KEEP IN SYNC comment, NOT by a
+  test. If one drifts the notice quotes a threshold the mod does not use. Worth
+  a pin like `tests/test_mod_rotate.sh` already does for the statusline
+  luminance constants: sed the number out of both files and compare.
+- Gate: 71 bun, rotation 107/107 (3 new notice tests, red first),
+  mod_rotate 6/6, docs 6/6, help 2/2, install 54/54, theme 24/24, shellcheck
+  clean; hooks + session_lock still running when this was written.
+- Unmeasured: the threshold itself. 80% leaves room before auto-compact on a
+  200K window; on a 1M context the absolute headroom at 80% is far larger, so
+  the forcing may fire earlier than it needs to. Nobody has measured where
+  auto-compact actually lands on either.
