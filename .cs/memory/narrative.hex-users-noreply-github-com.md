@@ -1403,3 +1403,20 @@ Traps worth keeping:
   `~/.claude.json` still trusts paths whose directories are long gone, so
   `cs <old-spike-name>` launches with no dialog and no write to that file —
   which is how this ran without touching a file every live claude rewrites.
+
+**Tighter wording than the table's header claims:** a render still running when
+Claude Code next wants to render is killed; `refreshInterval` bounds how long
+that wait can be, and startup events shorten it. It is not a strict one-second
+wall. Two lines in the same logs say so: `sweep.02.log`'s FIRST 0.2 s render
+died (nothing ticks in 0.2 s — a startup event killed it), and
+`invoke.real.2.log` has `start 980.335 -> end 981.695`, a 1.36 s render that
+survived under interval 1. The 207 starts under sleep 3.0 come one every
+0.24 s, not one a second. What the measurement does settle, and a fixed timeout
+cannot explain, is the interval pairs: 2 s dies 117/117 at interval 1 and
+survives first try at interval 5; 4 s survives first try at interval 10.
+
+`refreshInterval: 1` is **cs's own** registration (`lib/70-statusline.sh:95`),
+not the sidebar bridge's — so this is cs's to fix, not a hand-off. The 31-of-33
+kill rate in the real arm is a probe-environment number (leftover probe claudes
+loading the machine); the warm steady-state kill rate in an ordinary session is
+NOT measured here.
