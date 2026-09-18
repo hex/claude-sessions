@@ -244,6 +244,11 @@ TMUX_REAL_CACHE_TTL=300
 # nothing.
 TMUX_WALK_MARK_TTL=10
 
+# How long the detached walker waits on its ps before killing it. Shorter than
+# the mark, so a stalled walker is gone before the render that replaces it can
+# be spawned: at most one is ever alive.
+TMUX_WALK_DEADLINE=5
+
 _sl_tmux_is_real() {
     [ -n "${TMUX:-}" ] || return 1
     local srv start
@@ -299,7 +304,11 @@ _sl_tmux_walk() {  # start-pid server-pid
     # because a tool failure is not evidence of the negative, and scoring it as
     # one makes a genuine pane render dark and lose its pane id.
     local table
-    table=$(ps -ax -o pid=,ppid= 2>/dev/null) || table=""
+    if [ -n "${_SL_WALK_DEADLINE:-}" ]; then
+        _sl_ps_table_by_deadline "$_SL_WALK_DEADLINE"; table="$_PS_TABLE"
+    else
+        table=$(ps -ax -o pid=,ppid= 2>/dev/null) || table=""
+    fi
     [ -n "$table" ] || return 2
     printf '%s\n' "$table" | awk -v p="$start" -v s="$srv" '
         { pp[$1] = $2 }
@@ -312,6 +321,27 @@ _sl_tmux_walk() {  # start-pid server-pid
             }
             exit 1
         }'
+}
+
+# The ps table in _PS_TABLE, empty when ps has not answered within $1 seconds.
+# A ps that stalls is killed by the pid recorded at its start, so the walker
+# that ran it ends too: nothing outlives the deadline. It polls with sleep, a
+# fork a tick, which is why only the detached walker takes this path.
+_sl_ps_table_by_deadline() {
+    _PS_TABLE=""
+    local out="$HOME/.cache/cs/tmux-walking/.ps.$$.$RANDOM" pid ticks=$(( $1 * 10 ))
+    ps -ax -o pid=,ppid= > "$out" 2>/dev/null &
+    pid=$!
+    while [ "$ticks" -gt 0 ] && kill -0 "$pid" 2>/dev/null; do
+        sleep 0.1; ticks=$((ticks - 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null
+    elif wait "$pid" 2>/dev/null; then
+        _PS_TABLE=$(< "$out")
+    fi
+    rm -f "$out" 2>/dev/null || true
 }
 
 # Whether the environment describes a terminal this process is not in. Settled
@@ -362,7 +392,14 @@ _sl_defer_tmux_verdict() {
     # A ps that answers with a failure leaves no verdict but does clear the
     # mark, so the next render walks again — the cost of the walk it replaced,
     # not a new one.
-    ( { _sl_tmux_cached_walk "$_PARENT" "$_SRV" "$ident"
+    local deadline="$TMUX_WALK_DEADLINE"
+    case "${CS_STATUSLINE_WALK_DEADLINE:-}" in
+        ''|*[!0-9]*|0*) ;;
+        *) [ "$CS_STATUSLINE_WALK_DEADLINE" -lt "$TMUX_WALK_MARK_TTL" ] \
+               && deadline="$CS_STATUSLINE_WALK_DEADLINE" ;;
+    esac
+    ( { _SL_WALK_DEADLINE="$deadline"
+        _sl_tmux_cached_walk "$_PARENT" "$_SRV" "$ident"
         _cache_forget tmux-walking "$ident"; } >/dev/null 2>&1 & ) >/dev/null 2>&1
     return 0
 }

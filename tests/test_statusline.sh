@@ -3989,6 +3989,41 @@ test_a_stalled_walk_is_not_respawned_every_render() {
 
 run_test test_a_stalled_walk_is_not_respawned_every_render
 
+# The mark only spaces walkers out; what keeps them from piling up is that a
+# walker gives its ps a deadline shorter than the mark and kills it by the pid
+# it recorded. Across mark windows a ps that never answers leaves nothing alive.
+test_a_stalled_walker_is_killed_before_its_mark_expires() {
+    export CS_TERM_THEME=light FORCE_COLOR=0
+    export CS_STATUSLINE_SEGMENTS=pane
+    export TMUX="/tmp/fake,2216,0" TMUX_PANE="%7"
+    export CS_STATUSLINE_PARENT=4242 CS_STATUSLINE_WALK_DEADLINE=1
+    mkdir -p "$TEST_TMPDIR/fakebin"
+    export STALLLOG="$TEST_TMPDIR/stalled"
+    : > "$STALLLOG"
+    printf '#!/bin/sh\necho "$$" >> "$STALLLOG"\nexec sleep 30\n' > "$TEST_TMPDIR/fakebin/ps"
+    chmod +x "$TEST_TMPDIR/fakebin/ps"
+    export PATH="$TEST_TMPDIR/fakebin:$PATH"
+    local json='{"session_id":"sid-1"}' now p alive n
+    for now in 1001 1012 1023; do
+        CS_STATUSLINE_NOW=$now run_sl "$json" >/dev/null
+        n=0
+        while [ "$(wc -l < "$STALLLOG" | tr -d ' ')" -lt $(( (now - 990) / 11 )) ] && [ "$n" -lt 100 ]; do
+            n=$((n + 1)); sleep 0.05
+        done
+        sleep 1.6   # past the one-second deadline
+    done
+    assert_eq "3" "$(wc -l < "$STALLLOG" | tr -d ' ')" "each mark window spawns one walker" || return 1
+    alive=0
+    while read -r p; do kill -0 "$p" 2>/dev/null && alive=$((alive + 1)); done < "$STALLLOG"
+    assert_eq "0" "$alive" "no stalled ps outlives its deadline" || return 1
+    # The killed walk is a ps that could not answer: no verdict, and the pane
+    # still draws as real.
+    [ ! -e "$HOME/.cache/cs/tmux-real/4242,-tmp-fake,2216,0" ] \
+        || { echo "  FAIL: a killed walk must not leave a verdict"; return 1; }
+}
+
+run_test test_a_stalled_walker_is_killed_before_its_mark_expires
+
 # The org id is kept for ORG_CACHE_TTL under the config path, so an account
 # swap shows within five minutes and a render never walks the config twice in
 # that time.
