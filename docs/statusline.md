@@ -47,7 +47,7 @@ The render's cost is its fork count. The bar repaints once a second (`refreshInt
 | `jq` over the Fable usage record, and `date` for its reset countdown | with the record | `fable.<account>.json.fields` beside it: pct, resets_at, fetched_at, next_poll_at, and the reset as an epoch, one per line | written by the refresher with the JSON, never by a render, so a slow parse of an old record cannot overwrite a newer sidecar; the refresher honours the JSON's schedule (so a recorded backoff is never skipped) and rewrites a sidecar that disagrees with it from the JSON, without a fetch; a record with no sidecar (from before it existed) is parsed with `jq` until the next refresh |
 | `mv` for the `.cs/local/context-pct` and `.cs/local/limits` stamps | 60 s when the value is unchanged | `<stamp>.at` beside each, `epoch value`; a teammate's heartbeat touch keeps its own | a changed value is written at once; an unchanged one once a minute, which is the heartbeat (its readers allow 900 s for the mtime and 1800 s for `stamped_at`) |
 
-The two parent-keyed buckets (`tmux-real/`, `tmux-client/`) gain an entry per conversation, so the usage refresher (see [Fable usage](#fable-usage)), which already runs detached and under its own lock, removes their entries older than an hour. An hour is far past both TTLs, so a removed entry was already a miss and a conversation that needs it again recomputes it. The sweep runs only where the refresher does (a Fable session with `curl`), and the render never sweeps.
+The parent-keyed buckets (`tmux-real/`, `tmux-client/`, `tmux-walking/`) and the tty-keyed `tty/` gain an entry per conversation, so the usage refresher (see [Fable usage](#fable-usage)), which already runs detached and under its own lock, removes their entries older than an hour. An hour is far past both TTLs, so a removed entry was already a miss and a conversation that needs it again recomputes it. The sweep runs only where the refresher does (a Fable session with `curl`), and the render never sweeps.
 
 A cache entry is two lines: `epoch<TAB>identity`, then the text. The identity is the raw value the file name was made from (the workspace path, the config path, `<parent pid>,<TMUX>`), so two values that sanitise to the same name (`/x/a/b` and `/x/a-b`) never answer for each other, and the age is arithmetic against the render's one clock rather than a `find` or `stat` fork; the terminal-theme entry under `~/.cache/cs/term/` (see [Colors](#colors)) carries an epoch too. Every cache write is a builtin `printf`, and a read takes an entry only when both its lines are complete, so a torn read is a miss, never a wrong answer. Data gathering is still gated per segment: disabling `git` in `CS_STATUSLINE_SEGMENTS` means the git line is neither forked for nor cached. There is no transcript parsing and no network access; a Fable session reads the usage cache and never fetches from the render (see [Fable usage](#fable-usage)).
 
@@ -121,7 +121,8 @@ A lock serialises refreshers across sessions. A lock older than 120 seconds is
 treated as abandoned and reclaimed by *renaming* it: with a plain remove, two
 contenders that both see it stale can both proceed, the second deleting the
 first's fresh lock. A 429 backs off for `Retry-After` plus a minute, floored at
-ten — a 429 does not reliably clear at its stated horizon.
+ten and capped at an hour — a 429 does not reliably clear at its stated
+horizon, and a header of more than fifteen digits takes the floor.
 
 Polling happens only while the active model is Fable, because the trigger lives
 inside the segment and the segment is gated on the model. A session on any other

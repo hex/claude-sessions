@@ -437,7 +437,11 @@ the nudge threshold, where rotation takes over). At 65% context, the same
 hook nudges once per conversation to invoke the rotate skill
 (`CS_ROTATE_NUDGE_CTX` overrides the threshold; a non-numeric value falls
 back to 65). Both tiers yield to an armed or draining task queue, which
-owns the turn loop while it runs.
+owns the turn loop while it runs. At 80% the `cs-rotate` mod rotates the
+conversation itself: it runs `/rotate`, then counts down 20 seconds to the
+`/clear` (`1` goes now, any prompt stops it). `CS_ROTATE_FORCE_CTX=off`
+turns that off and a percentage moves it; the first launch on a machine
+prints one notice saying so.
 
 Every rotation, deliberate or not, appends a `rotated` event to
 `.cs/timeline.jsonl` with the old and new conversation UUIDs and a reason:
