@@ -1548,3 +1548,104 @@ Recommendation given to Alex, not yet built:
 would fit easily. If the bridge's own fork is the bulk, this belongs to the
 iterm-agents-sidebar session, not cs. Same probe with the bridge removed
 settles it; Alex has been asked whether to run it.
+
+### 2026-09-18 — Stale-first built, and the cost I under-weighted
+
+Branch `feat/statusline-stale-first`, not merged. Three tests red first
+(238/240), then the implementation in `bin/cs-statusline`: a `frame` cache kind
+holding the line this conversation last printed, read on entry before
+`_parse_stdin`, printed as-is, with a detached child re-rendering behind a
+directory lock. All three new tests pass.
+
+**Two existing tests then went red, and both are CORRECT failures:**
+`test_io_gating_git_subprocess` (two renders, one parent — the second served
+the frame and never consulted git) and
+`test_warm_render_forks_only_the_interpreter_and_jq`.
+
+The second is the finding. **I recommended this fix to Alex without costing its
+steady state.** Today a warm render forks 2 (bash + jq) per tick. Stale-first
+forks a subshell whose child forks bash + jq — about 3 per tick, permanently,
+and the bar is always one tick stale. That is a standing ~1.5x fork cost and a
+second of staleness traded for a one-time 2.4-3.5 s at session open, and it
+quietly gives back part of what #632 and #648 bought. A pin that goes red
+because the change is wrong, not because the pin is stale, is the cheapest
+review there is; I should have reached that number from the design.
+
+Options put to Alex: (1) gate stale-first to the conversation's first ~20 s, so
+steady state returns to today's fork count — the two tests then need their own
+`CS_STATUSLINE_PARENT` each, as `test_cache_keys_on_the_named_parent` already
+does, plus a new pin on the frame path's own fork cost; (2) keep it
+unconditional and move both pins deliberately; (3) drop it, since the
+measurement moved the blame to the bridge and cs-statusline alone painted on
+its first invocation in 3 of 5 runs. Awaiting his call.
+
+Note for whoever picks this up: `test_a_stale_frame_is_re_rendered_not_printed`
+passed while the feature did not exist, so it was vacuous when written. It is
+only meaningful now; re-verify it by mutating `FRAME_MAX_AGE` before trusting
+it.
+
+## 2026-09-18 — stale-first ruling (teammate fable-stalefirst, adversarial review)
+
+- Ruled drop (option 3). The frame is keyed on Claude Code's pid and published only at the end of a surviving render, so a fresh conversation never has a frame at its first request: stale-first serves ticks 2+, not the blank-on-open complaint.
+- Defect, probed on bash 3.2.57: the refresh child runs in `( ... ) &` without CS_STATUSLINE_PARENT, so its $PPID is the subshell and it publishes under a new key each tick. frame/<claude pid> never refreshes (frozen 10 s, one real render, repeat), one orphan file per second, and the child misses every _PARENT-keyed cache (tmux-client). Bridged mode inherits the var and works. The three new tests never exercise the spawned child.
+- Fork count measured with PATH shims: frame-path tick = rm date mkdir jq date + parent bash + subshell + child bash = 8 births on 3.2 (6 on 4+), against 3 (2) warm today. The estimate of ~3 was wrong.
+- Frame identity is pid only, so a changed CS_STATUSLINE_SEGMENTS / NO_COLOR / payload is served the old line; test_io_gating_git_subprocess fails for that reason and is a correct failure, as is the warm fork pin.
+- Lock: mkdir+rm fork per tick; EXIT trap skipped on SIGKILL; born-file race lets a second parent rm -rf a live lock; failed clock never breaks it.
+- Open measurement: per-command wall time of one cold render under real Claude Code; and whether its kill is SIGKILL to the group.
+
+### 2026-09-18 — Stale-first DROPPED: it cannot serve the request it was built for
+
+Fable ruled option 3 and found the flaw that makes options 1 and 2 moot. I
+verified both of its central claims myself before acting.
+
+**The feature cannot touch the complaint.** The frame is keyed on Claude Code's
+pid, which is new for every fresh conversation, and it is written only at the
+END of a render that survived (both `_publish_frame` calls sit immediately
+before `_render`'s final printf). So at a fresh conversation's first
+status-line request there is no frame; the first attempt is today's cold
+render, a killed attempt publishes nothing, and the retry loop runs exactly as
+before until an attempt survives — by which time the bar is already painted.
+Stale-first only ever serves ticks 2 and later, which were never the complaint.
+**Verified:** `~/.cache/cs/frame` does not exist before the first render.
+
+**And the built version is broken in the arm cs owns.** The refresh child runs
+in `( ... ) &` and nothing forwards `CS_STATUSLINE_PARENT`, so the child's
+`_sl_parent_pid` reads `$PPID` — the subshell — and publishes under a new key
+every tick. **Verified:** four ticks under one stable parent left four distinct
+keys (65066, 65340, 65454, 65589). Direct mode therefore freezes the bar on the
+tick-1 frame for the full 10 s cap, the pulse does not alternate (my own code
+comment claimed it did), and the cache gains an orphan file per second per
+conversation with no GC. Under a bridge `CS_STATUSLINE_PARENT` is already
+exported and inherited, so the handed-over arm would have worked and the
+cs-owned arm was the broken one.
+
+**My fork arithmetic was wrong by about 2.5x.** I told Alex 2/tick today vs
+~3/tick with the feature. Counted against the code: frame-path tick is
+`rm date mkdir jq date` plus parent bash, subshell and child bash — 8 process
+births on bash 3.2, 6 on bash 4+; baseline warm is 3 on 3.2, 2 on 4+. The lock
+alone is 3 of them, and `_cache_read` calls `_sl_now`, so the path whose comment
+says it forks nothing forks `date` on 3.2.
+
+`test_io_gating_git_subprocess` was also worse than I described: its two renders
+use different `CS_STATUSLINE_SEGMENTS`, and the second was served the first's
+frame. The frame's identity is the pid alone, but the line depends on the
+segment list, NO_COLOR, theme, width and the payload. That is a wrong-answer
+bug for up to the cap, not a test-isolation problem.
+
+Branch `feat/statusline-stale-first` is parked at d51ed4d, unmerged; main is
+clean and `bin/cs-statusline` byte-matches the installed copy. Nothing shipped.
+
+**Follow-ups worth keeping, none started:**
+- The real lever is the 0.70-3.54 s spread in the direct arm: one cold-only
+  cost likely dominates the slow runs. Measure per-command wall time inside a
+  real fresh conversation (timestamps in PATH shims); if one fork dominates,
+  defer it to a background child on the cold path only, as the file already does
+  for the usage refresh, and steady state stays at 3 processes.
+- Keying a frame on `CLAUDE_SESSION_NAME` instead of the pid is the ONLY keying
+  under which a frame could serve tick 1 of a fresh conversation — at the cost
+  of showing a bar that may be hours old. Not recommended, recorded so nobody
+  re-derives it.
+- `refreshInterval` 2 is still rejected: the pulse is second-parity.
+- Unmeasured and it decides the lock design if a frame ever returns: whether
+  Claude Code's kill is SIGKILL to the process group (an EXIT trap would not
+  run, and the lock would stick for its full break window).
