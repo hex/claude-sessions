@@ -29,6 +29,30 @@ test_mod_default_threshold_matches_the_statusline_warn_default() {
     assert_eq "$sl_warn" "$mod_default" "mod default == statusline warn default" || return 1
 }
 
+# The forced-rotation threshold is decided twice: by the mod, which acts on it,
+# and by the launch notice, which tells the person what it is. A comment kept
+# them together; this keeps the number itself together, so a notice can never
+# quote a threshold the mod does not use.
+test_mod_force_default_matches_the_launch_notice() {
+    local mod_default shell_default
+    mod_default="$(sed -n 's/^export const FORCE_DEFAULT = \([0-9]*\)$/\1/p' "$MOD/hooks/register.tsx")"
+    # The fallback the shell resolver prints for an unset value: the line is
+    # found by what it does (an empty raw echoing a number), and the number is
+    # read off it, so reformatting the line cannot turn a mismatch into a
+    # "not found" that passes for a different reason.
+    shell_default="$(grep -F 'z "$raw" ] && { echo' "$SCRIPT_DIR/../lib/75-launch.sh" \
+        | head -1 | sed -n 's/.*echo \([0-9][0-9]*\).*/\1/p')"
+    [ -n "$mod_default" ] || { echo "  FAIL: FORCE_DEFAULT literal not found in register.tsx"; return 1; }
+    [ -n "$shell_default" ] || { echo "  FAIL: unset fallback not found in lib/75-launch.sh"; return 1; }
+    assert_eq "$mod_default" "$shell_default" "mod FORCE_DEFAULT == the notice's default" || return 1
+    # And the two agree on what turns it off, so `off` cannot mean one thing to
+    # the mod and another to the notice.
+    grep -q "raw.toLowerCase() === 'off'" "$MOD/hooks/register.tsx" \
+        || { echo "  FAIL: the mod no longer spells the off switch as 'off'"; return 1; }
+    grep -q 'off) return 0 ;;' "$SCRIPT_DIR/../lib/75-launch.sh" \
+        || { echo "  FAIL: the notice no longer spells the off switch as 'off'"; return 1; }
+}
+
 # The band paints the bar's own capsule fill: a shade of the terminal
 # background nudged away from itself. The shift and the luminance pivot are
 # literals in two languages (KEEP IN SYNC), so this test is the only thing
@@ -101,6 +125,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
 
 run_test test_mod_manifest_names_the_plugin_and_its_module
 run_test test_mod_default_threshold_matches_the_statusline_warn_default
+run_test test_mod_force_default_matches_the_launch_notice
 run_test test_mod_surface_shade_matches_the_statusline_shade
 run_test test_mod_is_deployed_by_the_installer_and_enabled_at_launch
 run_test test_mod_unit_tests_pass_under_bun
