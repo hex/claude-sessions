@@ -1752,3 +1752,49 @@ Codex plan review returned 16 findings; 15 folded (d363b06), the `sed 's/\x1b…
   release workflow green, 12 assets (3 cs-tui binaries + .minisig + .sha256,
   install.sh + .minisig + .sha256). `cs -update` installed it locally:
   cs 2026.9.19, doctor drift OK, artifacts stamped 2026.9.19.
+
+## 2026-09-22: tab titles show the claude argv (iTerm profile, not cs)
+
+- Alex saw tabs reading `…<uuid> "/color cyan")`. Measured via osascript:
+  the full title is `cs: <name> (claude --permission-mode … --resume <uuid>
+  "/color <colour>")`. The `cs: <name>` part is ours (OSC 0 in
+  lib/05-term.sh); the parenthesised argv is iTerm2 appending the job's
+  command line: every profile in com.googlecode.iterm2 has
+  `Title Components = 512` (Command line). Left-truncation leaves only the
+  UUID and the /color prompt visible. Not a cs defect; fix is per-profile
+  in iTerm Settings > Profiles > General > Title.
+- Addendum: the clean `» cs: claude-sessions` tab is an iTerm tmux-integration
+  tab (`client_control_mode 1`); iTerm titles those from the pane title with
+  no job suffix. Bare cs tabs on THIS Mac show the argv too (measured by
+  AppleScript). cs has no iTerm-specific title tooling beyond OSC 0 + OSC 6
+  tab colour, so nothing is "missing" on the other laptop.
+- Correction: integration panes DO show the job. Under tmux -CC the iTerm
+  TAB takes the tmux window name (clean); the per-pane TITLE BAR takes
+  Session Name + Job+Args, so our pane bars show the argv too. Bare cs
+  tabs (his laptop) show it on the tab. Title Components: 1 = Session
+  Name, 512 = Job Name with Arguments; the cs panes here run under the
+  `tmux` profile, so editing Default/Hotkey changed nothing.
+- Profile title components are baked into a session at creation: after
+  the tmux profile went Name-only, open panes kept `(claude …)`;
+  `OSC 1337 SetProfile=tmux` via tmux passthrough (allow-passthrough on,
+  pane_tty) did not re-apply them under -CC. Only new panes/tabs pick the
+  change up. cs cannot force it.
+
+## 2026-09-22: feature worktrees get their own task list (fix/feature-task-list)
+
+- Alex: a feature/worktree session inherits the base's task list (seen on
+  an adopted session; the path is the same). Not a slip: the 2026-07-02
+  worktrees spec chose `CLAUDE_CODE_TASK_LIST_ID=<base>` ("one shared list
+  coordinates parallel work") and test_worktrees pinned it. Alex chose
+  "own list per feature", no fuse-back at retire.
+- Change: lib/75-launch.sh exports the full session name; cs_base still
+  keys CS_SECRETS_SESSION. Test flipped to expect `myproj@fix-auth`,
+  watched red on the old build (FAIL line in wt-red.out). Docs: README,
+  configuration.md, spec table (reversal noted), CHANGELOG Unreleased.
+  Green run of test_worktrees pending (suite is several minutes).
+- Built: c8920a5 on fix/feature-task-list. worktrees 108/108, feature_skill
+  5/5, docs 6/6, installed, drift OK. Task #668. Awaiting Codex + merge.
+  Already-open feature sessions keep the list they launched with.
+- Merged to main 2d31d9f on Alex's "merge" (Codex: no actionable defects).
+  build-sync clean, install 54/54, installed, drift OK, scratchpad back.
+  Not pushed; in CHANGELOG Unreleased. Task #668 closed.
