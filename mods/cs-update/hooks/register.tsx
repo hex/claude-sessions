@@ -61,13 +61,19 @@ let shown = false
 // would install the same version again.
 let phase: 'idle' | 'running' | 'done' | 'failed' = 'idle'
 let outcome = ''
+let registered = false
 
 export function register(on: On, options: PluginOptions) {
   version = undefined; sections = undefined; accent = undefined; shown = false
   phase = 'idle'; outcome = ''
+  registered = false
   const wanted = options[OPTION] !== false
 
   on('session.start', async ($, e, next) => {
+    if (!registered) {
+      registered = true
+      await $.command.register({ name: 'cs-update', description: 'Release notes for the pending cs update, with 1 to install it.' })
+    }
     if (await $.fs.exists(`${e.cwd}/.cs/local`)) {
       await $.fs.write(`${e.cwd}/${HEARTBEAT}`, `${new Date().toISOString()}\n`)
     }
@@ -116,6 +122,22 @@ export function register(on: On, options: PluginOptions) {
         </Box>
       </Box>
     )
+  })
+
+  // On demand: the same pane, whether or not the launch opened it (the
+  // option off, or dismissed). A registered command is answered with
+  // `{ text }` (the contract; an unanswered run prints "no hook answered"),
+  // so the pane is the answer and the text is empty. A launch that found
+  // nothing pending has nothing to show, and says so instead; a teammate
+  // (which inherits the exports) is refused as the launch pane refuses it.
+  on('command.run', { command: 'cs-update' }, async ($, e) => {
+    const cwd = await $.session.cwd()
+    if (!(await isLead($, cwd))) return { text: 'The release-notes pane belongs to the conversation cs launched.' }
+    const pending = await $.env.get('CS_UPDATE_AVAILABLE')
+    if (!pending) return { text: 'This launch found no newer cs; the check runs again at the next launch.' }
+    shown = true
+    await openPane($, cwd, pending)
+    return { text: '' }
   })
 }
 

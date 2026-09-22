@@ -297,3 +297,33 @@ test('no CS_UPDATE_BIN means the key says so instead of running nothing', async 
   expect(runs).toHaveLength(0)
   expect(texts(await draw()).join('\n')).toContain('cs -update')
 })
+
+test('the mod registers /cs-update at load', async () => {
+  await start()
+  expect(commands.map(c => c.name)).toEqual(['cs-update'])
+})
+
+const runCommand = () => hooks['command.run:cs-update']($, { command: 'cs-update', args: '', cwd: '/work' }, async () => ({ text: 'unhandled' }))
+
+test('/cs-update reopens the pane after a dismiss, and with the option off, and answers the command', async () => {
+  load({ [OPTION]: false })
+  await start()
+  expect(opens()).toHaveLength(0)
+  expect(await runCommand()).toEqual({ text: '' })
+  expect(opens()).toHaveLength(1)
+  expect(texts(await draw()).join('\n')).toContain('2026.99.3')
+})
+
+test('/cs-update with nothing pending says so as its output and opens nothing', async () => {
+  delete envVars.CS_UPDATE_AVAILABLE
+  await start()
+  expect(await runCommand()).toEqual({ text: 'This launch found no newer cs; the check runs again at the next launch.' })
+  expect(opens()).toHaveLength(0)
+})
+
+test('/cs-update in a teammate opens nothing', async () => {
+  sessionId = 'uuid-teammate'
+  await start()
+  expect(await runCommand()).toEqual({ text: 'The release-notes pane belongs to the conversation cs launched.' })
+  expect(opens()).toHaveLength(0)
+})
