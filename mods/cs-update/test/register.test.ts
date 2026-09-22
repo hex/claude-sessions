@@ -346,6 +346,15 @@ test('/cs-update in a teammate opens nothing', async () => {
   expect(opens()).toHaveLength(0)
 })
 
+test('/cs-update after a reload, with no session.start or render between, restores the finished pane instead of offering the update again', async () => {
+  files['/work/' + DONE] = '2026.99.3\nUpdate finished. Takes effect on your next launch.\n'
+  expect(await runCommand()).toEqual({ text: 'Release notes are in the side pane.' })
+  expect(opens()).toHaveLength(1)
+  const words = texts(await draw()).join('\n')
+  expect(words).toContain('Update finished. Takes effect on your next launch.')
+  expect(buttons(await draw())).toHaveLength(0)
+})
+
 test('a clean exit writes the DONE marker with the version and the outcome line', async () => {
   await start()
   await buttons(await draw())[0].props.onPress()

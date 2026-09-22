@@ -159,6 +159,11 @@ export function register(on: On, options: PluginOptions) {
     if (!(await isLead($, cwd))) return { text: 'The release-notes pane belongs to the conversation cs launched.' }
     const pending = await $.env.get('CS_UPDATE_AVAILABLE')
     if (!pending) return { text: 'This launch found no newer cs; the check runs again at the next launch.' }
+    // After a reload (which drops the module state, and fires no
+    // session.start) a pane dismissed before the update installed leaves
+    // nothing open for the render path to restore, so the command asks the
+    // marker itself before it offers an install that already finished.
+    if (version === undefined && (await restoreDone($, cwd))) return { text: 'Release notes are in the side pane.' }
     shown = true
     await openPane($, cwd, pending)
     return { text: 'Release notes are in the side pane.' }
