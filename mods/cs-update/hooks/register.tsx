@@ -55,9 +55,16 @@ let version: string | undefined
 let sections: Section[] | undefined
 let accent: string | undefined
 let shown = false
+// The update key's life: idle until pressed, running while cs -update is,
+// then what happened. `failed` keeps the key, so a transient failure (a
+// download) gets another press; `done` retires it, since a second update
+// would install the same version again.
+let phase: 'idle' | 'running' | 'done' | 'failed' = 'idle'
+let outcome = ''
 
 export function register(on: On, options: PluginOptions) {
   version = undefined; sections = undefined; accent = undefined; shown = false
+  phase = 'idle'; outcome = ''
   const wanted = options[OPTION] !== false
 
   on('session.start', async ($, e, next) => {
@@ -95,10 +102,17 @@ export function register(on: On, options: PluginOptions) {
                 ))}
               </Box>
             ))}
-        <Box marginTop={1}>
-          {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured in cs-rotate), so the keys stand in a Box */}
-          <Button key="cs-update-now" hotkey="1" plain label="update now" onPress={() => runUpdate($)} />
-          <Text dimColor>{'   Esc: later'}</Text>
+        <Box marginTop={1} flexDirection="column">
+          {phase === 'running' && <Text dimColor>{`updating… running cs -update ${version}`}</Text>}
+          {(phase === 'done' || phase === 'failed') && <Text>{outcome}</Text>}
+          {(phase === 'idle' || phase === 'failed') && (
+            <Box>
+              {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured in cs-rotate), so the keys stand in a Box */}
+              <Button key="cs-update-now" hotkey="1" plain label="update now" onPress={() => runUpdate($)} />
+              <Text dimColor>{'   Esc: later'}</Text>
+            </Box>
+          )}
+          {phase === 'done' && <Text dimColor>{'Esc: close'}</Text>}
         </Box>
       </Box>
     )
@@ -110,6 +124,7 @@ export function register(on: On, options: PluginOptions) {
 // match. A directory without the file is not a cs session: no pane. The id
 // may be quoted (KEEP IN SYNC with ownsRotation in mods/cs-rotate).
 async function isLead($: EngineInterface, cwd: string): Promise<boolean> {
+  if (await $.fs.exists(`${cwd}/.cs/local/disabled`)) return false
   let state: string
   try { state = await $.fs.read(`${cwd}/${STATE}`) } catch { return false }
   const lead = state.match(/^claude_session_id: *"?([^"\s]+)"?[ \t]*$/m)?.[1]
@@ -136,6 +151,34 @@ async function openPane($: EngineInterface, cwd: string, pending: string) {
   await $.ui.open({ id: PANE, title: `cs ${pending} is available`, focus: true, closeOnEscape: true })
 }
 
-async function runUpdate(_$: EngineInterface) {
-  // Task 4 fills this in.
+// Runs the update cs would run from the shell, by the path launch exported
+// (no shell: `$.process.run` takes an argv, and the claude process's PATH is
+// not the launching shell's). The pane keeps the outcome until dismissed, so
+// it is read rather than flashed. The new files take effect on the next
+// launch: this claude and its loaded mods keep the old code.
+async function runUpdate($: EngineInterface) {
+  // Claimed before the first await: two presses in one tick must not both
+  // pass the guard and start two installers.
+  if (phase === 'running' || phase === 'done') return
+  phase = 'running'; outcome = ''
+  $.ui.invalidate('ui.render')
+  try {
+    const bin = await $.env.get('CS_UPDATE_BIN')
+    if (!bin) {
+      phase = 'failed'; outcome = 'The launch did not say where cs is; run `cs -update` from a shell.'
+      $.ui.invalidate('ui.render'); return
+    }
+    const { exitCode, stderr } = await $.process.run([bin, '-update'], { timeoutMs: UPDATE_TIMEOUT_MS })
+    if (exitCode === 0) {
+      // Version-neutral: cs -update resolves the latest release when it runs,
+      // which may be newer than the one this launch saw.
+      phase = 'done'; outcome = 'Update finished. Takes effect on your next launch.'
+    } else {
+      const tail = stderr.split('\n').filter(l => l.trim() !== '').slice(-5).join('\n')
+      phase = 'failed'; outcome = `cs -update exited ${exitCode}.\n${tail}`
+    }
+  } catch (err) {
+    phase = 'failed'; outcome = `cs -update did not run: ${String(err instanceof Error ? err.message : err)}`
+  }
+  $.ui.invalidate('ui.render')
 }

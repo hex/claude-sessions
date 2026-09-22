@@ -215,3 +215,85 @@ test('another pane id is not the mod\'s to draw', async () => {
   await start()
   expect(await hooks['ui.render:Pane']($, { requestId: 'someone-else' }, async () => 'other')).toBe('other')
 })
+
+test('a directory opted out of cs (.cs/local/disabled) gets no pane', async () => {
+  files['/work/.cs/local/disabled'] = ''
+  await start()
+  expect(opens()).toHaveLength(0)
+})
+
+test('1 runs cs -update once, by the exported path, with a ten-minute timeout, and reports the install', async () => {
+  await start()
+  // The key is gone from the redraw once pressed, so the callback is kept
+  // and pressed twice; the run is held in flight so the second press lands
+  // while the first is running.
+  let release!: (v: any) => void
+  ;($ as any).process.run = async (argv: string[], init: any) => { runs.push({ argv, init }); return new Promise(r => { release = r }) }
+  const press = buttons(await draw())[0].props.onPress
+  const first = press()
+  const second = press()
+  await Promise.resolve()
+  release({ exitCode: 0, stdout: '', stderr: '' })
+  await first; await second
+  expect(runs).toHaveLength(1)
+  expect(runs[0].argv).toEqual(['/opt/cs/bin/cs', '-update'])
+  expect(runs[0].init).toMatchObject({ timeoutMs: 600000 })
+  const words = texts(await draw()).join('\n')
+  // Version-neutral: cs -update installs whatever is latest when pressed,
+  // which may be newer than the launch saw.
+  expect(words).toContain('Update finished. Takes effect on your next launch.')
+  expect(buttons(await draw())).toHaveLength(0)
+  expect(invalidated).toContain('ui.render')
+})
+
+test('two presses before the path lookup resolves still run once', async () => {
+  await start()
+  let giveBin!: (v: any) => void
+  ;($ as any).env.get = async (name: string) => name === 'CS_UPDATE_BIN' ? new Promise(r => { giveBin = r }) : envVars[name]
+  const press = buttons(await draw())[0].props.onPress
+  const a = press(); const b = press()
+  await Promise.resolve()
+  giveBin('/opt/cs/bin/cs')
+  await a; await b
+  ;($ as any).env.get = async (name: string) => envVars[name]
+  expect(runs).toHaveLength(1)
+})
+
+test('while the update runs the pane says so and hides the key', async () => {
+  await start()
+  let release!: (v: any) => void
+  ;($ as any).process.run = async (argv: string[], init: any) => { runs.push({ argv, init }); return new Promise(r => { release = r }) }
+  const pressed = buttons(await draw())[0].props.onPress()
+  await Promise.resolve()
+  const words = texts(await draw()).join('\n')
+  expect(words).toContain('updating')
+  expect(buttons(await draw())).toHaveLength(0)
+  release({ exitCode: 0, stdout: '', stderr: '' })
+  await pressed
+})
+
+test('a non-zero exit shows the last stderr lines and keeps the key for another try', async () => {
+  await start()
+  runResult = { exitCode: 1, stdout: '', stderr: 'a\nb\nc\nd\ne\nf\nchecksum mismatch\n' }
+  await buttons(await draw())[0].props.onPress()
+  const words = texts(await draw()).join('\n')
+  expect(words).toContain('cs -update exited 1')
+  expect(words).toContain('checksum mismatch')
+  expect(words).not.toContain('\na\n')
+  expect(buttons(await draw())).toHaveLength(1)
+})
+
+test('a run that cannot start shows the rejection', async () => {
+  await start()
+  runResult = new Error('spawn ENOENT')
+  await buttons(await draw())[0].props.onPress()
+  expect(texts(await draw()).join('\n')).toContain('spawn ENOENT')
+})
+
+test('no CS_UPDATE_BIN means the key says so instead of running nothing', async () => {
+  delete envVars.CS_UPDATE_BIN
+  await start()
+  await buttons(await draw())[0].props.onPress()
+  expect(runs).toHaveLength(0)
+  expect(texts(await draw()).join('\n')).toContain('cs -update')
+})
