@@ -387,6 +387,7 @@ test_launch_banner_shows_notes_card() {
     printf '%s 2026.99.3\n' "$(date +%s)" > "$HOME/.cache/cs/update-check"
     printf '2026.99.3\tOne fix: the statusline is readable.\n2026.99.2\tOne change: the menu is single-keypress.\n+\t… and 1 earlier versions\n' \
         > "$HOME/.cache/cs/update-notes-2026.99.3"
+    : > "$HOME/.cache/cs/update-notes-full-2026.99.3"
     unset CS_NO_UPDATE_CHECK
     local out
     out=$("$CS_BIN" "notes-card-session" < /dev/null 2>&1) || {
@@ -409,6 +410,7 @@ test_launch_banner_quiet_on_empty_notes_cache() {
     mkdir -p "$HOME/.cache/cs"
     printf '%s 2026.99.3\n' "$(date +%s)" > "$HOME/.cache/cs/update-check"
     : > "$HOME/.cache/cs/update-notes-2026.99.3"
+    : > "$HOME/.cache/cs/update-notes-full-2026.99.3"
     unset CS_NO_UPDATE_CHECK
     local out
     out=$("$CS_BIN" "notes-quiet-session" < /dev/null 2>&1) || {
@@ -431,6 +433,7 @@ test_notify_writes_notes_cache() {
     export HOME="$TEST_TMPDIR/home"
     mkdir -p "$HOME/.cache/cs"
     printf 'stale\n' > "$HOME/.cache/cs/update-notes-2026.90.0"
+    printf 'stale\n' > "$HOME/.cache/cs/update-notes-full-2026.90.0"
     unset CS_NO_UPDATE_CHECK
     PATH="$stub:$PATH" "$CS_BIN" "notes-notify-session" < /dev/null > /dev/null 2>&1 || {
         export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
@@ -442,6 +445,35 @@ test_notify_writes_notes_cache() {
     assert_file_contains "$cache" "2026.99.3	One fix: the statusline is readable on light terminals." \
         "cache holds tab-separated summaries" || { export HOME="$ORIGINAL_HOME"; return 1; }
     assert_not_exists "$HOME/.cache/cs/update-notes-2026.90.0" "stale notes caches pruned" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    assert_not_exists "$HOME/.cache/cs/update-notes-full-2026.90.0" "stale full caches pruned" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    local full="$HOME/.cache/cs/update-notes-full-2026.99.3"
+    assert_file_exists "$full" "notify writes the full-notes cache" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    assert_file_contains "$full" "^## 2026\.99\.3$" "the span starts at the newest version" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    assert_file_contains "$full" "Statusline: readable" "and keeps the bullets" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    # The fixture's every version is above the installed one (2026.99.x), so
+    # the span's stop-at-installed rule is not testable here; it is pinned by
+    # test_span_extracts_versions_above_installed on the function itself.
+    export HOME="$ORIGINAL_HOME"
+}
+
+# A failed fetch writes an empty full file, as it writes an empty summaries
+# file: the next launch must not retry the network, and the mod must be able
+# to tell "no notes" from "no file".
+test_notify_writes_empty_full_cache_when_fetch_fails() {
+    local stub="$TEST_TMPDIR/stub-bin-nofetch"
+    mkdir -p "$stub"
+    _make_curl_stub "$stub" ""
+    export HOME="$TEST_TMPDIR/home-nofetch"
+    mkdir -p "$HOME/.cache/cs"
+    unset CS_NO_UPDATE_CHECK
+    PATH="$stub:$PATH" "$CS_BIN" "notes-nofetch-session" < /dev/null > /dev/null 2>&1 || {
+        export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
+        return 1
+    }
+    export CS_NO_UPDATE_CHECK=1
+    local full="$HOME/.cache/cs/update-notes-full-2026.99.3"
+    [ -f "$full" ] || { echo "  FAIL: no full-notes tombstone written"; export HOME="$ORIGINAL_HOME"; return 1; }
+    [ ! -s "$full" ] || { echo "  FAIL: the tombstone is not empty"; export HOME="$ORIGINAL_HOME"; return 1; }
     export HOME="$ORIGINAL_HOME"
 }
 
@@ -476,5 +508,6 @@ run_test test_check_falls_back_when_fetch_fails
 run_test test_launch_banner_shows_notes_card
 run_test test_launch_banner_quiet_on_empty_notes_cache
 run_test test_notify_writes_notes_cache
+run_test test_notify_writes_empty_full_cache_when_fetch_fails
 
 report_results
