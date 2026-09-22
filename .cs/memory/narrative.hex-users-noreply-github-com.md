@@ -1661,3 +1661,18 @@ Codex plan review returned 16 findings; 15 folded (d363b06), the `sed 's/\x1b…
 2026-09-22 (cont.) Measured: `session.start` does NOT fire on a hot reload of a mod (the reloaded cs-update drew a blank pane although .cs/local/cs-update.done held the right two lines); the engine DOES re-render an open pane right after the reload. So state that must survive a reload is restored from the render hook, not from session.start. Correction dispatched (restoreDone from the Pane render). Launch card confirmed absent when the mod runs (5c5e6bc). Everything else green on HEAD a615e9b.
 
 2026-09-22 (cont.) cs-update mod BUILT on feat/update-mod, head a2ffd6b (14 commits): full-notes cache, launch exports (unset first), the mod (pane, keys at top, /cs-update, /config row, lead gate incl. .cs/local/disabled, persisted outcome restored from the render after the reload the update causes), launch card yields to the mod, docs. Live-measured on 2.1.278 four times; final: press 1 → Update finished → module overwrite → reload → pane restored. Gate: run_all 68/68 on a777bcc, touched suites green on later commits, ghost not run. Handed to Alex: /codex:review then /finish. Rotating at ~72% context.
+
+## 2026-09-22: TUI branch merged; Codex P2 on feat/update-mod folded
+
+- fix/tui-scan-off-render-thread merged to main cacd789 by hand on Alex's
+  "merge" (cs -features had no worktree: the branch lived in the base
+  checkout, so /finish had nothing to finish). Gates on the merged tree:
+  350/350, clippy 8, installed, drift OK. Branch not deleted.
+- Codex P2 on feat/update-mod (correct): reload drops module state and
+  fires no session.start; a pane dismissed before the install meant the
+  render restore never ran, and /cs-update then opened an idle pane with
+  the key. Fix d0e6c0b: the command handler tries restoreDone when
+  `version === undefined`. Test watched red (idle body, key present).
+  bun 33/33, test_mod_update 5/5, installed from the branch, drift OK.
+- scratchpad/ is parked again at 871dc9b2.../scratchpad-repo; move back
+  after the update-mod merge.
