@@ -763,6 +763,7 @@ run_doctor() {
         _doctor_check_session_id_match
         _doctor_check_token_cost
         _doctor_check_mod cs-rotate
+        _doctor_check_mod cs-update
     fi
 
     echo ""

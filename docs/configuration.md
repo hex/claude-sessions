@@ -244,6 +244,14 @@ export CS_TMUX_BIN="/opt/homebrew/bin/tmux"
 export CS_PLATFORM_OVERRIDE="linux"   # macos, wsl, or linux
 ```
 
+## In-session switches
+
+The release-notes pane is a Claude Code `/config` row, `cs-update.showReleaseNotes`
+(on by default). Off, a launch opens no pane; `/cs-update` still opens it.
+The launch banner's compact notes card draws only when `CS_NO_FUNCTION_HOOKS=1`
+or `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=0` withholds the mod, since otherwise
+the mod shows the full notes in the session.
+
 ## Environment variables cs sets for you
 
 These are exported automatically when you start a session, so the Claude Code
@@ -257,3 +265,4 @@ process and its hooks can find the session:
 - `CLAUDE_SESSION_META_DIR` - Path to the `.cs/` metadata directory
 - `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence
 - `CLAUDE_CODE_AUTO_MEMORY_PATH` / `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` - Redirect Claude Code's auto-memory writer into `<session>/.cs/memory/`
+- `CS_UPDATE_AVAILABLE` / `CS_UPDATE_BIN` - Exported by a cs launch, never set by hand: the version a newer cs was found at and the path of the running cs. The cs-update mod reads them to draw the release-notes pane and to run `cs -update` from inside the session. Absent when nothing is pending

@@ -1691,3 +1691,17 @@ Codex plan review returned 16 findings; 15 folded (d363b06), the `sed 's/\x1b…
   (left 1, right 2) before the gate. 350/350, clippy 8 = main, installed.
 - scratchpad/ is parked at the old session's scratch dir
   (871dc9b2.../scratchpad-repo); move it back after /finish.
+## 2026-09-22: TUI branch merged; Codex P2 on feat/update-mod folded
+
+- fix/tui-scan-off-render-thread merged to main cacd789 by hand on Alex's
+  "merge" (cs -features had no worktree: the branch lived in the base
+  checkout, so /finish had nothing to finish). Gates on the merged tree:
+  350/350, clippy 8, installed, drift OK. Branch not deleted.
+- Codex P2 on feat/update-mod (correct): reload drops module state and
+  fires no session.start; a pane dismissed before the install meant the
+  render restore never ran, and /cs-update then opened an idle pane with
+  the key. Fix d0e6c0b: the command handler tries restoreDone when
+  `version === undefined`. Test watched red (idle body, key present).
+  bun 33/33, test_mod_update 5/5, installed from the branch, drift OK.
+- scratchpad/ is parked again at 871dc9b2.../scratchpad-repo; move back
+  after the update-mod merge.

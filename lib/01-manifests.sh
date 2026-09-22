@@ -97,6 +97,9 @@ CS_MOD_FILES=(
     cs-rotate/.claude-plugin/plugin.json
     cs-rotate/hooks/hooks.json
     cs-rotate/hooks/register.tsx
+    cs-update/.claude-plugin/plugin.json
+    cs-update/hooks/hooks.json
+    cs-update/hooks/register.tsx
 )
 
 # Remove a hook registration from any event in a settings JSON string,

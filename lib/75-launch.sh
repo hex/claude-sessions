@@ -302,6 +302,21 @@ launch_claude_code() {
     # headless `claude -p` carries this value while owning a different pid.
     export CS_LEAD_PID=$$
 
+    # The cs-update mod draws the pending release's notes and runs the update
+    # from inside the session. It gets the launch's verdict, never its own:
+    # the version check_update_notify found newer than this cs, and where this
+    # cs is, since `$.process.run` takes no shell and the claude process's
+    # PATH is not this shell's. Absent when nothing is pending, so the mod is
+    # silent by absence rather than by a value it has to read; cleared first,
+    # since a nested launch inherits its parent's verdict.
+    unset CS_UPDATE_AVAILABLE CS_UPDATE_BIN
+    if [ -n "$UPDATE_AVAILABLE" ]; then
+        export CS_UPDATE_AVAILABLE="$UPDATE_AVAILABLE"
+        local self_bin
+        self_bin="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+        export CS_UPDATE_BIN="$self_bin"
+    fi
+
     # Spawn seed: tasks and a brief staged by cs -spawn for this session.
     # Consumed here, after the already-running guard and before any exec arm,
     # so a window that died before launching self-heals on the session's next
@@ -452,7 +467,16 @@ launch_claude_code() {
         # last fact about this session and not as a separate widget.
         echo -e "${bars[$((bar_idx < ${#bars[@]} ? bar_idx : ${#bars[@]} - 1))]}${NC} ${BOLD}${YELLOW}${ICON_UP}${NC} ${BOLD}${GREEN}$UPDATE_AVAILABLE${NC} ${BOLD}${COMMENT}available${NC} ${BOLD}${DIM}(you have $VERSION — run${NC} ${BOLD}${GOLD}cs -update${NC}${BOLD}${DIM})${NC}"; ((++bar_idx))
         local notes_cache="$HOME/.cache/cs/update-notes-$UPDATE_AVAILABLE"
-        if [ -s "$notes_cache" ]; then
+        # The cs-update mod draws these same notes in full inside the session
+        # once function hooks are on, so printing them here too would be a
+        # second copy of the same list. This card is the fallback for when
+        # the mod is withheld: mirrors the export above (CS_NO_FUNCTION_HOOKS
+        # set, or the flag pinned to 0) — it runs after that block, so the
+        # exported value already carries both cases. KEEP IN SYNC with
+        # _rotate_force_notice's identical check.
+        local _mod_withheld=""
+        case "${CLAUDE_CODE_ENABLE_FUNCTION_HOOKS:-}" in ''|0) _mod_withheld=1 ;; esac
+        if [ -n "$_mod_withheld" ] && [ -s "$notes_cache" ]; then
             local card_w nver nsum indent wrap_w line first
             card_w=$(tput cols 2>/dev/null) || card_w=80
             case "$card_w" in ''|*[!0-9]*) card_w=80 ;; esac

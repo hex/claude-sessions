@@ -387,9 +387,13 @@ test_launch_banner_shows_notes_card() {
     printf '%s 2026.99.3\n' "$(date +%s)" > "$HOME/.cache/cs/update-check"
     printf '2026.99.3\tOne fix: the statusline is readable.\n2026.99.2\tOne change: the menu is single-keypress.\n+\t… and 1 earlier versions\n' \
         > "$HOME/.cache/cs/update-notes-2026.99.3"
+    : > "$HOME/.cache/cs/update-notes-full-2026.99.3"
     unset CS_NO_UPDATE_CHECK
     local out
-    out=$("$CS_BIN" "notes-card-session" < /dev/null 2>&1) || {
+    # CS_NO_FUNCTION_HOOKS=1 withholds the cs-update mod, which is the
+    # fallback path this test covers: the card only draws when the mod will
+    # not run this launch.
+    out=$(CS_NO_FUNCTION_HOOKS=1 "$CS_BIN" "notes-card-session" < /dev/null 2>&1) || {
         export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
         return 1
     }
@@ -409,9 +413,13 @@ test_launch_banner_quiet_on_empty_notes_cache() {
     mkdir -p "$HOME/.cache/cs"
     printf '%s 2026.99.3\n' "$(date +%s)" > "$HOME/.cache/cs/update-check"
     : > "$HOME/.cache/cs/update-notes-2026.99.3"
+    : > "$HOME/.cache/cs/update-notes-full-2026.99.3"
     unset CS_NO_UPDATE_CHECK
     local out
-    out=$("$CS_BIN" "notes-quiet-session" < /dev/null 2>&1) || {
+    # CS_NO_FUNCTION_HOOKS=1 withholds the cs-update mod, which is the
+    # fallback path this test covers: the card only draws when the mod will
+    # not run this launch.
+    out=$(CS_NO_FUNCTION_HOOKS=1 "$CS_BIN" "notes-quiet-session" < /dev/null 2>&1) || {
         export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
         return 1
     }
@@ -423,6 +431,74 @@ test_launch_banner_quiet_on_empty_notes_cache() {
     assert_output_not_contains "$out" "earlier versions" "no collapse line from the tombstone" || return 1
 }
 
+test_launch_banner_card_yields_to_the_mod() {
+    export HOME="$TEST_TMPDIR/home"
+    mkdir -p "$HOME/.cache/cs"
+    printf '%s 2026.99.3\n' "$(date +%s)" > "$HOME/.cache/cs/update-check"
+    printf '2026.99.3\tOne fix: the statusline is readable.\n2026.99.2\tOne change: the menu is single-keypress.\n+\t… and 1 earlier versions\n' \
+        > "$HOME/.cache/cs/update-notes-2026.99.3"
+    : > "$HOME/.cache/cs/update-notes-full-2026.99.3"
+    unset CS_NO_UPDATE_CHECK
+    local out
+    # Same seed as test_launch_banner_shows_notes_card, but launched with the
+    # mod eligible to run: no CS_NO_FUNCTION_HOOKS and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS
+    # unset going in, so the launch's own export turns the flag on. The
+    # yellow row still announces the version; the card's summary line must
+    # not repeat it, since the mod draws the full notes inside the session.
+    out=$(env -u CLAUDE_CODE_ENABLE_FUNCTION_HOOKS -u CS_NO_FUNCTION_HOOKS "$CS_BIN" "notes-card-yields-session" < /dev/null 2>&1) || {
+        export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
+        return 1
+    }
+    export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
+    assert_output_contains "$out" "2026.99.3 available" "the row still announces the version" || return 1
+    assert_output_not_contains "$out" "One fix: the statusline is readable." \
+        "no card summary when the mod will draw the notes (the populated-card test proves this string renders when the card is drawn)" || return 1
+}
+
+# The cs-update mod reads the launch's verdict from the environment: which
+# version is pending and where cs lives, since `$.process.run` takes no shell
+# and the claude process's PATH is not the launching shell's. Neither name is
+# exported when nothing is pending, so the mod stays silent by absence.
+test_launch_exports_update_verdict_to_the_mod() {
+    local stub="$TEST_TMPDIR/claude-env-stub"
+    cat > "$stub" << 'SCRIPT'
+#!/bin/bash
+echo "UPDATE_AVAILABLE=${CS_UPDATE_AVAILABLE-unset}"
+echo "UPDATE_BIN=${CS_UPDATE_BIN-unset}"
+exit 0
+SCRIPT
+    chmod +x "$stub"
+    export HOME="$TEST_TMPDIR/home-export"
+    mkdir -p "$HOME/.cache/cs"
+    printf '%s 2026.99.3\n' "$(date +%s)" > "$HOME/.cache/cs/update-check"
+    : > "$HOME/.cache/cs/update-notes-2026.99.3"
+    : > "$HOME/.cache/cs/update-notes-full-2026.99.3"
+    unset CS_NO_UPDATE_CHECK
+    local out
+    out=$(CLAUDE_CODE_BIN="$stub" "$CS_BIN" "export-verdict-session" < /dev/null 2>&1) || {
+        export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"; return 1
+    }
+    export CS_NO_UPDATE_CHECK=1
+    assert_output_contains "$out" "UPDATE_AVAILABLE=2026.99.3" "the pending version is exported" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    local bin_line
+    bin_line=$(printf '%s\n' "$out" | sed -n 's/^UPDATE_BIN=//p' | head -1)
+    [ "$bin_line" != "unset" ] && [ -n "$bin_line" ] || { echo "  FAIL: CS_UPDATE_BIN not exported"; export HOME="$ORIGINAL_HOME"; return 1; }
+    [ -x "$bin_line" ] || { echo "  FAIL: CS_UPDATE_BIN is not an executable path: $bin_line"; export HOME="$ORIGINAL_HOME"; return 1; }
+    case "$bin_line" in /*) ;; *) echo "  FAIL: CS_UPDATE_BIN is not absolute: $bin_line"; export HOME="$ORIGINAL_HOME"; return 1 ;; esac
+    # And nothing pending exports nothing, even when the launching shell
+    # carries a parent launch's verdict (a nested cs): both names are cleared
+    # before the conditional export. CS_NO_UPDATE_CHECK=1 is the no-network
+    # way to have nothing pending: check_update_notify returns before it
+    # reads the cache or asks GitHub, so UPDATE_AVAILABLE stays empty.
+    export CS_NO_UPDATE_CHECK=1
+    out=$(CS_UPDATE_AVAILABLE=2026.1.1 CS_UPDATE_BIN=/stale/cs CLAUDE_CODE_BIN="$stub" "$CS_BIN" "export-current-session" < /dev/null 2>&1) || {
+        export HOME="$ORIGINAL_HOME"; return 1
+    }
+    export HOME="$ORIGINAL_HOME"
+    assert_output_contains "$out" "UPDATE_AVAILABLE=unset" "an inherited version is cleared when nothing is pending" || return 1
+    assert_output_contains "$out" "UPDATE_BIN=unset" "and so is an inherited path" || return 1
+}
+
 test_notify_writes_notes_cache() {
     local fix="$TEST_TMPDIR/CHANGELOG-fixture.md" stub="$TEST_TMPDIR/stub-bin"
     _write_fixture_changelog "$fix"
@@ -431,6 +507,7 @@ test_notify_writes_notes_cache() {
     export HOME="$TEST_TMPDIR/home"
     mkdir -p "$HOME/.cache/cs"
     printf 'stale\n' > "$HOME/.cache/cs/update-notes-2026.90.0"
+    printf 'stale\n' > "$HOME/.cache/cs/update-notes-full-2026.90.0"
     unset CS_NO_UPDATE_CHECK
     PATH="$stub:$PATH" "$CS_BIN" "notes-notify-session" < /dev/null > /dev/null 2>&1 || {
         export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
@@ -442,6 +519,35 @@ test_notify_writes_notes_cache() {
     assert_file_contains "$cache" "2026.99.3	One fix: the statusline is readable on light terminals." \
         "cache holds tab-separated summaries" || { export HOME="$ORIGINAL_HOME"; return 1; }
     assert_not_exists "$HOME/.cache/cs/update-notes-2026.90.0" "stale notes caches pruned" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    assert_not_exists "$HOME/.cache/cs/update-notes-full-2026.90.0" "stale full caches pruned" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    local full="$HOME/.cache/cs/update-notes-full-2026.99.3"
+    assert_file_exists "$full" "notify writes the full-notes cache" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    assert_file_contains "$full" "^## 2026\.99\.3$" "the span starts at the newest version" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    assert_file_contains "$full" "Statusline: readable" "and keeps the bullets" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    # The fixture's every version is above the installed one (2026.99.x), so
+    # the span's stop-at-installed rule is not testable here; it is pinned by
+    # test_span_extracts_versions_above_installed on the function itself.
+    export HOME="$ORIGINAL_HOME"
+}
+
+# A failed fetch writes an empty full file, as it writes an empty summaries
+# file: the next launch must not retry the network, and the mod must be able
+# to tell "no notes" from "no file".
+test_notify_writes_empty_full_cache_when_fetch_fails() {
+    local stub="$TEST_TMPDIR/stub-bin-nofetch"
+    mkdir -p "$stub"
+    _make_curl_stub "$stub" ""
+    export HOME="$TEST_TMPDIR/home-nofetch"
+    mkdir -p "$HOME/.cache/cs"
+    unset CS_NO_UPDATE_CHECK
+    PATH="$stub:$PATH" "$CS_BIN" "notes-nofetch-session" < /dev/null > /dev/null 2>&1 || {
+        export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
+        return 1
+    }
+    export CS_NO_UPDATE_CHECK=1
+    local full="$HOME/.cache/cs/update-notes-full-2026.99.3"
+    [ -f "$full" ] || { echo "  FAIL: no full-notes tombstone written"; export HOME="$ORIGINAL_HOME"; return 1; }
+    [ ! -s "$full" ] || { echo "  FAIL: the tombstone is not empty"; export HOME="$ORIGINAL_HOME"; return 1; }
     export HOME="$ORIGINAL_HOME"
 }
 
@@ -475,6 +581,9 @@ run_test test_check_shows_rendered_span
 run_test test_check_falls_back_when_fetch_fails
 run_test test_launch_banner_shows_notes_card
 run_test test_launch_banner_quiet_on_empty_notes_cache
+run_test test_launch_banner_card_yields_to_the_mod
+run_test test_launch_exports_update_verdict_to_the_mod
 run_test test_notify_writes_notes_cache
+run_test test_notify_writes_empty_full_cache_when_fetch_fails
 
 report_results

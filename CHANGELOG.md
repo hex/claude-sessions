@@ -6,6 +6,9 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Added
+- Release notes in the session. When a launch finds a newer cs, the new `cs-update` mod opens one pane with the full changelog for every version above the installed one, once per load of the mod (a launch, or a plugin reload), in the conversation cs launched. `1` runs `cs -update` in place through the engine's process runner (no shell; the path and the version come from the launch, never from the mod's own check) and the pane keeps the outcome until closed, since the new files take effect on the next launch. `Esc` closes it; `/cs-update` reopens it; `/config` → `cs-update.showReleaseNotes` turns the launch pane off. The notify check now caches the changelog span beside the summaries (`~/.cache/cs/update-notes-full-<version>`), and a launch with an update pending exports `CS_UPDATE_AVAILABLE` and `CS_UPDATE_BIN`.
+
 ### Performance
 - The session picker no longer freezes on the arrow keys. Its ten-second rescan forks `git remote get-url` for every checkout session (91 of 139 here), and on a busy machine those forks took longer than the ten seconds, so the picker was inside the rescan almost continuously and every key press waited for it. The rescan now runs on a worker thread and the loop swaps the result between two frames, with the highlight pinned to the same session by name; a rescan the user triggers (delete, rename, archive) still runs before the next frame and discards any worker read that predates it, so a deleted row never comes back. Measured with thirty Down presses on the same machine: the slowest press fell from 936 ms to 145 ms and the mean from 128 ms to 65 ms.
 
