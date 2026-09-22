@@ -111,7 +111,13 @@ fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Act
     loop {
         let animating = app.is_animating(app.idle_elapsed());
         let refresh_due = REFRESH.saturating_sub(last_refresh.elapsed());
-        let timeout = if animating { HEARTBEAT.min(refresh_due) } else { refresh_due };
+        // A rescan in flight also wakes on the heartbeat, only to drain its
+        // result; a wake that finds none paints nothing.
+        let timeout = if animating || app.scan_in_flight() {
+            HEARTBEAT.min(refresh_due)
+        } else {
+            refresh_due
+        };
         let mut redraw = false;
 
         if event::poll(timeout)? {
@@ -147,6 +153,11 @@ fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Act
             }
         } else if animating {
             // Heartbeat elapsed with no input: advance the shimmer and countdowns.
+            redraw = true;
+        }
+
+        // A finished rescan lands here; the request below never blocks.
+        if app.drain_scans() {
             redraw = true;
         }
 

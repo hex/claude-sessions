@@ -4,6 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Performance
+- The session picker no longer freezes on the arrow keys. Its ten-second rescan forks `git remote get-url` for every checkout session (91 of 139 here), and on a busy machine those forks took longer than the ten seconds, so the picker was inside the rescan almost continuously and every key press waited for it. The rescan now runs on a worker thread and the loop swaps the result between two frames, with the highlight pinned to the same session by name; a rescan the user triggers (delete, rename, archive) still runs before the next frame and discards any worker read that predates it, so a deleted row never comes back. Measured with thirty Down presses on the same machine: the slowest press fell from 936 ms to 145 ms and the mean from 128 ms to 65 ms.
+
 ## 2026.9.18
 
 ### Added
