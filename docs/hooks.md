@@ -499,8 +499,17 @@ installer; a non-zero exit or a run that could not start keeps the key for
 another try and shows the last lines of stderr; a clean exit retires the key
 and the pane keeps the outcome ("Update finished. Takes effect on your next
 launch.") until it is dismissed, since the new files take effect only on the
-next launch: this claude and its loaded mods keep running the old code. `Esc`
+next launch for the rest of this claude: the update replaces this mod's own
+deployed file, and Claude Code reloads it as soon as the install lands. `Esc`
 closes the pane at any point.
+
+That reload resets the mod's module state mid-pane, which would otherwise
+blank a pane still showing "Update finished". A clean exit also writes
+`.cs/local/cs-update.done` (version plus the outcome line), and `session.start`
+reads it back before the launch-pane gate runs, so the reloaded module redraws
+the finished pane instead. The mod clears the marker (writes it empty) the next
+launch that finds nothing pending for that version, since `$.fs` offers no
+delete.
 
 The `/config` row `cs-update.showReleaseNotes` (on by default) turns off only
 the launch pane; `/cs-update` still opens it with the option off.

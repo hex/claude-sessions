@@ -5,7 +5,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, parseSpan, stripInline, PANE, OPTION, HEARTBEAT } from '../hooks/register.tsx'
+import { register, parseSpan, stripInline, PANE, OPTION, HEARTBEAT, DONE } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -35,13 +35,17 @@ const defaultRun = async (argv: string[], init: any) => {
   return runResult
 }
 
+// The default writer: records the call. A test that swaps it in (to fail one
+// path write) gets it back in beforeEach, same as the runner above.
+let defaultWrite = async (path: string, text: string) => { written[path] = text }
+
 const $ = {
   env: { get: async (name: string) => envVars[name] },
   session: { id: async () => sessionId, cwd: async () => '/work' },
   fs: {
     read: async (path: string) => { if (path in files) return files[path]; throw new Error(`ENOENT ${path}`) },
     exists: async (path: string) => path in files || path === '/work/.cs/local',
-    write: async (path: string, text: string) => { written[path] = text },
+    write: (path: string, text: string) => defaultWrite(path, text),
   },
   ui: {
     resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }),
@@ -110,6 +114,7 @@ beforeEach(() => {
   written = {}; panes = []; toasts = []; invalidated = []; runs = []; commands = []
   runResult = { exitCode: 0, stdout: 'ok', stderr: '' }
   ;($ as any).process.run = defaultRun
+  defaultWrite = async (path: string, text: string) => { written[path] = text }
   sessionId = 'uuid-lead'
   load()
 })
@@ -339,4 +344,57 @@ test('/cs-update in a teammate opens nothing', async () => {
   await start()
   expect(await runCommand()).toEqual({ text: 'The release-notes pane belongs to the conversation cs launched.' })
   expect(opens()).toHaveLength(0)
+})
+
+test('a clean exit writes the DONE marker with the version and the outcome line', async () => {
+  await start()
+  await buttons(await draw())[0].props.onPress()
+  expect(written['/work/' + DONE]).toBe('2026.99.3\nUpdate finished. Takes effect on your next launch.\n')
+})
+
+test('a reload restores the finished pane from the DONE marker, in done, with no key', async () => {
+  await start()
+  await buttons(await draw())[0].props.onPress()
+  const marker = written['/work/' + DONE]
+  files['/work/' + DONE] = marker
+  panes = []
+  load()
+  await start()
+  expect(opens()).toHaveLength(1)
+  const words = texts(await draw()).join('\n')
+  expect(words).toContain('Update finished. Takes effect on your next launch.')
+  expect(words).toContain('Esc: close')
+  expect(buttons(await draw())).toHaveLength(0)
+})
+
+test('a marker present but no CS_UPDATE_AVAILABLE opens nothing and empties the marker', async () => {
+  files['/work/' + DONE] = '2026.99.3\nUpdate finished. Takes effect on your next launch.\n'
+  delete envVars.CS_UPDATE_AVAILABLE
+  await start()
+  expect(opens()).toHaveLength(0)
+  expect(written['/work/' + DONE]).toBe('')
+})
+
+test('a marker naming a version no longer pending is stale: cleared, and the idle pane opens for the newly pending one', async () => {
+  files['/work/' + DONE] = '2026.99.1\nUpdate finished. Takes effect on your next launch.\n'
+  await start()
+  expect(written['/work/' + DONE]).toBe('')
+  expect(opens()).toHaveLength(1)
+  const tree = await draw()
+  const words = texts(tree).join('\n')
+  expect(words).toContain('cs 2026.99.3 is available')
+  expect(words).not.toContain('Update finished')
+  expect(buttons(tree)).toHaveLength(1)
+})
+
+test('a failed write to the DONE marker toasts and the pane still shows done', async () => {
+  await start()
+  defaultWrite = async (path: string, text: string) => {
+    if (path === '/work/' + DONE) throw new Error('disk full')
+    written[path] = text
+  }
+  await buttons(await draw())[0].props.onPress()
+  expect(toasts).toEqual(['cs-update: could not record the finished update: disk full'])
+  const words = texts(await draw()).join('\n')
+  expect(words).toContain('Update finished. Takes effect on your next launch.')
 })

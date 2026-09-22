@@ -14,6 +14,11 @@ export const PANE = 'cs-update'
 export const OPTION = 'showReleaseNotes'
 // Doctor observes the mod RUNNING, not merely installed (see cs-rotate).
 export const HEARTBEAT = '.cs/local/cs-update.heartbeat'
+// The finished pane's outcome, written on a clean `cs -update` exit and read
+// back by session.start: installing the update rewrites this mod's own
+// deployed file, Claude Code reloads it, and the reload drops the module
+// state the `done` pane was drawing from before this file existed.
+export const DONE = '.cs/local/cs-update.done'
 // Where cs writes the id of the conversation it launched; a teammate claude
 // in the same directory has its own id and must not pop its own pane.
 export const STATE = '.cs/local/state'
@@ -51,7 +56,10 @@ export function parseSpan(text: string): Section[] {
 }
 
 // What the pane shows. Module state survives a /clear (as in cs-rotate) and is
-// dropped on a reload, which is what "once per load" means.
+// dropped on a reload, which is what "once per load" means. A finished update
+// is the one exception: the DONE marker survives the reload the update itself
+// causes, and session.start redraws it from disk before this state would
+// otherwise sit empty.
 let version: string | undefined
 let sections: Section[] | undefined
 let accent: string | undefined
@@ -78,9 +86,11 @@ export function register(on: On, options: PluginOptions) {
     if (await $.fs.exists(`${e.cwd}/.cs/local`)) {
       await $.fs.write(`${e.cwd}/${HEARTBEAT}`, `${new Date().toISOString()}\n`)
     }
-    if (wanted && !shown && await isLead($, e.cwd)) {
-      const pending = await $.env.get('CS_UPDATE_AVAILABLE')
-      if (pending) { shown = true; await openPane($, e.cwd, pending) }
+    if (!shown && await isLead($, e.cwd)) {
+      if (!(await restoreDone($, e.cwd)) && wanted) {
+        const pending = await $.env.get('CS_UPDATE_AVAILABLE')
+        if (pending) { shown = true; await openPane($, e.cwd, pending) }
+      }
     }
     return next(e)
   })
@@ -179,11 +189,35 @@ async function openPane($: EngineInterface, cwd: string, pending: string) {
   await $.ui.open({ id: PANE, title: `cs ${pending} is available`, focus: true, closeOnEscape: true })
 }
 
+// Restores the finished pane from the DONE marker on a reload, since the
+// reload itself drops the module state the pane was showing. Answers whether
+// it restored anything: false leaves the caller free to fall through to the
+// ordinary launch-pane gate. A marker naming a version that is no longer
+// CS_UPDATE_AVAILABLE is stale (a later launch, nothing pending, or something
+// newer) and is cleared rather than redrawn; `$.fs` has no delete, so an empty
+// write is the tombstone and empty text reads as absent.
+async function restoreDone($: EngineInterface, cwd: string): Promise<boolean> {
+  let text: string
+  try { text = await $.fs.read(`${cwd}/${DONE}`) } catch { return false }
+  const [doneVersion, line] = text.split('\n')
+  if (!doneVersion || line === undefined) return false
+  const pending = await $.env.get('CS_UPDATE_AVAILABLE')
+  if (pending !== doneVersion) {
+    await $.fs.write(`${cwd}/${DONE}`, '')
+    return false
+  }
+  shown = true; phase = 'done'; outcome = line
+  await openPane($, cwd, doneVersion)
+  return true
+}
+
 // Runs the update cs would run from the shell, by the path launch exported
 // (no shell: `$.process.run` takes an argv, and the claude process's PATH is
 // not the launching shell's). The pane keeps the outcome until dismissed, so
 // it is read rather than flashed. The new files take effect on the next
-// launch: this claude and its loaded mods keep the old code.
+// launch for the rest of this claude, but Claude Code reloads this mod's own
+// file as soon as the update installs it, which is why a clean exit also
+// writes the DONE marker restoreDone reads back.
 async function runUpdate($: EngineInterface) {
   // Claimed before the first await: two presses in one tick must not both
   // pass the guard and start two installers.
@@ -201,6 +235,12 @@ async function runUpdate($: EngineInterface) {
       // Version-neutral: cs -update resolves the latest release when it runs,
       // which may be newer than the one this launch saw.
       phase = 'done'; outcome = 'Update finished. Takes effect on your next launch.'
+      try {
+        const cwd = await $.session.cwd()
+        await $.fs.write(`${cwd}/${DONE}`, `${version}\n${outcome}\n`)
+      } catch (err) {
+        $.ui.toast(`cs-update: could not record the finished update: ${String(err instanceof Error ? err.message : err)}`)
+      }
     } else {
       const tail = stderr.split('\n').filter(l => l.trim() !== '').slice(-5).join('\n')
       phase = 'failed'; outcome = `cs -update exited ${exitCode}.\n${tail}`
