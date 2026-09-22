@@ -733,7 +733,13 @@ impl App {
             || self.revealed_secret.is_some()
             || self.delete_countdown_start.is_some()
             || !self.preview_pending.is_empty()
-            || self.scan_pending.is_some()
+    }
+
+    /// Whether a periodic rescan is running on the worker. The event loop
+    /// shortens its poll timeout while one is, so the result lands within a
+    /// heartbeat; it is not an animation and never forces a repaint by itself.
+    pub fn scan_in_flight(&self) -> bool {
+        self.scan_pending.is_some()
     }
 
     /// Record that the user just interacted, restarting the idle timer.
