@@ -15,9 +15,11 @@ export const OPTION = 'showReleaseNotes'
 // Doctor observes the mod RUNNING, not merely installed (see cs-rotate).
 export const HEARTBEAT = '.cs/local/cs-update.heartbeat'
 // The finished pane's outcome, written on a clean `cs -update` exit and read
-// back by session.start: installing the update rewrites this mod's own
-// deployed file, Claude Code reloads it, and the reload drops the module
-// state the `done` pane was drawing from before this file existed.
+// back on the reloaded module's next render: installing the update rewrites
+// this mod's own deployed file, Claude Code reloads it and immediately
+// re-renders the open pane, and the reload drops the module state the `done`
+// pane was drawing from before this file existed. `session.start` does not
+// fire on a reload, only at load, so the restore cannot wait for it alone.
 export const DONE = '.cs/local/cs-update.done'
 // Where cs writes the id of the conversation it launched; a teammate claude
 // in the same directory has its own id and must not pop its own pane.
@@ -58,8 +60,9 @@ export function parseSpan(text: string): Section[] {
 // What the pane shows. Module state survives a /clear (as in cs-rotate) and is
 // dropped on a reload, which is what "once per load" means. A finished update
 // is the one exception: the DONE marker survives the reload the update itself
-// causes, and session.start redraws it from disk before this state would
-// otherwise sit empty.
+// causes, and the marker is redrawn from disk, either by session.start at the
+// next load or by the Pane render the reload triggers immediately, before
+// this state would otherwise sit empty.
 let version: string | undefined
 let sections: Section[] | undefined
 let accent: string | undefined
@@ -96,7 +99,12 @@ export function register(on: On, options: PluginOptions) {
   })
 
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
-    if (e.requestId !== PANE || version === undefined) return next(e)
+    if (e.requestId !== PANE) return next(e)
+    // The engine re-renders the open pane the instant it reloads this
+    // module, before session.start (which does not fire on a reload) gets a
+    // chance to restore it, so a pane asked to draw with no module state
+    // tries the marker itself before giving up to the ordinary gate.
+    if (version === undefined && !(await restoreDone($, await $.session.cwd()))) return next(e)
     const { Box, Text, Button } = await $.ui.resolve(e)
     // A lone pane draws no title of its own (the tab shows only with two or
     // more), so the body opens with it. The pane does not scroll (measured
@@ -191,11 +199,12 @@ async function openPane($: EngineInterface, cwd: string, pending: string) {
 
 // Restores the finished pane from the DONE marker on a reload, since the
 // reload itself drops the module state the pane was showing. Answers whether
-// it restored anything: false leaves the caller free to fall through to the
-// ordinary launch-pane gate. A marker naming a version that is no longer
-// CS_UPDATE_AVAILABLE is stale (a later launch, nothing pending, or something
-// newer) and is cleared rather than redrawn; `$.fs` has no delete, so an empty
-// write is the tombstone and empty text reads as absent.
+// it restored anything: false leaves the caller to its own fallback (the
+// launch-pane gate in session.start, or the ordinary render in ui.render). A
+// marker naming a version that is no longer CS_UPDATE_AVAILABLE is stale (a
+// later launch, nothing pending, or something newer) and is cleared rather
+// than redrawn; `$.fs` has no delete, so an empty write is the tombstone and
+// empty text reads as absent.
 async function restoreDone($: EngineInterface, cwd: string): Promise<boolean> {
   let text: string
   try { text = await $.fs.read(`${cwd}/${DONE}`) } catch { return false }

@@ -367,6 +367,23 @@ test('a reload restores the finished pane from the DONE marker, in done, with no
   expect(buttons(await draw())).toHaveLength(0)
 })
 
+test('a Pane render with no prior session.start restores the finished pane from the marker on its own (the reload redraw path)', async () => {
+  files['/work/' + DONE] = '2026.99.3\nUpdate finished. Takes effect on your next launch.\n'
+  const tree = await draw()
+  const words = texts(tree).join('\n')
+  expect(words).toContain('Update finished. Takes effect on your next launch.')
+  expect(words).toContain('Esc: close')
+  expect(buttons(tree)).toHaveLength(0)
+  expect(opens()).toHaveLength(1)
+})
+
+test('a Pane render with no prior session.start and a stale marker falls through to next(e) and empties the marker', async () => {
+  files['/work/' + DONE] = '2026.99.1\nUpdate finished. Takes effect on your next launch.\n'
+  expect(await draw()).toBe('other')
+  expect(written['/work/' + DONE]).toBe('')
+  expect(opens()).toHaveLength(0)
+})
+
 test('a marker present but no CS_UPDATE_AVAILABLE opens nothing and empties the marker', async () => {
   files['/work/' + DONE] = '2026.99.3\nUpdate finished. Takes effect on your next launch.\n'
   delete envVars.CS_UPDATE_AVAILABLE

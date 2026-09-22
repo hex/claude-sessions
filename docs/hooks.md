@@ -505,11 +505,13 @@ closes the pane at any point.
 
 That reload resets the mod's module state mid-pane, which would otherwise
 blank a pane still showing "Update finished". A clean exit also writes
-`.cs/local/cs-update.done` (version plus the outcome line), and `session.start`
-reads it back before the launch-pane gate runs, so the reloaded module redraws
-the finished pane instead. The mod clears the marker (writes it empty) the next
-launch that finds nothing pending for that version, since `$.fs` offers no
-delete.
+`.cs/local/cs-update.done` (version plus the outcome line); the engine
+re-renders the open pane the instant it reloads the module, before
+`session.start` (which does not fire on a reload, only at load) gets a
+chance, so the reloaded module reads the marker back and redraws the finished
+pane from its own next render. The mod clears the marker (writes it empty)
+the next launch, or render, that finds nothing pending for that version,
+since `$.fs` offers no delete.
 
 The `/config` row `cs-update.showReleaseNotes` (on by default) turns off only
 the launch pane; `/cs-update` still opens it with the option off.
