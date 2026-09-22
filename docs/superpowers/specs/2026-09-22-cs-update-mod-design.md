@@ -47,10 +47,12 @@ one key, with a `/config` toggle to turn the pane off.
    does not reopen it. A dismissed pane stays dismissed; `/cs-update`
    (registered with `$.command.register`) reopens it on demand, and is
    the only way to see it again without relaunching.
-5. **Lead only.** The pane opens from `session.start` when
-   `e.agentId` is undefined (the main loop). Teammate panes in the same
-   directory share the settings and the cache, and each would otherwise
-   pop its own copy.
+5. **Lead only.** `session.start` carries no agent id (a teammate is
+   its own process with its own start), so the mod opens only when
+   `$.session.id()` equals the `claude_session_id` cs recorded in
+   `.cs/local/state` before the launch, as the rotate mod judges
+   ownership. Teammate panes in the same directory share the settings
+   and the cache, and each would otherwise pop its own copy.
 6. **The button runs the real update.** `1` runs
    `$.process.run([csBin, "-update"], { timeoutMs: 600000 })`, where
    `csBin` is `CS_UPDATE_BIN`, the absolute path of the running cs
