@@ -4,6 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Fixes
+- A feature worktree session no longer opens on the base session's task list. `CLAUDE_CODE_TASK_LIST_ID` was the base name for every `base@task` launch, so a new feature showed, and could edit, the tasks of the session it was cut from. It is now the feature's own name, so each feature starts with an empty list of its own; the base's list is untouched. Secrets still key to the base.
+
 ## 2026.9.19
 
 ### Added

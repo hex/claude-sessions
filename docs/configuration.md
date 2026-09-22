@@ -263,6 +263,6 @@ process and its hooks can find the session:
 - `CS_SECRETS_SESSION` - For a worktree session, the base session its secrets key to, so a feature worktree reads the same store as its parent (see [secrets.md](secrets.md))
 - `CLAUDE_SESSION_DIR` - Full path to the session directory (workspace root)
 - `CLAUDE_SESSION_META_DIR` - Path to the `.cs/` metadata directory
-- `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence
+- `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence; a feature worktree gets its own list under its `base@task` name, not the base's
 - `CLAUDE_CODE_AUTO_MEMORY_PATH` / `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` - Redirect Claude Code's auto-memory writer into `<session>/.cs/memory/`
 - `CS_UPDATE_AVAILABLE` / `CS_UPDATE_BIN` - Exported by a cs launch, never set by hand: the version a newer cs was found at and the path of the running cs. The cs-update mod reads them to draw the release-notes pane and to run `cs -update` from inside the session. Absent when nothing is pending

@@ -7595,11 +7595,13 @@ launch_claude_code() {
         export EDITOR="$HOOKS_DEPLOY_DIR/prompt-rewriter.sh"
         export VISUAL="$EDITOR"
     fi
-    # Worktree sessions coordinate through the base session's task list and
-    # keychain namespace; cs_base is only set in worktree local state.
+    # A feature worktree keeps its own task list, keyed like its conversation
+    # to the full `base@task` name: the base's list is the base's work, and a
+    # feature opening on it would show and edit tasks that are not its own.
+    # Secrets still key to the base (cs_base, worktree local state only).
     local cs_base
     cs_base=$(_read_local_state "$session_dir/.cs/local/state" cs_base)
-    export CLAUDE_CODE_TASK_LIST_ID="${cs_base:-$session_name}"
+    export CLAUDE_CODE_TASK_LIST_ID="$session_name"
     # Claude Code 2.1.233+ withholds the Task tools on Opus 4.8, Sonnet 5 and
     # Fable 5 unless the session opts in. The rotation wake, the walk-away
     # drain and the rotate skill all address the native task list, so a cs
