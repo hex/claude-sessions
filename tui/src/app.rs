@@ -1336,8 +1336,14 @@ impl App {
     }
 
     /// Swap in every finished rescan the worker has delivered. Returns whether
-    /// the table changed, so the event loop knows to repaint.
+    /// the table changed, so the event loop knows to repaint. While a modal is
+    /// open the result stays in the channel: a delete or rename dialog acts on
+    /// the current selection, and a table replaced underneath it could move
+    /// that selection to a different session than the one the user confirmed.
     pub fn drain_scans(&mut self) -> bool {
+        if self.mode != Mode::Normal {
+            return false;
+        }
         let mut replaced = false;
         while let Ok(result) = self.scan_results.try_recv() {
             replaced |= self.accept_scan(result);
@@ -3596,6 +3602,50 @@ mod tests {
         app.wait_for_scan();
         assert_eq!(app.sessions.len(), 3, "new session should appear after refresh");
         assert_eq!(app.selected_session_name().as_deref(), Some("bravo"));
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_rescan_finishing_under_a_modal_waits_for_normal_mode() {
+        use crate::session::test_root;
+        let root = std::env::temp_dir().join(format!("cs-test-modal-scan-{}", std::process::id()));
+        for name in ["alpha", "bravo"] {
+            std::fs::create_dir_all(root.join(name).join(".cs/local")).unwrap();
+        }
+        let _guard = test_root::scoped(root.clone());
+        let mut app = App::new(crate::session::scan_sessions());
+        let pos = app
+            .filtered
+            .iter()
+            .position(|&i| app.sessions[i].name == "bravo")
+            .unwrap();
+        app.table_state.select(Some(pos));
+
+        // A periodic rescan starts, then the user opens the delete dialog on
+        // bravo while another process removes bravo from disk.
+        app.auto_refresh();
+        app.mode = Mode::ConfirmDelete;
+        std::fs::remove_dir_all(root.join("bravo")).unwrap();
+        // Make the worker's read see the removal: wait for its answer, then
+        // request one more so the applied read is post-removal.
+        while app.scan_results.try_recv().is_err() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.scan_pending = None;
+        app.auto_refresh();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !app.drain_scans() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        // The dialog is still open: the table under it must be untouched, or
+        // confirming would delete whichever row the selection fell back to.
+        assert_eq!(app.sessions.len(), 2, "a scan must not land under a modal");
+        assert_eq!(app.selected_session_name().as_deref(), Some("bravo"));
+
+        app.mode = Mode::Normal;
+        assert!(app.drain_scans(), "the deferred scan lands once the modal closes");
+        assert_eq!(app.sessions.len(), 1);
 
         std::fs::remove_dir_all(&root).ok();
     }
