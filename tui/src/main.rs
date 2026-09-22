@@ -150,6 +150,11 @@ fn run_event_loop(app: &mut app::App, terminal: &mut Tui) -> io::Result<app::Act
             redraw = true;
         }
 
+        // A finished rescan lands here; the request below never blocks.
+        if app.drain_scans() {
+            redraw = true;
+        }
+
         // Periodic rescan so the table tracks locks, queue depth, and recency
         // without input. The timer resets even when a modal suppresses the
         // rescan — a zero remaining timeout must never turn into a spin.

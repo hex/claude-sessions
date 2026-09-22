@@ -481,6 +481,16 @@ pub struct App {
     preview_requests: std::sync::mpsc::Sender<(u64, String)>,
     /// Previews the worker has finished, drained once per event-loop tick.
     preview_results: std::sync::mpsc::Receiver<(u64, String, session::SessionPreview)>,
+    /// Generation of the periodic rescan in flight, if any. A result with any
+    /// other generation is stale (a user-initiated rescan replaced the table
+    /// while it ran) and is dropped; `None` also means no new request is due.
+    scan_pending: Option<u64>,
+    /// Monotonic rescan request counter; never reset (see `preview_generation`).
+    scan_generation: u64,
+    /// Rescan requests, drained by the scan worker.
+    scan_requests: std::sync::mpsc::Sender<u64>,
+    /// Finished rescans, drained once per event-loop tick.
+    scan_results: std::sync::mpsc::Receiver<(u64, Vec<Session>)>,
     /// Whether to show the preview pane on wide terminals (toggled with `p`).
     pub show_preview: bool,
     /// Whether archived sessions appear in the table (toggled with `A`).
@@ -544,6 +554,31 @@ fn spawn_preview_worker(
     (request_tx, result_rx)
 }
 
+/// Worker thread that rescans the sessions root on request. A scan forks one
+/// `git remote get-url` per checkout session (seconds of wall time on a busy
+/// machine); on the event-loop thread that blocked every key press until the
+/// scan returned. Each result carries the generation of the request it answers
+/// so a scan that raced a user-initiated rescan can be told apart and dropped.
+fn spawn_scan_worker(
+    root: std::path::PathBuf,
+) -> (
+    std::sync::mpsc::Sender<u64>,
+    std::sync::mpsc::Receiver<(u64, Vec<Session>)>,
+) {
+    let (request_tx, request_rx) = std::sync::mpsc::channel::<u64>();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        // Ends when the App drops its sender.
+        for generation in request_rx {
+            let sessions = session::scan_sessions_in(&root);
+            if result_tx.send((generation, sessions)).is_err() {
+                break;
+            }
+        }
+    });
+    (request_tx, result_rx)
+}
+
 impl App {
     pub fn new(sessions: Vec<Session>) -> Self {
         let mut table_state = TableState::default();
@@ -552,6 +587,7 @@ impl App {
         }
         let sessions_root = session::sessions_root();
         let (preview_requests, preview_results) = spawn_preview_worker(sessions_root.clone());
+        let (scan_requests, scan_results) = spawn_scan_worker(sessions_root.clone());
         let mut app = App {
             sessions_root,
             sessions,
@@ -588,6 +624,10 @@ impl App {
             preview_generation: 0,
             preview_requests,
             preview_results,
+            scan_pending: None,
+            scan_generation: 0,
+            scan_requests,
+            scan_results,
             show_preview: true,
             show_archived: false,
             focus: Focus::List,
@@ -693,6 +733,7 @@ impl App {
             || self.revealed_secret.is_some()
             || self.delete_countdown_start.is_some()
             || !self.preview_pending.is_empty()
+            || self.scan_pending.is_some()
     }
 
     /// Record that the user just interacted, restarting the idle timer.
@@ -784,6 +825,19 @@ impl App {
             }
         }
         delivered
+    }
+
+    /// Block until the rescan in flight has replaced the table.
+    #[cfg(test)]
+    fn wait_for_scan(&mut self) {
+        while self.scan_pending.is_some() {
+            match self.scan_results.recv() {
+                Ok(result) => {
+                    self.accept_scan(result);
+                }
+                Err(_) => break,
+            }
+        }
     }
 
     /// Block until every requested preview has landed in the cache.
@@ -1261,12 +1315,42 @@ impl App {
         Action::None
     }
 
-    /// Re-scan sessions from disk and re-derive the visible list, keeping the
-    /// highlight pinned to the same session by name (a new row appearing above
-    /// must not shift the selection). Callers gate this on `Mode::Normal`.
+    /// Ask the scan worker for a fresh read of the sessions root, unless one is
+    /// already in flight. Never touches the filesystem on this thread; the
+    /// result lands through `drain_scans`. Callers gate this on `Mode::Normal`.
     pub fn auto_refresh(&mut self) {
+        if self.scan_pending.is_some() {
+            return;
+        }
+        self.scan_generation += 1;
+        let generation = self.scan_generation;
+        if self.scan_requests.send(generation).is_ok() {
+            self.scan_pending = Some(generation);
+        }
+    }
+
+    /// Swap in every finished rescan the worker has delivered. Returns whether
+    /// the table changed, so the event loop knows to repaint.
+    pub fn drain_scans(&mut self) -> bool {
+        let mut replaced = false;
+        while let Ok(result) = self.scan_results.try_recv() {
+            replaced |= self.accept_scan(result);
+        }
+        replaced
+    }
+
+    /// Replace the table with a finished rescan and re-derive the visible list,
+    /// keeping the highlight pinned to the same session by name (a new row
+    /// appearing above must not shift the selection). A result whose generation
+    /// is not the one pending answers a request that `rescan_now` has since
+    /// superseded, so it is dropped rather than put an older read back.
+    fn accept_scan(&mut self, (generation, sessions): (u64, Vec<Session>)) -> bool {
+        if self.scan_pending != Some(generation) {
+            return false;
+        }
+        self.scan_pending = None;
         let selected_name = self.selected_session_name();
-        self.sessions = session::scan_sessions();
+        self.sessions = sessions;
         self.apply_filter_and_sort();
         if let Some(name) = selected_name {
             if let Some(pos) = self
@@ -1277,6 +1361,17 @@ impl App {
                 self.table_state.select(Some(pos));
             }
         }
+        true
+    }
+
+    /// Re-scan on this thread right after an action changed the sessions root
+    /// (delete, rename, archive): the user is waiting on that row, so the table
+    /// must show the change in the same frame. Forgets any periodic rescan in
+    /// flight, whose read predates the change.
+    fn rescan_now(&mut self) {
+        self.scan_pending = None;
+        self.sessions = session::scan_sessions();
+        self.apply_filter_and_sort();
     }
 
     fn handle_changelog(&mut self, key: KeyEvent) -> Action {
@@ -1883,8 +1978,7 @@ impl App {
             match session::remove_session_path(&root, &name, &path) {
                 Ok(()) => {
                     self.set_status(format!("Deleted: {}", name), StatusLevel::Success);
-                    self.sessions = session::scan_sessions();
-                    self.apply_filter_and_sort();
+                    self.rescan_now();
                 }
                 Err(e) => {
                     self.set_status(format!("Delete failed: {}", e), StatusLevel::Error);
@@ -1929,8 +2023,7 @@ impl App {
             }
         }
         self.marked_sessions.clear();
-        self.sessions = session::scan_sessions();
-        self.apply_filter_and_sort();
+        self.rescan_now();
         if errors == 0 {
             self.set_status(format!("Deleted {} sessions", deleted), StatusLevel::Success);
         } else if live.is_empty() {
@@ -1989,8 +2082,7 @@ impl App {
                         rename_claude_projects_dir(&old, &new);
                         self.set_status(format!("Renamed to: {}", new_name), StatusLevel::Success);
                         self.flash_row(&new_name, FlashKind::Success);
-                        self.sessions = session::scan_sessions();
-                        self.apply_filter_and_sort();
+                        self.rescan_now();
                     }
                     Err(e) => {
                         self.set_status(format!("Rename failed: {}", e), StatusLevel::Error);
@@ -2025,10 +2117,9 @@ impl App {
             Ok(out) if out.status.success() => {
                 self.set_status(format!("{}: {}", done, name), StatusLevel::Success);
                 self.flash_row(name, FlashKind::Success);
-                self.sessions = session::scan_sessions();
                 // An archived row leaves the table unless `A` is showing them;
-                // the re-filter is what keeps the selection inside the list.
-                self.apply_filter_and_sort();
+                // the re-filter inside is what keeps the selection in the list.
+                self.rescan_now();
             }
             Ok(out) => {
                 let err = String::from_utf8_lossy(&out.stderr);
@@ -3487,9 +3578,48 @@ mod tests {
 
         std::fs::create_dir_all(root.join("charlie").join(".cs/local")).unwrap();
         app.auto_refresh();
+        // The event loop calls this between frames; a table that already grew
+        // here would mean the rescan (one `git remote` per checkout session)
+        // ran on the render thread and blocked every key press meanwhile.
+        assert_eq!(
+            app.sessions.len(),
+            2,
+            "auto_refresh must hand the scan to the worker, not run it here"
+        );
 
+        app.wait_for_scan();
         assert_eq!(app.sessions.len(), 3, "new session should appear after refresh");
         assert_eq!(app.selected_session_name().as_deref(), Some("bravo"));
+
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn a_rescan_superseded_by_rescan_now_is_dropped() {
+        use crate::session::test_root;
+        let root = std::env::temp_dir().join(format!("cs-test-stale-scan-{}", std::process::id()));
+        for name in ["alpha", "bravo"] {
+            std::fs::create_dir_all(root.join(name).join(".cs/local")).unwrap();
+        }
+        let _guard = test_root::scoped(root.clone());
+        let mut app = App::new(crate::session::scan_sessions());
+        assert_eq!(app.sessions.len(), 2);
+
+        // The worker starts reading two sessions; before it answers, the user
+        // deletes one and the table is rescanned on the spot.
+        app.auto_refresh();
+        std::fs::remove_dir_all(root.join("bravo")).unwrap();
+        app.rescan_now();
+        assert_eq!(app.sessions.len(), 1);
+
+        // The worker's read may still hold bravo. Whatever it delivers must
+        // not put the deleted row back.
+        let (generation, stale) = app.scan_results.recv().unwrap();
+        assert!(
+            !app.accept_scan((generation, stale)),
+            "a scan requested before rescan_now must be dropped, not applied"
+        );
+        assert_eq!(app.sessions.len(), 1);
 
         std::fs::remove_dir_all(&root).ok();
     }

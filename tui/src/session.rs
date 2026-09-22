@@ -502,7 +502,7 @@ pub fn scan_sessions() -> Vec<Session> {
 
 /// Scan a specific sessions root. Tests call this directly so they never have to
 /// mutate the process-global `CS_SESSIONS_ROOT` (which races across parallel tests).
-fn scan_sessions_in(root: &Path) -> Vec<Session> {
+pub(crate) fn scan_sessions_in(root: &Path) -> Vec<Session> {
     if !root.is_dir() {
         return Vec::new();
     }
