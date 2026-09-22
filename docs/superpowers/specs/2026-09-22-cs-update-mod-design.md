@@ -59,9 +59,11 @@ one key, with a `/config` toggle to turn the pane off.
    (`$0` resolved), exported by launch beside `CS_UPDATE_AVAILABLE`.
    No `cs` on PATH is assumed: `$.process.run` takes no shell, and the
    claude process's PATH is not the launching shell's. The pane
-   shows `updating…` while it runs, then the exit: on 0, `Installed
-   <version>. Takes effect on your next launch.`; on non-zero, the last
-   lines of stderr. Either way the pane stays open until dismissed, so
+   shows `updating…` while it runs, then the exit: on 0, `Update
+   finished. Takes effect on your next launch.` (version-neutral, since
+   `cs -update` resolves the latest release when it runs, which may be
+   newer than the one the launch saw); on non-zero, the last lines of
+   stderr. Either way the pane stays open until dismissed, so
    the outcome is read, not flashed. `cs -update` never prompts, so no
    stdin is needed.
 7. **What an in-place update does to the running session.** The update
@@ -79,20 +81,22 @@ one key, with a `/config` toggle to turn the pane off.
    open and leaves `/cs-update` working. No cs verb, no env var, no
    marker file: the engine owns the row, and `cs -doctor` need not
    know it.
-9. **Look.** One pane, `rows` sized to the terminal, title
-   `cs <version> is available`. Body: for each pending version a heading
-   line (version, bold, the session accent), then its bullets as the
-   changelog authored them with `_md_strip_inline`'s job done in
-   TypeScript (links, bold and code marks stripped; a bullet wraps
-   under its own indent). Sections are separated by one blank line.
-   Footer: `1: update now   Esc: later`, rendered as the rotate band
-   renders its keys (Button inside a Box, never inside a Text). Colours
-   come from `surfaceColor` over `CS_TERM_BG_RGB`, as the rotate pane
-   does, so the pane reads on the light terminal Alex uses and on a dark
-   one. More than the pane can show scrolls if the Pane element scrolls;
-   if it does not (measured in the spike), the body is capped to the
-   newest versions that fit and ends with `… and N earlier versions`,
-   which is what the launch card does.
+9. **Look.** One pane, opened with `focus: true` (a request the surface
+   grants over an idle, empty composer; without it the keys stay with
+   the prompt) and `closeOnEscape`. A lone pane draws no tab title, so
+   the body opens with `cs <version> is available` in bold. Then, for
+   each pending version, a heading line (the version, bold, in the
+   session colour cs recorded in `.cs/local/state`, as the status bar's
+   name is), then its prose and bullets as the changelog authored them
+   with `_md_strip_inline`'s job done in TypeScript (links, bold and
+   code marks stripped); a continuation line hangs indented under its
+   bullet. Sections are separated by one blank line. Footer:
+   `1: update now   Esc: later`, rendered as the rotate band renders its
+   keys (Button inside a Box, never inside a Text). No fill colour: the
+   pane is the engine's surface, and text on it reads on light and dark
+   alike. Whether the Pane scrolls past its height is measured live; if
+   it does not, a follow-up caps the body to the newest versions that
+   fit, as the launch card does.
 
 ## Components
 

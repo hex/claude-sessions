@@ -61,9 +61,9 @@ In `tests/test_auto_update.sh`, inside `test_notify_writes_notes_cache`, after t
     assert_file_exists "$full" "notify writes the full-notes cache" || { export HOME="$ORIGINAL_HOME"; return 1; }
     assert_file_contains "$full" "^## 2026\.99\.3$" "the span starts at the newest version" || { export HOME="$ORIGINAL_HOME"; return 1; }
     assert_file_contains "$full" "Statusline: readable" "and keeps the bullets" || { export HOME="$ORIGINAL_HOME"; return 1; }
-    if grep -q "Old release that must never be emitted" "$full"; then
-        echo "  FAIL: the span ran past the installed version"; export HOME="$ORIGINAL_HOME"; return 1
-    fi
+    # The fixture's every version is above the installed one (2026.99.x), so
+    # the span's stop-at-installed rule is not testable here; it is pinned by
+    # test_span_extracts_versions_above_installed on the function itself.
 ```
 
 Also make the stale fixture two files, so the prune is proven for both names. Replace:
@@ -114,12 +114,20 @@ test_notify_writes_empty_full_cache_when_fetch_fails() {
 
 Register it in the runner block: after `run_test test_notify_writes_notes_cache` add `run_test test_notify_writes_empty_full_cache_when_fetch_fails`.
 
-- [ ] **Step 3: Run the suite to see both fail**
+- [ ] **Step 3: Seed the full file in the two banner tests**
+
+`check_update_notify` will now fetch whenever EITHER cache file is missing, and `test_launch_banner_shows_notes_card` and `test_launch_banner_quiet_on_empty_notes_cache` seed only the summaries file, so they would reach the network. In each, directly after the line that writes `update-notes-2026.99.3`, add:
+
+```bash
+    : > "$HOME/.cache/cs/update-notes-full-2026.99.3"
+```
+
+- [ ] **Step 4: Run the suite to see both fail**
 
 Run: `bash tests/test_auto_update.sh 2>&1 | tail -15`
 Expected: `test_notify_writes_notes_cache` FAIL at "notify writes the full-notes cache"; the new test FAIL at "no full-notes tombstone written".
 
-- [ ] **Step 4: Write the cache block**
+- [ ] **Step 5: Write the cache block**
 
 In `lib/20-update.sh`, replace the block that begins `if [ -n "$UPDATE_AVAILABLE" ]; then` inside `check_update_notify` (the one that builds `notes_cache`) with:
 
@@ -156,12 +164,12 @@ In `lib/20-update.sh`, replace the block that begins `if [ -n "$UPDATE_AVAILABLE
 
 The `|| [ ! -f "$full_cache" ]` arm is what makes an upgrade from a cs that only wrote the summaries file fetch once more; without it the mod would never see a full file until the next release.
 
-- [ ] **Step 5: Rebuild and run the suite**
+- [ ] **Step 6: Rebuild and run the suite**
 
 Run: `./build.sh >/dev/null && bash tests/test_auto_update.sh 2>&1 | tail -4`
 Expected: `Results: N/N passed, 0 failed`.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add lib/20-update.sh bin/cs tests/test_auto_update.sh
@@ -216,15 +224,18 @@ SCRIPT
     [ "$bin_line" != "unset" ] && [ -n "$bin_line" ] || { echo "  FAIL: CS_UPDATE_BIN not exported"; export HOME="$ORIGINAL_HOME"; return 1; }
     [ -x "$bin_line" ] || { echo "  FAIL: CS_UPDATE_BIN is not an executable path: $bin_line"; export HOME="$ORIGINAL_HOME"; return 1; }
     case "$bin_line" in /*) ;; *) echo "  FAIL: CS_UPDATE_BIN is not absolute: $bin_line"; export HOME="$ORIGINAL_HOME"; return 1 ;; esac
-    # And nothing is exported when the cache says we are current.
-    printf '%s 0.0.1\n' "$(date +%s)" > "$HOME/.cache/cs/update-check"
-    unset CS_NO_UPDATE_CHECK
-    out=$(CLAUDE_CODE_BIN="$stub" "$CS_BIN" "export-current-session" < /dev/null 2>&1) || {
-        export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"; return 1
+    # And nothing pending exports nothing, even when the launching shell
+    # carries a parent launch's verdict (a nested cs): both names are cleared
+    # before the conditional export. CS_NO_UPDATE_CHECK=1 is the no-network
+    # way to have nothing pending: check_update_notify returns before it
+    # reads the cache or asks GitHub, so UPDATE_AVAILABLE stays empty.
+    export CS_NO_UPDATE_CHECK=1
+    out=$(CS_UPDATE_AVAILABLE=2026.1.1 CS_UPDATE_BIN=/stale/cs CLAUDE_CODE_BIN="$stub" "$CS_BIN" "export-current-session" < /dev/null 2>&1) || {
+        export HOME="$ORIGINAL_HOME"; return 1
     }
-    export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
-    assert_output_contains "$out" "UPDATE_AVAILABLE=unset" "no version exported when current" || return 1
-    assert_output_contains "$out" "UPDATE_BIN=unset" "no path exported when current" || return 1
+    export HOME="$ORIGINAL_HOME"
+    assert_output_contains "$out" "UPDATE_AVAILABLE=unset" "an inherited version is cleared when nothing is pending" || return 1
+    assert_output_contains "$out" "UPDATE_BIN=unset" "and so is an inherited path" || return 1
 }
 ```
 
@@ -245,7 +256,9 @@ In `lib/75-launch.sh`, directly after `export CS_LEAD_PID=$$` and its comment, a
     # the version check_update_notify found newer than this cs, and where this
     # cs is, since `$.process.run` takes no shell and the claude process's
     # PATH is not this shell's. Absent when nothing is pending, so the mod is
-    # silent by absence rather than by a value it has to read.
+    # silent by absence rather than by a value it has to read; cleared first,
+    # since a nested launch inherits its parent's verdict.
+    unset CS_UPDATE_AVAILABLE CS_UPDATE_BIN
     if [ -n "$UPDATE_AVAILABLE" ]; then
         export CS_UPDATE_AVAILABLE="$UPDATE_AVAILABLE"
         local self_bin
@@ -285,7 +298,7 @@ Claude-Session: https://claude.ai/code/session_01Vq9cY3NDp19s9ES6ALgnBD"
 
 **Interfaces:**
 - Consumes: `CS_UPDATE_AVAILABLE`, `CS_UPDATE_BIN` (Task 2), `~/.cache/cs/update-notes-full-<v>` (Task 1), `.cs/local/state`'s `claude_session_id` line (written by cs before launch).
-- Produces (exported from `register.tsx`, used by the tests and by Tasks 4 and 5): `PANE = 'cs-update'`, `OPTION = 'showReleaseNotes'`, `HEARTBEAT = '.cs/local/cs-update.heartbeat'`, `parseSpan(text: string): Section[]` with `type Section = { version: string; lines: string[] }`, `stripInline(s: string): string`, `register(on, options)`.
+- Produces (exported from `register.tsx`, used by the tests and by Tasks 4 and 5): `PANE = 'cs-update'`, `OPTION = 'showReleaseNotes'`, `HEARTBEAT = '.cs/local/cs-update.heartbeat'`, `parseSpan(text: string): Section[]` with `type Section = { version: string; lines: string[] }`, `stripInline(s: string): string`, `register(on, options)`; module-internal `isLead($, cwd)`, `openPane($, cwd, pending)`, `runUpdate($)`.
 
 - [ ] **Step 1: Write the manifest and hooks list**
 
@@ -349,6 +362,14 @@ let runResult: { exitCode: number; stdout: string; stderr: string } | Error
 let commands: any[]
 let sessionId: string
 
+// The default runner: records the call and answers with `runResult`. A test
+// that swaps it in (for a run held in flight) gets it back in beforeEach.
+const defaultRun = async (argv: string[], init: any) => {
+  runs.push({ argv, init })
+  if (runResult instanceof Error) throw runResult
+  return runResult
+}
+
 const $ = {
   env: { get: async (name: string) => envVars[name] },
   session: { id: async () => sessionId, cwd: async () => '/work' },
@@ -364,13 +385,7 @@ const $ = {
     toast: (text: string) => { toasts.push(text) },
     invalidate: (event: string) => { invalidated.push(event) },
   },
-  process: {
-    run: async (argv: string[], init: any) => {
-      runs.push({ argv, init })
-      if (runResult instanceof Error) throw runResult
-      return runResult
-    },
-  },
+  process: { run: defaultRun as (argv: string[], init: any) => Promise<any> },
   command: { register: async (spec: any) => { commands.push(spec); return { command: spec.name } } },
 }
 
@@ -394,14 +409,25 @@ One change: the locked-session menu is single-keypress.
 
 const start = () => hooks['session.start']($, { cwd: '/work' }, async () => 'started')
 const opens = () => panes.filter(p => p.op === 'open')
+// A `.map()` inside JSX lands as an array child, so both walkers flatten
+// arrays before reading an element's children.
 function texts(tree: any): string[] {
-  if (!tree || typeof tree !== 'object') return typeof tree === 'string' ? [tree] : []
+  if (typeof tree === 'string') return [tree]
+  if (Array.isArray(tree)) return tree.flatMap(texts)
+  if (!tree || typeof tree !== 'object') return []
   return (tree.children ?? []).flatMap(texts)
 }
 function buttons(tree: any): any[] {
+  if (Array.isArray(tree)) return tree.flatMap(buttons)
   if (!tree || typeof tree !== 'object') return []
   if (tree.type === 'Button') return [tree]
   return (tree.children ?? []).flatMap(buttons)
+}
+function headings(tree: any): any[] {
+  if (Array.isArray(tree)) return tree.flatMap(headings)
+  if (!tree || typeof tree !== 'object') return []
+  if (tree.type === 'Text' && tree.props.bold && tree.props.color) return [tree]
+  return (tree.children ?? []).flatMap(headings)
 }
 const draw = () => hooks['ui.render:Pane']($, { requestId: PANE }, async () => 'other')
 
@@ -418,6 +444,7 @@ beforeEach(() => {
   }
   written = {}; panes = []; toasts = []; invalidated = []; runs = []; commands = []
   runResult = { exitCode: 0, stdout: 'ok', stderr: '' }
+  ;($ as any).process.run = defaultRun
   sessionId = 'uuid-lead'
   load()
 })
@@ -448,7 +475,7 @@ test('parseSpan of an empty file is no sections', () => {
 test('session.start opens the pane once per load and writes the heartbeat', async () => {
   expect(await start()).toBe('started')
   expect(opens()).toHaveLength(1)
-  expect(opens()[0].args).toMatchObject({ id: PANE, title: 'cs 2026.99.3 is available', closeOnEscape: true })
+  expect(opens()[0].args).toMatchObject({ id: PANE, title: 'cs 2026.99.3 is available', closeOnEscape: true, focus: true })
   expect(written['/work/' + HEARTBEAT]).toMatch(/^\d{4}-/)
   await start()
   expect(opens()).toHaveLength(1)
@@ -473,13 +500,30 @@ test('a teammate (a session that is not the one cs launched) gets no pane', asyn
   expect(opens()).toHaveLength(0)
 })
 
-test('the pane draws every version with its lines and the two keys', async () => {
+test('a quoted id in the state file still names the lead', async () => {
+  files['/work/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: "uuid-lead"\n'
+  await start()
+  expect(opens()).toHaveLength(1)
+})
+
+test('no state file (not a cs session) means no pane', async () => {
+  delete files['/work/.cs/local/state']
+  await start()
+  expect(opens()).toHaveLength(0)
+})
+
+test('the pane draws the title, every version in the session colour, its lines, and the two keys', async () => {
   await start()
   const tree = await draw()
   const words = texts(tree).join('\n')
-  expect(words).toContain('2026.99.3')
+  // A lone pane draws no title of its own, so the body carries it.
+  expect(words).toContain('cs 2026.99.3 is available')
+  expect(headings(tree).map(t => [t.props.color, texts(t).join('')])).toEqual([['red', '2026.99.3'], ['red', '2026.99.2']])
   expect(words).toContain('One fix: the statusline is readable on light terminals.')
   expect(words).toContain('- Menu: keypress. Cancel stays the default.')
+  // A continuation line hangs under its bullet: it is indented, not run on.
+  const cont = texts(tree).find(t => t.includes('A continuation line.'))
+  expect(cont).toBe('  A continuation line.')
   const keys = buttons(tree)
   expect(keys.map(b => b.props.hotkey)).toEqual(['1'])
   expect(keys[0].props.label).toBe('update now')
@@ -573,10 +617,11 @@ export function parseSpan(text: string): Section[] {
 // dropped on a reload, which is what "once per load" means.
 let version: string | undefined
 let sections: Section[] | undefined
+let accent: string | undefined
 let shown = false
 
 export function register(on: On, options: PluginOptions) {
-  version = undefined; sections = undefined; shown = false
+  version = undefined; sections = undefined; accent = undefined; shown = false
   const wanted = options[OPTION] !== false
 
   on('session.start', async ($, e, next) => {
@@ -585,7 +630,7 @@ export function register(on: On, options: PluginOptions) {
     }
     if (wanted && !shown && await isLead($, e.cwd)) {
       const pending = await $.env.get('CS_UPDATE_AVAILABLE')
-      if (pending) { shown = true; await openPane($, pending) }
+      if (pending) { shown = true; await openPane($, e.cwd, pending) }
     }
     return next(e)
   })
@@ -593,14 +638,23 @@ export function register(on: On, options: PluginOptions) {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE || version === undefined) return next(e)
     const { Box, Text, Button } = await $.ui.resolve(e)
+    // A lone pane draws no title of its own (the tab shows only with two or
+    // more), so the body opens with it. Version headings take the session
+    // colour cs recorded, as the status bar's name does; a continuation line
+    // (indented in the changelog) hangs under its bullet.
     return (
       <Box flexDirection="column" paddingX={1}>
+        <Text bold>{`cs ${version} is available`}</Text>
         {sections === undefined || sections.length === 0
-          ? <Text>{`Release notes could not be fetched at launch; the update is ${version}.`}</Text>
-          : sections.map((s, i) => (
-              <Box key={`v-${s.version}`} flexDirection="column" marginTop={i === 0 ? 0 : 1}>
-                <Text bold>{s.version}</Text>
-                {s.lines.map((line, j) => <Text key={`l-${s.version}-${j}`}>{line}</Text>)}
+          ? <Box marginTop={1}><Text>{`Release notes could not be fetched at launch; the update is ${version}.`}</Text></Box>
+          : sections.map(s => (
+              <Box key={`v-${s.version}`} flexDirection="column" marginTop={1}>
+                <Text bold color={accent}>{s.version}</Text>
+                {s.lines.map((line, j) => (
+                  <Box key={`l-${s.version}-${j}`} marginLeft={line.startsWith(' ') ? 2 : 0}>
+                    <Text>{line.startsWith(' ') ? line.trimStart() : line}</Text>
+                  </Box>
+                ))}
               </Box>
             ))}
         <Box marginTop={1}>
@@ -615,22 +669,33 @@ export function register(on: On, options: PluginOptions) {
 
 // The conversation cs launched is the one whose id cs recorded before the
 // launch; a teammate in the same directory reads the same file and does not
-// match. A directory without the file is not a cs session: no pane.
+// match. A directory without the file is not a cs session: no pane. The id
+// may be quoted (KEEP IN SYNC with ownsRotation in mods/cs-rotate).
 async function isLead($: EngineInterface, cwd: string): Promise<boolean> {
   let state: string
   try { state = await $.fs.read(`${cwd}/${STATE}`) } catch { return false }
-  const line = state.split('\n').find(l => l.startsWith('claude_session_id:'))
-  const recorded = line?.slice('claude_session_id:'.length).trim()
-  return recorded !== undefined && recorded !== '' && recorded === await $.session.id()
+  const lead = state.match(/^claude_session_id: *"?([^"\s]+)"?[ \t]*$/m)?.[1]
+  return lead !== undefined && lead === (await $.session.id())
 }
 
-async function openPane($: EngineInterface, pending: string) {
+// The session colour cs recorded, for the version headings; none is fine.
+async function sessionColor($: EngineInterface, cwd: string): Promise<string | undefined> {
+  try {
+    const state = await $.fs.read(`${cwd}/${STATE}`)
+    return state.match(/^claude_session_color: *"?([^"\s]+)"?[ \t]*$/m)?.[1]
+  } catch { return undefined }
+}
+
+async function openPane($: EngineInterface, cwd: string, pending: string) {
   version = pending
+  accent = await sessionColor($, cwd)
   const home = await $.env.get('HOME')
   let text = ''
   try { text = home ? await $.fs.read(NOTES(home, pending)) : '' } catch { text = '' }
   sections = parseSpan(text)
-  await $.ui.open({ id: PANE, title: `cs ${pending} is available`, closeOnEscape: true })
+  // focus is a request the surface grants only over an idle, empty composer;
+  // without it the keys stay with the prompt and `1` does nothing.
+  await $.ui.open({ id: PANE, title: `cs ${pending} is available`, focus: true, closeOnEscape: true })
 }
 
 async function runUpdate(_$: EngineInterface) {
@@ -770,18 +835,39 @@ Append to `mods/cs-update/test/register.test.ts`:
 ```ts
 test('1 runs cs -update once, by the exported path, with a ten-minute timeout, and reports the install', async () => {
   await start()
-  const key = buttons(await draw())[0]
-  const pressed = key.props.onPress()
-  // A second press while the first runs is ignored.
-  buttons(await draw())[0].props.onPress()
-  await pressed
+  // The key is gone from the redraw once pressed, so the callback is kept
+  // and pressed twice; the run is held in flight so the second press lands
+  // while the first is running.
+  let release!: (v: any) => void
+  ;($ as any).process.run = async (argv: string[], init: any) => { runs.push({ argv, init }); return new Promise(r => { release = r }) }
+  const press = buttons(await draw())[0].props.onPress
+  const first = press()
+  const second = press()
+  await Promise.resolve()
+  release({ exitCode: 0, stdout: '', stderr: '' })
+  await first; await second
   expect(runs).toHaveLength(1)
   expect(runs[0].argv).toEqual(['/opt/cs/bin/cs', '-update'])
   expect(runs[0].init).toMatchObject({ timeoutMs: 600000 })
   const words = texts(await draw()).join('\n')
-  expect(words).toContain('Installed 2026.99.3. Takes effect on your next launch.')
+  // Version-neutral: cs -update installs whatever is latest when pressed,
+  // which may be newer than the launch saw.
+  expect(words).toContain('Update finished. Takes effect on your next launch.')
   expect(buttons(await draw())).toHaveLength(0)
   expect(invalidated).toContain('ui.render')
+})
+
+test('two presses before the path lookup resolves still run once', async () => {
+  await start()
+  let giveBin!: (v: any) => void
+  ;($ as any).env.get = async (name: string) => name === 'CS_UPDATE_BIN' ? new Promise(r => { giveBin = r }) : envVars[name]
+  const press = buttons(await draw())[0].props.onPress
+  const a = press(); const b = press()
+  await Promise.resolve()
+  giveBin('/opt/cs/bin/cs')
+  await a; await b
+  ;($ as any).env.get = async (name: string) => envVars[name]
+  expect(runs).toHaveLength(1)
 })
 
 test('while the update runs the pane says so and hides the key', async () => {
@@ -789,6 +875,7 @@ test('while the update runs the pane says so and hides the key', async () => {
   let release!: (v: any) => void
   ;($ as any).process.run = async (argv: string[], init: any) => { runs.push({ argv, init }); return new Promise(r => { release = r }) }
   const pressed = buttons(await draw())[0].props.onPress()
+  await Promise.resolve()
   const words = texts(await draw()).join('\n')
   expect(words).toContain('updating')
   expect(buttons(await draw())).toHaveLength(0)
@@ -872,18 +959,22 @@ Footer (replace the `<Box marginTop={1}>` block in the Pane render):
 // it is read rather than flashed. The new files take effect on the next
 // launch: this claude and its loaded mods keep the old code.
 async function runUpdate($: EngineInterface) {
+  // Claimed before the first await: two presses in one tick must not both
+  // pass the guard and start two installers.
   if (phase === 'running' || phase === 'done') return
-  const bin = await $.env.get('CS_UPDATE_BIN')
-  if (!bin) {
-    phase = 'failed'; outcome = 'The launch did not say where cs is; run `cs -update` from a shell.'
-    $.ui.invalidate('ui.render'); return
-  }
   phase = 'running'; outcome = ''
   $.ui.invalidate('ui.render')
   try {
+    const bin = await $.env.get('CS_UPDATE_BIN')
+    if (!bin) {
+      phase = 'failed'; outcome = 'The launch did not say where cs is; run `cs -update` from a shell.'
+      $.ui.invalidate('ui.render'); return
+    }
     const { exitCode, stderr } = await $.process.run([bin, '-update'], { timeoutMs: UPDATE_TIMEOUT_MS })
     if (exitCode === 0) {
-      phase = 'done'; outcome = `Installed ${version}. Takes effect on your next launch.`
+      // Version-neutral: cs -update resolves the latest release when it runs,
+      // which may be newer than the one this launch saw.
+      phase = 'done'; outcome = 'Update finished. Takes effect on your next launch.'
     } else {
       const tail = stderr.split('\n').filter(l => l.trim() !== '').slice(-5).join('\n')
       phase = 'failed'; outcome = `cs -update exited ${exitCode}.\n${tail}`
@@ -930,22 +1021,29 @@ test('the mod registers /cs-update at load', async () => {
   expect(commands.map(c => c.name)).toEqual(['cs-update'])
 })
 
-test('/cs-update reopens the pane after a dismiss, and with the option off', async () => {
+const runCommand = () => hooks['command.run:cs-update']($, { command: 'cs-update', args: '', cwd: '/work' }, async () => ({ text: 'unhandled' }))
+
+test('/cs-update reopens the pane after a dismiss, and with the option off, and answers the command', async () => {
   load({ [OPTION]: false })
   await start()
   expect(opens()).toHaveLength(0)
-  const out = await hooks['command.run:cs-update']($, { command: 'cs-update', args: '' }, async () => 'ran')
-  expect(out).toBe('ran')
+  expect(await runCommand()).toEqual({ text: '' })
   expect(opens()).toHaveLength(1)
   expect(texts(await draw()).join('\n')).toContain('2026.99.3')
 })
 
-test('/cs-update with nothing pending says so and opens nothing', async () => {
+test('/cs-update with nothing pending says so as its output and opens nothing', async () => {
   delete envVars.CS_UPDATE_AVAILABLE
   await start()
-  await hooks['command.run:cs-update']($, { command: 'cs-update', args: '' }, async () => 'ran')
+  expect(await runCommand()).toEqual({ text: 'This launch found no newer cs; the check runs again at the next launch.' })
   expect(opens()).toHaveLength(0)
-  expect(toasts).toEqual(['cs-update: this launch found no newer cs; the check runs again at the next launch'])
+})
+
+test('/cs-update in a teammate opens nothing', async () => {
+  sessionId = 'uuid-teammate'
+  await start()
+  expect(await runCommand()).toEqual({ text: 'The release-notes pane belongs to the conversation cs launched.' })
+  expect(opens()).toHaveLength(0)
 })
 ```
 
@@ -975,17 +1073,19 @@ Add the hook after the Pane render hook:
 
 ```tsx
   // On demand: the same pane, whether or not the launch opened it (the
-  // option off, or dismissed). A launch that found nothing pending has
-  // nothing to show, and says so rather than opening an empty pane.
-  on('command.run', { command: 'cs-update' }, async ($, e, next) => {
+  // option off, or dismissed). A registered command is answered with
+  // `{ text }` (the contract; an unanswered run prints "no hook answered"),
+  // so the pane is the answer and the text is empty. A launch that found
+  // nothing pending has nothing to show, and says so instead; a teammate
+  // (which inherits the exports) is refused as the launch pane refuses it.
+  on('command.run', { command: 'cs-update' }, async ($, e) => {
+    const cwd = await $.session.cwd()
+    if (!(await isLead($, cwd))) return { text: 'The release-notes pane belongs to the conversation cs launched.' }
     const pending = await $.env.get('CS_UPDATE_AVAILABLE')
-    if (!pending) {
-      $.ui.toast('cs-update: this launch found no newer cs; the check runs again at the next launch')
-      return next(e)
-    }
+    if (!pending) return { text: 'This launch found no newer cs; the check runs again at the next launch.' }
     shown = true
-    await openPane($, pending)
-    return next(e)
+    await openPane($, cwd, pending)
+    return { text: '' }
   })
 ```
 
@@ -1102,21 +1202,27 @@ sed -n '1,/^## 2026\.9\.1[0-9]$/p' CHANGELOG.md | sed '$d' > ~/.cache/cs/update-
 cs cs-update-live
 ```
 
-Expected: the launch banner shows `2099.1.1 available`; a few seconds in, the pane opens titled `cs 2099.1.1 is available` with the sections and `1: update now   Esc: later`. Screenshot to `scratchpad/cs-update-live/pane.png` (imgcat to see it). Press Esc: closes. Type `/cs-update`: reopens. Toggle `/config` → `cs-update.showReleaseNotes` off, `/clear`, confirm no pane; back on.
+The terminal must be at least 144 columns wide: below that the engine holds a pane a plugin opens on its own (measured for cs-rotate's preview). Expected: the launch banner shows `2099.1.1 available`; a few seconds in, the pane opens with `cs 2099.1.1 is available` as its first body line (a lone pane draws no tab title), the version headings in the session colour, the sections, and `1: update now   Esc: later`; the pane has the keys (focus was requested over an idle, empty composer). Screenshot to `scratchpad/cs-update-live/pane.png` (imgcat to see it). Press Esc: closes. Type `/cs-update`: reopens, and the transcript shows no "no hook answered" line. Exit.
+
+The option: `/config`, set `cs-update.showReleaseNotes` off, exit, `cs cs-update-live` again: no pane at launch (a `/clear` proves nothing here, since `session.start` does not fire on `/clear` and the pane was already shown). `/cs-update` still opens it. Set it back on.
 
 Then remove the seed (`rm ~/.cache/cs/update-check ~/.cache/cs/update-notes-*2099*`) and `cs -rm cs-update-live`.
 
-- [ ] **Step 4: Live: a real in-place update**
+- [ ] **Step 4: Live: the mod's own file overwritten under an open pane**
 
-From an installed cs one release behind (check out the previous tag into a scratch clone, `./install.sh` from it, or on the Mac Mini), launch a throwaway session, wait for the pane, press `1`. Watch: the pane shows `updating…`, then `Installed <v>. Takes effect on your next launch.`; the engine keeps running with the pane open; no crash, no mod reload mid-pane; `cs -version` from a shell shows the new version; the next `cs <name>` runs the new code. Record what happened, including anything surprising, in `scratchpad/cs-update-live/notes.md` and the narrative.
+No published release carries this mod yet, so a real `cs -update` would not touch `~/.claude/skills/cs-update/` and proves nothing about self-overwrite. Measure it directly: with the seeded pane from Step 3 open, from another shell change one comment in the checkout's `mods/cs-update/hooks/register.tsx`, run `./install.sh > /dev/null` (which rewrites the deployed module), then `git checkout -- mods/cs-update/hooks/register.tsx && ./install.sh > /dev/null`. Watch the engine for the whole minute: the pane stays drawn and answers Esc, no reload notice, no crash; `claude --debug` output, if used, shows what the loader did. Record in `scratchpad/cs-update-live/notes.md`.
+
+- [ ] **Step 5: Live: the key runs the real update**
+
+With the seed still in place, press `1` in the pane. Expected: `updating…`, then either `Update finished. Takes effect on your next launch.` (the installer fetched the latest published release, which is older than or equal to this checkout's version; that is fine, the path is what is measured) or the non-zero arm with cs's own message. The engine keeps running with the pane open. After Esc and exit, `./install.sh` from the checkout again, since the real update replaced `bin/cs` with the published release. Record the outcome.
 
 If the engine reloads the mod or misbehaves when its own file is overwritten, stop and report before merging: the fix is a design change (for example, copying the mod aside before the update), not a patch.
 
-- [ ] **Step 5: Foreign-model review**
+- [ ] **Step 6: Foreign-model review**
 
 Offer `/codex:review` on the branch to Alex (Alex runs it). Fold findings; re-run the suites touched.
 
-- [ ] **Step 6: Hand the merge to Alex**
+- [ ] **Step 7: Hand the merge to Alex**
 
 Report: branch, commits, suite counts, the live findings with the screenshot, what was skipped (ghost, if so). Alex decides on `/finish`.
 
@@ -1126,4 +1232,5 @@ Report: branch, commits, suite counts, the live findings with the screenshot, wh
 
 - **Spec coverage.** Decisions 1 (second mod, deployment) → Task 3; 2 (env verdict, no version logic) → Tasks 2, 3; 3 (full cache) → Task 1; 4 (once per load, `/cs-update`) → Tasks 3, 5; 5 (lead only) → Task 3 (`isLead` by the state file, since `session.start` carries no `agentId`; the spec's wording is corrected in the same commit as Task 3); 6 (button, `CS_UPDATE_BIN`, outcome kept) → Task 4; 7 (in-place effect, measured) → Task 7; 8 (`/config` toggle) → Tasks 3, 5; 9 (look) → Task 3's render, with the scroll question left to Task 7's measurement. Error handling section → Tasks 3, 4, 5 tests. Out of scope → untouched.
 - **Placeholders.** None; every step carries its code.
+- **Codex plan review (2026-09-22), folded.** Fixture boundary (Task 1), array-blind test walkers (Task 3), the double-press test and the un-restored runner (Task 4), the guard before the first await (Task 4), `command.run` answering `{ text }` and lead-only (Task 5), exports cleared before the conditional and a no-network "current" case (Task 2), banner fixtures seeding the full file (Task 1), the quoted-id parse (Task 3), title in the body + session-colour headings + hanging indent + `focus: true` (Task 3), a version-neutral success line (Task 4), the option measured across launches and the self-overwrite measured directly (Task 7). Left as is: the `sed 's/\x1b…'` strip in the bun-runner test matches `tests/test_mod_rotate.sh`, which is green on the macOS lane; the assertions do not depend on the strip.
 - **Type consistency.** `Section = { version, lines }` in Task 3 is what Task 4's render iterates; `PANE`, `OPTION`, `HEARTBEAT`, `NOTES`, `UPDATE_TIMEOUT_MS`, `parseSpan`, `stripInline`, `runUpdate`, `openPane`, `isLead` are named identically across Tasks 3 to 5; the fake `$` in Task 3's test file already carries `process.run` and `command.register` for Tasks 4 and 5.
