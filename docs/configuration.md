@@ -235,6 +235,13 @@ export CS_NO_TASK_TOOLS="1"
 # cs keeps a value already in the shell (0 keeps function hooks off).
 export CS_NO_FUNCTION_HOOKS="1"
 
+# Exported by a cs launch, never set by hand: the version a newer cs was
+# found at and the path of the running cs. The cs-update mod reads them to
+# draw the release-notes pane and to run `cs -update` from inside the
+# session. Absent when nothing is pending.
+CS_UPDATE_AVAILABLE
+CS_UPDATE_BIN
+
 # Override the tmux binary cs -spawn uses (default: tmux on PATH)
 export CS_TMUX_BIN="/opt/homebrew/bin/tmux"
 
@@ -243,6 +250,11 @@ export CS_TMUX_BIN="/opt/homebrew/bin/tmux"
 # macOS keychain and the encrypted file
 export CS_PLATFORM_OVERRIDE="linux"   # macos, wsl, or linux
 ```
+
+## In-session switches
+
+The release-notes pane is a Claude Code `/config` row, `cs-update.showReleaseNotes`
+(on by default). Off, a launch opens no pane; `/cs-update` still opens it.
 
 ## Environment variables cs sets for you
 

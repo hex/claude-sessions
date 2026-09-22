@@ -4,6 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Added
+- Release notes in the session. When a launch finds a newer cs, the new `cs-update` mod opens one pane with the full changelog for every version above the installed one, once per launch, in the conversation cs launched. `1` runs `cs -update` in place through the engine's process runner (no shell; the path and the version come from the launch, never from the mod's own check) and the pane keeps the outcome until closed, since the new files take effect on the next launch. `Esc` closes it; `/cs-update` reopens it; `/config` → `cs-update.showReleaseNotes` turns the launch pane off. The notify check now caches the changelog span beside the summaries (`~/.cache/cs/update-notes-full-<version>`), and a launch with an update pending exports `CS_UPDATE_AVAILABLE` and `CS_UPDATE_BIN`.
+
 ## 2026.9.18
 
 ### Added
