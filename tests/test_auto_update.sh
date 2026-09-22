@@ -425,6 +425,50 @@ test_launch_banner_quiet_on_empty_notes_cache() {
     assert_output_not_contains "$out" "earlier versions" "no collapse line from the tombstone" || return 1
 }
 
+# The cs-update mod reads the launch's verdict from the environment: which
+# version is pending and where cs lives, since `$.process.run` takes no shell
+# and the claude process's PATH is not the launching shell's. Neither name is
+# exported when nothing is pending, so the mod stays silent by absence.
+test_launch_exports_update_verdict_to_the_mod() {
+    local stub="$TEST_TMPDIR/claude-env-stub"
+    cat > "$stub" << 'SCRIPT'
+#!/bin/bash
+echo "UPDATE_AVAILABLE=${CS_UPDATE_AVAILABLE-unset}"
+echo "UPDATE_BIN=${CS_UPDATE_BIN-unset}"
+exit 0
+SCRIPT
+    chmod +x "$stub"
+    export HOME="$TEST_TMPDIR/home-export"
+    mkdir -p "$HOME/.cache/cs"
+    printf '%s 2026.99.3\n' "$(date +%s)" > "$HOME/.cache/cs/update-check"
+    : > "$HOME/.cache/cs/update-notes-2026.99.3"
+    : > "$HOME/.cache/cs/update-notes-full-2026.99.3"
+    unset CS_NO_UPDATE_CHECK
+    local out
+    out=$(CLAUDE_CODE_BIN="$stub" "$CS_BIN" "export-verdict-session" < /dev/null 2>&1) || {
+        export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"; return 1
+    }
+    export CS_NO_UPDATE_CHECK=1
+    assert_output_contains "$out" "UPDATE_AVAILABLE=2026.99.3" "the pending version is exported" || { export HOME="$ORIGINAL_HOME"; return 1; }
+    local bin_line
+    bin_line=$(printf '%s\n' "$out" | sed -n 's/^UPDATE_BIN=//p' | head -1)
+    [ "$bin_line" != "unset" ] && [ -n "$bin_line" ] || { echo "  FAIL: CS_UPDATE_BIN not exported"; export HOME="$ORIGINAL_HOME"; return 1; }
+    [ -x "$bin_line" ] || { echo "  FAIL: CS_UPDATE_BIN is not an executable path: $bin_line"; export HOME="$ORIGINAL_HOME"; return 1; }
+    case "$bin_line" in /*) ;; *) echo "  FAIL: CS_UPDATE_BIN is not absolute: $bin_line"; export HOME="$ORIGINAL_HOME"; return 1 ;; esac
+    # And nothing pending exports nothing, even when the launching shell
+    # carries a parent launch's verdict (a nested cs): both names are cleared
+    # before the conditional export. CS_NO_UPDATE_CHECK=1 is the no-network
+    # way to have nothing pending: check_update_notify returns before it
+    # reads the cache or asks GitHub, so UPDATE_AVAILABLE stays empty.
+    export CS_NO_UPDATE_CHECK=1
+    out=$(CS_UPDATE_AVAILABLE=2026.1.1 CS_UPDATE_BIN=/stale/cs CLAUDE_CODE_BIN="$stub" "$CS_BIN" "export-current-session" < /dev/null 2>&1) || {
+        export HOME="$ORIGINAL_HOME"; return 1
+    }
+    export HOME="$ORIGINAL_HOME"
+    assert_output_contains "$out" "UPDATE_AVAILABLE=unset" "an inherited version is cleared when nothing is pending" || return 1
+    assert_output_contains "$out" "UPDATE_BIN=unset" "and so is an inherited path" || return 1
+}
+
 test_notify_writes_notes_cache() {
     local fix="$TEST_TMPDIR/CHANGELOG-fixture.md" stub="$TEST_TMPDIR/stub-bin"
     _write_fixture_changelog "$fix"
@@ -507,6 +551,7 @@ run_test test_check_shows_rendered_span
 run_test test_check_falls_back_when_fetch_fails
 run_test test_launch_banner_shows_notes_card
 run_test test_launch_banner_quiet_on_empty_notes_cache
+run_test test_launch_exports_update_verdict_to_the_mod
 run_test test_notify_writes_notes_cache
 run_test test_notify_writes_empty_full_cache_when_fetch_fails
 
