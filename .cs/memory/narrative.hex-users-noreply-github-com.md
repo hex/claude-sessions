@@ -1806,3 +1806,14 @@ Codex plan review returned 16 findings; 15 folded (d363b06), the `sed 's/\x1b…
   to 2026.9.20 uncommitted; install 54/54; docs checked (no issues);
   /simplify skipped (bump-only tree); /code-review + run_all + cargo
   running.
+- Gates: CI 6/6 on 66a4972, run_all 68/68, cargo 350/350. /code-review's
+  one finding ("cs_base dead") was false: lib/75-launch.sh:281 still reads
+  it for CS_SECRETS_SESSION; CI shellcheck green agrees. Notes approved;
+  release commit 46b2760 pushed; CI watch in background; tag after green.
+- Trap: `gh run watch --exit-status` returned rc=1 with the macOS bash job
+  still in_progress (empty conclusion), twice today. Read per-job
+  conclusions and count six `success`; never trust the watch's rc alone.
+  CI 6/6 on 46b2760; v2026.9.20 created with --target; signing workflow
+  watching.
+- v2026.9.20 released: signing workflow success, 12 assets, installed
+  via cs -update (cs 2026.9.20, drift OK, artifacts stamped).
