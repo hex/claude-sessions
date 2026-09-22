@@ -2,7 +2,8 @@
 parent: 871dc9b2-d6e5-4018-8128-0c5bb4019329
 created: 2026-09-22T11:23:18Z
 purpose: Hand two built branches (fix/tui-scan-off-render-thread, feat/update-mod) through Alex's /codex:review and /finish; then the git-config follow-up or the rotate polish on Alex's yes
-status: unconsumed
+status: consumed
+consumed_by: 524ba3e7-6207-4c5a-af51-85392a3f541f
 ---
 
 # Continuation: finish the TUI scan fix and the cs-update mod
