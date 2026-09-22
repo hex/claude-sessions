@@ -1675,3 +1675,19 @@ Codex plan review returned 16 findings; 15 folded (d363b06), the `sed 's/\x1b…
 - Follow-up worth doing: read `.git/config` in-process instead of forking git per session (91 forks/scan), or key a remote cache on the config mtime.
 - Before/after on a settled machine (load ~18, same probe, 30 Down presses each, scratchpad/tui-ab.sh): pre-fix max 936 ms, mean 128 ms, three stalls >340 ms during scan bursts; fixed max 145 ms, mean 65 ms, no stall. The 14 s scans happen when the machine is loaded (several claude sessions), which is Alex's normal state; on a quiet machine a scan is ~1-2 s, so the pre-fix stalls are shorter but still there.
 - Advisor caught a regression in the first cut: `scan_pending` inside `has_timed_state` made the loop redraw at 10 fps for the whole scan. Fixed (3rd commit on the branch): the pending scan only shortens the poll timeout; `drain_scans` is the sole repaint trigger. Idle TUI CPU 5.6% -> 2.5% of a core (60 s samples, different load, so indicative). CHANGELOG Unreleased entry added. Still on the main thread: the startup scan in main.rs:35 (out of scope, same cost on a loaded machine). Handoff note for Alex: move scratchpad/ aside before `/codex:review --base main --scope branch`.
+
+## 2026-09-22 (rotation 524ba3e7): Codex review of fix/tui-scan-off-render-thread folded
+
+- Codex P1 (correct): `drain_scans` ran unconditionally in the loop, so a
+  worker result could replace the table under a ConfirmDelete/Rename dialog;
+  with the selected session gone from disk the selection fell back to another
+  row and `execute_delete`/`execute_rename` act on the current selection.
+  The old synchronous path was gated on `Mode::Normal` at the request; the
+  worker moved the apply past that gate.
+- Fix: `drain_scans` returns false unless `mode == Mode::Normal`; the result
+  waits in the channel. Cost: `scan_in_flight()` stays true under a modal,
+  so the poll timeout is 100 ms (not a repaint) until the dialog closes.
+  Test `a_rescan_finishing_under_a_modal_waits_for_normal_mode` watched red
+  (left 1, right 2) before the gate. 350/350, clippy 8 = main, installed.
+- scratchpad/ is parked at the old session's scratch dir
+  (871dc9b2.../scratchpad-repo); move it back after /finish.
