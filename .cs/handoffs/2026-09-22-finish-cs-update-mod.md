@@ -2,7 +2,8 @@
 parent: 8e703b12-5aaf-4667-be7f-da821bd04022
 created: 2026-09-22T10:24:01Z
 purpose: Hand feat/update-mod (the cs-update mod, built and live-verified) through Alex's /codex:review and /finish, then take up the cs-rotate polish once Alex says yes to its design
-status: unconsumed
+status: consumed
+consumed_by: 871dc9b2-d6e5-4018-8128-0c5bb4019329
 ---
 
 # Continuation: finish the cs-update mod, then the rotate polish
