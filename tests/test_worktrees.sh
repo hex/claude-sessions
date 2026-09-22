@@ -261,8 +261,7 @@ test_worktree_launch_exports_base_identity() {
         case "$env_out" in *"CLAUDE_SESSION_NAME=myproj@fix-auth"*) break ;; esac
     done
     assert_output_contains "$env_out" "CLAUDE_SESSION_NAME=myproj@fix-auth" "display identity is the task name" || return 1
-    assert_output_contains "$env_out" "CLAUDE_CODE_TASK_LIST_ID=myproj" "task list is shared with the base" || return 1
-    assert_output_not_contains "$env_out" "CLAUDE_CODE_TASK_LIST_ID=myproj@" "task list id must be the base, not the worktree name" || return 1
+    assert_output_contains "$env_out" "CLAUDE_CODE_TASK_LIST_ID=myproj@fix-auth" "a feature keeps its own task list, not the base's" || return 1
     assert_output_contains "$env_out" "CS_SECRETS_SESSION=myproj" "secrets stay keyed to the base" || return 1
 }
 

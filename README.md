@@ -314,7 +314,7 @@ user's confirmation that a worktree, a branch and a window are about to
 exist.
 
 Each worktree is a full cs session (own conversation, color, crash
-recovery) that shares the base session's task list and secrets.
+recovery, task list) that shares the base session's secrets.
 
 cs never commits for you: retirement refuses dirty checkouts and tells you
 what to commit, and creating a feature from a base with uncommitted changes asks

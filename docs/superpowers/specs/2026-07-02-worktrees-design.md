@@ -157,7 +157,7 @@ the unmerged `cs/fix-auth` branch. Never silent.
 |---|---|---|
 | `CLAUDE_SESSION_NAME` | `myproj@fix-auth` | distinct pill/logs/hook gating |
 | Claude conversation | own (cwd-bound transcript discovery) | parallel conversations for free |
-| `CLAUDE_CODE_TASK_LIST_ID` | base `myproj` | one shared task list coordinates parallel work |
+| `CLAUDE_CODE_TASK_LIST_ID` | own `myproj@fix-auth` | a feature's tasks are its own; sharing the base list showed the base's work inside every feature (reversed 2026-09-22) |
 | Secrets | base `myproj` (`cs:<session>:<name>`, bin/cs-secrets:104) | keychain entries are session-scoped, not task-scoped |
 | Tracked `.cs/` | branch checkout | forks with the code, merges back with it |
 | `.cs/local/`, PID lock, color | own, fresh | machine-local partition already guarantees this |
