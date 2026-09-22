@@ -1,140 +1,142 @@
 - [GitHub repo analysis: ask before cloning](feedback_github_repo_analysis.md): AskUserQuestion picks depth (clone+source vs README-only) before the first WebFetch
 - [Subagent final message is the deliverable](feedback_subagent_final_message_deliverable.md): spawn prompts demand the deliverable IN the final message
-- [Agent-team task visibility](feedback_agent_team_task_visibility.md): lead's TaskCreate can land in a session-global list teammates cannot see; coordinate by message content, not task IDs
+- [Agent-team task visibility](feedback_agent_team_task_visibility.md): lead's TaskCreate can land in a session-global list teammates cannot see; coordinate by message content, not IDs
 - [Destructive commands need explicit targets](feedback_destructive_commands_explicit_targets.md): capture IDs at creation; never experiment on the live tmux server
-- [Visual design direction](user_visual_design_direction.md): match claude's own UI chrome, pixel-sample screenshot swatches, ship small and react; EXCEPT cs-tui: btop-style maximalism
-- [Light terminal](user_light_terminal.md): Alex's terminal is light/cream; never assume a dark canvas for cs UI/colour work; route via CS_TERM_THEME
-- [Fold into existing hook](feedback_fold_into_existing_hook.md): add event behaviour to the existing hook for that event, not a new hook file (5-site registration cost)
-- [cs bash 3.2 + BSD compatibility](feedback_bash32_compatibility.md): cs AND tests/ run on stock bash 3.2 + BSD; no bash 4+ (local -A, printf %(...)T, source <()), no GNU-only sed/awk/stat
+- [Visual design direction](user_visual_design_direction.md): match claude's own UI chrome, pixel-sample screenshot swatches, ship small and react; EXCEPT cs-tui: btop maximalism
+- [Light terminal](user_light_terminal.md): Alex's terminal is light/cream; never assume a dark canvas for cs UI/colour work; use CS_TERM_THEME
+- [Fold into existing hook](feedback_fold_into_existing_hook.md): add behaviour to the existing hook for that event, not a new hook file (5-site registration cost)
+- [cs bash 3.2 + BSD compatibility](feedback_bash32_compatibility.md): cs AND tests/ run on stock bash 3.2 + BSD; no bash 4+ (local -A, printf %(...)T, source <()), no GNU sed/awk/stat
 - [cs CI needs a git identity](project_ci_git_identity.md): bare GitHub runners auto-detect an empty ident name, so cs's internal commits fail
-- [cs memory is Claude Code's, not cs's](project_cs_memory_ownership.md): cs only redirects the path; do NOT regenerate MEMORY.md or stamp frontmatter from cs; attribute via git log
-- [cs multi-user safety](project_cs_multi_user_safety.md): classify every new session-dir write path (.cs/local/, union stream, JSON driver); file dates from git, never the clock
-- [Design discussion style](feedback_design_discussion_style.md): open-ended design → prose + ELI5 iteration, not AskUserQuestion menus; AskUserQuestion is fine for a concrete either/or
-- [Narrative; alex-geana-erepubliklabs-com (lab notebook)](narrative.alex-geana-erepubliklabs-com.md): looser-bar work in progress; its owner reads it whole on resume
+- [cs memory is Claude Code's, not cs's](project_cs_memory_ownership.md): cs only redirects the path; do NOT regenerate MEMORY.md or stamp frontmatter from cs; attribute by git log
+- [cs multi-user safety](project_cs_multi_user_safety.md): classify every new session-dir write path (.cs/local/, union stream, JSON driver); file dates from git, not the clock
+- [Design discussion style](feedback_design_discussion_style.md): open-ended design → prose + ELI5 iteration, not AskUserQuestion menus; AskUserQuestion only for a concrete either/or
+- [Narrative; alex-geana-erepubliklabs-com](narrative.alex-geana-erepubliklabs-com.md): looser-bar lab notebook; its owner reads it whole on resume
 - [cs test harness: run_test disables errexit](project_cs_test_harness_errexit.md): every assert needs `|| return 1`; subshell fix queued as follow-up B
 - [Plan code: fixture-reaches-branch check](feedback_plan_code_fixture_check.md): 7/7 defects were plan-born; fix dispatches ARE plans; every dispatch keeps 'flag, don't silently fix'
 - [cs dev repo gitignores .cs/ wholesale](project_cs_dev_repo_ignores_cs.md): narrative/memory machine-local; tracked .cs files need `git commit -- path`; never `git checkout <sha> -- .`
 - [cs command-substitution traps](project_cs_command_substitution_traps.md): captured functions can't warn to stdout or exit; prompts/exits live in the caller, gates use cs_interactive()
-- [pipefail SIGPIPE early-exit class](project_pipefail_sigpipe.md): early-exiting consumers (grep -q, sed q) silently kill cs at exit 141 on >64KB input; read files directly, probe >64KB
+- [pipefail SIGPIPE early-exit class](project_pipefail_sigpipe.md): early-exiting consumers (grep -q, sed q) silently kill cs at exit 141 on >64KB input; read files, probe >64KB
 - [cs flag convention](project_cs_flag_convention.md): single-dash for cs verbs (-rm, -secrets, -queue), double-dash + short for POSIX modifiers (--force/-f); --merge is the lone outlier
-- [Cross-session comms roadmap](project_cross_session_comms.md): COMPLETE; presence (cs -live/-status), mailbox (cs -msg) and spawner (cs -spawn) shipped
+- [Cross-session comms roadmap](project_cross_session_comms.md): COMPLETE; presence (cs -live/-status), mailbox (cs -msg), spawner (cs -spawn) shipped
 - [Review asserts the property](feedback_review_asserts_property.md): assert the row fits / the value is right, not 'no crash'; re-verify agent-reported green yourself
-- [Claude Code bundle is the contract](reference_claude_code_bundle.md): grep the installed bundle (~/.local/share/claude/versions/<v>), never public docs, for hook/settings surfaces
+- [Claude Code bundle is the contract](reference_claude_code_bundle.md): grep the installed bundle (~/.local/share/claude/versions/<v>), never public docs, for hook/settings
 - [No foreground sleep in dispatched agents](project_subagent_no_foreground_sleep.md): the harness blocks it and a polling reviewer hangs for good; every long dispatch must forbid it
 - [SDD scratch collides across features](project_sdd_scratch_collisions.md): bare task-N files in .superpowers/sdd/ satisfy existence waiters with stale data
-- [Teammate pane hygiene](feedback_teammate_pane_hygiene.md): named agents park idle holding tmux panes; Alex wants each impl/review pair shut down the moment its task completes
-- [Polish before merge](feedback_polish_before_merge.md): at merge gates after a clean final review Alex picks polish-first (4/4); recommend it first
-- [Merge-gate delegation](feedback_merge_gate_delegation.md): drains auto-merge small green changes and gate core/deploy/design; nothing is ever PUSHED; authority ends at a local merge
-- [Queue-gate turn skew](project_queue_gate_turn_skew.md): drains advance on every turn end and count gated turns as failures; keep gates inside the turn via AskUserQuestion
-- [assert_file_contains is regex](project_assert_file_contains_regex.md): BRE, line-based, case-sensitive; escape brackets; copy the pin FROM the production line, never the reverse
+- [Teammate pane hygiene](feedback_teammate_pane_hygiene.md): named agents park idle holding tmux panes; Alex wants each impl/review pair shut down when its task completes
+- [Polish before merge](feedback_polish_before_merge.md): at merge gates after a clean final review Alex picks polish-first (4/4); offer it first
+- [Merge-gate delegation](feedback_merge_gate_delegation.md): drains auto-merge small green changes, gate core/deploy/design; nothing is ever PUSHED; authority ends at a local merge
+- [Queue-gate turn skew](project_queue_gate_turn_skew.md): drains advance on every turn end and count gated turns as failures; keep gates inside the turn (AskUserQuestion)
+- [assert_file_contains is regex](project_assert_file_contains_regex.md): BRE, line-based, case-sensitive; escape brackets; copy the pin FROM the production line, never reversed
 - [Skill surfaces over cs verbs](user_prefers_skill_surfaces.md): RULE: fewest cs verbs; every capability reachable as a skill/plugin/command; verbs are plumbing
 - [tui cargo fmt is unsafe](project_tui_cargo_fmt_unsafe.md): crate never fmt-clean; bare `cargo fmt` sweeps ~500 unrelated lines; hand-match style instead
 - [.claude/ git quirks](project_claude_dir_git_quirks.md): release.md is force-tracked inside gitignored .claude/; git add exits 1 yet stages; trust git status
-- [tmux target anchor split](project_tmux_target_anchor_split.md): 3.6a takes '=name' on resolvers, rejects it on set/show-option; plain `cs` is safe ONLY once existence is established
-- [Empty name resolves to sessions root](project_empty_name_root_deletion.md): "" passes the traversal guard to the sessions root (`cs -rm victim ""` deleted all); reject empty names
+- [tmux target anchor split](project_tmux_target_anchor_split.md): 3.6a takes '=name' on resolvers, rejects it on set/show-option; plain name is safe ONLY once existence is proven
+- [Empty name resolves to sessions root](project_empty_name_root_deletion.md): "" passes the traversal guard to the sessions root (`cs -rm victim ""` deleted all); reject empty
 - [TUI byte-count torn files](project_tui_byte_count_torn_files.md): read_to_string errs on invalid UTF-8 and unwrap_or_default() empties the WHOLE file; count newlines via fs::read
-- [Retire benign hardening](feedback_retire_benign_hardening.md): benign-by-design concerns get an in-code "do not re-fix" note and leave the backlog, not parked
+- [Retire benign hardening](feedback_retire_benign_hardening.md): benign-by-design concerns get an in-code "do not re-fix" note and leave the backlog
 - [Statusline memo inheritance trap](project_statusline_memo_inheritance.md): an inherited env var of the same name seeds a bare global memo; ready-flag, reset at main(), 10#-normalise
-- [cs single launch-prompt slot](project_cs_launch_prompt_slot.md): one auto-run-at-LAUNCH channel (claude's positional prompt); actions compete by precedence; asyncRewake exit 2 is a 2nd
-- [Wording-rename long tail](project_wording_rename_surfaces.md): a user-facing rename spans lib strings, hook contracts, generated READMEs, errors, TUI labels and docs
-- [Windows support REMOVED](project_windows_support_state.md): dropped 2026-08-08; macOS + Linux/WSL2 only; never re-add msys arms, .exe naming, the Windows CI lane or WCM
-- [Release gate skips CI](project_release_gate_skips_ci.md): Alex's shape: skip the repeat local run, push the release commit, tag ONLY after its CI is green, with --target <full sha>
+- [cs single launch-prompt slot](project_cs_launch_prompt_slot.md): one auto-run-at-LAUNCH channel (claude's positional prompt); actions compete by precedence; asyncRewake exit 2 is another
+- [Wording-rename long tail](project_wording_rename_surfaces.md): a user-facing rename spans lib strings, hook contracts, generated READMEs, errors, TUI labels, docs
+- [Windows support REMOVED](project_windows_support_state.md): dropped 2026-08-08; macOS + Linux/WSL2 only; never re-add msys arms, .exe naming, the Windows CI lane, WCM
+- [Release gate skips CI](project_release_gate_skips_ci.md): Alex's shape: skip the repeat local run, push the release commit, tag ONLY after its CI is green, --target <full sha>
 - [Backend dispatch silent no-op](project_backend_dispatch_silent_noop.md): a bash case with no default arm silently no-ops an unknown value; CI-platform-safe != runtime-platform-safe
-- [Subagent fork exhaustion](project_subagent_fork_exhaustion.md): long agent-heavy sessions exhaust Agent-tool panes ("fork failed"); codex node-subprocess + Bash still work
+- [Subagent fork exhaustion](project_subagent_fork_exhaustion.md): long agent-heavy sessions exhaust Agent-tool panes ("fork failed"); codex subprocess + Bash still work
 - [CRLF's last line is clean](project_crlf_last_line_clean.md): jq.exe CRLF corrupts every item but the LAST, so a passing final item never rules CRLF out
 - [Background the CI poll](feedback_background_the_ci_poll.md): never foreground-poll a ~15-min lane; shim the platform locally instead of pushing to learn
-- [Validate after the transform](project_validate_after_transform.md): close the class structurally over a deny-list; else validate the OUTPUT, test BOTH directions, on real data
+- [gh run watch exits early](project_gh_run_watch_early_exit.md): rc=1 while a job is still in_progress; count per-job successes, never the watch's rc
+- [Validate after the transform](project_validate_after_transform.md): close the class structurally over a deny-list; else validate the OUTPUT, test BOTH directions on real data
 - [Verify the mutation landed](project_verify_mutation_landed.md): a green mutation test is meaningless until you confirm the sed/perl actually changed the file
-- [Hold for adversarial review](feedback_hold_for_adversarial_review.md): Alex holds for an independent Fable review even with gates green, NOT only security work; wait for it on any release
-- [Subagent idle is not dead](project_subagent_idle_not_dead.md): never judge by mtime or an unanswered ping; NAMED agents are tmux-backed; past a time box re-dispatch UNNAMED or codex
+- [Hold for adversarial review](feedback_hold_for_adversarial_review.md): Alex holds for an independent Fable review even with gates green, NOT only security work; wait per release
+- [Subagent idle is not dead](project_subagent_idle_not_dead.md): never judge by mtime or an unanswered ping; NAMED agents are tmux-backed; past a time box re-dispatch UNNAMED
 - [SessionEnd source asymmetry](project_sessionend_source_asymmetry.md): a `/clear` ends as `user_exit`, not `clear`; only SessionStart tells rotation from quit; lineage logic lives there
-- [/code-review level arg ignored](project_code_review_skill_is_pr_shaped.md): `high` ran at LOW (1 pass, no verify); read the agent brief for the real level, else Step 4b fallback
-- [No real identities in fixtures](feedback_no_real_identities_in_fixtures.md): never a real name, email or handle in fixtures, tests, comments or docs; use example.com placeholders
+- [/code-review level arg ignored](project_code_review_skill_is_pr_shaped.md): `high` ran at LOW (1 pass, no verify); read the agent brief for the real level, else Step 4b
+- [No real identities in fixtures](feedback_no_real_identities_in_fixtures.md): never a real name, email or handle in fixtures, tests, comments or docs; example.com placeholders
 - [Session narrative; hex-users-noreply-github-com (lab notebook)](narrative.hex-users-noreply-github-com.md): looser-bar work-in-progress; its owner reads it in full on resume
-- [Secret-shaped fixtures vs push protection](project_secret_fixtures_push_protection.md): GH013 rejects a literal credential pattern even in a fixture; build tokens at runtime; never unblock
+- [Secret-shaped fixtures vs push protection](project_secret_fixtures_push_protection.md): GH013 rejects a literal credential pattern even in a fixture; build tokens at runtime, never unblock
 - [/write-as-me corpus sweeps every project](project_voice_corpus_sweeps_all_projects.md): no exclusion mechanism; an exclusion feature was DECLINED 2026-08-10, do not re-propose
 - [Measure before you poll](feedback_measure_before_you_poll.md): dispatch the agent that can check the facts BEFORE asking advisers who cannot
-- [Mail `from` is empty, not null](project_mail_from_empty_string.md): `cs -msg` writes `from:""` outside a cs session so jq's `//` never fires; consumers test emptiness explicitly
-- [Vale hook re-lints whole files](project_vale_hook_relints_whole_file.md): a 3-word edit returns hundreds of old alerts; diff alert sets against the previous TAG, never raw counts
+- [Mail `from` is empty, not null](project_mail_from_empty_string.md): `cs -msg` writes `from:""` outside a cs session so jq's `//` never fires; test emptiness explicitly
+- [Vale hook re-lints whole files](project_vale_hook_relints_whole_file.md): a 3-word edit returns hundreds of old alerts; diff alert sets against the previous TAG, not raw counts
 - [Transcript core is 1-2%](project_transcript_core_ratio.md): a Claude Code JSONL is 98% machinery (1.3-2.3% core across 4-84 MB files), so transcript work is a serialiser problem
 - [Subagent context leaks](project_subagent_context_leak.md): "the agent sees only X" is a harness claim, not a prompt one; grep agent transcripts for a canary or the run is void
-- [Eval saturation](project_eval_saturation.md): every arm passing measured nothing; needs a control arm, a rejection region, single-occurrence golds, the status quo as arm
-- [Handoff fact carriage](project_handoff_fact_carriage.md): 0/12 vs 12/12 on facts only the larger handoff carried, yet bigger is not monotonically better: retrieval degrades
+- [Eval saturation](project_eval_saturation.md): every arm passing measured nothing; needs a control arm, a rejection region, single-occurrence golds, status quo as an arm
+- [Handoff fact carriage](project_handoff_fact_carriage.md): 0/12 vs 12/12 on facts only the larger handoff carried, yet bigger is not monotonically better; retrieval degrades
 - [Tests stage their preconditions](project_test_stages_its_precondition.md): a test whose outcome depends on state it never sets asserts the developer's machine
-- [Mutation testing needs isolation](project_mutation_testing_needs_isolation.md): one clone per mutating agent; a peer-reverted mutation looks exactly like a vacuous test
-- [BSD cmp -n is length-sensitive](project_bsd_cmp_n_length.md): `cmp -n N a b` fails when total lengths differ even with identical first N bytes; compare `<(head -c N a)` streams
+- [Mutation testing needs isolation](project_mutation_testing_needs_isolation.md): one clone per mutating agent; a peer-reverted mutation looks like a vacuous test
+- [BSD cmp -n is length-sensitive](project_bsd_cmp_n_length.md): `cmp -n N a b` fails when total lengths differ even with identical first N bytes; compare `<(head -c N)` streams
 - [Subagents never dump the environment](project_subagent_no_env_dump.md): `env | grep` leaked live secrets into a transcript; forbid env, printenv, set AND export -p; probe ${NAME:+set}
-- [lib/bin build drift](project_lib_bin_build_drift.md): tests source lib/ while users run the assembled bin/cs; only CI's build-sync sees the gap; ./build.sh last before committing
+- [lib/bin build drift](project_lib_bin_build_drift.md): tests source lib/ while users run the assembled bin/cs; only CI's build-sync sees the gap; ./build.sh before committing
 - [Rank from the complete measurement](feedback_rank_from_complete_measurement.md): don't rank fixes from a snapshot while the settling measurement is still running
-- [Fork CI waits at action_required](project_fork_ci_action_required.md): an empty statusCheckRollup on a fork PR is a run awaiting approval, not "no checks yet"
-- [Test isolation lives at source time](project_test_lib_source_time_isolation.md): 22 suites override setup(); HOME/PATH/git-identity scoping goes at test_lib.sh top level
-- [OSC theme probe writes to /dev/tty](project_osc_probe_tty_uncapturable.md): cs -detect-theme cannot be captured from a subshell and paints the screen
-- [commands/ subdir renames, skills/ subdir hides](project_claude_dirs_namespace_semantics.md): keep cs commands and skills flat (2.1.258); probe with `env -u ANTHROPIC_API_KEY claude -p`
-- [Review prompts name every consumer](feedback_review_names_consumers.md): two Fable reviews disagreed by which consumer each read; list consumers by path; re-reviews measure closures
+- [Fork CI waits at action_required](project_fork_ci_action_required.md): an empty statusCheckRollup on a fork PR is a run awaiting approval, not "no checks"
+- [Test isolation lives at source time](project_test_lib_source_time_isolation.md): 22 suites override setup(); HOME/PATH/git-identity scoping goes in test_lib.sh top level
+- [OSC theme probe writes to /dev/tty](project_osc_probe_tty_uncapturable.md): cs -detect-theme cannot be captured from a subshell; it paints the screen
+- [commands/ subdir renames, skills/ subdir hides](project_claude_dirs_namespace_semantics.md): keep cs commands and skills flat (2.1.258); probe via `env -u ANTHROPIC_API_KEY claude -p`
+- [Review prompts name every consumer](feedback_review_names_consumers.md): two Fable reviews disagreed by which consumer each read; list consumers by path; re-reviews measure closure
 - [Outward prose bar](feedback_outward_prose_bar.md): no model names, no praise of the contributor, and far shorter than /write-as-me + Vale enforce
 - [Rebase without -i](project_rebase_without_interactive.md): `GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash <base>` folds fixups; `GIT_EDITOR="cp /tmp/msg"` rewords
-- [Native tasks are per session under cs](project_native_tasks_per_conversation.md): CLAUDE_CODE_TASK_LIST_ID = session name, so the list survives /clear; rotations reconcile, never mirror
+- [Native tasks are per session under cs](project_native_tasks_per_conversation.md): CLAUDE_CODE_TASK_LIST_ID = session name (base@task for a feature); survives /clear; rotations reconcile
 - [Skill examples get copied](project_skill_examples_get_copied.md): a named outcome becomes the modal output; for entropy, seed AND mapping live in a script, not the prompt
 - [Teammate shares session slots](project_teammate_shares_session_slots.md): a tmux teammate is a full claude with its own Stop and statusline; gate every .cs/local/ slot on the lead
-- [Gate: one at a time, --changed for the loop](project_gate_one_at_a_time.md): one background gate at a time, never beside a council; never edit a script mid-run; capture output to a file
-- [Bash trap needs a background child](project_bash_trap_needs_background_child.md): a TERM/INT trap waits for the foreground command; background + wait, kill the recorded pid; never `kill -- -$$`
+- [Gate: one at a time, --changed for the loop](project_gate_one_at_a_time.md): one background gate at a time, never beside a council; never edit a script mid-run; capture output to files
+- [Bash trap needs a background child](project_bash_trap_needs_background_child.md): a TERM/INT trap waits for the foreground command; background + wait, kill the recorded pid, never `kill -- -$$`
 - [No auto-commit of sessions](project_no_auto_commit_of_sessions.md): removed in v2026.6.9 after it committed real code onto an adopted repo; never re-add auto-commit or `git add .cs`
 - [Claude Code hook/statusline limits](reference_claude_code_hook_statusline_limits.md): PreCompact cannot inject; renderer keeps bold/fg/bg and needs refreshInterval
 - [Visible surfaces need consent](feedback_visible_surfaces_need_consent.md): a status line, tab title or banner needs explicit revocable consent: prompt if interactive, else print it
-- [TUI rewrite rejected](project_tui_rewrite_rejected.md): Textual (4/4 council) and OpenTUI/bun (58 MB floor) rejected; binary size and start time are contract
+- [TUI rewrite rejected](project_tui_rewrite_rejected.md): Textual (4/4 council) and OpenTUI/bun (58 MB floor) rejected; binary size and start time are the contract
 - [No external attribution on public surfaces](feedback_no_external_attribution_public.md): borrowed patterns are fine; credit stays in .cs/ notes or memory, never on public surfaces
 - [jq --arg 128 KB limit on Linux](project_jq_arg_limit_linux.md): a large --arg passes on macOS and fails on ubuntu CI; use --rawfile from a temp file
-- [Discoverability pass before merge](feedback_discoverability_pass.md): reviews check code vs plan, nobody checks a human can find the feature; open the installed app cold first
+- [Discoverability pass before merge](feedback_discoverability_pass.md): reviews check code vs plan, nobody checks a human can find the feature; open the installed app cold
 - [Injected commands are an API](feedback_injected_commands_are_api.md): a hook-suggested `cs -rm` targeted the base session in a degraded state
 - [awk exit semantics](project_awk_exit_semantics.md): body exit still runs END and END wins; empty input exits 0; flag in the body, exit from END
-- [Moving a session dir breaks resume](project_session_dir_move_breaks_resume.md): Claude Code keys transcripts on the cwd encoding; archive-like states are marker files, never moves
+- [Moving a session dir breaks resume](project_session_dir_move_breaks_resume.md): Claude Code keys transcripts on the cwd encoding; archive-like states are marker files, not moves
 - [jq @tsv into bash](project_jq_tsv_into_bash.md): IFS-tab read collapses empty fields; @tsv escapes leak verbatim; sanitise in jq, peel with parameter expansion
-- [Bash tool is zsh here](project_bash_tool_is_zsh.md): `${s:i:1}` fails, MULTIOS changes `2>&1 >/dev/null`, `status` is read-only; write probes to a file and run them with bash
+- [Bash tool is zsh here](project_bash_tool_is_zsh.md): `${s:i:1}` fails, MULTIOS changes `2>&1 >/dev/null`, `status` is read-only; write probes to a file, run with bash
 - [Terminal font glyph coverage](user_terminal_font_glyphs.md): for actor alex-geana-erepubliklabs-com: Misc Symbols render as tofu, U+25AA too light
-- [Outside-cs liveness is the heartbeat](project_outside_cs_liveness_heartbeat.md): un-wrapped conversations have no lock and no ps match; context-pct mtime within 15 min is the only signal
+- [iTerm Job+Args titles](user_iterm_title_components.md): the `(claude … --resume uuid)` tab suffix is iTerm's profile setting, not cs; never hide argv
+- [Outside-cs liveness is the heartbeat](project_outside_cs_liveness_heartbeat.md): un-wrapped conversations have no lock and no ps match; context-pct mtime within 15 min is the signal
 - [Transcript usage fields](reference_transcript_usage_fields.md): dedup by requestId (else ~2.9x); costUSD is 0 on subscription; statusline stdin has rate_limits.{five_hour,seven_day}
 - [ratatui: no subprocess in render](project_ratatui_render_no_subprocess.md): git in the draw call is the lag; event-driven idle leaks a revealed secret
 - [openssl base64 -d is silent on garbage](project_openssl_base64_silent_empty.md): `openssl base64 -d -A` exits 0 and prints nothing on malformed input; empty-from-nonempty is a failure
 - [cs tests are subprocess-driven](project_cs_tests_are_subprocess.md): function stubs never cross the process boundary; fake CLAUDE_CODE_BIN/PATH binary + sentinel + positive control
-- [Trimming cs: two constraints](project_cs_trim_constraints.md): migrate.sh phases stay (git-synced sessions resume years later); no verb telemetry, judge verbs by automation callers
-- [Eradicate a shared failure class](feedback_eradicate_shared_failure_class.md): a review exposing a repo-wide silent-failure idiom: Alex picks fix-everywhere over match-the-old-convention
+- [Trimming cs: two constraints](project_cs_trim_constraints.md): migrate.sh phases stay (git-synced sessions resume years later); no verb telemetry; judge verbs by automation callers
+- [Eradicate a shared failure class](feedback_eradicate_shared_failure_class.md): a review exposing a repo-wide silent-failure idiom: Alex picks fix-everywhere over match-the-convention
 - [codex prompts with shell operators](project_codex_prompt_shell_operators.md): inline `||` breaks the zsh eval wrapper; pass the prompt via "$(cat file)"
 - [mv-over drops the exec bit](project_mv_drops_exec_bit.md): temp-then-mv rewrites lose 100755; check git diff --summary for mode changes
 - [cs-tui is untracked](project_cs_tui_untracked_in_ci.md): absent in CI checkouts; never assert its presence in install tests
-- [CS_CLAUDE_SESSION_ID is the launch id](project_cs_claude_session_id_is_launch_id.md): stale after the first rotation; read claude_session_id in .cs/local/state; staleness serves crash recovery
-- [Review newly reachable code](feedback_review_newly_reachable_code.md): a diff-scoped review misses untouched lines the change exposes; lifetime/resolution changes are security changes
+- [CS_CLAUDE_SESSION_ID is the launch id](project_cs_claude_session_id_is_launch_id.md): stale after the first rotation; read claude_session_id in .cs/local/state; stale on purpose for crash recovery
+- [Review newly reachable code](feedback_review_newly_reachable_code.md): a diff-scoped review misses untouched lines the change exposes; lifetime/resolution changes are security
 - [Claude desktop measurements](reference_claude_desktop_measurements.md): not sandboxed, user hooks fire, autoMemoryDirectory honoured, CLAUDE_PROJECT_DIR constant, source startup
-- [teammate-message frame is no discriminator](project_transcript_teammate_frame.md): leads carry it once reports arrive; key on the first type:user line; re-measure after the feature runs
+- [teammate-message frame is no discriminator](project_transcript_teammate_frame.md): leads carry it once reports arrive; key on the first type:user line; re-measure once the feature runs
 - [Delegate disk-input work only](feedback_delegate_disk_input_only.md): narrative/sweep/wrap read live context and cannot be delegated; file fan-out can
 - [Lineage from session.log](project_lineage_from_session_log.md): timeline.jsonl is shared across actors; a date-prefixed sort cannot order same-day handoffs
 - [Foreign-model pass before done](feedback_foreign_model_pass_on_research.md): Alex expects a Codex or council falsification pass after research AND after a build
 - [jq runtime error exits 0](project_jq_runtime_error_exit_zero.md): a shape error on any record but the last prints to stderr and jq exits 0; capture stderr per pass and fail on content
-- [mktemp template form](project_mktemp_template_form.md): `mktemp -t prefix` is BSD-only and GNU rejects it; always `mktemp "${TMPDIR:-/tmp}/name.XXXXXX"`
-- [Full gate runs on ghost](feedback_full_gate_runs_on_ghost.md): EVERY tests/test_*.sh run goes to ghost via remote-tests, even one suite; ghost is bash 5.3; CI macos is the only 3.2 judge
+- [mktemp template form](project_mktemp_template_form.md): `mktemp -t prefix` is BSD-only, GNU rejects it; always `mktemp "${TMPDIR:-/tmp}/name.XXXXXX"`
+- [Full gate runs on ghost](feedback_full_gate_runs_on_ghost.md): EVERY tests/test_*.sh run goes to ghost via remote-tests, even one suite; ghost is bash 5.3; only CI macos judges 3.2
 - [Headless e2e inside a cs session](project_e2e_inside_cs_session_headless.md): claude -p from a throwaway session dir, inherited contract env -u'd; a logging hook proves META_DIR
-- [No base-URL gateway](project_no_base_url_gateway.md): do NOT route cs through an ANTHROPIC_BASE_URL gateway: Claude Code sends it the subscription OAuth token; the rewriter keeps it
-- [pwd -P keeps typed case](project_pwd_p_keeps_typed_case.md): bash `pwd -P` echoes the case you typed on APFS (zsh normalises); identity checks use `-ef`, never string equality
-- [Plan fixes live in the code block](feedback_plan_fixes_live_in_the_code_block.md): a prose correction after a code block ships the defect; edit the block, delete the note
-- [tmux pane env wall](project_tmux_pane_env_wall.md): panes inherit no provider API keys; `tmux new-window -e` forwards one but the value lands in tmux's argv: no never-in-argv guarantee
-- [Exit status after a pipe](project_exit_status_after_pipe.md): `cmd | tail; echo $?` reads tail; redirect to files when exit status IS the measurement; timeout returns 124, not the tool's
+- [No base-URL gateway](project_no_base_url_gateway.md): do NOT route cs through an ANTHROPIC_BASE_URL gateway: Claude Code sends it the subscription OAuth token; rewriter keeps it
+- [pwd -P keeps typed case](project_pwd_p_keeps_typed_case.md): bash `pwd -P` echoes the case you typed on APFS (zsh normalises); identity checks use `-ef`, not string equality
+- [Plan fixes live in the code block](feedback_plan_fixes_live_in_the_code_block.md): a prose correction after a code block ships the defect; edit the block, drop the note
+- [tmux pane env wall](project_tmux_pane_env_wall.md): panes inherit no provider API keys; `tmux new-window -e` forwards one but the value lands in tmux's argv: never-in-argv is lost
+- [Exit status after a pipe](project_exit_status_after_pipe.md): `cmd | tail; echo $?` reads tail; redirect to files when exit status IS the measurement; timeout returns 124
 - [pane_current_command is the version](project_pane_current_command_is_version.md): panes report `2.1.263`, not `claude`; never kill by predicate, only by pane ids captured at creation
 - [clonefile vs cp -cR](project_clonefile_directory_syscall.md): cp -cR walks per file (15.6s) vs one clonefile(2) on the dir (0.5s); never judge a filesystem by its CLI
-- [Peer session control is the user's](feedback_peer_session_control.md): never send-keys, signal or mark a Claude session for closing; refuse, naming what to close and what to run after
+- [Peer session control is the user's](feedback_peer_session_control.md): never send-keys, signal or mark a Claude session for closing; refuse, naming what to close and run after
 - [Statusline render tests pin the clock](project_statusline_clock_pin.md): asserts on pulsing tokens (mark, crit text) need CS_STATUSLINE_NOW even, else red on odd seconds
-- [Codex review briefs](project_codex_readonly_no_probes.md): "do not edit files" = no fixtures, grant a scratch dir; /codex:review takes flags ONLY and stops on an untracked dir
-- [Remote Control contract](project_remote_control_contract.md): subscription-only, one account per server, no cs launch env on phones; `cswap run`, never `cswap switch`, under a live server
-- [Agent servers studied](project_agent_servers_studied.md): codehero + infaiw read and rejected 2026-09-14; Remote Control supersedes both; do not re-study
-- [Alex is both actor slugs](user_two_actor_identities.md): hex-users-noreply-github-com and alex-geana-erepubliklabs-com are one person, two git identities; CS_ACTOR=<email> picks the other
+- [Codex review briefs](project_codex_readonly_no_probes.md): "do not edit files" = no fixtures, grant a scratch dir; /codex:review: flags ONLY, stops on an untracked dir
+- [Remote Control contract](project_remote_control_contract.md): subscription-only, one account per server, no cs launch env on phones; `cswap run`, never `cswap switch`, with a live server
+- [Agent servers studied](project_agent_servers_studied.md): codehero + infaiw read and rejected 2026-09-14; Remote Control supersedes both; never re-study
+- [Alex is both actor slugs](user_two_actor_identities.md): hex-users-noreply-github-com and alex-geana-erepubliklabs-com are one person, two git identities; CS_ACTOR=<email> picks one
 - [Hook subprocess eats stdin](project_hook_subprocess_eats_stdin.md): a tool run before the hook reads stdin can eat the event JSON (terminal-notifier did); `</dev/null` every such call
 - [Claude scratch disk pressure](project_claude_scratch_disk_pressure.md): /private/tmp/claude-501 fills the disk; delete only sessions with no live claude cwd (lsof), by explicit path
 - [Mods type contract on disk](reference_mods_type_contract.md): ~/.claude/plugins/marketplaces/claude-code-plugins/mods/types/claude-code.d.ts is the authority on events, $.ui, elements
-- [PromptHint rewrite draws nothing](project_prompthint_rewrite_draws_nothing.md): on 2.1.273 a `hint` rewrite never shows; a mod draws its own tree; debug with `claude --debug`
+- [PromptHint rewrite draws nothing](project_prompthint_rewrite_draws_nothing.md): on 2.1.273 a `hint` rewrite never shows; a mod draws its own tree; debug via `claude --debug`
 - [Commit before mutating](feedback_commit_before_mutating.md): `git checkout <file>` after a mutation drops uncommitted work too; commit green first, assert the mutation landed
-- [Mod Button in a Text is refused](project_mod_button_inline_refused.md): the engine drops the whole band silently, the fake engine stays green; --debug throwaway before trusting an element
-- [Codex via plugin](feedback_codex_via_plugin.md): use /codex: (codex:rescue skill or agent), never raw `codex exec` from Bash
+- [Mod Button in a Text is refused](project_mod_button_inline_refused.md): the engine drops the whole band silently, the fake engine stays green; --debug throwaway before trusting it
+- [Codex via plugin](feedback_codex_via_plugin.md): use /codex: (codex:rescue skill or agent), never raw `codex exec` in Bash
 - [PATH shim execs an absolute path](project_path_shim_exec_absolute.md): `exec find "$@"` / zsh `command -v` recurses into the shim; #642 was the shim measuring itself
 - [shellcheck is a CI-only lane](project_shellcheck_ci_only_lane.md): tests/run_all.sh never runs it; run CI's shellcheck line locally before pushing any .sh
 - [Abort never deletes published files](project_abort_never_deletes_published.md): delete only what this run created; order staging so failure leaves nothing
-- [Statusline first-tick budget](project_statusline_first_tick_budget.md): a first tick under ~0.85 s paints, over ~1.1 s is discarded; judge paint from the pane, never a trace event
-- [CI macOS runner timing](project_ci_macos_runner_timing.md): a fixed sleep past a polled deadline passes local Macs, fails the macos runner; poll with a bound under the TTL
+- [Statusline first-tick budget](project_statusline_first_tick_budget.md): a first tick under ~0.85 s paints, over ~1.1 s is discarded; judge paint from the pane, not a trace
+- [CI macOS runner timing](project_ci_macos_runner_timing.md): a fixed sleep past a polled deadline passes local Macs, fails the macos runner; poll with a bound under TTL
 - [Plain branch: hand merge](feedback_plain_branch_hand_merge.md): /finish refuses a branch in the base checkout; on Alex's "merge": checkout main, --no-ff, gates, install, no push
