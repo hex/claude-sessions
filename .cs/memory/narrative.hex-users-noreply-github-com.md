@@ -1798,3 +1798,11 @@ Codex plan review returned 16 findings; 15 folded (d363b06), the `sed 's/\x1b…
 - Merged to main 2d31d9f on Alex's "merge" (Codex: no actionable defects).
   build-sync clean, install 54/54, installed, drift OK, scratchpad back.
   Not pushed; in CHANGELOG Unreleased. Task #668 closed.
+
+## 2026-09-22: release 2026.9.20 in progress
+
+- Range v2026.9.19..66a4972: the feature task-list fix plus session files.
+  Pushed; CI run 35734600392 on 66a4972 watching in the background. Bump
+  to 2026.9.20 uncommitted; install 54/54; docs checked (no issues);
+  /simplify skipped (bump-only tree); /code-review + run_all + cargo
+  running.
