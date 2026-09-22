@@ -81,7 +81,7 @@ No git repo required. No project structure needed. Just a name for what you're w
 
 - **Secure secrets handling** - Store sensitive data in the OS keychain (value read from stdin, never written to a file); exportable as [age](https://github.com/FiloSottile/age)-encrypted files for backup
 - **Bash command audit trail** - Every Bash command Claude runs is logged to `.cs/local/session.log` (machine-local, never git-synced) with timestamps
-- **Update notifications** - Checks for updates and notifies when new versions are available. When an update is pending, cs shows the release notes for every version above the installed one: a compact summary card in the launch banner, and the full notes under `cs -update --check`.
+- **Update notifications** - Checks for updates and notifies when new versions are available. When an update is pending, cs shows the release notes for every version above the installed one: the `cs-update` mod's pane inside the session (see Release notes in the session above), a compact summary card in the launch banner only when `CS_NO_FUNCTION_HOOKS=1` withholds that mod, and the full notes under `cs -update --check`.
 - **Verified updates** - Updates are downloaded from GitHub Releases and verified with SHA-256 checksums; additionally verified with [minisign](https://jedisct1.github.io/minisign/) signatures when available
 
 

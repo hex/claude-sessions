@@ -509,9 +509,12 @@ blank a pane still showing "Update finished". A clean exit also writes
 re-renders the open pane the instant it reloads the module, before
 `session.start` (which does not fire on a reload, only at load) gets a
 chance, so the reloaded module reads the marker back and redraws the finished
-pane from its own next render. The mod clears the marker (writes it empty)
-the next launch, or render, that finds nothing pending for that version,
-since `$.fs` offers no delete.
+pane from its own next render. A pane dismissed before the install landed
+leaves nothing open to redraw, so `/cs-update` after the reload reads the
+marker too and shows the finished pane instead of offering the install a
+second time. The mod clears the marker (writes it empty) the next launch,
+render, or `/cs-update` that finds nothing pending for that version, since
+`$.fs` offers no delete.
 
 The `/config` row `cs-update.showReleaseNotes` (on by default) turns off only
 the launch pane; `/cs-update` still opens it with the option off.

@@ -1705,3 +1705,30 @@ Codex plan review returned 16 findings; 15 folded (d363b06), the `sed 's/\x1b…
   bun 33/33, test_mod_update 5/5, installed from the branch, drift OK.
 - scratchpad/ is parked again at 871dc9b2.../scratchpad-repo; move back
   after the update-mod merge.
+
+## 2026-09-22: feat/update-mod merged (d81ca69)
+
+- Merged by hand on Alex's "merge" (no cs feature worktree, /finish would
+  refuse). One conflict: both branches added `## Unreleased` to
+  CHANGELOG.md; kept both entries under one heading, Added above
+  Performance.
+- Gates on the merged tree: build.sh sync clean; auto_update 25/25,
+  mod_update 5/5, install 54/54, doctor 71/71, docs 6/6; bun 33/33;
+  shellcheck at CI severity (-S error) clean, the 6 -S warning hits are
+  pre-existing install.sh lines; installed from main, drift OK. Full
+  run_all NOT run (ghost has no host store).
+- scratchpad/ is back at the repo root; .superpowers/sdd/2026-09-22-cs-update-mod
+  removed. Branches fix/tui-scan-off-render-thread and feat/update-mod
+  still exist locally, merged. Nothing pushed, unreleased.
+- Alex: "Not yet — keep working" at the wrap gate. Open candidates:
+  release, #664 rotate polish, TUI git-config read.
+
+## 2026-09-22: release 2026.9.19 in progress
+
+- Alex ran /release. Pushed main (9ce826a..d81ca69, 30 commits); CI on
+  d81ca69 green 6/6 (build-sync, rust x2, bash x2, shellcheck).
+- Version bumped to 2026.9.19 in lib/00-header.sh, build.sh run, install
+  suite 54/54; the bump is uncommitted until the notes are approved.
+- /simplify skipped: upstream range empty after the push and the working
+  tree is the two-line bump only. Docs review (agent docs-review) and
+  /code-review over v2026.9.18..HEAD at high are running.
