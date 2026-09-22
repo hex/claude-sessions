@@ -459,6 +459,69 @@ heartbeat) and `claude plugin validate` when each binary is on PATH, and
 always checks the manifest, the threshold pin, and that the installer and
 the launch name the mod and the flag.
 
+## cs-update (not a hook script — a Claude Code mod)
+
+`mods/cs-update/` is a Claude Code function-hooks plugin, deployed and gated
+the same way as `cs-rotate`: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, which every
+`cs <name>` launch exports and `CS_NO_FUNCTION_HOOKS=1` withholds even when the
+launching shell already carries it.
+
+A launch that finds a newer cs exports two variables the mod reads and nothing
+else: `CS_UPDATE_AVAILABLE`, the pending version, and `CS_UPDATE_BIN`, the path
+of the running cs. Absent, there is nothing to show and the mod does nothing.
+Present, the mod reads the changelog span the launch's check cached at
+`~/.cache/cs/update-notes-full-<version>` (KEEP IN SYNC with
+`check_update_notify` in `lib/20-update.sh`), strips its markdown the way
+bash's `_md_strip_inline` does, and opens one pane titled `cs <version> is
+available`. A version that cached no span, or a span the cache lost, still
+opens the pane with a one-line fallback instead of a blank body.
+
+The pane is for the lead conversation of a cs session only: the mod checks
+`.cs/local/state`'s `claude_session_id` against its own conversation id, as
+`cs-rotate`'s button does, and a `.cs/local/disabled` directory refuses it
+outright. A teammate claude in the same directory reads the same state file
+and does not match, so it gets no pane of its own.
+
+The launch pane opens once per load of the mod (a launch, or a plugin
+reload), never again for the same conversation, whether or not the update key
+was pressed. `/cs-update`, which the mod registers at every load, opens the
+same pane on demand: after a dismiss, with the `/config` row off, or with
+nothing else having shown it. Run from a teammate it says the pane belongs to
+the conversation cs launched; run with nothing pending it says so instead of
+opening an empty pane.
+
+Pressing `1` runs `cs -update` through the engine's own process runner
+(`$.process.run`, the path from `CS_UPDATE_BIN`; no shell, since the claude
+process's `PATH` is not the launching shell's), with a ten-minute timeout for
+the download, the checksum and the signature. The pane shows `updating…`
+while it runs and hides the key so a second press cannot start a second
+installer; a non-zero exit or a run that could not start keeps the key for
+another try and shows the last lines of stderr; a clean exit retires the key
+and the pane keeps the outcome — "Update finished. Takes effect on your next
+launch." — until it is dismissed, since the new files take effect only on the
+next launch: this claude and its loaded mods keep running the old code. `Esc`
+closes the pane at any point.
+
+The `/config` row `cs-update.showReleaseNotes` (on by default) turns off only
+the launch pane; `/cs-update` still opens it with the option off.
+
+`install.sh` deploys the mod's three files — `.claude-plugin/plugin.json`,
+`hooks/hooks.json`, `hooks/register.tsx` — under `~/.claude/skills/cs-update/`,
+the same layout as `cs-rotate`, and `cs -uninstall` removes the directory. When
+Claude Code loads the plugin, the mod writes `.cs/local/cs-update.heartbeat`
+(one UTC timestamp) when the cwd has `.cs/local`, and `cs -doctor` reports the
+mod from that file through the same `_doctor_check_mod` check it runs for
+`cs-rotate`: OK naming when it last ran in this session, or a WARN naming the
+ways it has not (no cs launch since the install, function hooks withheld by
+`CS_NO_FUNCTION_HOOKS` or a preset `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=0`, or a
+Claude Code that no longer loads mods behind the flag).
+
+Tests: `tests/test_mod_update.sh` runs the bun unit tests under
+`mods/cs-update/test/` (a fake engine drives the pane, the update key and the
+lead gate) and `claude plugin validate` when each binary is on PATH, and always
+checks the manifest and its `/config` field, the cache-name pin against
+`lib/20-update.sh`, and that the installer and doctor name the mod.
+
 ## Hook Configuration
 
 The hooks are configured in `~/.claude/settings.json`:

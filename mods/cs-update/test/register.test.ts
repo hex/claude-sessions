@@ -119,6 +119,10 @@ test('stripInline drops links, bold and code marks and keeps the words', () => {
     .toBe('The chiptext token was wrong in two places.')
 })
 
+test('stripInline strips an unpaired ** and an unpaired backtick too', () => {
+  expect(stripInline('a **b `c')).toBe('a b c')
+})
+
 test('parseSpan yields one section per version with prose and bullets, headings and blanks dropped', () => {
   const sections = parseSpan(SPAN)
   expect(sections.map(s => s.version)).toEqual(['2026.99.3', '2026.99.2'])
@@ -193,6 +197,7 @@ test('the pane draws the title, every version in the session colour, its lines, 
   expect(keys.map(b => b.props.hotkey)).toEqual(['1'])
   expect(keys[0].props.label).toBe('update now')
   expect(words).toContain('Esc: later')
+  expect(words).toContain('Installs in place; the new files take effect on your next launch.')
 })
 
 test('a tombstone (empty notes file) still opens the pane with the fallback body', async () => {
@@ -246,7 +251,7 @@ test('1 runs cs -update once, by the exported path, with a ten-minute timeout, a
   expect(invalidated).toContain('ui.render')
 })
 
-test('two presses before the path lookup resolves still run once', async () => {
+test('a second press returns at the running guard before any lookup', async () => {
   await start()
   let giveBin!: (v: any) => void
   ;($ as any).env.get = async (name: string) => name === 'CS_UPDATE_BIN' ? new Promise(r => { giveBin = r }) : envVars[name]

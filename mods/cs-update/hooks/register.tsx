@@ -25,13 +25,14 @@ export const UPDATE_TIMEOUT_MS = 600000
 
 export type Section = { version: string; lines: string[] }
 
-// Links, bold and inline code, as changelog_summaries strips them in bash
-// (_md_strip_inline): the pane shows the words, never the markup.
+// Links, bold and inline code, as _md_strip_inline strips them in bash: the
+// link text survives a replace, but every `**` and every backtick is removed
+// outright, paired or not, so the pane never shows raw markup.
 export function stripInline(s: string): string {
   return s
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\*\*([^*]*)\*\*/g, '$1')
-    .replace(/`([^`]*)`/g, '$1')
+    .replace(/\*\*/g, '')
+    .replace(/`/g, '')
 }
 
 // The span as check_update_notify caches it: `## X.Y.Z` opens a section; its
@@ -118,6 +119,7 @@ export function register(on: On, options: PluginOptions) {
               <Text dimColor>{'   Esc: later'}</Text>
             </Box>
           )}
+          {phase === 'idle' && <Text dimColor>{'Installs in place; the new files take effect on your next launch.'}</Text>}
           {phase === 'done' && <Text dimColor>{'Esc: close'}</Text>}
         </Box>
       </Box>

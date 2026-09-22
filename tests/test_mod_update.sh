@@ -27,6 +27,10 @@ test_mod_reads_the_cache_file_bash_writes() {
         || { echo "  FAIL: lib/20-update.sh no longer writes update-notes-full-<version>"; return 1; }
     grep -q 'update-notes-full-\${version}' "$MOD/hooks/register.tsx" \
         || { echo "  FAIL: the mod no longer reads update-notes-full-<version>"; return 1; }
+    grep -q '\.cache/cs' "$MOD/hooks/register.tsx" \
+        || { echo "  FAIL: the mod no longer reads from .cache/cs"; return 1; }
+    grep -q 'UPDATE_CACHE=.*\.cache/cs' "$SCRIPT_DIR/../lib/20-update.sh" \
+        || { echo "  FAIL: lib/20-update.sh no longer caches under .cache/cs"; return 1; }
 }
 
 test_mod_is_deployed_by_the_installer_and_checked_by_doctor() {
