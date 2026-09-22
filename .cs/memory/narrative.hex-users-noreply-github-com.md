@@ -1732,3 +1732,23 @@ Codex plan review returned 16 findings; 15 folded (d363b06), the `sed 's/\x1b…
 - /simplify skipped: upstream range empty after the push and the working
   tree is the two-line bump only. Docs review (agent docs-review) and
   /code-review over v2026.9.18..HEAD at high are running.
+
+## 2026-09-22: release v2026.9.19 committed, tag pending CI
+
+- Gates: run_all 68/68, cargo 350/350, docs review 3 fixes (README launch
+  card fallback, hooks.md /cs-update-after-reload, session-layout done
+  marker readers), all verified against lib/75-launch.sh:478.
+- /code-review with `high` ran at LOW effort (its brief: "1 diff pass, no
+  verify, ≤4 findings"); the level argument did not take. One Minor: with
+  hooks on, the launch card is withheld but the pane also needs the plugin
+  enabled and isLead; both are user opt-outs, the "available" line still
+  prints. Not fixed; follow-up if it bites.
+- Alex approved the notes. Release commit 998b35e pushed; CI watch in
+  the background; tag + gh release only after it is green, with --target.
+
+## 2026-09-22: v2026.9.19 released
+
+- CI on 998b35e green 6/6; `gh release create --target 998b35e...`;
+  release workflow green, 12 assets (3 cs-tui binaries + .minisig + .sha256,
+  install.sh + .minisig + .sha256). `cs -update` installed it locally:
+  cs 2026.9.19, doctor drift OK, artifacts stamped 2026.9.19.
