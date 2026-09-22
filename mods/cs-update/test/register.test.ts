@@ -198,6 +198,14 @@ test('the pane draws the title, every version in the session colour, its lines, 
   expect(keys[0].props.label).toBe('update now')
   expect(words).toContain('Esc: later')
   expect(words).toContain('Installs in place; the new files take effect on your next launch.')
+  // The pane does not scroll, so the key row sits above the notes body,
+  // never below where a long changelog span could push it off the fold.
+  const list = texts(tree)
+  const keyRow = list.findIndex(t => t.includes('Esc: later'))
+  const notesStart = list.findIndex(t => t.includes('One fix: the statusline is readable on light terminals.'))
+  expect(keyRow).toBeGreaterThanOrEqual(0)
+  expect(notesStart).toBeGreaterThanOrEqual(0)
+  expect(keyRow).toBeLessThan(notesStart)
 })
 
 test('a tombstone (empty notes file) still opens the pane with the fallback body', async () => {
@@ -314,7 +322,7 @@ test('/cs-update reopens the pane after a dismiss, and with the option off, and 
   load({ [OPTION]: false })
   await start()
   expect(opens()).toHaveLength(0)
-  expect(await runCommand()).toEqual({ text: '' })
+  expect(await runCommand()).toEqual({ text: 'Release notes are in the side pane.' })
   expect(opens()).toHaveLength(1)
   expect(texts(await draw()).join('\n')).toContain('2026.99.3')
 })

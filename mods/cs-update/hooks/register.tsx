@@ -89,26 +89,17 @@ export function register(on: On, options: PluginOptions) {
     if (e.requestId !== PANE || version === undefined) return next(e)
     const { Box, Text, Button } = await $.ui.resolve(e)
     // A lone pane draws no title of its own (the tab shows only with two or
-    // more), so the body opens with it. Version headings take the session
-    // colour cs recorded, as the status bar's name does; a continuation line
-    // hangs under its bullet on the changelog's own indent, which parseSpan
-    // keeps in the line (as a bullet keeps its `- `), so the text is drawn
-    // verbatim and no margin doubles it.
+    // more), so the body opens with it. The pane does not scroll (measured
+    // live 2026-09-22 on Claude Code 2.1.278), and a long changelog span
+    // pushes anything below it off the bottom, so the keys sit right under
+    // the title, above the notes, where a long span can never hide them.
+    // Version headings take the session colour cs recorded, as the status
+    // bar's name does; a continuation line hangs under its bullet on the
+    // changelog's own indent, which parseSpan keeps in the line (as a bullet
+    // keeps its `- `), so the text is drawn verbatim and no margin doubles it.
     return (
       <Box flexDirection="column" paddingX={1}>
         <Text bold>{`cs ${version} is available`}</Text>
-        {sections === undefined || sections.length === 0
-          ? <Box marginTop={1}><Text>{`Release notes could not be fetched at launch; the update is ${version}.`}</Text></Box>
-          : sections.map(s => (
-              <Box key={`v-${s.version}`} flexDirection="column" marginTop={1}>
-                <Text bold color={accent}>{s.version}</Text>
-                {s.lines.map((line, j) => (
-                  <Box key={`l-${s.version}-${j}`}>
-                    <Text>{line}</Text>
-                  </Box>
-                ))}
-              </Box>
-            ))}
         <Box marginTop={1} flexDirection="column">
           {phase === 'running' && <Text dimColor>{`updating… running cs -update ${version}`}</Text>}
           {(phase === 'done' || phase === 'failed') && <Text>{outcome}</Text>}
@@ -122,6 +113,18 @@ export function register(on: On, options: PluginOptions) {
           {phase === 'idle' && <Text dimColor>{'Installs in place; the new files take effect on your next launch.'}</Text>}
           {phase === 'done' && <Text dimColor>{'Esc: close'}</Text>}
         </Box>
+        {sections === undefined || sections.length === 0
+          ? <Box marginTop={1}><Text>{`Release notes could not be fetched at launch; the update is ${version}.`}</Text></Box>
+          : sections.map(s => (
+              <Box key={`v-${s.version}`} flexDirection="column" marginTop={1}>
+                <Text bold color={accent}>{s.version}</Text>
+                {s.lines.map((line, j) => (
+                  <Box key={`l-${s.version}-${j}`}>
+                    <Text>{line}</Text>
+                  </Box>
+                ))}
+              </Box>
+            ))}
       </Box>
     )
   })
@@ -129,9 +132,10 @@ export function register(on: On, options: PluginOptions) {
   // On demand: the same pane, whether or not the launch opened it (the
   // option off, or dismissed). A registered command is answered with
   // `{ text }` (the contract; an unanswered run prints "no hook answered"),
-  // so the pane is the answer and the text is empty. A launch that found
-  // nothing pending has nothing to show, and says so instead; a teammate
-  // (which inherits the exports) is refused as the launch pane refuses it.
+  // so the pane carries the notes and the text just points at it. A launch
+  // that found nothing pending has nothing to show, and says so instead; a
+  // teammate (which inherits the exports) is refused as the launch pane
+  // refuses it.
   on('command.run', { command: 'cs-update' }, async ($, e) => {
     const cwd = await $.session.cwd()
     if (!(await isLead($, cwd))) return { text: 'The release-notes pane belongs to the conversation cs launched.' }
@@ -139,7 +143,7 @@ export function register(on: On, options: PluginOptions) {
     if (!pending) return { text: 'This launch found no newer cs; the check runs again at the next launch.' }
     shown = true
     await openPane($, cwd, pending)
-    return { text: '' }
+    return { text: 'Release notes are in the side pane.' }
   })
 }
 
