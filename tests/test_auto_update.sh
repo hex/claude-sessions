@@ -390,7 +390,10 @@ test_launch_banner_shows_notes_card() {
     : > "$HOME/.cache/cs/update-notes-full-2026.99.3"
     unset CS_NO_UPDATE_CHECK
     local out
-    out=$("$CS_BIN" "notes-card-session" < /dev/null 2>&1) || {
+    # CS_NO_FUNCTION_HOOKS=1 withholds the cs-update mod, which is the
+    # fallback path this test covers: the card only draws when the mod will
+    # not run this launch.
+    out=$(CS_NO_FUNCTION_HOOKS=1 "$CS_BIN" "notes-card-session" < /dev/null 2>&1) || {
         export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
         return 1
     }
@@ -413,7 +416,10 @@ test_launch_banner_quiet_on_empty_notes_cache() {
     : > "$HOME/.cache/cs/update-notes-full-2026.99.3"
     unset CS_NO_UPDATE_CHECK
     local out
-    out=$("$CS_BIN" "notes-quiet-session" < /dev/null 2>&1) || {
+    # CS_NO_FUNCTION_HOOKS=1 withholds the cs-update mod, which is the
+    # fallback path this test covers: the card only draws when the mod will
+    # not run this launch.
+    out=$(CS_NO_FUNCTION_HOOKS=1 "$CS_BIN" "notes-quiet-session" < /dev/null 2>&1) || {
         export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
         return 1
     }
@@ -423,6 +429,30 @@ test_launch_banner_quiet_on_empty_notes_cache() {
     assert_output_not_contains "$out" "One fix: the statusline is readable." \
         "no card rows from the tombstone (the populated-cache test proves this string DOES render when present)" || return 1
     assert_output_not_contains "$out" "earlier versions" "no collapse line from the tombstone" || return 1
+}
+
+test_launch_banner_card_yields_to_the_mod() {
+    export HOME="$TEST_TMPDIR/home"
+    mkdir -p "$HOME/.cache/cs"
+    printf '%s 2026.99.3\n' "$(date +%s)" > "$HOME/.cache/cs/update-check"
+    printf '2026.99.3\tOne fix: the statusline is readable.\n2026.99.2\tOne change: the menu is single-keypress.\n+\t… and 1 earlier versions\n' \
+        > "$HOME/.cache/cs/update-notes-2026.99.3"
+    : > "$HOME/.cache/cs/update-notes-full-2026.99.3"
+    unset CS_NO_UPDATE_CHECK
+    local out
+    # Same seed as test_launch_banner_shows_notes_card, but launched with the
+    # mod eligible to run: no CS_NO_FUNCTION_HOOKS and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS
+    # unset going in, so the launch's own export turns the flag on. The
+    # yellow row still announces the version; the card's summary line must
+    # not repeat it, since the mod draws the full notes inside the session.
+    out=$(env -u CLAUDE_CODE_ENABLE_FUNCTION_HOOKS -u CS_NO_FUNCTION_HOOKS "$CS_BIN" "notes-card-yields-session" < /dev/null 2>&1) || {
+        export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
+        return 1
+    }
+    export CS_NO_UPDATE_CHECK=1 HOME="$ORIGINAL_HOME"
+    assert_output_contains "$out" "2026.99.3 available" "the row still announces the version" || return 1
+    assert_output_not_contains "$out" "One fix: the statusline is readable." \
+        "no card summary when the mod will draw the notes (the populated-card test proves this string renders when the card is drawn)" || return 1
 }
 
 # The cs-update mod reads the launch's verdict from the environment: which
@@ -551,6 +581,7 @@ run_test test_check_shows_rendered_span
 run_test test_check_falls_back_when_fetch_fails
 run_test test_launch_banner_shows_notes_card
 run_test test_launch_banner_quiet_on_empty_notes_cache
+run_test test_launch_banner_card_yields_to_the_mod
 run_test test_launch_exports_update_verdict_to_the_mod
 run_test test_notify_writes_notes_cache
 run_test test_notify_writes_empty_full_cache_when_fetch_fails

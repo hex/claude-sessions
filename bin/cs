@@ -7808,7 +7808,16 @@ launch_claude_code() {
         # last fact about this session and not as a separate widget.
         echo -e "${bars[$((bar_idx < ${#bars[@]} ? bar_idx : ${#bars[@]} - 1))]}${NC} ${BOLD}${YELLOW}${ICON_UP}${NC} ${BOLD}${GREEN}$UPDATE_AVAILABLE${NC} ${BOLD}${COMMENT}available${NC} ${BOLD}${DIM}(you have $VERSION — run${NC} ${BOLD}${GOLD}cs -update${NC}${BOLD}${DIM})${NC}"; ((++bar_idx))
         local notes_cache="$HOME/.cache/cs/update-notes-$UPDATE_AVAILABLE"
-        if [ -s "$notes_cache" ]; then
+        # The cs-update mod draws these same notes in full inside the session
+        # once function hooks are on, so printing them here too would be a
+        # second copy of the same list. This card is the fallback for when
+        # the mod is withheld: mirrors the export above (CS_NO_FUNCTION_HOOKS
+        # set, or the flag pinned to 0) — it runs after that block, so the
+        # exported value already carries both cases. KEEP IN SYNC with
+        # _rotate_force_notice's identical check.
+        local _mod_withheld=""
+        case "${CLAUDE_CODE_ENABLE_FUNCTION_HOOKS:-}" in ''|0) _mod_withheld=1 ;; esac
+        if [ -n "$_mod_withheld" ] && [ -s "$notes_cache" ]; then
             local card_w nver nsum indent wrap_w line first
             card_w=$(tput cols 2>/dev/null) || card_w=80
             case "$card_w" in ''|*[!0-9]*) card_w=80 ;; esac

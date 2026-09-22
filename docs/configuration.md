@@ -248,6 +248,9 @@ export CS_PLATFORM_OVERRIDE="linux"   # macos, wsl, or linux
 
 The release-notes pane is a Claude Code `/config` row, `cs-update.showReleaseNotes`
 (on by default). Off, a launch opens no pane; `/cs-update` still opens it.
+The launch banner's compact notes card draws only when `CS_NO_FUNCTION_HOOKS=1`
+or `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=0` withholds the mod, since otherwise
+the mod shows the full notes in the session.
 
 ## Environment variables cs sets for you
 
