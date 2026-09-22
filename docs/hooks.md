@@ -497,16 +497,16 @@ the download, the checksum and the signature. The pane shows `updating…`
 while it runs and hides the key so a second press cannot start a second
 installer; a non-zero exit or a run that could not start keeps the key for
 another try and shows the last lines of stderr; a clean exit retires the key
-and the pane keeps the outcome — "Update finished. Takes effect on your next
-launch." — until it is dismissed, since the new files take effect only on the
+and the pane keeps the outcome ("Update finished. Takes effect on your next
+launch.") until it is dismissed, since the new files take effect only on the
 next launch: this claude and its loaded mods keep running the old code. `Esc`
 closes the pane at any point.
 
 The `/config` row `cs-update.showReleaseNotes` (on by default) turns off only
 the launch pane; `/cs-update` still opens it with the option off.
 
-`install.sh` deploys the mod's three files — `.claude-plugin/plugin.json`,
-`hooks/hooks.json`, `hooks/register.tsx` — under `~/.claude/skills/cs-update/`,
+`install.sh` deploys the mod's three files (`.claude-plugin/plugin.json`,
+`hooks/hooks.json`, `hooks/register.tsx`) under `~/.claude/skills/cs-update/`,
 the same layout as `cs-rotate`, and `cs -uninstall` removes the directory. When
 Claude Code loads the plugin, the mod writes `.cs/local/cs-update.heartbeat`
 (one UTC timestamp) when the cwd has `.cs/local`, and `cs -doctor` reports the
