@@ -581,6 +581,27 @@ test_a_session_ending_leaves_the_window_to_the_others() {
     _tt kill-server
 }
 
+# The launch's own cleanup (its EXIT trap: a resume prompt cancelled, or the
+# resume arm's claude returning) releases the pane the launch claimed, and the
+# window stays named, and locked, after the sessions still in it.
+test_a_launch_cleanup_releases_its_pane_and_keeps_the_others_title() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup
+    local lib="$SCRIPT_DIR/../lib"
+    _tt respawn-pane -k -t "$TT_PANE_B" "bash -c '. \"$lib/02-shared.sh\"; . \"$lib/05-term.sh\"; set_tab_title \"cs: fignity\" \"\" fignity; reset_tab_title; touch \"$TEST_TMPDIR/cleaned\"; sleep 600'" \
+        || { _tt kill-server; return 1; }
+    local i=0
+    while [ ! -e "$TEST_TMPDIR/cleaned" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+    assert_eq "cs: current-session" "$(_tt_window_name)" \
+        "the cleaned-up launch leaves the window to the session still running" || { _tt kill-server; return 1; }
+    assert_eq "" "$(_tt show-options -p -v -t "$TT_PANE_B" @cs_session 2>/dev/null)" \
+        "and holds no claim on its pane" || { _tt kill-server; return 1; }
+    assert_eq "off" "$(_tt show-window-options -v -t "$TT_PANE_A" allow-rename)" \
+        "the surviving session's window stays locked" || { _tt kill-server; return 1; }
+    _tt kill-server
+}
+
 # A /clear in the window's only session ends it (the window is released and
 # unlocked) and starts it again: the claim back must lock the names again, or
 # Claude Code retitles the pane and the window for the rest of the session.
@@ -1970,6 +1991,7 @@ run_test test_session_start_reasserts_tab_title_through_tmux
 run_test test_two_cs_sessions_in_one_window_name_it_after_both
 run_test test_a_session_ending_leaves_the_window_to_the_others
 run_test test_a_launch_in_a_second_pane_joins_the_window_name
+run_test test_a_launch_cleanup_releases_its_pane_and_keeps_the_others_title
 run_test test_a_claim_after_the_last_release_locks_the_titles_again
 run_test test_a_non_lead_end_leaves_the_pane_claimed
 run_test test_session_start_tab_title_leaves_a_teammate_pane_alone
