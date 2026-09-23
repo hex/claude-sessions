@@ -126,7 +126,10 @@ export const FORCE_DEFAULT = 80
 // mod opens on its own is not drawn below 144 columns (110 once the person has
 // opened it themselves), so on a narrow terminal the band is all there is.
 export const PREVIEW_PANE = 'cs-rotate-handoff'
-export const PREVIEW_LINES = 12
+// The most text a Markdown element takes: a longer one refuses the whole tree,
+// and the pane would draw nothing (KEEP IN SYNC with MarkdownProps.text in
+// the mods type contract).
+export const MARKDOWN_LIMIT = 10000
 
 // The wrap key's question, and the answer that runs /wrap. `$.ui.ask` opens
 // the engine's own AskUserQuestion dialog and resolves to the label chosen, or
@@ -142,7 +145,7 @@ let left: number | undefined
 let ticker: { cancel: () => void } | undefined
 let bandIdle = false
 // The preview's lines while its pane is open, and whether this load has shown it.
-let preview: string[] | undefined
+let preview: Step | undefined
 let previewShown = false
 
 // Which conversation the turns belong to, and whether it is being judged. A
@@ -259,16 +262,17 @@ export function register(on: On) {
   // or this one once the count has ended, is not the mod's to draw.
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PREVIEW_PANE || preview === undefined) return next(e)
-    const { Box, Text } = await $.ui.resolve(e)
+    const { Box, Text, Markdown } = await $.ui.resolve(e)
     // With one pane open the engine draws no title, so the pane carries its
-    // own, in the session's colour; the step's first line is its headline.
+    // own, in the session's colour; the step is drawn as a reply's markdown is.
     const own = paletteColor(await sessionColor($))
     const color = left === undefined ? undefined : await rampColor($, left)
     return (
       <Box flexDirection="column" paddingX={1}>
         <Text key="header" bold color={own}>Handoff</Text>
         <Box flexDirection="column" marginTop={1}>
-          {preview.map((line, i) => <Text key={`step-${i}`} bold={i === 0 ? true : undefined}>{line}</Text>)}
+          <Markdown key="step" text={preview.text} />
+          {preview.cut && <Text key="cut" dimColor>… the rest of the step is in the handoff</Text>}
         </Box>
         {left !== undefined && (
           <Box flexDirection="column" marginTop={1}>
@@ -405,19 +409,27 @@ async function openPreview($: EngineInterface) {
   }
 }
 
-// The handoff's Next Step section (`# Next Step`, `## 1. Next Step`), its
-// blank lines dropped, capped at PREVIEW_LINES; empty when it has none.
-export function nextStep(text: string): string[] {
+// A handoff's next step as the pane shows it: the section's markdown, and
+// whether MARKDOWN_LIMIT cut it short.
+export type Step = { text: string; cut: boolean }
+
+// The handoff's Next Step section (`# Next Step`, `## 1. Next Step`) as
+// written, blank lines and all, trimmed of the blank lines around it; empty
+// when it has none. Past MARKDOWN_LIMIT it keeps the whole lines that fit.
+export function nextStep(text: string): Step {
   const lines = text.split('\n')
   const start = lines.findIndex(line => /^#+\s*(\d+\.\s*)?next step\s*$/i.test(line.trim()))
-  if (start < 0) return []
+  if (start < 0) return { text: '', cut: false }
   const body: string[] = []
   for (const line of lines.slice(start + 1)) {
     if (/^#+\s/.test(line)) break
-    if (line.trim() !== '') body.push(line.trimEnd())
-    if (body.length === PREVIEW_LINES) break
+    body.push(line.trimEnd())
   }
-  return body
+  const step = body.join('\n').replace(/^\n+/, '').trimEnd()
+  if (step.length <= MARKDOWN_LIMIT) return { text: step, cut: false }
+  // a line longer than the bound has no line end to stop at: cut at the bound
+  const end = step.lastIndexOf('\n', MARKDOWN_LIMIT)
+  return { text: end > 0 ? step.slice(0, end).trimEnd() : step.slice(0, MARKDOWN_LIMIT), cut: true }
 }
 
 // The band's own threshold; without one it is the bar's warn band, read the way
