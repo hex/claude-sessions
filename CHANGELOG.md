@@ -4,10 +4,10 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.9.21
 
 ### Changed
-- Inside tmux, a window whose panes run more than one cs session is named after all of them, `cs: claude-sessions | fignity`, in pane order. Under iTerm's tmux integration that name is the tab's title, so a second session no longer takes the tab from the first. A session that ends leaves the name; with none left the window names itself again.
+- Inside tmux, a window whose panes run more than one cs session is named after all of them, `cs: claude-sessions | fignity`, in pane order. Under iTerm's tmux integration that name is the tab's title, so a second session no longer takes the tab from the first. A session that ends leaves the name; with none left the window names itself again. Claims from several panes at once are serialised by a per-window lock that never waits more than five seconds.
 - The Handoff pane shows the whole next step, drawn as markdown the way Claude Code draws a reply: lists, bold, code and links come out styled rather than as their markers. It used to stop at twelve lines without saying so.
 - The forced rotation's countdown is coloured: the session's own colour while there is time, amber from ten seconds, red under five, on the band's `/clear in Ns` and in the Handoff pane. The pane opens on a header in the session colour and counts down on a twenty-block bar.
 - Bare `cs` always opens the session manager, including from a session's own directory. `cs .` opens the session you are standing in (an adopted project under its cs name); outside a session it refuses and names `cs -adopt`.
