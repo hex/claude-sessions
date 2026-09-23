@@ -6,7 +6,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, GRACE_SECONDS, PREVIEW_PANE, WRAP_QUESTION, WRAP_YES, nextStep, surfaceColor, isUnconsumed } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, GRACE_SECONDS, PREVIEW_PANE, WRAP_QUESTION, WRAP_YES, nextStep, inlineSpans, surfaceColor, isUnconsumed } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -962,12 +962,31 @@ test('a pane drawn for any other id passes through, and a closed preview draws n
   expect(await pane()).toBe(DRAWN)
 })
 
-test('nextStep reads the handoff\'s Next Step section, however it is numbered, and caps it', () => {
-  expect(nextStep(HANDOFF_WITH_STEP)).toEqual(['Run the secrets suites solo.', 'Triage the store file.'])
-  expect(nextStep('---\nstatus: unconsumed\n---\n\n## 1. Next Step\n\nOne thing.\n')).toEqual(['One thing.'])
-  expect(nextStep('---\nstatus: unconsumed\n---\n\nNo heading here.\n')).toEqual([])
-  const long = '# Next Step\n' + Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n')
-  expect(nextStep(long)).toHaveLength(12)
+test('nextStep reads the handoff\'s Next Step section, however it is numbered, and counts what the cap leaves out', () => {
+  expect(nextStep(HANDOFF_WITH_STEP)).toEqual({ lines: ['Run the secrets suites solo.', 'Triage the store file.'], more: 0 })
+  expect(nextStep('---\nstatus: unconsumed\n---\n\n## 1. Next Step\n\nOne thing.\n')).toEqual({ lines: ['One thing.'], more: 0 })
+  expect(nextStep('---\nstatus: unconsumed\n---\n\nNo heading here.\n')).toEqual({ lines: [], more: 0 })
+  // 30 lines with blanks between them, then the next section: 24 shown, 6 left
+  const long = '# Next Step\n' + Array.from({ length: 30 }, (_, i) => `line ${i}\n`).join('\n') + '# Settled\n\nNothing.\n'
+  const step = nextStep(long)
+  expect(step.lines).toHaveLength(24)
+  expect(step.lines[23]).toBe('line 23')
+  expect(step.more).toBe(6)
+  const exact = '# Next Step\n' + Array.from({ length: 24 }, (_, i) => `line ${i}`).join('\n')
+  expect(nextStep(exact).more).toBe(0)
+})
+
+test('inlineSpans reads bold, italic and code, and leaves an unclosed marker as text', () => {
+  expect(inlineSpans('the **overlap chip**. Native')).toEqual([
+    { text: 'the ' }, { text: 'overlap chip', bold: true }, { text: '. Native' },
+  ])
+  expect(inlineSpans('checked against `git status`, *not* `a **b**`')).toEqual([
+    { text: 'checked against ' }, { text: 'git status', code: true }, { text: ', ' },
+    { text: 'not', italic: true }, { text: ' ' }, { text: 'a **b**', code: true },
+  ])
+  expect(inlineSpans('2 * 3 and **open')).toEqual([{ text: '2 * 3 and **open' }])
+  expect(inlineSpans('_cs_is_lead_ stays')).toEqual([{ text: '_cs_is_lead_ stays' }])
+  expect(inlineSpans('')).toEqual([])
 })
 
 // The count's colour ramp: the session's own colour while there is time, the
@@ -980,7 +999,8 @@ function texts(tree: any): any[] {
   const own = tree.type === 'Text' ? [tree] : []
   return [...own, ...(tree.children ?? []).flatMap(texts)]
 }
-const textOf = (node: any): string => (node.children ?? []).map((c: any) => typeof c === 'string' ? c : '').join('')
+// A Text's own strings; a mapped list of children nests, as the engine allows.
+const textOf = (node: any): string => (node.children ?? []).flat(Infinity).map((c: any) => typeof c === 'string' ? c : '').join('')
 const countText = (tree: any) => texts(tree).find(t => /^\/clear in \d+s$/.test(textOf(t)))
 const startGrace = async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
@@ -1038,6 +1058,27 @@ test('the pane opens on a header in the session colour and a bold first step', a
   const second = all.find(t => textOf(t) === 'Triage the store file.')
   expect(first.props.bold).toBe(true)
   expect(second.props.bold).toBeUndefined()
+})
+
+test('the pane draws the step\'s markdown as styles and says how much the cap left out', async () => {
+  const step = Array.from({ length: 26 }, (_, i) => i === 0 ? 'Build the **overlap chip** with `git status`.' : `line ${i}`).join('\n')
+  await startGrace(); files[HANDOFF] = `---\nparent: uuid-lead\nstatus: unconsumed\n---\n\n# Next Step\n\n${step}\n`
+  await fireAfter()
+  const all = texts(await pane())
+  expect(JSON.stringify(await pane())).not.toContain('**')
+  const chip = all.find(t => textOf(t) === 'overlap chip')
+  expect(chip.props.bold).toBe(true)
+  const code = all.find(t => textOf(t) === 'git status')
+  expect(code.props.color).toBe('rgb(220,38,38)')
+  expect(all.some(t => textOf(t) === 'line 23')).toBe(true)
+  expect(all.some(t => textOf(t) === 'line 24')).toBe(false)
+  const cut = all.find(t => textOf(t) === '… 2 more lines in the handoff')
+  expect(cut.props.dimColor).toBe(true)
+})
+
+test('a step the cap does not cut draws no marker', async () => {
+  await startGrace(); await fireAfter()
+  expect(JSON.stringify(await pane())).not.toContain('more line')
 })
 
 test('the pane counts down on a twenty-block bar in the ramp\'s colour, beside the same count', async () => {

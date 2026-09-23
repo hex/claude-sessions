@@ -126,7 +126,7 @@ export const FORCE_DEFAULT = 80
 // mod opens on its own is not drawn below 144 columns (110 once the person has
 // opened it themselves), so on a narrow terminal the band is all there is.
 export const PREVIEW_PANE = 'cs-rotate-handoff'
-export const PREVIEW_LINES = 12
+export const PREVIEW_LINES = 24
 
 // The wrap key's question, and the answer that runs /wrap. `$.ui.ask` opens
 // the engine's own AskUserQuestion dialog and resolves to the label chosen, or
@@ -142,7 +142,7 @@ let left: number | undefined
 let ticker: { cancel: () => void } | undefined
 let bandIdle = false
 // The preview's lines while its pane is open, and whether this load has shown it.
-let preview: string[] | undefined
+let preview: Step | undefined
 let previewShown = false
 
 // Which conversation the turns belong to, and whether it is being judged. A
@@ -268,7 +268,14 @@ export function register(on: On) {
       <Box flexDirection="column" paddingX={1}>
         <Text key="header" bold color={own}>Handoff</Text>
         <Box flexDirection="column" marginTop={1}>
-          {preview.map((line, i) => <Text key={`step-${i}`} bold={i === 0 ? true : undefined}>{line}</Text>)}
+          {preview.lines.map((line, i) => (
+            <Text key={`step-${i}`} bold={i === 0 ? true : undefined}>
+              {inlineSpans(line).map((span, k) => span.bold || span.italic || span.code
+                ? <Text key={`span-${k}`} bold={span.bold} italic={span.italic} color={span.code ? own : undefined}>{span.text}</Text>
+                : span.text)}
+            </Text>
+          ))}
+          {preview.more > 0 && <Text key="more" dimColor>{`… ${preview.more} more line${preview.more === 1 ? '' : 's'} in the handoff`}</Text>}
         </Box>
         {left !== undefined && (
           <Box flexDirection="column" marginTop={1}>
@@ -405,19 +412,60 @@ async function openPreview($: EngineInterface) {
   }
 }
 
+// A handoff's next step as the pane shows it: the first PREVIEW_LINES lines,
+// and how many more the section holds past them.
+export type Step = { lines: string[]; more: number }
+
 // The handoff's Next Step section (`# Next Step`, `## 1. Next Step`), its
-// blank lines dropped, capped at PREVIEW_LINES; empty when it has none.
-export function nextStep(text: string): string[] {
+// blank lines dropped; no lines when it has none.
+export function nextStep(text: string): Step {
   const lines = text.split('\n')
   const start = lines.findIndex(line => /^#+\s*(\d+\.\s*)?next step\s*$/i.test(line.trim()))
-  if (start < 0) return []
+  if (start < 0) return { lines: [], more: 0 }
   const body: string[] = []
   for (const line of lines.slice(start + 1)) {
     if (/^#+\s/.test(line)) break
     if (line.trim() !== '') body.push(line.trimEnd())
-    if (body.length === PREVIEW_LINES) break
   }
-  return body
+  return { lines: body.slice(0, PREVIEW_LINES), more: Math.max(0, body.length - PREVIEW_LINES) }
+}
+
+// A run of a line's text and the markdown style it carries.
+export type Span = { text: string; bold?: true; italic?: true; code?: true }
+
+// A line's inline markdown: `code`, **bold**, *italic*. A marker counts only
+// when its text starts and ends on a non-space (`2 * 3` stays text) and it is
+// closed on the same line; code is taken as written, markers and all.
+// Underscores are never emphasis, so `_name_` identifiers stay as they are.
+export function inlineSpans(line: string): Span[] {
+  const spans: Span[] = []
+  let plain = ''
+  const flush = () => { if (plain !== '') spans.push({ text: plain }); plain = '' }
+  const closes = (from: number, marker: string) => {
+    if (from >= line.length || line[from] === ' ') return -1
+    let at = line.indexOf(marker, from + 1)
+    while (at >= 0 && (line[at - 1] === ' ' || (marker === '*' && line[at + 1] === '*'))) {
+      at = line.indexOf(marker, at + (marker === '*' && line[at + 1] === '*' ? 2 : 1))
+    }
+    return at
+  }
+  let i = 0
+  while (i < line.length) {
+    if (line[i] === '`') {
+      const end = line.indexOf('`', i + 1)
+      if (end > i + 1) { flush(); spans.push({ text: line.slice(i + 1, end), code: true }); i = end + 1; continue }
+    } else if (line.startsWith('**', i)) {
+      const end = closes(i + 2, '**')
+      if (end > i + 2) { flush(); spans.push({ text: line.slice(i + 2, end), bold: true }); i = end + 2; continue }
+      plain += '**'; i += 2; continue
+    } else if (line[i] === '*') {
+      const end = closes(i + 1, '*')
+      if (end > i + 1) { flush(); spans.push({ text: line.slice(i + 1, end), italic: true }); i = end + 1; continue }
+    }
+    plain += line[i]; i++
+  }
+  flush()
+  return spans
 }
 
 // The band's own threshold; without one it is the bar's warn band, read the way
