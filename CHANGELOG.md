@@ -7,6 +7,7 @@ All notable changes to cs are documented here. Release notes are also available 
 ## Unreleased
 
 ### Changed
+- The forced rotation's countdown is coloured: the session's own colour while there is time, amber from ten seconds, red under five, on the band's `/clear in Ns` and in the Handoff pane. The pane opens on a header in the session colour, shows the next step's first line in bold, and counts down on a twenty-block bar.
 - Bare `cs` always opens the session manager, including from a session's own directory. `cs .` opens the session you are standing in (an adopted project under its cs name); outside a session it refuses and names `cs -adopt`.
 
 ## 2026.9.20

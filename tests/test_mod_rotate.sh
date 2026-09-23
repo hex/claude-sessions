@@ -70,6 +70,31 @@ test_mod_surface_shade_matches_the_statusline_shade() {
     assert_eq "$sl_pivot" "$mod_pivot" "mod luminance pivot == statusline _bg_shade pivot" || return 1
 }
 
+# The countdown's ramp paints the bar's own inks: the session palette, amber
+# and crit, each a literal in two languages (KEEP IN SYNC). Read out of _sgr's
+# truecolor arm, so a colour changed in the bar and not in the mod fails here.
+test_mod_ramp_inks_match_the_statusline() {
+    local sl="$SCRIPT_DIR/../bin/cs-statusline" mod="$MOD/hooks/register.tsx"
+    local truecolor name sl_rgb mod_rgb
+    truecolor="$(sed -n '/^_sgr() {/,/^        256)/p' "$sl")"
+    for name in red blue green yellow purple orange pink cyan; do
+        sl_rgb="$(sed -n "s/^ *$name) *rgb=\"\([0-9;]*\)\" ;;.*/\1/p" <<< "$truecolor" | tr ';' ',')"
+        mod_rgb="$(sed -n "s/.*[{ ]$name: '\([0-9,]*\)'.*/\1/p" "$mod")"
+        [ -n "$sl_rgb" ] || { echo "  FAIL: palette colour $name not found in _sgr"; return 1; }
+        assert_eq "$sl_rgb" "$mod_rgb" "mod palette $name == statusline $name" || return 1
+    done
+
+    local amber crit
+    amber="$(sed -n '/^ *amber)$/,/fi ;;/p' <<< "$truecolor")"
+    crit="$(sed -n 's/^ *\[ "\$SL_THEME" = "dark" \] && rgb="\([0-9;]*\)" || rgb="\([0-9;]*\)" ;;$/\1 \2/p' <<< "$(sed -n '/^ *crit)$/,/;;/p' <<< "$truecolor")")"
+    assert_eq "$(sed -n 's/.*_LUM" -ge \([0-9]*\) \] && rgb="\([0-9;]*\)" || rgb="\([0-9;]*\)".*/\1 \2 \3/p' <<< "$amber" | tr ';' ',')" \
+        "$(sed -n 's/.*722 \* rgb\[2\] >= \([0-9]*\) :.*/\1/p' "$mod") $(sed -n "s/^export const AMBER_LIGHT = '\([0-9,]*\)'$/\1/p" "$mod") $(sed -n "s/^export const AMBER_DARK = '\([0-9,]*\)'$/\1/p" "$mod")" \
+        "mod amber pivot, light and dark == statusline amber" || return 1
+    assert_eq "$(tr ';' ',' <<< "$crit")" \
+        "$(sed -n "s/^export const CRIT_DARK = '\([0-9,]*\)'$/\1/p" "$mod") $(sed -n "s/^export const CRIT_LIGHT = '\([0-9,]*\)'$/\1/p" "$mod")" \
+        "mod crit dark and light == statusline crit" || return 1
+}
+
 # The installer deploys the mod under ~/.claude/skills/cs-rotate and a cs
 # launch exports the flag Claude Code loads it behind, so the mod runs with
 # nothing for the person to place. Both halves are pinned here by name; the
@@ -112,13 +137,13 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     fi
     assert_output_contains "$out" "hooks: session.start, turn.complete, prompt.submit, command.run{command=clear}, turn.start, ui.render{component=AbovePrompt}, ui.render{component=Pane}" "all seven hooks inventoried" || return 1
     assert_output_not_contains "$out" '$.prompt.fill' "nothing fills the composer any more" || return 1
-    assert_output_contains "$out" 'env reads: CS_ROTATE_BUTTON_CTX, CS_ROTATE_FORCE_CTX, CS_STATUSLINE_CTX_WARN, CS_TERM_BG_RGB' "the two thresholds, the bar's warn band and the measured background are read from the environment" || return 1
+    assert_output_contains "$out" 'env reads: CS_ROTATE_BUTTON_CTX, CS_ROTATE_FORCE_CTX, CS_STATUSLINE_CTX_WARN, CS_TERM_BG_RGB, CS_TERM_THEME' "the two thresholds, the bar's warn band, the measured background and the theme are read from the environment" || return 1
     assert_output_not_contains "$out" '$.prompt.submit' "and never submits" || return 1
     assert_output_contains "$out" '$.command.run (via askToWrap, clearAndContinue, rotate)' "the keys run their commands, and nothing else runs one" || return 1
     assert_output_contains "$out" '$.clock.after (via forceRotation, startCountdown), $.clock.every (via startCountdown)' "the forced /rotate and the pane's open are one-shot timers and the grace a ticker, nowhere else" || return 1
     assert_output_contains "$out" '$.ui.ask (via askToWrap)' "the wrap key asks through the engine's own dialog" || return 1
     assert_output_contains "$out" '$.ui.close (via openPreview, stopCountdown)' "the handoff pane closes where the count ends, and where it lands after one" || return 1
-    assert_output_contains "$out" '$.fs.read (via armedHandoff, forceRotation, ownsRotation, readWrapped)' "the wrap marker is read, never a file's age" || return 1
+    assert_output_contains "$out" '$.fs.read (via armedHandoff, forceRotation, readState, readWrapped)' "the wrap marker and the state are read, never a file's age" || return 1
     assert_output_not_contains "$out" '$.fs.stat' "no rule hangs on a modification time" || return 1
     assert_output_contains "$out" '$.ui.open (via openPreview)' "and opens in one place" || return 1
 }
@@ -127,6 +152,7 @@ run_test test_mod_manifest_names_the_plugin_and_its_module
 run_test test_mod_default_threshold_matches_the_statusline_warn_default
 run_test test_mod_force_default_matches_the_launch_notice
 run_test test_mod_surface_shade_matches_the_statusline_shade
+run_test test_mod_ramp_inks_match_the_statusline
 run_test test_mod_is_deployed_by_the_installer_and_enabled_at_launch
 run_test test_mod_unit_tests_pass_under_bun
 run_test test_mod_validate_inventories_the_hooks_and_calls
