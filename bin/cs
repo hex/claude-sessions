@@ -210,6 +210,32 @@ _narrative_budget() {  # value, default
     n=$((10#$1))
     if [ "$n" -gt 0 ]; then echo "$n"; else echo "$2"; fi
 }
+
+# Names a tmux window after every cs session running in its panes: "cs: a | b",
+# in pane order, each name once. Under iTerm's tmux integration the window name
+# is the tab's title, and one window holds every pane of a tab, so a single
+# session writing its own name took the tab from the other. Each pane records
+# its session in the pane option @cs_session; an empty name releases the pane.
+# With no cs session left in the window it names itself again. Every tmux call
+# is best-effort: a title must never fail a launch or a hook.
+cs_tmux_title_window() {  # pane, session name ("" releases the pane)
+    local pane="$1" name="$2" names
+    [ -n "$pane" ] || return 0
+    if [ -n "$name" ]; then
+        tmux set-option -p -t "$pane" @cs_session "$name" 2>/dev/null || true
+    else
+        tmux set-option -p -u -t "$pane" @cs_session 2>/dev/null || true
+    fi
+    names=$(tmux list-panes -t "$pane" -F '#{@cs_session}' 2>/dev/null \
+        | awk 'NF && !seen[$0]++ { out = out (out == "" ? "" : " | ") $0 } END { print out }') || names=""
+    if [ -n "$names" ]; then
+        tmux rename-window -t "$pane" "cs: $names" 2>/dev/null || true
+    else
+        tmux set-window-option -t "$pane" automatic-rename on 2>/dev/null || true
+        tmux set-window-option -t "$pane" allow-rename on 2>/dev/null || true
+        tmux set-window-option -t "$pane" allow-set-title on 2>/dev/null || true
+    fi
+}
 _claude_encode_path() {
     local p="$1"
     p="${p//\//-}"
@@ -424,6 +450,7 @@ set_tab_title() {
 
     local title="$1"
     local color="${2:-}"  # optional: "blue", r,g,b values, or "auto:name" to hash from name
+    local session="${3:-}"  # optional: the cs session, to share a tmux window's name with its other panes
     local outer_term
     outer_term=$(_detect_terminal)
 
@@ -432,7 +459,11 @@ set_tab_title() {
 
     # tmux: set window name and pane title, then lock both so Claude Code can't overwrite
     if [ -n "${TMUX:-}" ]; then
-        tmux rename-window "$title" 2>/dev/null || true
+        if [ -n "$session" ] && [ -n "${TMUX_PANE:-}" ]; then
+            cs_tmux_title_window "$TMUX_PANE" "$session"
+        else
+            tmux rename-window "$title" 2>/dev/null || true
+        fi
         tmux select-pane -T "$title" 2>/dev/null || true
         tmux set-window-option allow-rename off 2>/dev/null || true
         tmux set-window-option allow-set-title off 2>/dev/null || true
@@ -7853,7 +7884,7 @@ EOF
     # name hash only if no color is recorded.
     local _tab_color
     _tab_color=$(_session_color_rgb "$claude_session_color")
-    set_tab_title "cs: $session_name" "${_tab_color:-auto:$session_name}"
+    set_tab_title "cs: $session_name" "${_tab_color:-auto:$session_name}" "$session_name"
 
     cd "$session_dir"
 

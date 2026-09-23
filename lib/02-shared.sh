@@ -1,4 +1,4 @@
-# ABOUTME: Actor identity and narrative-budget code that cs AND its hooks run. build.sh
+# ABOUTME: Actor identity, narrative-budget and tmux window-title code that cs AND its hooks run. build.sh
 # ABOUTME: folds this into bin/cs and writes it verbatim to hooks/cs-shared.sh for sourcing.
 
 # Normalize an arbitrary identity string to a filesystem-safe slug.
@@ -64,4 +64,30 @@ _narrative_budget() {  # value, default
     case "${1:-}" in ''|*[!0-9]*|????????????????*) echo "$2"; return;; esac
     n=$((10#$1))
     if [ "$n" -gt 0 ]; then echo "$n"; else echo "$2"; fi
+}
+
+# Names a tmux window after every cs session running in its panes: "cs: a | b",
+# in pane order, each name once. Under iTerm's tmux integration the window name
+# is the tab's title, and one window holds every pane of a tab, so a single
+# session writing its own name took the tab from the other. Each pane records
+# its session in the pane option @cs_session; an empty name releases the pane.
+# With no cs session left in the window it names itself again. Every tmux call
+# is best-effort: a title must never fail a launch or a hook.
+cs_tmux_title_window() {  # pane, session name ("" releases the pane)
+    local pane="$1" name="$2" names
+    [ -n "$pane" ] || return 0
+    if [ -n "$name" ]; then
+        tmux set-option -p -t "$pane" @cs_session "$name" 2>/dev/null || true
+    else
+        tmux set-option -p -u -t "$pane" @cs_session 2>/dev/null || true
+    fi
+    names=$(tmux list-panes -t "$pane" -F '#{@cs_session}' 2>/dev/null \
+        | awk 'NF && !seen[$0]++ { out = out (out == "" ? "" : " | ") $0 } END { print out }') || names=""
+    if [ -n "$names" ]; then
+        tmux rename-window -t "$pane" "cs: $names" 2>/dev/null || true
+    else
+        tmux set-window-option -t "$pane" automatic-rename on 2>/dev/null || true
+        tmux set-window-option -t "$pane" allow-rename on 2>/dev/null || true
+        tmux set-window-option -t "$pane" allow-set-title on 2>/dev/null || true
+    fi
 }

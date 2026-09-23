@@ -215,6 +215,7 @@ set_tab_title() {
 
     local title="$1"
     local color="${2:-}"  # optional: "blue", r,g,b values, or "auto:name" to hash from name
+    local session="${3:-}"  # optional: the cs session, to share a tmux window's name with its other panes
     local outer_term
     outer_term=$(_detect_terminal)
 
@@ -223,7 +224,11 @@ set_tab_title() {
 
     # tmux: set window name and pane title, then lock both so Claude Code can't overwrite
     if [ -n "${TMUX:-}" ]; then
-        tmux rename-window "$title" 2>/dev/null || true
+        if [ -n "$session" ] && [ -n "${TMUX_PANE:-}" ]; then
+            cs_tmux_title_window "$TMUX_PANE" "$session"
+        else
+            tmux rename-window "$title" 2>/dev/null || true
+        fi
         tmux select-pane -T "$title" 2>/dev/null || true
         tmux set-window-option allow-rename off 2>/dev/null || true
         tmux set-window-option allow-set-title off 2>/dev/null || true

@@ -526,10 +526,78 @@ test_session_start_reasserts_tab_title_through_tmux() {
           bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1 || return 1
     assert_file_contains "$FAKE_TMUX_CALLS" "^\[select-pane\]\[-t\]\[%3\]\[-T\]\[cs: current-session\]$" \
         "the pane title is re-asserted on the hook's own pane, as one argument" || return 1
-    assert_file_contains "$FAKE_TMUX_CALLS" "^\[rename-window\]\[-t\]\[%3\]\[cs: current-session\]$" \
-        "the window name is re-asserted too" || return 1
+    # The window name itself is composed from every pane's claim; the real-tmux
+    # tests below read it back. Here: the claim is this pane's, the name whole.
+    assert_file_contains "$FAKE_TMUX_CALLS" "^\[set-option\]\[-p\]\[-t\]\[%3\]\[@cs_session\]\[current-session\]$" \
+        "the pane claims its session, as one argument, so the window can be named after it" || return 1
     assert_file_not_exists "$CS_TITLE_TTY" \
         "under tmux the server carries the title; no escape is written to a tty" || return 1
+}
+
+# Two cs sessions in two panes of one tmux window share one window name, which
+# is the tab's title under iTerm's tmux integration. Each pane records the
+# session it runs; the window is named after all of them, in pane order. Real
+# tmux on a private socket, so the developer's server is never touched.
+_real_tmux_window() {
+    command -v tmux >/dev/null 2>&1 || return 77
+    TT_SOCK="$TEST_TMPDIR/tt.sock"
+    TT_PANE_A=$(tmux -S "$TT_SOCK" -f /dev/null new-session -d -P -F '#{pane_id}' -x 120 -y 30 'sleep 600') || return 1
+    TT_PANE_B=$(tmux -S "$TT_SOCK" split-window -d -h -P -F '#{pane_id}' -t "$TT_PANE_A" 'sleep 600') || return 1
+}
+_tt() { tmux -S "$TT_SOCK" "$@"; }
+_tt_window_name() { _tt display-message -p -t "$TT_PANE_A" '#{window_name}'; }
+_tt_hook() {  # hook, pane, session name, source
+    echo '{"session_id":"s","source":"'"$4"'","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"x"}' \
+        | TMUX="$TT_SOCK,1,0" TMUX_PANE="$2" CLAUDE_SESSION_NAME="$3" \
+          bash "$HOOKS_DIR/$1" >/dev/null 2>&1
+}
+
+test_two_cs_sessions_in_one_window_name_it_after_both() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup || { _tt kill-server; return 1; }
+    assert_eq "cs: current-session" "$(_tt_window_name)" "one session names the window alone" || { _tt kill-server; return 1; }
+    _tt_hook session-start.sh "$TT_PANE_B" fignity startup || { _tt kill-server; return 1; }
+    assert_eq "cs: current-session | fignity" "$(_tt_window_name)" \
+        "a second session in the same window joins the name, in pane order" || { _tt kill-server; return 1; }
+    # A /clear restarts a conversation in its pane: the name does not repeat.
+    _tt_hook session-start.sh "$TT_PANE_A" current-session clear || { _tt kill-server; return 1; }
+    assert_eq "cs: current-session | fignity" "$(_tt_window_name)" \
+        "a session re-asserting its own pane is listed once" || { _tt kill-server; return 1; }
+    _tt kill-server
+}
+
+test_a_session_ending_leaves_the_window_to_the_others() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup
+    _tt_hook session-start.sh "$TT_PANE_B" fignity startup
+    _tt_hook session-end.sh "$TT_PANE_A" current-session user_exit || { _tt kill-server; return 1; }
+    assert_eq "cs: fignity" "$(_tt_window_name)" \
+        "the session that ended leaves the name; the other keeps it" || { _tt kill-server; return 1; }
+    _tt_hook session-end.sh "$TT_PANE_B" fignity user_exit || { _tt kill-server; return 1; }
+    assert_eq "on" "$(_tt show-window-options -v -t "$TT_PANE_A" automatic-rename)" \
+        "with no cs session left the window names itself again" || { _tt kill-server; return 1; }
+    _tt kill-server
+}
+
+# The launch takes its pane's claim too, from inside the pane itself: tmux gives
+# the pane its own TMUX and TMUX_PANE, and the pane's terminal is the tty
+# set_tab_title requires.
+test_a_launch_in_a_second_pane_joins_the_window_name() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup
+    local lib="$SCRIPT_DIR/../lib"
+    _tt respawn-pane -k -t "$TT_PANE_B" "bash -c '. \"$lib/02-shared.sh\"; . \"$lib/05-term.sh\"; set_tab_title \"cs: fignity\" \"\" fignity; touch \"$TEST_TMPDIR/launched\"; sleep 600'" \
+        || { _tt kill-server; return 1; }
+    local i=0
+    while [ ! -e "$TEST_TMPDIR/launched" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+    assert_eq "cs: current-session | fignity" "$(_tt_window_name)" \
+        "a cs launched in the other pane joins the window name" || { _tt kill-server; return 1; }
+    assert_eq "cs: fignity" "$(_tt display-message -p -t "$TT_PANE_B" '#{pane_title}')" \
+        "the pane's own title stays its session alone" || { _tt kill-server; return 1; }
+    _tt kill-server
 }
 
 # A tmux teammate is a full claude with its own SessionStart, and Claude Code
@@ -1867,6 +1935,9 @@ run_test test_failure_handles_missing_error
 run_test test_test_lib_drops_an_inherited_tmux_and_routes_the_title_to_a_file
 run_test test_session_start_teardown_keeps_the_title_off_the_terminal
 run_test test_session_start_reasserts_tab_title_through_tmux
+run_test test_two_cs_sessions_in_one_window_name_it_after_both
+run_test test_a_session_ending_leaves_the_window_to_the_others
+run_test test_a_launch_in_a_second_pane_joins_the_window_name
 run_test test_session_start_tab_title_leaves_a_teammate_pane_alone
 run_test test_session_start_reasserts_tab_title_on_the_terminal_device
 run_test test_session_start_tab_title_skips_silently_without_a_terminal

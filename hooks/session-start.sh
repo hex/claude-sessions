@@ -517,7 +517,12 @@ elif [ -n "${TMUX:-}" ]; then
     # An empty array is unbound under bash 3.2's set -u, hence the expansion.
     _pane="${TMUX_PANE:-}"
     tmux select-pane ${_pane:+-t "$_pane"} -T "$_title" 2>/dev/null || true
-    tmux rename-window ${_pane:+-t "$_pane"} "$_title" 2>/dev/null || true
+    # The window, which is the tab, is shared with any other pane's session.
+    if command -v cs_tmux_title_window >/dev/null 2>&1 && [ -n "$_pane" ]; then
+        cs_tmux_title_window "$_pane" "$CLAUDE_SESSION_NAME"
+    else
+        tmux rename-window ${_pane:+-t "$_pane"} "$_title" 2>/dev/null || true
+    fi
 else
     # Braced so the redirection failure itself is silenced: a trailing
     # 2>/dev/null applies after the `>` has already reported.

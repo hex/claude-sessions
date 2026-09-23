@@ -523,7 +523,7 @@ EOF
     # name hash only if no color is recorded.
     local _tab_color
     _tab_color=$(_session_color_rgb "$claude_session_color")
-    set_tab_title "cs: $session_name" "${_tab_color:-auto:$session_name}"
+    set_tab_title "cs: $session_name" "${_tab_color:-auto:$session_name}" "$session_name"
 
     cd "$session_dir"
 
