@@ -109,6 +109,34 @@ _cs_find_session_root() {  # start_dir
     return 1
 }
 
+# True when the claude a hook fires for is the conversation cs launched. cs
+# starts claude two ways: the exec arms replace cs's own process, so claude
+# carries cs's pid; the resume arm runs claude as a child, since it needs the
+# exit status, and there claude's parent is cs. Anything else is not the lead:
+# a tmux teammate (tmux starts it, and CS_LEAD_PID is absent from its
+# environment), a `claude -p` run from inside the session (its parent is a
+# shell), a front end that walked in from the directory. Both variables must be
+# non-empty, not merely equal: unset on both sides compares equal. Memoized: a
+# hook may ask more than once, and the resume-arm answer costs a ps fork.
+_CS_IS_LEAD=""
+cs_is_lead() {
+    if [ -z "$_CS_IS_LEAD" ]; then
+        _CS_IS_LEAD=0
+        if [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ]; then
+            if [ "$CLAUDE_PID" = "$CS_LEAD_PID" ]; then
+                _CS_IS_LEAD=1
+            else
+                local parent
+                parent=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
+                if [ -n "$parent" ] && [ "$parent" = "$CS_LEAD_PID" ]; then
+                    _CS_IS_LEAD=1
+                fi
+            fi
+        fi
+    fi
+    [ "$_CS_IS_LEAD" = 1 ]
+}
+
 # Claude Code launches an agent-team teammate with --agent-id, --agent-name and
 # --team-name, and rejects the launch unless all three are given. All three are
 # required here for that reason: one flag alone also matches a person asking

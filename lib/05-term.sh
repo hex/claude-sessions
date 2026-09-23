@@ -215,6 +215,7 @@ set_tab_title() {
 
     local title="$1"
     local color="${2:-}"  # optional: "blue", r,g,b values, or "auto:name" to hash from name
+    local session="${3:-}"  # optional: the cs session, to share a tmux window's name with its other panes
     local outer_term
     outer_term=$(_detect_terminal)
 
@@ -223,10 +224,16 @@ set_tab_title() {
 
     # tmux: set window name and pane title, then lock both so Claude Code can't overwrite
     if [ -n "${TMUX:-}" ]; then
-        tmux rename-window "$title" 2>/dev/null || true
-        tmux select-pane -T "$title" 2>/dev/null || true
-        tmux set-window-option allow-rename off 2>/dev/null || true
-        tmux set-window-option allow-set-title off 2>/dev/null || true
+        if [ -n "$session" ] && [ -n "${TMUX_PANE:-}" ]; then
+            cs_tmux_title_window "$TMUX_PANE" "$session"
+        else
+            tmux rename-window "$title" 2>/dev/null || true
+        fi
+        # Aimed at this pane: untargeted, tmux picks the attached client's
+        # active pane, which need not be the one cs runs in.
+        tmux select-pane ${TMUX_PANE:+-t "$TMUX_PANE"} -T "$title" 2>/dev/null || true
+        tmux set-window-option ${TMUX_PANE:+-t "$TMUX_PANE"} allow-rename off 2>/dev/null || true
+        tmux set-window-option ${TMUX_PANE:+-t "$TMUX_PANE"} allow-set-title off 2>/dev/null || true
     fi
 
     # Tab color via iTerm2 escape sequences (also supported by WezTerm)
@@ -263,8 +270,13 @@ reset_tab_title() {
     # Reset title (empty = let shell/prompt set its own)
     printf '\033]0;\007'
 
-    # tmux: re-enable automatic window/title naming
-    if [ -n "${TMUX:-}" ]; then
+    # tmux: release the pane this launch claimed. The window stays named, and
+    # locked, after any cs session still running in its other panes, and names
+    # itself again once none is left. Without a pane to release, the window's
+    # own naming comes back as before.
+    if [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ]; then
+        cs_tmux_title_window "$TMUX_PANE" ""
+    elif [ -n "${TMUX:-}" ]; then
         tmux set-window-option automatic-rename on 2>/dev/null || true
         tmux set-window-option allow-rename on 2>/dev/null || true
         tmux set-window-option allow-set-title on 2>/dev/null || true

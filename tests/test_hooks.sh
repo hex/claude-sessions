@@ -526,10 +526,164 @@ test_session_start_reasserts_tab_title_through_tmux() {
           bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>&1 || return 1
     assert_file_contains "$FAKE_TMUX_CALLS" "^\[select-pane\]\[-t\]\[%3\]\[-T\]\[cs: current-session\]$" \
         "the pane title is re-asserted on the hook's own pane, as one argument" || return 1
-    assert_file_contains "$FAKE_TMUX_CALLS" "^\[rename-window\]\[-t\]\[%3\]\[cs: current-session\]$" \
-        "the window name is re-asserted too" || return 1
+    # The window name itself is composed from every pane's claim; the real-tmux
+    # tests below read it back. Here: the claim is this pane's, the name whole.
+    assert_file_contains "$FAKE_TMUX_CALLS" "^\[set-option\]\[-p\]\[-t\]\[%3\]\[@cs_session\]\[current-session\]$" \
+        "the pane claims its session, as one argument, so the window can be named after it" || return 1
     assert_file_not_exists "$CS_TITLE_TTY" \
         "under tmux the server carries the title; no escape is written to a tty" || return 1
+}
+
+# Two cs sessions in two panes of one tmux window share one window name, which
+# is the tab's title under iTerm's tmux integration. Each pane records the
+# session it runs; the window is named after all of them, in pane order. Real
+# tmux on a private socket, so the developer's server is never touched.
+_real_tmux_window() {
+    command -v tmux >/dev/null 2>&1 || return 77
+    TT_SOCK="$TEST_TMPDIR/tt.sock"
+    TT_PANE_A=$(tmux -S "$TT_SOCK" -f /dev/null new-session -d -P -F '#{pane_id}' -x 120 -y 30 'sleep 600') || return 1
+    TT_PANE_B=$(tmux -S "$TT_SOCK" split-window -d -h -P -F '#{pane_id}' -t "$TT_PANE_A" 'sleep 600') || return 1
+}
+_tt() { tmux -S "$TT_SOCK" "$@"; }
+_tt_window_name() { _tt display-message -p -t "$TT_PANE_A" '#{window_name}'; }
+_tt_hook() {  # hook, pane, session name, source
+    echo '{"session_id":"s","source":"'"$4"'","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"x"}' \
+        | TMUX="$TT_SOCK,1,0" TMUX_PANE="$2" CLAUDE_SESSION_NAME="$3" \
+          bash "$HOOKS_DIR/$1" >/dev/null 2>&1
+}
+
+test_two_cs_sessions_in_one_window_name_it_after_both() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup || { _tt kill-server; return 1; }
+    assert_eq "cs: current-session" "$(_tt_window_name)" "one session names the window alone" || { _tt kill-server; return 1; }
+    _tt_hook session-start.sh "$TT_PANE_B" fignity startup || { _tt kill-server; return 1; }
+    assert_eq "cs: current-session | fignity" "$(_tt_window_name)" \
+        "a second session in the same window joins the name, in pane order" || { _tt kill-server; return 1; }
+    # A /clear restarts a conversation in its pane: the name does not repeat.
+    _tt_hook session-start.sh "$TT_PANE_A" current-session clear || { _tt kill-server; return 1; }
+    assert_eq "cs: current-session | fignity" "$(_tt_window_name)" \
+        "a session re-asserting its own pane is listed once" || { _tt kill-server; return 1; }
+    _tt kill-server
+}
+
+test_a_session_ending_leaves_the_window_to_the_others() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup
+    _tt_hook session-start.sh "$TT_PANE_B" fignity startup
+    _tt_hook session-end.sh "$TT_PANE_A" current-session user_exit || { _tt kill-server; return 1; }
+    assert_eq "cs: fignity" "$(_tt_window_name)" \
+        "the session that ended leaves the name; the other keeps it" || { _tt kill-server; return 1; }
+    _tt_hook session-end.sh "$TT_PANE_B" fignity user_exit || { _tt kill-server; return 1; }
+    assert_eq "on" "$(_tt show-window-options -v -t "$TT_PANE_A" automatic-rename)" \
+        "with no cs session left the window names itself again" || { _tt kill-server; return 1; }
+    _tt kill-server
+}
+
+# Panes claim and release at the same moment (a layout restore starting
+# several sessions, two /clears): each call reads the claims and then renames,
+# so without serialising them a slower rename writes a name from before another
+# pane's claim. Six panes, twenty rounds of claims and releases all at once;
+# after each round the name must be the claims as they stand.
+test_concurrent_claims_leave_the_name_the_claims_make() {
+    session_start_setup
+    _real_tmux_window || return $?
+    local panes="$TT_PANE_A $TT_PANE_B" i p round got want
+    for i in 3 4 5 6; do
+        panes="$panes $(_tt split-window -d -P -F '#{pane_id}' -t "$TT_PANE_A" 'sleep 600')" || { _tt kill-server; return 1; }
+        _tt select-layout -t "$TT_PANE_A" tiled >/dev/null
+    done
+    for round in $(seq 1 20); do
+        i=0
+        for p in $panes; do
+            i=$((i + 1))
+            ( TMUX="$TT_SOCK,1,0" bash -c '. "$1"; cs_tmux_title_window "$2" "$3"' _ "$HOOKS_DIR/cs-shared.sh" "$p" "s$i" ) &
+        done
+        wait
+        want="cs: $(_tt list-panes -t "$TT_PANE_A" -F '#{@cs_session}' | awk '{ out = out (NR > 1 ? " | " : "") $0 } END { print out }')"
+        got=$(_tt_window_name)
+        assert_eq "$want" "$got" "round $round: concurrent claims name the window after every claim" || { _tt kill-server; return 1; }
+        for p in $panes; do
+            ( TMUX="$TT_SOCK,1,0" bash -c '. "$1"; cs_tmux_title_window "$2" ""' _ "$HOOKS_DIR/cs-shared.sh" "$p" ) &
+        done
+        wait
+        assert_eq "on" "$(_tt show-window-options -v -t "$TT_PANE_A" automatic-rename)" \
+            "round $round: concurrent releases leave no claim and hand the name back" || { _tt kill-server; return 1; }
+    done
+    _tt kill-server
+}
+
+# The launch's own cleanup (its EXIT trap: a resume prompt cancelled, or the
+# resume arm's claude returning) releases the pane the launch claimed, and the
+# window stays named, and locked, after the sessions still in it.
+test_a_launch_cleanup_releases_its_pane_and_keeps_the_others_title() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup
+    local lib="$SCRIPT_DIR/../lib"
+    _tt respawn-pane -k -t "$TT_PANE_B" "bash -c '. \"$lib/02-shared.sh\"; . \"$lib/05-term.sh\"; set_tab_title \"cs: fignity\" \"\" fignity; reset_tab_title; touch \"$TEST_TMPDIR/cleaned\"; sleep 600'" \
+        || { _tt kill-server; return 1; }
+    local i=0
+    while [ ! -e "$TEST_TMPDIR/cleaned" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+    assert_eq "cs: current-session" "$(_tt_window_name)" \
+        "the cleaned-up launch leaves the window to the session still running" || { _tt kill-server; return 1; }
+    assert_eq "" "$(_tt show-options -p -v -t "$TT_PANE_B" @cs_session 2>/dev/null)" \
+        "and holds no claim on its pane" || { _tt kill-server; return 1; }
+    assert_eq "off" "$(_tt show-window-options -v -t "$TT_PANE_A" allow-rename)" \
+        "the surviving session's window stays locked" || { _tt kill-server; return 1; }
+    _tt kill-server
+}
+
+# A /clear in the window's only session ends it (the window is released and
+# unlocked) and starts it again: the claim back must lock the names again, or
+# Claude Code retitles the pane and the window for the rest of the session.
+test_a_claim_after_the_last_release_locks_the_titles_again() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup
+    _tt_hook session-end.sh "$TT_PANE_A" current-session clear
+    _tt_hook session-start.sh "$TT_PANE_A" current-session clear || { _tt kill-server; return 1; }
+    assert_eq "cs: current-session" "$(_tt_window_name)" "the window is named again" || { _tt kill-server; return 1; }
+    assert_eq "off off" "$(_tt show-window-options -v -t "$TT_PANE_A" allow-rename) $(_tt show-window-options -v -t "$TT_PANE_A" allow-set-title)" \
+        "the claim locks the window and pane names against Claude Code's own titles" || { _tt kill-server; return 1; }
+    _tt kill-server
+}
+
+# A claude that is not the launched one (a `claude -p` run from inside the
+# session inherits its environment and TMUX_PANE) ends without taking the
+# lead's claim with it.
+test_a_non_lead_end_leaves_the_pane_claimed() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup
+    echo '{"session_id":"s","source":"other","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionEnd"}' \
+        | TMUX="$TT_SOCK,1,0" TMUX_PANE="$TT_PANE_A" CS_LEAD_PID=1 CLAUDE_PID=99999 \
+          bash "$HOOKS_DIR/session-end.sh" >/dev/null 2>&1 || { _tt kill-server; return 1; }
+    assert_eq "cs: current-session" "$(_tt_window_name)" \
+        "the lead's session still names the window" || { _tt kill-server; return 1; }
+    assert_eq "current-session" "$(_tt show-options -p -v -t "$TT_PANE_A" @cs_session)" \
+        "and still holds its pane's claim" || { _tt kill-server; return 1; }
+    _tt kill-server
+}
+
+# The launch takes its pane's claim too, from inside the pane itself: tmux gives
+# the pane its own TMUX and TMUX_PANE, and the pane's terminal is the tty
+# set_tab_title requires.
+test_a_launch_in_a_second_pane_joins_the_window_name() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup
+    local lib="$SCRIPT_DIR/../lib"
+    _tt respawn-pane -k -t "$TT_PANE_B" "bash -c '. \"$lib/02-shared.sh\"; . \"$lib/05-term.sh\"; set_tab_title \"cs: fignity\" \"\" fignity; touch \"$TEST_TMPDIR/launched\"; sleep 600'" \
+        || { _tt kill-server; return 1; }
+    local i=0
+    while [ ! -e "$TEST_TMPDIR/launched" ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+    assert_eq "cs: current-session | fignity" "$(_tt_window_name)" \
+        "a cs launched in the other pane joins the window name" || { _tt kill-server; return 1; }
+    assert_eq "cs: fignity" "$(_tt display-message -p -t "$TT_PANE_B" '#{pane_title}')" \
+        "the pane's own title stays its session alone" || { _tt kill-server; return 1; }
+    _tt kill-server
 }
 
 # A tmux teammate is a full claude with its own SessionStart, and Claude Code
@@ -1867,6 +2021,13 @@ run_test test_failure_handles_missing_error
 run_test test_test_lib_drops_an_inherited_tmux_and_routes_the_title_to_a_file
 run_test test_session_start_teardown_keeps_the_title_off_the_terminal
 run_test test_session_start_reasserts_tab_title_through_tmux
+run_test test_two_cs_sessions_in_one_window_name_it_after_both
+run_test test_a_session_ending_leaves_the_window_to_the_others
+run_test test_concurrent_claims_leave_the_name_the_claims_make
+run_test test_a_launch_in_a_second_pane_joins_the_window_name
+run_test test_a_launch_cleanup_releases_its_pane_and_keeps_the_others_title
+run_test test_a_claim_after_the_last_release_locks_the_titles_again
+run_test test_a_non_lead_end_leaves_the_pane_claimed
 run_test test_session_start_tab_title_leaves_a_teammate_pane_alone
 run_test test_session_start_reasserts_tab_title_on_the_terminal_device
 run_test test_session_start_tab_title_skips_silently_without_a_terminal

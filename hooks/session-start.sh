@@ -400,26 +400,13 @@ UUID_RE='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F
 # slot leaves `cs <name>` resuming a conversation nobody opened, and stamps the
 # timeline with a lineage that never happened.
 #
-# Two shapes count as the launch, because cs starts claude two ways. The exec
-# arms replace cs's own process, so claude carries cs's pid; the resume arm runs
-# claude as a child, since it needs the exit status to fall through to a fresh
-# rebind when there is nothing to resume, and there claude's parent is cs. A
-# teammate is neither: tmux starts it, so cs is not its process and not its
-# parent, and CS_LEAD_PID is absent from its environment entirely.
-#
-# Both variables must be non-empty, not merely equal: unset on both sides
-# compares equal, which would hand the slot to precisely the callers this
-# excludes.
+# cs_is_lead (cs-resolve.sh) says which claude is the launch; the resume arm's
+# claude is cs's child because it needs the exit status to fall through to a
+# fresh rebind when there is nothing to resume. Without the library nothing is
+# the lead: declining the slot is the safe side.
 IS_LEAD=0
-if [ -n "${CS_LEAD_PID:-}" ] && [ -n "${CLAUDE_PID:-}" ]; then
-    if [ "$CLAUDE_PID" = "$CS_LEAD_PID" ]; then
-        IS_LEAD=1
-    else
-        _CS_LAUNCH_PARENT=$(ps -o ppid= -p "$CLAUDE_PID" 2>/dev/null | tr -d '[:space:]' || true)
-        if [ -n "$_CS_LAUNCH_PARENT" ] && [ "$_CS_LAUNCH_PARENT" = "$CS_LEAD_PID" ]; then
-            IS_LEAD=1
-        fi
-    fi
+if command -v cs_is_lead >/dev/null 2>&1 && cs_is_lead; then
+    IS_LEAD=1
 fi
 if [ "$IS_LEAD" = 1 ] && [[ "$SESSION_ID" =~ $UUID_RE ]]; then
     RECORDED_UUID=$(awk '/^claude_session_id:/ { print $2; exit }' "$STATE_FILE" 2>/dev/null || true)
@@ -517,7 +504,12 @@ elif [ -n "${TMUX:-}" ]; then
     # An empty array is unbound under bash 3.2's set -u, hence the expansion.
     _pane="${TMUX_PANE:-}"
     tmux select-pane ${_pane:+-t "$_pane"} -T "$_title" 2>/dev/null || true
-    tmux rename-window ${_pane:+-t "$_pane"} "$_title" 2>/dev/null || true
+    # The window, which is the tab, is shared with any other pane's session.
+    if command -v cs_tmux_title_window >/dev/null 2>&1 && [ -n "$_pane" ]; then
+        cs_tmux_title_window "$_pane" "$CLAUDE_SESSION_NAME"
+    else
+        tmux rename-window ${_pane:+-t "$_pane"} "$_title" 2>/dev/null || true
+    fi
 else
     # Braced so the redirection failure itself is silenced: a trailing
     # 2>/dev/null applies after the `>` has already reported.

@@ -23,6 +23,9 @@ SOURCE=$(echo "$INPUT" | jq -r '.source // "user_exit"')
 # before its own decline, silently. When the library is absent the fallback
 # is the env-only check this guard replaced, so the hook behaves as it used to.
 _cs_lib="$(dirname "$0")/cs-resolve.sh"
+# cs-shared.sh is build.sh's copy of lib/02-shared.sh (the tmux window title).
+# Same guard, same reasons.
+_cs_shared="$(dirname "$0")/cs-shared.sh"
 # shellcheck source=cs-resolve.sh
 # Parse-check before sourcing: a truncated or corrupt library is readable,
 # and sourcing it aborts the hook at the syntax error, before the fallback
@@ -36,6 +39,8 @@ _cs_lib="$(dirname "$0")/cs-resolve.sh"
 case $- in *e*) _cs_had_e=1 ;; *) _cs_had_e=0 ;; esac
 set +e
 [ -r "$_cs_lib" ] && "${BASH:-/bin/bash}" -n "$_cs_lib" 2>/dev/null && . "$_cs_lib"
+# shellcheck source=cs-shared.sh
+[ -r "$_cs_shared" ] && "${BASH:-/bin/bash}" -n "$_cs_shared" 2>/dev/null && . "$_cs_shared"
 if [ "$_cs_had_e" = 1 ]; then set -e; fi
 if ! command -v cs_resolve_session >/dev/null 2>&1; then
     cs_resolve_session() {
@@ -52,6 +57,17 @@ fi
 # Not in a cs session, do nothing. Resolves from the env under the CLI and
 # from the opened directory under front ends that cannot export one.
 cs_resolve_session "$INPUT" || exit 0
+
+# This pane no longer runs the session: the tmux window, which is the tab, is
+# named after the cs sessions still running in its other panes, or names
+# itself again when none is left. A /clear ends here too, and its SessionStart
+# claims the pane back straight after. Only the launched conversation
+# releases it: a `claude -p` run from inside the session inherits its
+# TMUX_PANE, and its end must not take the lead's claim with it.
+if [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] && command -v cs_tmux_title_window >/dev/null 2>&1 \
+    && command -v cs_is_lead >/dev/null 2>&1 && cs_is_lead; then
+    cs_tmux_title_window "$TMUX_PANE" ""
+fi
 
 SESSION_DIR="${CLAUDE_SESSION_DIR:-}"
 META_DIR="${CLAUDE_SESSION_META_DIR:-$SESSION_DIR/.cs}"
