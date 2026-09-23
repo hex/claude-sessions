@@ -101,7 +101,7 @@ is_session_dir() {
 }
 
 # The name cs knows a directory by, or non-zero when the directory is not a
-# session cs can open. Backs bare `cs` opening the session you are standing in.
+# session cs can open. Backs `cs .` opening the session you are standing in.
 #
 # Detects on .cs/ alone, where is_session_dir also accepts a root CLAUDE.md:
 # listing a stray directory is a cosmetic error, launching one is not.
@@ -158,17 +158,6 @@ cmd_complete() {
         sessions) complete_sessions ;;
         *) error "Unknown completion subject: ${1:-<none>}" ;;
     esac
-}
-
-# The session bare `cs` opens from where it was run, or nothing when it would
-# show the picker instead. Answers for the dispatch and for the `cs -list` hint
-# alike, so the hint can never name a command that does something else.
-#
-# Nothing inside a launched session, whose shells inherit its name: there the
-# request would be to open a second copy of the session you are already in.
-_bare_cs_target() {
-    [ -z "${CLAUDE_SESSION_NAME:-}" ] || return 1
-    _session_name_for_dir "$PWD"
 }
 
 # The picker binary, or non-zero when none is installed. Every caller asks

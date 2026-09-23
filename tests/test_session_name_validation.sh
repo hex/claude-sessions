@@ -16,11 +16,14 @@ test_create_rejects_dotdot() {
     assert_not_exists "$parent/CLAUDE.md" "cs .. must not write a CLAUDE.md in the parent" || return 1
 }
 
-# `cs .` resolves to the sessions root itself; also invalid.
+# `cs .` run from the sessions root: the root is not a session, so it is refused.
 test_create_rejects_dot() {
     local output status=0
-    output=$("$CS_BIN" "." < /dev/null 2>&1) || status=$?
-    assert_output_contains "$output" "Session name" "cs . must be rejected as invalid" || return 1
+    output=$(cd "$CS_SESSIONS_ROOT" && "$CS_BIN" "." < /dev/null 2>&1) || status=$?
+    # `cs .` means "the session I am standing in"; the sessions root is not one,
+    # so it is refused rather than opened, created or migrated as a session '.'.
+    assert_output_contains "$output" "Not a cs session" "cs . outside a session must be refused" || return 1
+    assert_eq "1" "$status" "cs . outside a session must exit non-zero" || return 1
     assert_not_exists "$CS_SESSIONS_ROOT/.cs" "cs . must not migrate the sessions root" || return 1
 }
 

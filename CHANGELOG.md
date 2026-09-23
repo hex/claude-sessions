@@ -4,6 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Changed
+- Bare `cs` always opens the session manager, including from a session's own directory. `cs .` opens the session you are standing in (an adopted project under its cs name); outside a session it refuses and names `cs -adopt`.
+
 ## 2026.9.20
 
 ### Fixes
