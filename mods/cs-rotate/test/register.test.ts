@@ -969,3 +969,88 @@ test('nextStep reads the handoff\'s Next Step section, however it is numbered, a
   const long = '# Next Step\n' + Array.from({ length: 30 }, (_, i) => `line ${i}`).join('\n')
   expect(nextStep(long)).toHaveLength(12)
 })
+
+// The count's colour ramp: the session's own colour while there is time, the
+// bar's amber from ten seconds, its crit red under five. The band's
+// `/clear in Ns` and the pane's bar and count wear it alike. Inks KEEP IN SYNC
+// with _sgr in bin/cs-statusline (tests/test_mod_rotate.sh pins them).
+function texts(tree: any): any[] {
+  if (!tree || typeof tree !== 'object') return []
+  if (Array.isArray(tree)) return tree.flatMap(texts)
+  const own = tree.type === 'Text' ? [tree] : []
+  return [...own, ...(tree.children ?? []).flatMap(texts)]
+}
+const textOf = (node: any): string => (node.children ?? []).map((c: any) => typeof c === 'string' ? c : '').join('')
+const countText = (tree: any) => texts(tree).find(t => /^\/clear in \d+s$/.test(textOf(t)))
+const startGrace = async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); files[HANDOFF] = HANDOFF_WITH_STEP; percent = 80
+  await band()
+  await turnComplete()
+}
+
+test('the band\'s count ramps: session colour past ten seconds, amber from ten to five, crit red under five', async () => {
+  envVars.CS_TERM_BG_RGB = '252;247;229'
+  await startGrace()
+  let count = countText(await band())
+  expect(count.props).toMatchObject({ bold: true, color: 'rgb(220,38,38)' })
+  await tick(9) // 11 s left
+  expect(countText(await band()).props.color).toBe('rgb(220,38,38)')
+  await tick(1) // 10
+  expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
+  await tick(5) // 5
+  expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
+  await tick(1) // 4
+  count = countText(await band())
+  expect(textOf(count)).toBe('/clear in 4s')
+  expect(count.props.color).toBe('rgb(215,0,21)')
+})
+
+test('on a dark terminal the ramp takes the bar\'s dark inks', async () => {
+  envVars.CS_TERM_BG_RGB = '30;30;30'
+  envVars.CS_TERM_THEME = 'dark'
+  files['/work/.cs/local/state'] = 'claude_session_color: cyan\nclaude_session_id: uuid-lead\n'
+  await startGrace()
+  expect(countText(await band()).props.color).toBe('rgb(8,145,178)')
+  await tick(10)
+  expect(countText(await band()).props.color).toBe('rgb(253,230,138)')
+  await tick(6)
+  expect(countText(await band()).props.color).toBe('rgb(255,69,58)')
+})
+
+test('a session with no colour, or one outside the palette, keeps the band\'s own ink until the amber', async () => {
+  files['/work/.cs/local/state'] = 'claude_session_color: chartreuse\nclaude_session_id: uuid-lead\n'
+  await startGrace()
+  expect(countText(await band()).props.color).toBeUndefined()
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-lead\n'
+  expect(countText(await band()).props.color).toBeUndefined()
+  await tick(10)
+  // no measured background and no theme: the light amber, as the bar picks
+  expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
+})
+
+test('the pane opens on a header in the session colour and a bold first step', async () => {
+  await startGrace(); await fireAfter()
+  const all = texts(await pane())
+  expect(textOf(all[0])).toBe('Handoff')
+  expect(all[0].props).toMatchObject({ bold: true, color: 'rgb(220,38,38)' })
+  const first = all.find(t => textOf(t) === 'Run the secrets suites solo.')
+  const second = all.find(t => textOf(t) === 'Triage the store file.')
+  expect(first.props.bold).toBe(true)
+  expect(second.props.bold).toBeUndefined()
+})
+
+test('the pane counts down on a twenty-block bar in the ramp\'s colour, beside the same count', async () => {
+  envVars.CS_TERM_BG_RGB = '252;247;229'
+  await startGrace(); await fireAfter()
+  const bar = (tree: any) => texts(tree).find(t => /^[█░]+$/.test(textOf(t)))
+  let b = bar(await pane())
+  expect(textOf(b)).toBe('█'.repeat(20))
+  expect(b.props.color).toBe('rgb(220,38,38)')
+  expect(countText(await pane()).props.color).toBe('rgb(220,38,38)')
+  await tick(15) // 5 left
+  b = bar(await pane())
+  expect(textOf(b)).toBe('█'.repeat(5) + '░'.repeat(15))
+  expect(b.props.color).toBe('rgb(180,83,9)')
+  expect(JSON.stringify(await pane())).toContain('press 1 to clear now, or send a prompt to stay')
+})

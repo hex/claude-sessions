@@ -2,7 +2,7 @@
 /* @jsx h */
 /* @jsxFrag Fragment */
 // ABOUTME: cs-rotate mod: keys above the prompt: rotate past the threshold, wrap up, or /clear once a handoff is armed.
-// ABOUTME: With CS_ROTATE_FORCE_CTX set a turn ending past it runs /rotate itself, then counts down to the /clear; session.start writes a heartbeat for doctor.
+// ABOUTME: With CS_ROTATE_FORCE_CTX set a turn ending past it runs /rotate itself, then counts down to the /clear (session colour, amber, crit); session.start writes a heartbeat for doctor.
 import type { On, EngineInterface } from 'claude-code'
 
 declare const h: any
@@ -35,6 +35,55 @@ export function surfaceColor(bg: string | undefined): string | undefined {
     ? rgb.map(v => Math.floor(v * (100 - SURFACE_SHIFT) / 100))
     : rgb.map(v => v + Math.floor((255 - v) * SURFACE_SHIFT / 100))
   return `rgb(${shade.join(',')})`
+}
+
+// The count's colour ramp, in the status bar's inks. KEEP IN SYNC with _sgr in
+// bin/cs-statusline (tests/test_mod_rotate.sh pins every value here against
+// it): the session palette is Claude Code's /color, the tab colour cs sets;
+// amber and crit are the bar's warning and critical inks. Amber pivots on the
+// measured background's luminance (the ink pivot, not the surface one) and
+// falls back to the theme; crit follows the theme.
+export const SESSION_PALETTE: Record<string, string> = {
+  red: '220,38,38', blue: '106,155,204', green: '22,163,74', yellow: '202,138,4',
+  purple: '130,125,189', orange: '217,119,87', pink: '196,102,134', cyan: '8,145,178',
+}
+export const AMBER_LIGHT = '180,83,9'
+export const AMBER_DARK = '253,230,138'
+export const CRIT_LIGHT = '215,0,21'
+export const CRIT_DARK = '255,69,58'
+// Seconds left at which the count turns amber, and then crit (below CRIT_AT).
+export const AMBER_AT = 10
+export const CRIT_AT = 5
+// The pane's bar: one block per second of the grace.
+export const BAR_FULL = '\u2588'
+export const BAR_EMPTY = '\u2591'
+
+// The colour the count wears with `left` seconds to go: the session's own
+// colour while there is time (none, so the surrounding ink, when the session
+// has no colour in the palette), amber from AMBER_AT, crit under CRIT_AT.
+export function countdownColor(left: number, session: string | undefined, bg: string | undefined, theme: string | undefined): string | undefined {
+  const dark = theme === 'dark'
+  if (left < CRIT_AT) return `rgb(${dark ? CRIT_DARK : CRIT_LIGHT})`
+  if (left <= AMBER_AT) {
+    const rgb = (bg ?? '').split(';').map(part => (/^\s*\d{1,3}\s*$/.test(part) ? Number(part) : NaN))
+    const measured = rgb.length === 3 && rgb.every(v => v <= 255)
+    const light = measured ? 2126 * rgb[0] + 7152 * rgb[1] + 722 * rgb[2] >= 1530000 : !dark
+    return `rgb(${light ? AMBER_LIGHT : AMBER_DARK})`
+  }
+  return paletteColor(session)
+}
+
+// A session colour name as an rgb() the engine paints, or undefined for a name
+// outside the palette (state hand-edited, or from a newer Claude Code).
+export function paletteColor(name: string | undefined): string | undefined {
+  const rgb = name === undefined ? undefined : SESSION_PALETTE[name]
+  return rgb === undefined ? undefined : `rgb(${rgb})`
+}
+
+// The pane's bar with `left` of GRACE_SECONDS still to run.
+export function countdownBar(left: number): string {
+  const full = Math.max(0, Math.min(GRACE_SECONDS, left))
+  return BAR_FULL.repeat(full) + BAR_EMPTY.repeat(GRACE_SECONDS - full)
 }
 
 // Doctor observes the mod RUNNING, not merely installed: under a managed
@@ -199,7 +248,7 @@ export function register(on: On) {
             {!armed && !wrapped && <Button key="cs-wrap" hotkey="2" plain label="wrap up this session" onPress={() => askToWrap($)} />}
             {/* the forced rotation's grace: the seconds left before the mod runs the /clear itself */}
             {armed && left !== undefined && <Text dimColor>{'  \u00b7  '}</Text>}
-            {armed && left !== undefined && <Text bold>{`/clear in ${left}s`}</Text>}
+            {armed && left !== undefined && <Text bold color={await rampColor($, left)}>{`/clear in ${left}s`}</Text>}
           </Box>
         </Box>
       </Box>
@@ -211,12 +260,26 @@ export function register(on: On) {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PREVIEW_PANE || preview === undefined) return next(e)
     const { Box, Text } = await $.ui.resolve(e)
+    // With one pane open the engine draws no title, so the pane carries its
+    // own, in the session's colour; the step's first line is its headline.
+    const own = paletteColor(await sessionColor($))
+    const color = left === undefined ? undefined : await rampColor($, left)
     return (
       <Box flexDirection="column" paddingX={1}>
-        {preview.map((line, i) => <Text key={`step-${i}`}>{line}</Text>)}
-        <Box marginTop={1}>
-          <Text dimColor>{left === undefined ? '' : `/clear in ${left}s \u00b7 press 1 to clear now, or send a prompt to stay`}</Text>
+        <Text key="header" bold color={own}>Handoff</Text>
+        <Box flexDirection="column" marginTop={1}>
+          {preview.map((line, i) => <Text key={`step-${i}`} bold={i === 0 ? true : undefined}>{line}</Text>)}
         </Box>
+        {left !== undefined && (
+          <Box flexDirection="column" marginTop={1}>
+            <Box>
+              <Text key="bar" color={color}>{countdownBar(left)}</Text>
+              <Text>{'  '}</Text>
+              <Text key="count" bold color={color}>{`/clear in ${left}s`}</Text>
+            </Box>
+            <Text dimColor>press 1 to clear now, or send a prompt to stay</Text>
+          </Box>
+        )}
       </Box>
     )
   })
@@ -407,6 +470,26 @@ export function isUnconsumed(text: string): boolean {
   return false
 }
 
+// The count's colour for this session and terminal. Each name is a literal:
+// `claude plugin validate` lists what a module reads.
+async function rampColor($: EngineInterface, secs: number): Promise<string | undefined> {
+  return countdownColor(secs, await sessionColor($), await $.env.get("CS_TERM_BG_RGB"), await $.env.get("CS_TERM_THEME"))
+}
+
+// The session's colour name as cs recorded it in state, or undefined.
+async function sessionColor($: EngineInterface): Promise<string | undefined> {
+  const state = await readState($)
+  return state?.match(/^claude_session_color: *"?([^"\s]+)"?[ \t]*$/m)?.[1]
+}
+
+async function readState($: EngineInterface): Promise<string | undefined> {
+  try {
+    return await $.fs.read(`${await $.session.cwd()}/.cs/local/state`)
+  } catch {
+    return undefined // no state: not a session cs launched
+  }
+}
+
 // Only the lead conversation of a cs session may be offered a rotation. The
 // rotate skill refuses outside a cs session, .cs/local/disabled opts a
 // directory out of cs entirely, and the handoff it writes carries the UUID in
@@ -418,12 +501,8 @@ export function isUnconsumed(text: string): boolean {
 async function ownsRotation($: EngineInterface): Promise<boolean> {
   const local = `${await $.session.cwd()}/.cs/local`
   if (!(await $.fs.exists(local)) || (await $.fs.exists(`${local}/disabled`))) return false
-  let state: string
-  try {
-    state = await $.fs.read(`${local}/state`)
-  } catch {
-    return false
-  }
+  const state = await readState($)
+  if (state === undefined) return false
   const lead = state.match(/^claude_session_id: *"?([^"\s]+)"?[ \t]*$/m)?.[1]
   return lead !== undefined && lead === (await $.session.id())
 }
