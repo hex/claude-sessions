@@ -370,8 +370,10 @@ inside), so a truncated handoff is never cleared into.
 
 The first grace of a session (a load of the mod) also opens a pane, titled
 `Handoff`, beside the band: a `Handoff` header in the session colour, the
-handoff's `Next Step` section (up to twelve lines, the first in bold), and
-beneath it a twenty-block bar that empties one block a second beside the same
+handoff's `Next Step` section (up to twenty-four lines, the first in bold,
+with a dim `… N more lines in the handoff` when the section runs longer; its
+`**bold**`, `*italic*` and `` `code` `` are drawn as styles, code in the
+session colour, and underscores are left alone), and beneath it a twenty-block bar that empties one block a second beside the same
 count, both in the count's colour, so the twenty seconds are spent reading
 what the next conversation will do. The pane carries no keys; stopping the
 count stays on the band. It closes wherever the count ends: a press, a prompt,
