@@ -126,7 +126,10 @@ export const FORCE_DEFAULT = 80
 // mod opens on its own is not drawn below 144 columns (110 once the person has
 // opened it themselves), so on a narrow terminal the band is all there is.
 export const PREVIEW_PANE = 'cs-rotate-handoff'
-export const PREVIEW_LINES = 24
+// The most text a Markdown element takes: a longer one refuses the whole tree,
+// and the pane would draw nothing (KEEP IN SYNC with MarkdownProps.text in
+// the mods type contract).
+export const MARKDOWN_LIMIT = 10000
 
 // The wrap key's question, and the answer that runs /wrap. `$.ui.ask` opens
 // the engine's own AskUserQuestion dialog and resolves to the label chosen, or
@@ -259,23 +262,17 @@ export function register(on: On) {
   // or this one once the count has ended, is not the mod's to draw.
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PREVIEW_PANE || preview === undefined) return next(e)
-    const { Box, Text } = await $.ui.resolve(e)
+    const { Box, Text, Markdown } = await $.ui.resolve(e)
     // With one pane open the engine draws no title, so the pane carries its
-    // own, in the session's colour; the step's first line is its headline.
+    // own, in the session's colour; the step is drawn as a reply's markdown is.
     const own = paletteColor(await sessionColor($))
     const color = left === undefined ? undefined : await rampColor($, left)
     return (
       <Box flexDirection="column" paddingX={1}>
         <Text key="header" bold color={own}>Handoff</Text>
         <Box flexDirection="column" marginTop={1}>
-          {preview.lines.map((line, i) => (
-            <Text key={`step-${i}`} bold={i === 0 ? true : undefined}>
-              {inlineSpans(line).map((span, k) => span.bold || span.italic || span.code
-                ? <Text key={`span-${k}`} bold={span.bold} italic={span.italic} color={span.code ? own : undefined}>{span.text}</Text>
-                : span.text)}
-            </Text>
-          ))}
-          {preview.more > 0 && <Text key="more" dimColor>{`… ${preview.more} more line${preview.more === 1 ? '' : 's'} in the handoff`}</Text>}
+          <Markdown key="step" text={preview.text} />
+          {preview.cut && <Text key="cut" dimColor>… the rest of the step is in the handoff</Text>}
         </Box>
         {left !== undefined && (
           <Box flexDirection="column" marginTop={1}>
@@ -412,60 +409,27 @@ async function openPreview($: EngineInterface) {
   }
 }
 
-// A handoff's next step as the pane shows it: the first PREVIEW_LINES lines,
-// and how many more the section holds past them.
-export type Step = { lines: string[]; more: number }
+// A handoff's next step as the pane shows it: the section's markdown, and
+// whether MARKDOWN_LIMIT cut it short.
+export type Step = { text: string; cut: boolean }
 
-// The handoff's Next Step section (`# Next Step`, `## 1. Next Step`), its
-// blank lines dropped; no lines when it has none.
+// The handoff's Next Step section (`# Next Step`, `## 1. Next Step`) as
+// written, blank lines and all, trimmed of the blank lines around it; empty
+// when it has none. Past MARKDOWN_LIMIT it keeps the whole lines that fit.
 export function nextStep(text: string): Step {
   const lines = text.split('\n')
   const start = lines.findIndex(line => /^#+\s*(\d+\.\s*)?next step\s*$/i.test(line.trim()))
-  if (start < 0) return { lines: [], more: 0 }
+  if (start < 0) return { text: '', cut: false }
   const body: string[] = []
   for (const line of lines.slice(start + 1)) {
     if (/^#+\s/.test(line)) break
-    if (line.trim() !== '') body.push(line.trimEnd())
+    body.push(line.trimEnd())
   }
-  return { lines: body.slice(0, PREVIEW_LINES), more: Math.max(0, body.length - PREVIEW_LINES) }
-}
-
-// A run of a line's text and the markdown style it carries.
-export type Span = { text: string; bold?: true; italic?: true; code?: true }
-
-// A line's inline markdown: `code`, **bold**, *italic*. A marker counts only
-// when its text starts and ends on a non-space (`2 * 3` stays text) and it is
-// closed on the same line; code is taken as written, markers and all.
-// Underscores are never emphasis, so `_name_` identifiers stay as they are.
-export function inlineSpans(line: string): Span[] {
-  const spans: Span[] = []
-  let plain = ''
-  const flush = () => { if (plain !== '') spans.push({ text: plain }); plain = '' }
-  const closes = (from: number, marker: string) => {
-    if (from >= line.length || line[from] === ' ') return -1
-    let at = line.indexOf(marker, from + 1)
-    while (at >= 0 && (line[at - 1] === ' ' || (marker === '*' && line[at + 1] === '*'))) {
-      at = line.indexOf(marker, at + (marker === '*' && line[at + 1] === '*' ? 2 : 1))
-    }
-    return at
-  }
-  let i = 0
-  while (i < line.length) {
-    if (line[i] === '`') {
-      const end = line.indexOf('`', i + 1)
-      if (end > i + 1) { flush(); spans.push({ text: line.slice(i + 1, end), code: true }); i = end + 1; continue }
-    } else if (line.startsWith('**', i)) {
-      const end = closes(i + 2, '**')
-      if (end > i + 2) { flush(); spans.push({ text: line.slice(i + 2, end), bold: true }); i = end + 2; continue }
-      plain += '**'; i += 2; continue
-    } else if (line[i] === '*') {
-      const end = closes(i + 1, '*')
-      if (end > i + 1) { flush(); spans.push({ text: line.slice(i + 1, end), italic: true }); i = end + 1; continue }
-    }
-    plain += line[i]; i++
-  }
-  flush()
-  return spans
+  const step = body.join('\n').replace(/^\n+/, '').trimEnd()
+  if (step.length <= MARKDOWN_LIMIT) return { text: step, cut: false }
+  // a line longer than the bound has no line end to stop at: cut at the bound
+  const end = step.lastIndexOf('\n', MARKDOWN_LIMIT)
+  return { text: end > 0 ? step.slice(0, end).trimEnd() : step.slice(0, MARKDOWN_LIMIT), cut: true }
 }
 
 // The band's own threshold; without one it is the bar's warn band, read the way

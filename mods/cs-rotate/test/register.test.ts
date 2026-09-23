@@ -6,7 +6,7 @@ import { test, expect, beforeEach } from 'bun:test'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, DEFAULT_PERCENT, GRACE_SECONDS, PREVIEW_PANE, WRAP_QUESTION, WRAP_YES, nextStep, inlineSpans, surfaceColor, isUnconsumed } from '../hooks/register.tsx'
+import { register, DEFAULT_PERCENT, GRACE_SECONDS, PREVIEW_PANE, WRAP_QUESTION, WRAP_YES, MARKDOWN_LIMIT, nextStep, surfaceColor, isUnconsumed } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -47,7 +47,7 @@ const $ = {
   prompt: { fill: async (args: any) => { filled.push(args); return { isFilled: true } } },
   command: { run: async (args: any) => { ran.push(args); return { text: '' } } },
   ui: {
-    resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button' }),
+    resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button', Markdown: 'Markdown' }),
     invalidate: (event: string) => { invalidated.push(event) },
     toast: (text: string) => { toasts.push(text) },
     open: async (args: any) => { panes.push({ op: 'open', args }) },
@@ -962,31 +962,31 @@ test('a pane drawn for any other id passes through, and a closed preview draws n
   expect(await pane()).toBe(DRAWN)
 })
 
-test('nextStep reads the handoff\'s Next Step section, however it is numbered, and counts what the cap leaves out', () => {
-  expect(nextStep(HANDOFF_WITH_STEP)).toEqual({ lines: ['Run the secrets suites solo.', 'Triage the store file.'], more: 0 })
-  expect(nextStep('---\nstatus: unconsumed\n---\n\n## 1. Next Step\n\nOne thing.\n')).toEqual({ lines: ['One thing.'], more: 0 })
-  expect(nextStep('---\nstatus: unconsumed\n---\n\nNo heading here.\n')).toEqual({ lines: [], more: 0 })
-  // 30 lines with blanks between them, then the next section: 24 shown, 6 left
-  const long = '# Next Step\n' + Array.from({ length: 30 }, (_, i) => `line ${i}\n`).join('\n') + '# Settled\n\nNothing.\n'
-  const step = nextStep(long)
-  expect(step.lines).toHaveLength(24)
-  expect(step.lines[23]).toBe('line 23')
-  expect(step.more).toBe(6)
-  const exact = '# Next Step\n' + Array.from({ length: 24 }, (_, i) => `line ${i}`).join('\n')
-  expect(nextStep(exact).more).toBe(0)
+test('nextStep reads the handoff\'s Next Step section as written, however it is numbered', () => {
+  expect(nextStep(HANDOFF_WITH_STEP)).toEqual({ text: 'Run the secrets suites solo.\nTriage the store file.', cut: false })
+  expect(nextStep('---\nstatus: unconsumed\n---\n\n## 1. Next Step\n\nOne thing.\n\n- a\n- b\n')).toEqual({ text: 'One thing.\n\n- a\n- b', cut: false })
+  expect(nextStep('---\nstatus: unconsumed\n---\n\nNo heading here.\n')).toEqual({ text: '', cut: false })
+  // no line cap: 300 lines come through whole
+  const long = '# Next Step\n\n' + Array.from({ length: 300 }, (_, i) => `line ${i}`).join('\n') + '\n\n# Settled\n\nNothing.\n'
+  expect(nextStep(long).text.split('\n')).toHaveLength(300)
+  expect(nextStep(long).cut).toBe(false)
 })
 
-test('inlineSpans reads bold, italic and code, and leaves an unclosed marker as text', () => {
-  expect(inlineSpans('the **overlap chip**. Native')).toEqual([
-    { text: 'the ' }, { text: 'overlap chip', bold: true }, { text: '. Native' },
-  ])
-  expect(inlineSpans('checked against `git status`, *not* `a **b**`')).toEqual([
-    { text: 'checked against ' }, { text: 'git status', code: true }, { text: ', ' },
-    { text: 'not', italic: true }, { text: ' ' }, { text: 'a **b**', code: true },
-  ])
-  expect(inlineSpans('2 * 3 and **open')).toEqual([{ text: '2 * 3 and **open' }])
-  expect(inlineSpans('_cs_is_lead_ stays')).toEqual([{ text: '_cs_is_lead_ stays' }])
-  expect(inlineSpans('')).toEqual([])
+test('a step past the engine\'s markdown bound is cut at a line and says so', () => {
+  const line = 'x'.repeat(99)
+  const huge = '# Next Step\n\n' + Array.from({ length: 200 }, () => line).join('\n') + '\n'
+  const step = nextStep(huge)
+  expect(step.cut).toBe(true)
+  expect(step.text.length).toBeLessThanOrEqual(MARKDOWN_LIMIT)
+  expect(step.text.split('\n').every(l => l === line)).toBe(true)
+  expect(step.text.split('\n')).toHaveLength(100)
+  // one line past the bound has no line to stop at: it is cut at the bound
+  const wide = nextStep('# Next Step\n\n' + 'y'.repeat(MARKDOWN_LIMIT + 50) + '\n')
+  expect(wide).toEqual({ text: 'y'.repeat(MARKDOWN_LIMIT), cut: true })
+})
+
+test('nextStep keeps an indented first line\'s indent', () => {
+  expect(nextStep('# Next Step\n\n    make test\n\nThen merge.\n').text).toBe('    make test\n\nThen merge.')
 })
 
 // The count's colour ramp: the session's own colour while there is time, the
@@ -999,8 +999,12 @@ function texts(tree: any): any[] {
   const own = tree.type === 'Text' ? [tree] : []
   return [...own, ...(tree.children ?? []).flatMap(texts)]
 }
-// A Text's own strings; a mapped list of children nests, as the engine allows.
-const textOf = (node: any): string => (node.children ?? []).flat(Infinity).map((c: any) => typeof c === 'string' ? c : '').join('')
+const textOf = (node: any): string => (node.children ?? []).map((c: any) => typeof c === 'string' ? c : '').join('')
+function markdowns(tree: any): any[] {
+  if (!tree || typeof tree !== 'object') return []
+  if (Array.isArray(tree)) return tree.flatMap(markdowns)
+  return [...(tree.type === 'Markdown' ? [tree] : []), ...(tree.children ?? []).flatMap(markdowns)]
+}
 const countText = (tree: any) => texts(tree).find(t => /^\/clear in \d+s$/.test(textOf(t)))
 const startGrace = async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
@@ -1049,36 +1053,22 @@ test('a session with no colour, or one outside the palette, keeps the band\'s ow
   expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
 })
 
-test('the pane opens on a header in the session colour and a bold first step', async () => {
+test('the pane opens on a header in the session colour and draws the step as markdown', async () => {
   await startGrace(); await fireAfter()
-  const all = texts(await pane())
+  const tree = await pane()
+  const all = texts(tree)
   expect(textOf(all[0])).toBe('Handoff')
   expect(all[0].props).toMatchObject({ bold: true, color: 'rgb(220,38,38)' })
-  const first = all.find(t => textOf(t) === 'Run the secrets suites solo.')
-  const second = all.find(t => textOf(t) === 'Triage the store file.')
-  expect(first.props.bold).toBe(true)
-  expect(second.props.bold).toBeUndefined()
+  expect(markdowns(tree)).toEqual([{ type: 'Markdown', props: { key: 'step', text: 'Run the secrets suites solo.\nTriage the store file.' }, children: [] }])
+  expect(JSON.stringify(tree)).not.toContain('rest of the step')
 })
 
-test('the pane draws the step\'s markdown as styles and says how much the cap left out', async () => {
-  const step = Array.from({ length: 26 }, (_, i) => i === 0 ? 'Build the **overlap chip** with `git status`.' : `line ${i}`).join('\n')
-  await startGrace(); files[HANDOFF] = `---\nparent: uuid-lead\nstatus: unconsumed\n---\n\n# Next Step\n\n${step}\n`
+test('a step cut at the markdown bound ends on a dim note', async () => {
+  const huge = Array.from({ length: 200 }, () => 'x'.repeat(99)).join('\n')
+  await startGrace(); files[HANDOFF] = `---\nparent: uuid-lead\nstatus: unconsumed\n---\n\n# Next Step\n\n${huge}\n`
   await fireAfter()
-  const all = texts(await pane())
-  expect(JSON.stringify(await pane())).not.toContain('**')
-  const chip = all.find(t => textOf(t) === 'overlap chip')
-  expect(chip.props.bold).toBe(true)
-  const code = all.find(t => textOf(t) === 'git status')
-  expect(code.props.color).toBe('rgb(220,38,38)')
-  expect(all.some(t => textOf(t) === 'line 23')).toBe(true)
-  expect(all.some(t => textOf(t) === 'line 24')).toBe(false)
-  const cut = all.find(t => textOf(t) === '… 2 more lines in the handoff')
-  expect(cut.props.dimColor).toBe(true)
-})
-
-test('a step the cap does not cut draws no marker', async () => {
-  await startGrace(); await fireAfter()
-  expect(JSON.stringify(await pane())).not.toContain('more line')
+  const note = texts(await pane()).find(t => textOf(t) === '… the rest of the step is in the handoff')
+  expect(note.props.dimColor).toBe(true)
 })
 
 test('the pane counts down on a twenty-block bar in the ramp\'s colour, beside the same count', async () => {

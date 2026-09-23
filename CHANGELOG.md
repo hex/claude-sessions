@@ -7,8 +7,8 @@ All notable changes to cs are documented here. Release notes are also available 
 ## Unreleased
 
 ### Changed
-- The Handoff pane shows up to twenty-four lines of the next step, and says how many more the handoff holds when it cuts one short, where it used to stop at twelve without a mark. The step's `**bold**`, `*italic*` and `` `code` `` are drawn as styles rather than as their markers.
-- The forced rotation's countdown is coloured: the session's own colour while there is time, amber from ten seconds, red under five, on the band's `/clear in Ns` and in the Handoff pane. The pane opens on a header in the session colour, shows the next step's first line in bold, and counts down on a twenty-block bar.
+- The Handoff pane shows the whole next step, drawn as markdown the way Claude Code draws a reply: lists, bold, code and links come out styled rather than as their markers. It used to stop at twelve lines without saying so.
+- The forced rotation's countdown is coloured: the session's own colour while there is time, amber from ten seconds, red under five, on the band's `/clear in Ns` and in the Handoff pane. The pane opens on a header in the session colour and counts down on a twenty-block bar.
 - Bare `cs` always opens the session manager, including from a session's own directory. `cs .` opens the session you are standing in (an adopted project under its cs name); outside a session it refuses and names `cs -adopt`.
 
 ## 2026.9.20
