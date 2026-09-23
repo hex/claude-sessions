@@ -174,7 +174,7 @@ cs -version, -v             # Show version
 
 Running `cs` with no arguments launches an interactive TUI for browsing and managing sessions, wherever you run it. To open the session you are standing in, run `cs .` from its root: an adopted project opens under the name it was adopted as, and a directory that is not a session is refused with a pointer to `cs -adopt`.
 
-The current directory decides, not any history: cs opens a session when that directory *is* one it knows by name (a session root, a `<base>@<feature>` worktree, or a project adopted with `cs -adopt`). A subdirectory of a session, any unrelated directory, and a shell inside a launched session all get the picker — inside a session, opening a second copy is never the intent.
+For `cs .`, the current directory decides, not any history: it opens a session only when that directory *is* one cs knows by name (a session root, a `<base>@<feature>` worktree, or a project adopted with `cs -adopt`). A subdirectory of a session and any unrelated directory are refused. Once resolved, `cs .` is `cs <name>`, so a session already open elsewhere meets the same collision menu.
 
 - **Navigate** with `j`/`k` or arrow keys; `g`/`G` for first/last; mouse scroll and click supported
 - **Sort** by column with `1`-`6` (toggles ascending/descending); opens sorted by recency — most-recently-modified first

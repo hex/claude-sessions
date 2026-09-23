@@ -645,8 +645,14 @@ test_a_claim_after_the_last_release_locks_the_titles_again() {
     _tt_hook session-end.sh "$TT_PANE_A" current-session clear
     _tt_hook session-start.sh "$TT_PANE_A" current-session clear || { _tt kill-server; return 1; }
     assert_eq "cs: current-session" "$(_tt_window_name)" "the window is named again" || { _tt kill-server; return 1; }
-    assert_eq "off off" "$(_tt show-window-options -v -t "$TT_PANE_A" allow-rename) $(_tt show-window-options -v -t "$TT_PANE_A" allow-set-title)" \
-        "the claim locks the window and pane names against Claude Code's own titles" || { _tt kill-server; return 1; }
+    assert_eq "off" "$(_tt show-window-options -v -t "$TT_PANE_A" allow-rename)" \
+        "the claim locks the window name against Claude Code's own titles" || { _tt kill-server; return 1; }
+    # allow-set-title arrived in tmux 3.5; an older server (ubuntu-latest has
+    # 3.4) has no pane-title lock to set, and the claim's set is a no-op there.
+    if _tt show-options -gw allow-set-title >/dev/null 2>&1; then
+        assert_eq "off" "$(_tt show-window-options -v -t "$TT_PANE_A" allow-set-title)" \
+            "the claim locks the pane name against Claude Code's own titles" || { _tt kill-server; return 1; }
+    fi
     _tt kill-server
 }
 
