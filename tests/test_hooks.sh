@@ -614,6 +614,32 @@ test_concurrent_claims_leave_the_name_the_claims_make() {
     _tt kill-server
 }
 
+# A lock that can never be made (TMPDIR gone or read-only, a full disk) must
+# not stall the title: the wait is bounded at five seconds however the mkdir
+# fails, and the name is still written without the lock. The call runs in the
+# background so an unbounded wait fails the test instead of hanging the suite.
+test_an_unmakeable_lock_still_names_the_window_in_bounded_time() {
+    session_start_setup
+    _real_tmux_window || return $?
+    local start=$SECONDS waited=0 pid
+    TMUX="$TT_SOCK,1,0" TMPDIR="$TEST_TMPDIR/no-such-dir" \
+        bash -c '. "$1"; cs_tmux_title_window "$2" solo' _ "$HOOKS_DIR/cs-shared.sh" "$TT_PANE_A" &
+    pid=$!
+    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 30 ]; do
+        sleep 0.5; waited=$((waited + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+        _tt kill-server
+        assert_eq "returned" "still waiting after 15 s" "the title call returns when its lock cannot be made"
+        return 1
+    fi
+    wait "$pid" 2>/dev/null
+    assert_eq "1" "$(( SECONDS - start <= 8 ))" "the wait is bounded near five seconds" || { _tt kill-server; return 1; }
+    assert_eq "cs: solo" "$(_tt_window_name)" "the name is written without the lock" || { _tt kill-server; return 1; }
+    _tt kill-server
+}
+
 # The launch's own cleanup (its EXIT trap: a resume prompt cancelled, or the
 # resume arm's claude returning) releases the pane the launch claimed, and the
 # window stays named, and locked, after the sessions still in it.
@@ -2030,6 +2056,7 @@ run_test test_session_start_reasserts_tab_title_through_tmux
 run_test test_two_cs_sessions_in_one_window_name_it_after_both
 run_test test_a_session_ending_leaves_the_window_to_the_others
 run_test test_concurrent_claims_leave_the_name_the_claims_make
+run_test test_an_unmakeable_lock_still_names_the_window_in_bounded_time
 run_test test_a_launch_in_a_second_pane_joins_the_window_name
 run_test test_a_launch_cleanup_releases_its_pane_and_keeps_the_others_title
 run_test test_a_claim_after_the_last_release_locks_the_titles_again

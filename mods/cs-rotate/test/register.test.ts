@@ -985,6 +985,11 @@ test('a step past the engine\'s markdown bound is cut at a line and says so', ()
   expect(wide).toEqual({ text: 'y'.repeat(MARKDOWN_LIMIT), cut: true })
 })
 
+test('a # line inside a fenced block belongs to the step, not to a new section', () => {
+  const step = '## Next Step\n\nRun:\n\n```bash\n# build first\n./build.sh\n```\n\n~~~\n## not a heading\n~~~\nThen merge.\n\n## Settled\n\nNothing.\n'
+  expect(nextStep(step)).toEqual({ text: 'Run:\n\n```bash\n# build first\n./build.sh\n```\n\n~~~\n## not a heading\n~~~\nThen merge.', cut: false })
+})
+
 test('nextStep keeps an indented first line\'s indent', () => {
   expect(nextStep('# Next Step\n\n    make test\n\nThen merge.\n').text).toBe('    make test\n\nThen merge.')
 })

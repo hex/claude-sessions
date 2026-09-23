@@ -421,8 +421,13 @@ export function nextStep(text: string): Step {
   const start = lines.findIndex(line => /^#+\s*(\d+\.\s*)?next step\s*$/i.test(line.trim()))
   if (start < 0) return { text: '', cut: false }
   const body: string[] = []
+  // A `#` line inside a fenced block (a shell comment in a command block) is
+  // the step's text, not the next section.
+  let fence: string | undefined
   for (const line of lines.slice(start + 1)) {
-    if (/^#+\s/.test(line)) break
+    const marker = /^\s*(```|~~~)/.exec(line)?.[1]
+    if (marker !== undefined) fence = fence === undefined ? marker : fence === marker ? undefined : fence
+    else if (fence === undefined && /^#+\s/.test(line)) break
     body.push(line.trimEnd())
   }
   const step = body.join('\n').replace(/^\n+/, '').trimEnd()

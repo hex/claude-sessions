@@ -113,20 +113,29 @@ cs_tmux_title_window() {  # pane, session name ("" releases the pane)
 # more than five seconds: past that the title is written without the lock, as
 # a title must never stall a hook. Prints nothing when it holds nothing.
 _cs_tmux_title_lock() {  # pane
-    local key lock holder start=$SECONDS
+    local key lock holder deadline=$((SECONDS + 5)) empty_since=""
     key=$(tmux display-message -p -t "$1" '#{socket_path}#{window_id}' 2>/dev/null) || key=""
     [ -n "$key" ] || return 0
     lock="${TMPDIR:-/tmp}/cs-title-$(printf '%s' "$key" | tr -c 'A-Za-z0-9@_.-' '_').lock"
+    # One deadline, set once: a takeover never extends it, so a mkdir that
+    # fails for any other reason (TMPDIR gone or read-only, a full disk)
+    # still ends the wait. Two waiters that both see the same dead pid can
+    # both take over, and one then renames without the lock; the next claim
+    # repairs the name, so that race is left alone.
     until mkdir "$lock" 2>/dev/null; do
+        [ "$SECONDS" -lt "$deadline" ] || return 0
         holder=""
         { read -r holder < "$lock/pid"; } 2>/dev/null || true
-        if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } \
-            || { [ -z "$holder" ] && [ $((SECONDS - start)) -ge 2 ]; }; then
-            rm -f "$lock/pid"; rmdir "$lock" 2>/dev/null
-            start=$SECONDS
-            continue
+        if [ -n "$holder" ]; then
+            empty_since=""
+            kill -0 "$holder" 2>/dev/null || { rm -f "$lock/pid"; rmdir "$lock" 2>/dev/null; }
+        else
+            : "${empty_since:=$SECONDS}"
+            if [ $((SECONDS - empty_since)) -ge 2 ]; then
+                rm -f "$lock/pid"; rmdir "$lock" 2>/dev/null
+                empty_since=""
+            fi
         fi
-        [ $((SECONDS - start)) -lt 5 ] || return 0
         sleep 0.05
     done
     echo "$$" > "$lock/pid" 2>/dev/null || true
