@@ -584,7 +584,7 @@ test_a_session_ending_leaves_the_window_to_the_others() {
 # Panes claim and release at the same moment (a layout restore starting
 # several sessions, two /clears): each call reads the claims and then renames,
 # so without serialising them a slower rename writes a name from before another
-# pane's claim. Six panes, ten rounds of claims and releases all at once;
+# pane's claim. Six panes, twenty rounds of claims and releases all at once;
 # after each round the name must be the claims as they stand.
 test_concurrent_claims_leave_the_name_the_claims_make() {
     session_start_setup
@@ -594,7 +594,7 @@ test_concurrent_claims_leave_the_name_the_claims_make() {
         panes="$panes $(_tt split-window -d -P -F '#{pane_id}' -t "$TT_PANE_A" 'sleep 600')" || { _tt kill-server; return 1; }
         _tt select-layout -t "$TT_PANE_A" tiled >/dev/null
     done
-    for round in $(seq 1 10); do
+    for round in $(seq 1 20); do
         i=0
         for p in $panes; do
             i=$((i + 1))
