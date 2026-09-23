@@ -493,8 +493,8 @@ show_help() {
     cat << EOF
 cs $VERSION - Claude Code session manager
 
-Usage: cs                             Open the session you are standing in,
-                                      or the session manager if you are not in one
+Usage: cs                             Open the session manager
+       cs .                           Open the session you are standing in
        cs <session-name>              Create or resume a session
        cs <session-name> -secrets <cmd>  Run secrets command on session
        cs -<command>                  Run a global subcommand
@@ -527,7 +527,7 @@ Commands:
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
   -statusline <cmd>   enable|disable the cs status line; caps on|off|ask records whether your font has the rounded caps
   -detect-theme       Show the detected terminal theme (light|dark)
-  -tui                Open the interactive session manager (bare 'cs' does too, outside a session)
+  -tui                Open the interactive session manager (bare 'cs' does too)
   -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived)
   -adopt <name>       Adopt current directory as a cs session
   -whoami             Show the current actor (for shared, multi-person sessions)
@@ -1339,9 +1339,9 @@ validate_session_name() {
 
     case "$name" in
         .|..) error "Session name cannot be '.' or '..'" ;;
-        # Bare cs in a session directory re-enters as `cs <name>`, where a
-        # leading hyphen reads as a verb: a session named -uninstall would run
-        # that verb rather than open, and -rm would reach remove_session.
+        # `cs <name>` reads a leading hyphen as a verb: a session named
+        # -uninstall would run that verb rather than open, and -rm would reach
+        # remove_session.
         -*) error "Session name cannot start with a hyphen" ;;
     esac
 
@@ -6567,7 +6567,7 @@ is_session_dir() {
 }
 
 # The name cs knows a directory by, or non-zero when the directory is not a
-# session cs can open. Backs bare `cs` opening the session you are standing in.
+# session cs can open. Backs `cs .` opening the session you are standing in.
 #
 # Detects on .cs/ alone, where is_session_dir also accepts a root CLAUDE.md:
 # listing a stray directory is a cosmetic error, launching one is not.
@@ -6624,17 +6624,6 @@ cmd_complete() {
         sessions) complete_sessions ;;
         *) error "Unknown completion subject: ${1:-<none>}" ;;
     esac
-}
-
-# The session bare `cs` opens from where it was run, or nothing when it would
-# show the picker instead. Answers for the dispatch and for the `cs -list` hint
-# alike, so the hint can never name a command that does something else.
-#
-# Nothing inside a launched session, whose shells inherit its name: there the
-# request would be to open a second copy of the session you are already in.
-_bare_cs_target() {
-    [ -z "${CLAUDE_SESSION_NAME:-}" ] || return 1
-    _session_name_for_dir "$PWD"
 }
 
 # The picker binary, or non-zero when none is installed. Every caller asks
@@ -8524,17 +8513,8 @@ main() {
 
     if [ $# -eq 0 ]; then
         if [ -t 1 ]; then
-            # Standing in a session, open it: the picker exists to choose one,
-            # and here the choice is the directory you are in. Re-entered as
-            # `cs <name>` so the lock, migration and launch are the same ones
-            # the explicit form gets. Skipped inside a launched session, whose
-            # shells inherit the name — there the answer would be to open a
-            # second copy of the session you are already in.
-            local here=""
-            here=$(_bare_cs_target || true)
-            if [ -n "$here" ]; then
-                exec "$0" "$here"
-            fi
+            # Bare cs is the picker everywhere, a session directory included;
+            # `cs .` is the explicit way to open the session you stand in.
             # `||`, not two statements: run_tui returns non-zero only when no
             # picker is installed, and under `set -e` a bare failing call would
             # end cs there — printing nothing at all on the machines that need
@@ -8577,13 +8557,7 @@ main() {
             ;;
         -list|-ls)
             if command -v cs-tui >/dev/null 2>&1; then
-                # Bare cs opens the session you are standing in, so name the
-                # command that reaches the manager from where the reader is.
-                if [ -n "$(_bare_cs_target || true)" ]; then
-                    info "Hint: run 'cs -tui' for the interactive session manager"
-                else
-                    info "Hint: run bare 'cs' for the interactive session manager"
-                fi
+                info "Hint: run bare 'cs' for the interactive session manager"
             fi
             shift
             list_sessions "$@"
@@ -8718,6 +8692,15 @@ main() {
             error "Unknown command: $cmd. Run 'cs -help' for usage."
             ;;
     esac
+
+    # `cs .` opens the session you are standing in, under the name cs knows it
+    # by (an adopted project's cs name, not its directory's). Resolved here so
+    # the lock, migration and launch are the ones `cs <name>` gets. Never
+    # adopts: a directory that is not a session is refused, not made into one.
+    if [ "$cmd" = "." ]; then
+        cmd=$(_session_name_for_dir "$PWD") \
+            || error "Not a cs session: $PWD. Run 'cs -adopt <name>' to make it one, or bare 'cs' to pick a session."
+    fi
 
     local session_name="$cmd"
     local force_flag=""

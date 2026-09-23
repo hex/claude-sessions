@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: Tests for bare `cs` opening the session you are standing in
-# ABOUTME: Covers the cwd -> session-name resolver and the dispatch that uses it
+# ABOUTME: Tests for `cs .` opening the session you are standing in
+# ABOUTME: Covers the cwd -> session-name resolver, `cs .`, and bare `cs` staying the picker
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=tests/test_lib.sh
@@ -100,7 +100,8 @@ test_unregistered_session_outside_the_root_does_not_resolve() {
 }
 
 # ============================================================================
-# Cycle 3: bare `cs` in a session directory opens that session
+# Cycle 3: `cs .` in a session directory opens that session; bare `cs` there
+# shows the picker
 # ============================================================================
 
 # A fake picker on PATH. Bare `cs` prefers cs-tui wherever it resolves, and a
@@ -146,17 +147,49 @@ _cs_in() {  # dir, args...
     ) | tr -d '\r'
 }
 
-test_bare_cs_in_a_session_directory_opens_that_session() {
+test_dot_in_a_session_directory_opens_that_session() {
     local dir
     dir=$(create_test_session "epsilon")
 
     local out
-    out=$(_cs_in "$dir")
+    out=$(_cs_in "$dir" .)
 
     assert_output_contains "$out" "LAUNCHED --name epsilon" \
-        "bare cs in a session directory should open that session" || return 1
+        "cs . in a session directory should open that session" || return 1
     assert_output_not_contains "$out" "PICKER_RAN" \
-        "bare cs in a session directory should not reach the picker" || return 1
+        "cs . in a session directory should not reach the picker" || return 1
+}
+
+test_bare_cs_in_a_session_directory_shows_the_picker() {
+    local dir
+    dir=$(create_test_session "epsilon2")
+
+    local out
+    out=$(_cs_in "$dir")
+
+    assert_output_contains "$out" "PICKER_RAN" \
+        "bare cs should show the picker even standing in a session" || return 1
+    assert_output_not_contains "$out" "LAUNCHED" \
+        "bare cs should not open the session it is standing in" || return 1
+}
+
+test_dot_outside_any_session_refuses() {
+    local dir="$TEST_TMPDIR/not-a-session-dir"
+    mkdir -p "$dir"
+
+    local out
+    out=$(_cs_in "$dir" .)
+
+    # A literal '.' must never become a session name, and cs must not adopt the
+    # directory on the user's behalf: adoption is its own verb.
+    assert_output_contains "$out" "Not a cs session: $dir" \
+        "cs . outside a session should say where it looked" || return 1
+    assert_output_contains "$out" "cs -adopt <name>" \
+        "cs . outside a session should name the verb that makes one" || return 1
+    assert_output_not_contains "$out" "LAUNCHED" \
+        "cs . outside a session must not launch anything" || return 1
+    assert_output_not_contains "$out" "PICKER_RAN" \
+        "cs . outside a session must not fall back to the picker" || return 1
 }
 
 test_adopted_session_opens_under_its_cs_name() {
@@ -165,7 +198,7 @@ test_adopted_session_opens_under_its_cs_name() {
     ln -s "$project" "$CS_SESSIONS_ROOT/adopted-name"
 
     local out
-    out=$(_cs_in "$project")
+    out=$(_cs_in "$project" .)
 
     # 'some-repo' here would open — and create — a session that is not this one.
     assert_output_contains "$out" "LAUNCHED --name adopted-name" \
@@ -204,7 +237,7 @@ test_tui_verb_shows_the_picker_from_inside_a_session_directory() {
     out=$(_cs_in "$dir" -tui)
 
     assert_output_contains "$out" "PICKER_RAN" \
-        "cs -tui should show the picker even where bare cs would open a session" || return 1
+        "cs -tui should show the picker from a session directory" || return 1
     assert_output_not_contains "$out" "LAUNCHED" \
         "cs -tui should not open the session it is standing in" || return 1
 }
@@ -221,11 +254,10 @@ test_bare_cs_outside_any_session_shows_the_picker() {
 }
 
 # ============================================================================
-# Cycle 5: opening by standing in the directory is the same open as by name,
-# including its refusals
+# Cycle 5: `cs .` is the same open as by name, including its refusals
 # ============================================================================
 
-test_bare_cs_refuses_a_session_that_is_already_running() {
+test_dot_refuses_a_session_that_is_already_running() {
     local dir
     dir=$(create_test_session "theta")
     printf 'claude_session_id: 11111111-2222-4333-8444-555555555555\n' \
@@ -238,27 +270,25 @@ test_bare_cs_refuses_a_session_that_is_already_running() {
 
     local out
     export CS_PS_BIN="$ps_stub"
-    out=$(_cs_in "$dir")
+    out=$(_cs_in "$dir" .)
     unset CS_PS_BIN
 
     assert_output_contains "$out" "already running elsewhere" \
-        "bare cs should refuse a live session exactly as 'cs <name>' does" || return 1
+        "cs . should refuse a live session exactly as 'cs <name>' does" || return 1
     assert_output_not_contains "$out" "LAUNCHED" \
         "a refused open must not reach claude" || return 1
 }
 
-test_list_hint_names_the_command_that_reaches_the_picker() {
+test_list_hint_names_bare_cs_from_a_session_directory() {
     local dir
     dir=$(create_test_session "iota")
 
-    local inside outside
-    inside=$(_cs_in "$dir" -list)
-    outside=$(_cs_in "$CS_SESSIONS_ROOT" -list)
+    local out
+    out=$(_cs_in "$dir" -list)
 
-    assert_output_contains "$inside" "cs -tui" \
-        "inside a session, the -list hint should name 'cs -tui'" || return 1
-    assert_output_contains "$outside" "bare 'cs'" \
-        "outside a session, the -list hint should still name bare cs" || return 1
+    # Bare cs is the picker everywhere now, so the hint needs no second form.
+    assert_output_contains "$out" "run bare 'cs' for the interactive session manager" \
+        "the -list hint should name bare cs, even from a session directory" || return 1
 }
 
 # ============================================================================
@@ -366,13 +396,15 @@ EOF
 }
 
 run_test test_a_pty_test_cannot_rename_the_developers_tmux_window
-run_test test_bare_cs_in_a_session_directory_opens_that_session
+run_test test_dot_in_a_session_directory_opens_that_session
+run_test test_bare_cs_in_a_session_directory_shows_the_picker
+run_test test_dot_outside_any_session_refuses
 run_test test_adopted_session_opens_under_its_cs_name
 run_test test_bare_cs_inside_a_launched_session_shows_the_picker
 run_test test_tui_verb_shows_the_picker_from_inside_a_session_directory
 run_test test_bare_cs_outside_any_session_shows_the_picker
-run_test test_bare_cs_refuses_a_session_that_is_already_running
-run_test test_list_hint_names_the_command_that_reaches_the_picker
+run_test test_dot_refuses_a_session_that_is_already_running
+run_test test_list_hint_names_bare_cs_from_a_session_directory
 run_test test_bare_cs_without_a_picker_falls_back_to_help
 
 report_results

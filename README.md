@@ -129,7 +129,8 @@ The platform is detected automatically. It decides one thing — whether secrets
 ## Usage
 
 ```bash
-cs                          # Open the session you are standing in, else the session manager (TUI)
+cs                          # Open the session manager (TUI)
+cs .                        # Open the session you are standing in
 cs -tui                     # Interactive session manager, from anywhere
 cs -- <session-name>        # '--' ends the options, for launchers that insert one
 cs <session-name>           # Create or resume a session
@@ -171,7 +172,7 @@ cs -version, -v             # Show version
 
 ### Interactive Session Manager
 
-Running `cs` with no arguments launches an interactive TUI for browsing and managing sessions. Standing in a session's own directory, bare `cs` opens that session instead — the picker is for choosing one, and there the choice is already made. `cs -tui` always reaches the picker.
+Running `cs` with no arguments launches an interactive TUI for browsing and managing sessions, wherever you run it. To open the session you are standing in, run `cs .` from its root: an adopted project opens under the name it was adopted as, and a directory that is not a session is refused with a pointer to `cs -adopt`.
 
 The current directory decides, not any history: cs opens a session when that directory *is* one it knows by name (a session root, a `<base>@<feature>` worktree, or a project adopted with `cs -adopt`). A subdirectory of a session, any unrelated directory, and a shell inside a launched session all get the picker — inside a session, opening a second copy is never the intent.
 

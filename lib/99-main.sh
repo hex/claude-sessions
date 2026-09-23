@@ -20,17 +20,8 @@ main() {
 
     if [ $# -eq 0 ]; then
         if [ -t 1 ]; then
-            # Standing in a session, open it: the picker exists to choose one,
-            # and here the choice is the directory you are in. Re-entered as
-            # `cs <name>` so the lock, migration and launch are the same ones
-            # the explicit form gets. Skipped inside a launched session, whose
-            # shells inherit the name — there the answer would be to open a
-            # second copy of the session you are already in.
-            local here=""
-            here=$(_bare_cs_target || true)
-            if [ -n "$here" ]; then
-                exec "$0" "$here"
-            fi
+            # Bare cs is the picker everywhere, a session directory included;
+            # `cs .` is the explicit way to open the session you stand in.
             # `||`, not two statements: run_tui returns non-zero only when no
             # picker is installed, and under `set -e` a bare failing call would
             # end cs there — printing nothing at all on the machines that need
@@ -73,13 +64,7 @@ main() {
             ;;
         -list|-ls)
             if command -v cs-tui >/dev/null 2>&1; then
-                # Bare cs opens the session you are standing in, so name the
-                # command that reaches the manager from where the reader is.
-                if [ -n "$(_bare_cs_target || true)" ]; then
-                    info "Hint: run 'cs -tui' for the interactive session manager"
-                else
-                    info "Hint: run bare 'cs' for the interactive session manager"
-                fi
+                info "Hint: run bare 'cs' for the interactive session manager"
             fi
             shift
             list_sessions "$@"
@@ -214,6 +199,15 @@ main() {
             error "Unknown command: $cmd. Run 'cs -help' for usage."
             ;;
     esac
+
+    # `cs .` opens the session you are standing in, under the name cs knows it
+    # by (an adopted project's cs name, not its directory's). Resolved here so
+    # the lock, migration and launch are the ones `cs <name>` gets. Never
+    # adopts: a directory that is not a session is refused, not made into one.
+    if [ "$cmd" = "." ]; then
+        cmd=$(_session_name_for_dir "$PWD") \
+            || error "Not a cs session: $PWD. Run 'cs -adopt <name>' to make it one, or bare 'cs' to pick a session."
+    fi
 
     local session_name="$cmd"
     local force_flag=""
