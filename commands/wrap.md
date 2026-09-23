@@ -6,7 +6,7 @@ Wrap up this session: distill durable memory entries, write a comprehensive summ
 
 You are working in a cs session. The user has signaled they're winding down. Do the passes in order — memory first (so durable facts land in the right place before the narrative absorbs them), summary second (so the narrative reflects the final state including any memory entries just written), rotation third (so the summary was written from the whole live narrative before its oldest sections leave it).
 
-Each pass is owned by its own command file. Read that file and apply it — do not work from a remembered paraphrase. This command adds only the ordering and the combined report.
+Each pass is owned by its own command file. Read that file with the Read tool, one call per file (not `cat` through Bash, whose zsh can stop a command list part-way), and apply it — do not work from a remembered paraphrase. This command adds only the ordering and the combined report.
 
 ## Pass 1 — Memory distillation
 
