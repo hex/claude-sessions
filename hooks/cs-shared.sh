@@ -76,10 +76,14 @@ _narrative_budget() {  # value, default
 # A named window is locked against Claude Code's own titles, as the launch
 # locks it: a /clear releases the window and claims it back, and the claim must
 # lock it again. With no cs session left it names itself again. Every tmux call
-# is best-effort: a title must never fail a launch or a hook.
+# is best-effort: a title must never fail a launch or a hook. The claim, the
+# read of every claim and the rename run under the window's lock, since panes
+# claim at the same moment (a layout restore, two /clears) and a rename written
+# from a read before another pane's claim would drop that pane's name.
 cs_tmux_title_window() {  # pane, session name ("" releases the pane)
-    local pane="$1" name="$2" names
+    local pane="$1" name="$2" names lock
     [ -n "$pane" ] || return 0
+    lock=$(_cs_tmux_title_lock "$pane")
     if [ -n "$name" ]; then
         tmux set-option -p -t "$pane" @cs_session "$name" 2>/dev/null || true
     else
@@ -96,4 +100,35 @@ cs_tmux_title_window() {  # pane, session name ("" releases the pane)
         tmux set-window-option -t "$pane" allow-rename on 2>/dev/null || true
         tmux set-window-option -t "$pane" allow-set-title on 2>/dev/null || true
     fi
+    [ -z "$lock" ] || { rm -f "$lock/pid"; rmdir "$lock" 2>/dev/null; } || true
+}
+
+# Takes the lock on a pane's window and prints its directory: a directory per
+# tmux server and window under $TMPDIR, made by mkdir (atomic, and bash 3.2 has
+# no flock), holding the holder's pid. A holder whose pid is gone died holding
+# it, and the lock is taken over at once; a lock with no pid after a second is
+# one whose holder died between the mkdir and the write, and is taken over too.
+# A live holder is waited for, since a call is a few tmux round trips (385 ms
+# measured on a loaded machine, so six panes queue for two seconds), but for no
+# more than five seconds: past that the title is written without the lock, as
+# a title must never stall a hook. Prints nothing when it holds nothing.
+_cs_tmux_title_lock() {  # pane
+    local key lock holder start=$SECONDS
+    key=$(tmux display-message -p -t "$1" '#{socket_path}#{window_id}' 2>/dev/null) || key=""
+    [ -n "$key" ] || return 0
+    lock="${TMPDIR:-/tmp}/cs-title-$(printf '%s' "$key" | tr -c 'A-Za-z0-9@_.-' '_').lock"
+    until mkdir "$lock" 2>/dev/null; do
+        holder=""
+        { read -r holder < "$lock/pid"; } 2>/dev/null || true
+        if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } \
+            || { [ -z "$holder" ] && [ $((SECONDS - start)) -ge 2 ]; }; then
+            rm -f "$lock/pid"; rmdir "$lock" 2>/dev/null
+            start=$SECONDS
+            continue
+        fi
+        [ $((SECONDS - start)) -lt 5 ] || return 0
+        sleep 0.05
+    done
+    echo "$$" > "$lock/pid" 2>/dev/null || true
+    printf '%s\n' "$lock"
 }

@@ -581,6 +581,39 @@ test_a_session_ending_leaves_the_window_to_the_others() {
     _tt kill-server
 }
 
+# Panes claim and release at the same moment (a layout restore starting
+# several sessions, two /clears): each call reads the claims and then renames,
+# so without serialising them a slower rename writes a name from before another
+# pane's claim. Six panes, ten rounds of claims and releases all at once;
+# after each round the name must be the claims as they stand.
+test_concurrent_claims_leave_the_name_the_claims_make() {
+    session_start_setup
+    _real_tmux_window || return $?
+    local panes="$TT_PANE_A $TT_PANE_B" i p round got want
+    for i in 3 4 5 6; do
+        panes="$panes $(_tt split-window -d -P -F '#{pane_id}' -t "$TT_PANE_A" 'sleep 600')" || { _tt kill-server; return 1; }
+        _tt select-layout -t "$TT_PANE_A" tiled >/dev/null
+    done
+    for round in $(seq 1 10); do
+        i=0
+        for p in $panes; do
+            i=$((i + 1))
+            ( TMUX="$TT_SOCK,1,0" bash -c '. "$1"; cs_tmux_title_window "$2" "$3"' _ "$HOOKS_DIR/cs-shared.sh" "$p" "s$i" ) &
+        done
+        wait
+        want="cs: $(_tt list-panes -t "$TT_PANE_A" -F '#{@cs_session}' | awk '{ out = out (NR > 1 ? " | " : "") $0 } END { print out }')"
+        got=$(_tt_window_name)
+        assert_eq "$want" "$got" "round $round: concurrent claims name the window after every claim" || { _tt kill-server; return 1; }
+        for p in $panes; do
+            ( TMUX="$TT_SOCK,1,0" bash -c '. "$1"; cs_tmux_title_window "$2" ""' _ "$HOOKS_DIR/cs-shared.sh" "$p" ) &
+        done
+        wait
+        assert_eq "on" "$(_tt show-window-options -v -t "$TT_PANE_A" automatic-rename)" \
+            "round $round: concurrent releases leave no claim and hand the name back" || { _tt kill-server; return 1; }
+    done
+    _tt kill-server
+}
+
 # The launch's own cleanup (its EXIT trap: a resume prompt cancelled, or the
 # resume arm's claude returning) releases the pane the launch claimed, and the
 # window stays named, and locked, after the sessions still in it.
@@ -1990,6 +2023,7 @@ run_test test_session_start_teardown_keeps_the_title_off_the_terminal
 run_test test_session_start_reasserts_tab_title_through_tmux
 run_test test_two_cs_sessions_in_one_window_name_it_after_both
 run_test test_a_session_ending_leaves_the_window_to_the_others
+run_test test_concurrent_claims_leave_the_name_the_claims_make
 run_test test_a_launch_in_a_second_pane_joins_the_window_name
 run_test test_a_launch_cleanup_releases_its_pane_and_keeps_the_others_title
 run_test test_a_claim_after_the_last_release_locks_the_titles_again
