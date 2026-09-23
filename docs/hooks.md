@@ -352,7 +352,10 @@ nothing. The run is scheduled from a timer rather than from the turn's own
 hook, which the plugin contract refuses a command from. Once the rotate skill
 has armed its handoff, the next turn's end starts a 20-second grace: the
 band reads `1: /clear and continue from the handoff  ·  /clear in 20s`,
-redrawn once a second, and at zero the mod runs the `/clear` itself, only if
+redrawn once a second. The count wears the session's own colour while there
+is time, the status bar's amber from ten seconds and its crit red under five
+(the bar's inks, pinned against `bin/cs-statusline` by `tests/test_mod_rotate.sh`).
+At zero the mod runs the `/clear` itself, only if
 the band is idle at that moment (no turn running, no survey), the handoff still
 armed and this still the lead; otherwise the count stops and the button waits
 for you. Pressing `1` during the count clears at once. Sending a prompt, from
@@ -366,8 +369,10 @@ own rule (frontmatter opened and closed by `---`, `status: unconsumed`
 inside), so a truncated handoff is never cleared into.
 
 The first grace of a session (a load of the mod) also opens a pane, titled
-`Handoff`, beside the band: the handoff's `Next Step` section, up to twelve
-lines, and the same count beneath it, so the twenty seconds are spent reading
+`Handoff`, beside the band: a `Handoff` header in the session colour, the
+handoff's `Next Step` section (up to twelve lines, the first in bold), and
+beneath it a twenty-block bar that empties one block a second beside the same
+count, both in the count's colour, so the twenty seconds are spent reading
 what the next conversation will do. The pane carries no keys; stopping the
 count stays on the band. It closes wherever the count ends: a press, a prompt,
 a `/clear`, or zero. Later graces in the same session keep to the band. A pane
