@@ -61,9 +61,11 @@ cs_resolve_session "$INPUT" || exit 0
 # This pane no longer runs the session: the tmux window, which is the tab, is
 # named after the cs sessions still running in its other panes, or names
 # itself again when none is left. A /clear ends here too, and its SessionStart
-# claims the pane back straight after. Keyed to this hook's own pane, so a
-# teammate's end, in a pane that never claimed one, changes nothing.
-if [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] && command -v cs_tmux_title_window >/dev/null 2>&1; then
+# claims the pane back straight after. Only the launched conversation
+# releases it: a `claude -p` run from inside the session inherits its
+# TMUX_PANE, and its end must not take the lead's claim with it.
+if [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] && command -v cs_tmux_title_window >/dev/null 2>&1 \
+    && command -v cs_is_lead >/dev/null 2>&1 && cs_is_lead; then
     cs_tmux_title_window "$TMUX_PANE" ""
 fi
 

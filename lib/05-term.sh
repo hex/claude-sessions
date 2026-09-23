@@ -229,9 +229,11 @@ set_tab_title() {
         else
             tmux rename-window "$title" 2>/dev/null || true
         fi
-        tmux select-pane -T "$title" 2>/dev/null || true
-        tmux set-window-option allow-rename off 2>/dev/null || true
-        tmux set-window-option allow-set-title off 2>/dev/null || true
+        # Aimed at this pane: untargeted, tmux picks the attached client's
+        # active pane, which need not be the one cs runs in.
+        tmux select-pane ${TMUX_PANE:+-t "$TMUX_PANE"} -T "$title" 2>/dev/null || true
+        tmux set-window-option ${TMUX_PANE:+-t "$TMUX_PANE"} allow-rename off 2>/dev/null || true
+        tmux set-window-option ${TMUX_PANE:+-t "$TMUX_PANE"} allow-set-title off 2>/dev/null || true
     fi
 
     # Tab color via iTerm2 escape sequences (also supported by WezTerm)

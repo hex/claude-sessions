@@ -581,6 +581,38 @@ test_a_session_ending_leaves_the_window_to_the_others() {
     _tt kill-server
 }
 
+# A /clear in the window's only session ends it (the window is released and
+# unlocked) and starts it again: the claim back must lock the names again, or
+# Claude Code retitles the pane and the window for the rest of the session.
+test_a_claim_after_the_last_release_locks_the_titles_again() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup
+    _tt_hook session-end.sh "$TT_PANE_A" current-session clear
+    _tt_hook session-start.sh "$TT_PANE_A" current-session clear || { _tt kill-server; return 1; }
+    assert_eq "cs: current-session" "$(_tt_window_name)" "the window is named again" || { _tt kill-server; return 1; }
+    assert_eq "off off" "$(_tt show-window-options -v -t "$TT_PANE_A" allow-rename) $(_tt show-window-options -v -t "$TT_PANE_A" allow-set-title)" \
+        "the claim locks the window and pane names against Claude Code's own titles" || { _tt kill-server; return 1; }
+    _tt kill-server
+}
+
+# A claude that is not the launched one (a `claude -p` run from inside the
+# session inherits its environment and TMUX_PANE) ends without taking the
+# lead's claim with it.
+test_a_non_lead_end_leaves_the_pane_claimed() {
+    session_start_setup
+    _real_tmux_window || return $?
+    _tt_hook session-start.sh "$TT_PANE_A" current-session startup
+    echo '{"session_id":"s","source":"other","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionEnd"}' \
+        | TMUX="$TT_SOCK,1,0" TMUX_PANE="$TT_PANE_A" CS_LEAD_PID=1 CLAUDE_PID=99999 \
+          bash "$HOOKS_DIR/session-end.sh" >/dev/null 2>&1 || { _tt kill-server; return 1; }
+    assert_eq "cs: current-session" "$(_tt_window_name)" \
+        "the lead's session still names the window" || { _tt kill-server; return 1; }
+    assert_eq "current-session" "$(_tt show-options -p -v -t "$TT_PANE_A" @cs_session)" \
+        "and still holds its pane's claim" || { _tt kill-server; return 1; }
+    _tt kill-server
+}
+
 # The launch takes its pane's claim too, from inside the pane itself: tmux gives
 # the pane its own TMUX and TMUX_PANE, and the pane's terminal is the tty
 # set_tab_title requires.
@@ -1938,6 +1970,8 @@ run_test test_session_start_reasserts_tab_title_through_tmux
 run_test test_two_cs_sessions_in_one_window_name_it_after_both
 run_test test_a_session_ending_leaves_the_window_to_the_others
 run_test test_a_launch_in_a_second_pane_joins_the_window_name
+run_test test_a_claim_after_the_last_release_locks_the_titles_again
+run_test test_a_non_lead_end_leaves_the_pane_claimed
 run_test test_session_start_tab_title_leaves_a_teammate_pane_alone
 run_test test_session_start_reasserts_tab_title_on_the_terminal_device
 run_test test_session_start_tab_title_skips_silently_without_a_terminal

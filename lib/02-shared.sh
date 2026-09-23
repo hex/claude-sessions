@@ -71,7 +71,9 @@ _narrative_budget() {  # value, default
 # is the tab's title, and one window holds every pane of a tab, so a single
 # session writing its own name took the tab from the other. Each pane records
 # its session in the pane option @cs_session; an empty name releases the pane.
-# With no cs session left in the window it names itself again. Every tmux call
+# A named window is locked against Claude Code's own titles, as the launch
+# locks it: a /clear releases the window and claims it back, and the claim must
+# lock it again. With no cs session left it names itself again. Every tmux call
 # is best-effort: a title must never fail a launch or a hook.
 cs_tmux_title_window() {  # pane, session name ("" releases the pane)
     local pane="$1" name="$2" names
@@ -85,6 +87,8 @@ cs_tmux_title_window() {  # pane, session name ("" releases the pane)
         | awk 'NF && !seen[$0]++ { out = out (out == "" ? "" : " | ") $0 } END { print out }') || names=""
     if [ -n "$names" ]; then
         tmux rename-window -t "$pane" "cs: $names" 2>/dev/null || true
+        tmux set-window-option -t "$pane" allow-rename off 2>/dev/null || true
+        tmux set-window-option -t "$pane" allow-set-title off 2>/dev/null || true
     else
         tmux set-window-option -t "$pane" automatic-rename on 2>/dev/null || true
         tmux set-window-option -t "$pane" allow-rename on 2>/dev/null || true
