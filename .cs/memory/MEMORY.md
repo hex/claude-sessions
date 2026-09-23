@@ -112,7 +112,7 @@
 - [Foreign-model pass before done](feedback_foreign_model_pass_on_research.md): Alex expects a Codex or council falsification pass after research AND after a build
 - [jq runtime error exits 0](project_jq_runtime_error_exit_zero.md): a shape error on any record but the last prints to stderr and jq exits 0; capture stderr per pass and fail on content
 - [mktemp template form](project_mktemp_template_form.md): `mktemp -t prefix` is BSD-only, GNU rejects it; always `mktemp "${TMPDIR:-/tmp}/name.XXXXXX"`
-- [Full gate runs on ghost](feedback_full_gate_runs_on_ghost.md): EVERY tests/test_*.sh run goes to ghost via remote-tests, even one suite; ghost is bash 5.3; only CI macos judges 3.2
+- [Full gate runs on ghost](feedback_full_gate_runs_on_ghost.md): every test_*.sh run, even one suite, via `--host ghost@ghost`; keep its claude current; CI alone judges bash 3.2
 - [Headless e2e inside a cs session](project_e2e_inside_cs_session_headless.md): claude -p from a throwaway session dir, inherited contract env -u'd; a logging hook proves META_DIR
 - [No base-URL gateway](project_no_base_url_gateway.md): do NOT route cs through an ANTHROPIC_BASE_URL gateway: Claude Code sends it the subscription OAuth token; rewriter keeps it
 - [pwd -P keeps typed case](project_pwd_p_keeps_typed_case.md): bash `pwd -P` echoes the case you typed on APFS (zsh normalises); identity checks use `-ef`, not string equality

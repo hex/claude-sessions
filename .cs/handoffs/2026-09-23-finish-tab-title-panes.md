@@ -2,7 +2,8 @@
 parent: 524ba3e7-6207-4c5a-af51-85392a3f541f
 created: 2026-09-23T08:53:06Z
 purpose: Finish feat/tab-title-panes (tmux window title lists every cs session in its panes): confirm the full suite, offer Codex review round 3, merge on Alex's say, install
-status: unconsumed
+status: consumed
+consumed_by: 0924fa25-2e31-489a-a100-b8df76b380f7
 ---
 
 # 1. Next Step

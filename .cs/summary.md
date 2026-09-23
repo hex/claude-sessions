@@ -1,62 +1,68 @@
 # Session Summary: claude-sessions
 
-**Date:** 2026-09-22
-**Duration:** one day across three conversations, roughly 09:00 to 17:30 Bucharest time; this summary covers today, which shipped cs v2026.9.19 and v2026.9.20 (the session itself has run since 2026-02-07 and earlier days are in `.cs/README.md`'s outcome log and the narrative archive)
+**Date:** 2026-09-23
+**Duration:** one day in two conversations (09:27 to about 14:00 Bucharest time), joined by a handoff rotation at 11:56. This summary covers today. The session has run since 2026-02-07, and earlier days are in `.cs/README.md`'s outcome log and the narrative archive.
 
 ## Objective
 
-Build the cs-update mod Alex asked for in the morning (release notes in a side pane when a newer cs exists, with one key that installs it), find out why the session picker felt heavy, land both branches and release. After that release Alex brought two more things: a tab-title question from a colleague's laptop, and a feature worktree that opened on its base's task list. The second became a fix and a second release.
+Alex brought four requests, one at a time, and each ended as a merge on main:
+
+1. Bare `cs` inside a session directory opened that session. He wanted the picker there, and `cs .` as the explicit way to open the session you are standing in.
+2. Task #664: colour the forced rotation's countdown and give the Handoff pane a header and a bar.
+3. A tab with two panes running two cs sessions should read `cs: claude-sessions | fignity`.
+4. He sent a screenshot and asked whether the Handoff pane was truncated. It was. He asked for three fixes: show the cut, raise the cap, draw the markdown. Then he chose the engine's own Markdown element over a hand parser, with no cap.
 
 ## Environment
 
-macOS on the dev Mac, inside an iTerm2 tmux-integration pane; the session directory is cs's own source checkout with origin at github.com/hex/claude-sessions. Claude Code 2.1.278, whose function-hooks engine ("mods") hosts the new plugin. Codex companion 1.0.6 for the three branch reviews. Ghost, the remote test host, had no host store all day, so every suite run was local and CI's macOS lane was the only bash 3.2 judge. The machine carried four or five live Claude sessions, which shaped the picker numbers.
+The Mac, inside an iTerm2 tmux-integration pane; the session directory is cs's own source checkout (origin github.com/hex/claude-sessions). Claude Code 2.1.280. Each branch grew in a git worktree under the first conversation's scratchpad, so a running suite never saw its files change. Codex companion 1.0.6 reviewed the tab-title branch three times. The machine ran at load average 9 to 12 all day, which shaped every timing below. ghost, the remote test host, ran the final gate once the literal `--host ghost@ghost` was used. Its Claude Code was 2.1.72 until it was updated today.
 
 ## Key Discoveries
 
-- **The picker freeze was the rescan, not rendering.** Every ten seconds the picker (the cs-tui terminal UI) rescans all 139 session directories and forks `git remote get-url` for each of the 91 that are checkouts. On this loaded machine one fork costs 0.76 s wall, so a scan took about 14 s across the 14-thread pool, and because the ten-second timer counts from scan start the next scan began a second after the last one ended. Arrow keys queued behind it 14 seconds of every 15.
-- **The first sampler lied.** It forked once per child per tick, so a "tick" took 1.5 to 4 s and reported a phantom 5.5 s cadence; a 10 Hz single-fork probe gave the true picture. The latency probe had the same flaw at load average 148, so before/after runs must sit back to back on a settled machine.
-- **Moving work to a worker moves the apply past the mode gate.** Codex's P1 on the TUI branch: the old synchronous rescan was only requested in Normal mode, but the loop applied the worker's result wherever it landed, so a delete or rename dialog could have its table replaced underneath it and act on the wrong row. Results now wait in the channel until the dialog closes.
-- **A reload fires no `session.start`, and a dismissed pane leaves nothing to redraw.** The cs-update mod persists the finished install in `.cs/local/cs-update.done` because installing cs overwrites the mod's own file and the engine hot-reloads it. Codex's P2 found the gap: dismiss the pane, reload, then `/cs-update` offered the install again. The command handler now reads the marker first.
-- **A feature worktree shared the base's task list by design.** The 2026-07-02 worktrees spec chose `CLAUDE_CODE_TASK_LIST_ID=<base>` so parallel work would coordinate, and a test pinned it. Alex judged that wrong: a fresh feature showed, and could edit, the base's tasks. Reversed with his say; secrets still key to the base; no fuse-back at retirement.
-- **The tab-title suffix is iTerm's, not cs's.** A colleague's tabs read `…<uuid> "/color cyan")`. That is claude's own argv, appended by the profile's "Job Name with Arguments" title component. This Mac shows the same string on the pane title bars; its tabs stay clean only because tmux integration names tabs after the tmux window. cs sets nothing but OSC 0 and the OSC 6 tab colour, and a profile change reaches only sessions created after it (`OSC 1337 SetProfile` did not re-apply components to an open pane). Alex chose not to change his own profiles.
-- **`/finish` has nothing to finish when the branch lives in the base.** All three branches today grew in the base checkout, so `cs -features` was empty and the skill refused its plain-branch path from a cs session. Alex answered "merge" each time: checkout main, `--no-ff`, gates on the merged tree, install, branch kept, nothing pushed.
-- **Review tooling has edges.** `/codex:review` takes flags only and stops on an untracked `scratchpad/`; `/code-review high` ran at low effort and its one finding on the second release (`cs_base` dead) was false, since `lib/75-launch.sh:281` still reads it for secrets; `gh run watch --exit-status` returned 1 twice while the macOS bash job was still running, so the release gate counts per-job successes instead.
+- **Under iTerm's tmux integration, the tab title is the tmux window name.** One window holds every pane of a tab, so each launch's `rename-window` overwrote the other session's name. The fix: each pane records its session in the pane option `@cs_session`, and the window is named after all of them in pane order. Plain iTerm split panes without tmux have no shared name to compose. There the tab shows the active pane's own title, and that case is deliberately out of scope.
+- **Codex's three rounds each found a real lifecycle gap in that design:**
+  - SessionEnd fires on `/clear` too. So unlocking the window at the end and only renaming at the next claim let Claude Code retitle the tab. Every claim now locks the window again.
+  - A `claude -p` run inside the session inherits `TMUX_PANE`, so its SessionEnd released the lead session's claim. Releasing is now lead-only, through a memoized `cs_is_lead`. That check was already copied in two hooks and needed a third copy, so the Rule of Three moved it into `hooks/cs-resolve.sh`.
+  - The launch's EXIT trap unlocked the whole window over the surviving session's name. It now releases only its own pane.
+  - The third round found a real race: two panes read the claims, then rename.
+- **A lock's steal timer has to fit the machine it runs on.** One title call measured 385 ms at load 12 (about ten forks), so six panes queued behind each other wait about 2 s. A fixed 2 s steal timer would have broken holders that were alive and still working. The lock is a `mkdir` directory holding the caller's pid:
+  - a dead pid is taken over at once;
+  - a pid-less lock (holder died between `mkdir` and the write) is taken over after about a second;
+  - a live holder is waited on for up to 5 s, and then the title is written without the lock rather than stealing it.
+- **Letting tmux compute the name is not race-free.** An `automatic-rename-format` of `cs: #{s/ [|] $//:#{P:#{?@cs_session,…}}}` expands correctly. But tmux recomputes the name only on its own timer or on pane activity, not when a pane option changes. Measured on a private tmux 3.7c server.
+- **The engine has a Markdown element, and Text may nest inside Text.** From the 2.1.280 bundle: Text and Link are inline; Box, Button, Markdown and six others are block; only a block or an engine node inside an inline element is refused. The mods type contract bounds `Markdown.text` at 10,000 characters and says a longer one refuses the whole tree. That bound is the only cap left on the pane.
+- **A test harness's view of JSX can hide real behaviour.** The mod's fake `h()` keeps mapped children as a nested list. The engine's `ElementChildren` allows that nesting, but the test helper `textOf` only read the top level. The Markdown design removed the need to touch it.
+- **Sensitivity of a race test is a measured number.** Without the lock, the six-pane test failed 3 of 3 runs at 20 rounds but only 4 of 5 at 10 rounds, so it stays at 20 rounds and costs about 105 s on a loaded machine.
+- **ghost was never unavailable.** The handoff recorded "no host store" from `--host ghost`; the bare name needs `/remote`'s store, while the literal `ghost@ghost` needs nothing. Its stale Claude Code then failed `test_mod_update.sh` on the cs-update manifest's `userConfig` key, and `test_mod_rotate.sh` had been silently skipping its inventory pins. Both skips sit after the exit assert.
 
 ## Changes Made
 
-**cs-update mod (feat/update-mod, 20 commits, merged as d81ca69, shipped in v2026.9.19).** A function-hooks plugin the installer deploys beside cs-rotate. When a launch finds a newer cs it opens one pane with the full changelog for every version above the installed one, once per load, in the conversation cs launched. `1` runs `cs -update` through the engine's process runner with the exported `CS_UPDATE_BIN` and `CS_UPDATE_AVAILABLE`; the outcome survives the reload the install causes; `Esc` closes, `/cs-update` reopens, `/config` has a `cs-update.showReleaseNotes` row. The launch banner's summary card now prints only when function hooks are off.
+**`cs .` (feat/cs-dot, merged as 9821c0c).** Bare `cs` is always the picker. `cs .` resolves the current directory to its session through `_session_name_for_dir`, so `--force` and the live-duplicate guard behave as they do for a named session. Outside a session it refuses and names `cs -adopt`; it never adopts on its own. `_bare_cs_target` is gone, and `test_session_name_validation.sh` now pins the refusal.
 
-**TUI rescan worker (fix/tui-scan-off-render-thread, 7 commits, merged as cacd789, shipped in v2026.9.19).** The periodic rescan runs on a worker thread; the loop swaps the result between frames with the highlight pinned by name; user-triggered rescans still run synchronously and discard stale worker reads; a result under a modal waits. Thirty Down presses: slowest 936 ms to 145 ms, mean 128 ms to 65 ms; idle CPU 5.6% to 2.5% of a core.
+**#664 cs-rotate polish (feat/rotate-polish, merged as 3c24509).** The countdown ramps from the session's colour to amber at ten seconds and red under five, on the band and in the Handoff pane. The pane opens on a `Handoff` header in the session colour and counts down on a twenty-block bar. A pin test reads the status line's truecolor arm so the two ink tables cannot drift.
 
-**Per-feature task list (fix/feature-task-list, merged as 2d31d9f, shipped in v2026.9.20).** A `base@task` launch exports its own name as the task-list id. Test flipped red-first; README, configuration.md and the worktrees spec table updated, the spec marked as reversed today.
+**Tab title across panes (feat/tab-title-panes, merged as 304eb72).** `cs_tmux_title_window` in `lib/02-shared.sh`, which reaches the hooks through `cs-shared.sh`, runs under `_cs_tmux_title_lock`. Its callers are the launch, the lead's SessionStart re-assert, the lead's SessionEnd and the launch cleanup trap. Seven real-tmux tests run on a private socket, including the concurrent-claims test.
 
-**Two releases.** v2026.9.19 on 998b35e (29 files, 3278 insertions) and v2026.9.20 on 46b2760, each tagged only after its own CI run was green, each with a green signing workflow and 12 assets, each installed locally with `cs -update`.
+**Handoff pane as markdown (feat/handoff-pane-text, merged as 2b8f437).** `nextStep` returns the Next Step section as written, blank lines included, drawn by `<Markdown>`. A section over 10,000 characters keeps its whole lines and ends on a dim `… the rest of the step is in the handoff`. The pane no longer bolds the step's first line.
+
+**ghost.** Claude Code updated from 2.1.72 to 2.1.280 on Alex's call.
 
 ## Key Files & Outputs
 
-- `mods/cs-update/hooks/register.tsx`, `mods/cs-update/test/register.test.ts` (33 bun tests), `mods/cs-update/hooks/hooks.json`, `.claude-plugin/plugin.json`: the mod.
-- `lib/20-update.sh`, `lib/75-launch.sh`, `lib/01-manifests.sh`, `lib/60-doctor.sh`, `install.sh`: full-notes cache, launch exports, deployment, doctor row, card gating, the task-list id.
-- `tui/src/app.rs`, `tui/src/main.rs`, `tui/src/session.rs`: scan worker, drain, modal deferral; three new tests.
-- `tests/test_mod_update.sh`, `tests/test_auto_update.sh`, `tests/test_worktrees.sh`: the mod's bash suite, cache pins, the flipped worktree pin.
-- `docs/hooks.md`, `docs/session-layout.md`, `docs/configuration.md`, `README.md`, `CHANGELOG.md` (2026.9.19 and 2026.9.20 entries), `docs/superpowers/specs/2026-07-02-worktrees-design.md`.
-- `docs/superpowers/specs/2026-09-22-cs-update-mod-design.md`, `docs/superpowers/plans/2026-09-22-cs-update-mod.md`.
-- `.cs/handoffs/2026-09-22-finish-cs-update-mod.md`, `.cs/handoffs/2026-09-22-finish-tui-scan-and-update-mod.md`: the two rotations.
-- Memory: `project_code_review_skill_is_pr_shaped.md` and `project_codex_readonly_no_probes.md` updated; `feedback_plain_branch_hand_merge.md`, `project_gh_run_watch_early_exit.md`, `user_iterm_title_components.md` new.
-- Releases: https://github.com/hex/claude-sessions/releases/tag/v2026.9.19 and https://github.com/hex/claude-sessions/releases/tag/v2026.9.20.
+- `lib/02-shared.sh` (and the built `hooks/cs-shared.sh`, `bin/cs`): `cs_tmux_title_window`, `_cs_tmux_title_lock`.
+- `lib/05-term.sh`, `lib/75-launch.sh`: `set_tab_title` takes the session name and targets `$TMUX_PANE`; `reset_tab_title` releases the pane.
+- `hooks/cs-resolve.sh`, `session-start.sh`, `session-end.sh`, `narrative-reminder.sh`: `cs_is_lead` and the claim and release.
+- `mods/cs-rotate/hooks/register.tsx` and its test: the colour ramp, header, bar, `MARKDOWN_LIMIT`, and Markdown rendering.
+- `tests/test_hooks.sh`, `tests/test_auto_open.sh`, `tests/test_session_name_validation.sh`, `tests/test_mod_rotate.sh`.
+- `docs/hooks.md`, `CHANGELOG.md` (Unreleased).
+- Memory: `feedback_full_gate_runs_on_ghost.md` extended with the literal host form and ghost's stale Claude Code.
 
 ## Outcome
 
-Both releases are on origin, signed and installed; `cs -doctor` reports no drift and artifacts stamped 2026.9.20. Gates per release: CI 6/6 on the content and on the release commit, `tests/run_all.sh` 68/68, cargo 350/350, bun 33/33, install parity 54/54, shellcheck clean at CI severity. Codex found one real defect on each of the first two branches and none on the third; every real finding got a red-first fix before merging. One Minor shipped unfixed in 9.19: with function hooks on, the launch card stays off even when a disabled plugin or `.cs/local/disabled` also keeps the pane from opening; both are user opt-outs and the "update available" line still prints.
-
-Open: #664, the cs-rotate polish, waiting on Alex's yes; the in-process `.git/config` read that would remove the 91 forks per rescan entirely; the startup scan in `tui/src/main.rs` still on the main thread. Three merged branches still exist locally. The colleague's tab title stays as it is unless he changes his profile's Title component. Alex chose to wrap here.
+All four requests are on main and installed: 2b8f437, 68/68 on ghost after the Claude Code update, deploy drift OK, and the deployed rotate mod byte-identical to main. Nothing is pushed or released. The Markdown pane and the colour ramp have not been seen live; both appear only during a forced rotation's grace. The worktrees `wt-664`, `wt-title` and `wt-pane` and their branches remain.
 
 ## Notes for Future Reference
 
-- Move `scratchpad/` aside before `/codex:review --base main --scope branch --background`, pass no other words, put it back after.
-- A branch built in the base checkout does not go through `/finish`; ask once, and on "merge" land it by hand as above.
-- After `gh run watch`, print per-job conclusions and require six `success` lines; the watch's exit code and the run's overall status lie while a lane is still running.
-- Check the `/code-review` agent's brief for the level it actually ran at; fall back to the Step 4b finder-plus-skeptic pass on low.
-- Picker performance claims need a settled machine and a single-fork probe (`scratchpad/tui-kids.sh`, `scratchpad/tui-ab.sh`).
-- A mod restores state it must keep across its own reload from the render hook and from any command that can open the pane, never from `session.start`.
-- iTerm bakes title components into a session at creation; a profile edit shows on new tabs and panes only. The `(claude …)` suffix is not something cs can remove.
-- This repo gitignores `.cs/` wholesale: commit tracked session files with `git commit -- <path>`, never `git add`.
+- Every `tests/test_*.sh` run goes to ghost with `--host ghost@ghost`. Check `claude --version` on both machines before reading a mod-suite result there. ghost has no bun, so the mods' unit tests only run locally.
+- A merge-conflict resolver must be chained `&&` all the way to the commit. Today a failed resolver chained with `;` committed conflict markers (01a5944). They were caught by the printed marker count and fixed by amending before anything built on it.
+- `{ read -r x < f; } 2>/dev/null`, not `read -r x < f 2>/dev/null`: the redirect error prints before the trailing redirect applies.
+- Open: #554 parked, #606 postponed. A release of the Unreleased changelog is Alex's call.

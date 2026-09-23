@@ -35,3 +35,17 @@ string under `set -u`; CI's macos-latest lane went red). The gate's only bash-3.
 3.2-specific defect is reproduced with a one-line `/bin/bash -u -c` probe and the ONE suite it
 lives in run under `/bin/bash` with `/bin` first on PATH; that is a targeted verification, not the
 full run, and the push to CI is still the verdict. See [[release-gate-skips-ci]].
+
+Repeated a fourth time 2026-09-23 ("do we run it on ghost@ghost?") after the merged-main full run,
+two branch full runs and several `tests/test_hooks.sh` runs went local. Cause: a handoff recorded
+"ghost has no host store" from a `--host ghost` failure and the next conversation took it as
+"ghost is unavailable". The bare name needs `/remote`'s store; the literal `--host ghost@ghost`
+skips the store and works (verified the same day). A remote-tests failure is a reason to try the
+literal form, never to fall back to local.
+
+**ghost's Claude Code goes stale (2026-09-23):** it was 2.1.72 while the dev box ran 2.1.280. An
+old `claude plugin validate` refuses newer manifest keys (`userConfig`: "Unrecognized key"), so
+`test_mod_update.sh` failed and `test_mod_rotate.sh` silently SKIPPED its inventory pins (the skip
+sits after the exit assert). Alex's ruling: update claude on ghost (`ssh ghost@ghost claude update`),
+not guard the test. Before reading a mod-suite failure or skip on ghost, compare `claude --version`
+on both machines.
