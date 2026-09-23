@@ -73,3 +73,76 @@ Branch `feat/tab-title-panes` (tip 75fd532) is in a git worktree at
   pane B via `respawn-pane`, which gives the pane its own TMUX/TMUX_PANE and a tty.
 - Ghost (remote test host) has no host store: `remote-tests.sh --host ghost` fails with
   "no host store at .../remote-hosts.json". All suites ran locally today.
+
+# 3. Primary Request and Intent
+
+Today (2026-09-23), in order:
+1. "right now when I use cs inside a directory it opens the session automatically, can we open
+   the tui when we do that and only when we use cs . to open the session autoamtically?" ->
+   done, merged (9821c0c), installed.
+2. "didn't we color the /clar in xs text?" -> no; it was pending #664. "yes to #664" -> done,
+   merged (3c24509), installed.
+3. The tab-title request quoted above -> feat/tab-title-panes, three commits plus two fix
+   rounds, unmerged, awaiting the suite result and Alex's merge call.
+Alex drives each gate himself: he runs `/codex:review`, then says "merge". Hand-merge flow
+(memory `feedback_plain_branch_hand_merge.md`): merge --no-ff on main, gates, install, no push.
+
+# 4. Key Technical Concepts
+
+- `lib/02-shared.sh` is folded into bin/cs AND written to `hooks/cs-shared.sh` by `./build.sh`,
+  so a function there is callable from cs and from hooks. `hooks/cs-resolve.sh` is hooks-only.
+- Hooks source both libraries with a guarded pattern (parse-check, errexit suspended); a hook
+  must `command -v` a library function before calling it.
+- cs execs into claude on the fresh/--session-id arms, so the EXIT trap never runs there; on
+  the resume arm claude is cs's child and the trap does run after SessionEnd.
+- SessionEnd fires on /clear too (source `clear`), and the next SessionStart re-claims.
+- `IS_LEAD` gating: SessionStart's title re-assert and the rebind are lead-only; SessionEnd's
+  release is now lead-only too.
+
+# 5. Files and Code Sections (branch feat/tab-title-panes, worktree above)
+
+- `lib/02-shared.sh`: `cs_tmux_title_window <pane> <name|"">`: set/unset `@cs_session`,
+  `list-panes -F '#{@cs_session}' | awk` dedup-join with " | ", then `rename-window "cs: $names"`
+  plus `allow-rename off`/`allow-set-title off`, or the three options back on when empty.
+- `lib/05-term.sh`: `set_tab_title title color session` (3rd arg new; launch passes
+  `$session_name`), select-pane and locks targeted at `$TMUX_PANE`; `reset_tab_title` releases
+  the pane when it has one.
+- `lib/75-launch.sh:526`: passes the session name.
+- `hooks/cs-resolve.sh`: new `cs_is_lead` (memoized in `_CS_IS_LEAD`).
+- `hooks/session-start.sh`: IS_LEAD from `cs_is_lead`; title re-assert calls
+  `cs_tmux_title_window "$_pane" "$CLAUDE_SESSION_NAME"` (falls back to rename-window).
+- `hooks/session-end.sh`: sources cs-shared.sh; releases the pane when TMUX, TMUX_PANE, the
+  function and `cs_is_lead` all hold.
+- `hooks/narrative-reminder.sh`: `_mail_is_lead` is now a thin call to `cs_is_lead`.
+- `tests/test_hooks.sh`: helpers `_real_tmux_window`, `_tt`, `_tt_window_name`, `_tt_hook`; tests
+  test_two_cs_sessions_in_one_window_name_it_after_both, test_a_session_ending_leaves_the_window_to_the_others,
+  test_a_launch_in_a_second_pane_joins_the_window_name, test_a_launch_cleanup_releases_its_pane_and_keeps_the_others_title,
+  test_a_claim_after_the_last_release_locks_the_titles_again, test_a_non_lead_end_leaves_the_pane_claimed.
+- `docs/hooks.md` (SessionStart title bullet, SessionEnd bullet) and `CHANGELOG.md` Unreleased.
+  The docs were written before rounds 1-2; re-read them for the lock-on-claim and lead-only
+  release and the launch cleanup before merging.
+- Helper `/tmp/claude-501/one-test.sh <suite> <test>...` runs selected tests of a suite.
+
+# 6. Problem Solving
+
+Each fix was red-first against a real tmux server (measured): round 1 finding 1 red
+"expected off off, actual on on"; finding 2 red "expected cs: current-session, actual sleep";
+round 2 red "actual sleep". Launch test proved sensitive: it failed with the 05-term change
+stashed. Suites on 8aad513: hooks 145/145, install 54/54, auto_open 18/18, docs 6/6;
+2cd70f1: run_all 68/68; shellcheck -S error clean on 75fd532.
+
+# 7. Pending Tasks
+
+- feat/tab-title-panes: suite on 75fd532, optional Codex round 3, merge, install (Alex gates).
+- Native #664: done and merged, still marked pending; mark completed.
+- #554 parked, #606 postponed (unchanged).
+- Worktrees wt-664 (feat/rotate-polish, merged) and wt-title remain under scratchpad; after
+  the merge, `git worktree remove` both (they are clean) or leave them; branches are kept.
+- Narrative `.cs/memory/narrative.hex-users-noreply-github-com.md` has uncommitted appends for
+  today's work (committed with this rotation's step 8).
+
+# 8. Current Work
+
+Waiting on the full suite for 75fd532 (background task in the old conversation, output file
+/tmp/claude-501/runall-title2.out). Context in this conversation was long but not compacted
+since the first summary; this handoff was written from live context.
