@@ -843,13 +843,15 @@ if [ -n "$ROTATION_HANDOFF" ] && [ "$SOURCE" = "clear" ] && [ "$IS_LEAD" = 1 ] \
     fi
 elif [ "$SOURCE" = "clear" ] && [ "$IS_LEAD" = 1 ]; then
     # A lead /clear that arms nothing must SPEND any kick still in flight from a
-    # previous one. Lead-only because a teammate's /clear would otherwise stop
-    # the lead's retries and make the lead's own wake decline. Otherwise: /clear #1 arms and its child sleeps; the user
+    # previous one. Otherwise: /clear #1 arms and its child sleeps; the user
     # runs /clear #2 inside that window wanting a genuinely clean break (the
     # handoff is consumed now, so the fresh-conversation notice fires instead);
     # the child's write lands before Claude Code has replaced the watch list,
     # and the wake tells a conversation explicitly told "clean break, not a
     # continuation" to go execute a handoff it was never given.
+    #
+    # Lead-only: a teammate's /clear would otherwise stop the lead's retries
+    # and make the lead's own wake decline.
     _stale_kick="$META_DIR/local/rotation-kick"
     if [ -d "$_stale_kick" ]; then
         { : > "$_stale_kick/delivered"; } 2>/dev/null || true
