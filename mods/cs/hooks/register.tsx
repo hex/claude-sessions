@@ -1,7 +1,7 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: cs-rotate mod: keys above the prompt: rotate past the threshold, wrap up, or /clear once a handoff is armed.
+// ABOUTME: cs mod: keys above the prompt: rotate past the threshold, wrap up, or /clear once a handoff is armed.
 // ABOUTME: With CS_ROTATE_FORCE_CTX set a turn ending past it runs /rotate itself, then counts down to the /clear (session colour, amber, crit); session.start writes a heartbeat for doctor.
 import type { On, EngineInterface } from 'claude-code'
 
@@ -91,7 +91,7 @@ export function countdownBar(left: number): string {
 // (process start or reload; session.start does not fire on /clear). Path is
 // relative to the session's cwd, which under cs is the session directory (or
 // its worktree).
-export const HEARTBEAT = '.cs/local/cs-rotate.heartbeat'
+export const HEARTBEAT = '.cs/local/cs.heartbeat'
 // Written by /wrap's last pass: the conversation it wrapped.
 export const WRAPPED = '.cs/local/wrapped'
 
@@ -107,7 +107,7 @@ export const HANDOFFS = '.cs/handoffs'
 // the end of every turn. Module state would not do: it survives a /clear
 // (measured; a timer started before one kept firing after it) and is lost
 // on a reload of the mod.
-export const FORCED = '.cs/local/cs-rotate.forced'
+export const FORCED = '.cs/local/cs.forced'
 
 // Once the forced rotation has armed its handoff, how long the band counts
 // down before the mod runs the /clear itself. Pressing the button or sending a
@@ -336,7 +336,7 @@ async function forceRotation($: EngineInterface) {
     birth = undefined
     startPercent = context.percent
     if (startPercent !== undefined && startPercent >= force) {
-      $.ui.toast(`cs-rotate: CS_ROTATE_FORCE_CTX=${force} is below this conversation's starting context (${startPercent}%); not forcing a rotation`)
+      $.ui.toast(`cs: CS_ROTATE_FORCE_CTX=${force} is below this conversation's starting context (${startPercent}%); not forcing a rotation`)
     }
   }
   if (await handoffArmed($)) {
@@ -349,7 +349,7 @@ async function forceRotation($: EngineInterface) {
   if ((await $.fs.exists(forced)) && (await $.fs.read(forced)).trim() === id) return
   await $.fs.write(forced, `${id}\n`)
   $.clock.after(0, () => {
-    rotate($).catch(err => $.ui.toast(`cs-rotate: /rotate did not run: ${String(err)}`))
+    rotate($).catch(err => $.ui.toast(`cs: /rotate did not run: ${String(err)}`))
   })
 }
 
@@ -379,7 +379,7 @@ function startCountdown($: EngineInterface) {
     const idle = bandIdle && (await handoffArmed($)) && (await ownsRotation($))
     if (left !== 0) return
     stopCountdown($)
-    if (idle) await clearAndContinue($).catch(err => $.ui.toast(`cs-rotate: /clear did not run: ${String(err)}`))
+    if (idle) await clearAndContinue($).catch(err => $.ui.toast(`cs: /clear did not run: ${String(err)}`))
   })
 }
 
@@ -389,7 +389,7 @@ function stopCountdown($: EngineInterface) {
   left = undefined
   if (preview !== undefined) {
     preview = undefined
-    $.ui.close({ id: PREVIEW_PANE }).catch(err => $.ui.toast(`cs-rotate: the handoff pane did not close: ${String(err)}`))
+    $.ui.close({ id: PREVIEW_PANE }).catch(err => $.ui.toast(`cs: the handoff pane did not close: ${String(err)}`))
   }
   $.ui.invalidate('ui.render')
 }
@@ -405,7 +405,7 @@ async function openPreview($: EngineInterface) {
   // engine first: a pane that lands after its count is closed here, since
   // nothing else will close it.
   if (preview === undefined) {
-    await $.ui.close({ id: PREVIEW_PANE }).catch(err => $.ui.toast(`cs-rotate: the handoff pane did not close: ${String(err)}`))
+    await $.ui.close({ id: PREVIEW_PANE }).catch(err => $.ui.toast(`cs: the handoff pane did not close: ${String(err)}`))
   }
 }
 
@@ -568,7 +568,7 @@ async function askToWrap($: EngineInterface) {
   try {
     await $.command.run({ command: 'wrap', args: '' })
   } catch (err) {
-    $.ui.toast(`cs-rotate: /wrap did not run: ${String(err)}`)
+    $.ui.toast(`cs: /wrap did not run: ${String(err)}`)
   }
 }
 

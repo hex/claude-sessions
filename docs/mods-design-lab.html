@@ -520,8 +520,8 @@ none|start fresh</textarea></label>
 <!-- ============================== ROTATE ============================== -->
 </section>
 <section class="panel" id="p-rotate">
-<h2 id="rotate">Rotate capsule presets <span class="src">the cs-rotate band, as shipped</span></h2>
-<p class="sub">The band the cs-rotate mod draws above the prompt. Move the knobs, pick a preset, read the JSX it maps to. Inks come from <code>bin/cs-statusline</code>; the shipped capsule is the "Inked" preset.</p>
+<h2 id="rotate">Rotate capsule presets <span class="src">the cs mod's rotate band, as shipped</span></h2>
+<p class="sub">The band the cs mod draws above the prompt. Move the knobs, pick a preset, read the JSX it maps to. Inks come from <code>bin/cs-statusline</code>; the shipped capsule is the "Inked" preset.</p>
 <div class="lab">
   <div class="controls">
     <label>Context <span id="ctxv" style="text-transform:none;letter-spacing:0"></span><input id="ctx" type="range" min="0" max="99" value="47"></label>
@@ -676,7 +676,7 @@ function screenMock(lit){
     " ",
     S("AssistantMessage", claude+" I will add a band above the prompt that offers the rotation once the\n  context passes the warn threshold, and runs /rotate on a press."),
     " ",
-    S("ToolUse", span("⏺ ",c("success"))+span("Read",";font-weight:700")+"(mods/cs-rotate/hooks/register.tsx)"),
+    S("ToolUse", span("⏺ ",c("success"))+span("Read",";font-weight:700")+"(mods/cs/hooks/register.tsx)"),
     S("ToolResult", "  ⎿  "+span("Read 374 lines",c("inactive"))+"\n     "+span("export function register(on: On) {",c("inactive"))),
     " ",
     S("ToolGroup", span("⏺ ",c("success"))+span("Read 3 files, ran 2 shell commands",c("inactive"))+span("  ctrl+o to expand",c("subtle"))),
@@ -1229,7 +1229,7 @@ const NAV=[
   {grp:"Where"},{id:"sites",hk:"1",label:"Render sites",cnt:"14"},
   {grp:"Elements"},{id:"box",hk:"2",label:"Box",cnt:"36 props"},{id:"text",hk:"3",label:"Text",cnt:"10"},{id:"button",hk:"4",label:"Button",cnt:"9"},{id:"input",hk:"5",label:"Input",cnt:"8"},{id:"select",hk:"6",label:"Select",cnt:"6"},{id:"link",hk:"7",label:"Link",cnt:"2"},{id:"code",hk:"8",label:"Code",cnt:"6"},{id:"raster",hk:"9",label:"Raster",cnt:"4"},{id:"client",hk:"0",label:"Client",cnt:"6"},
   {grp:"Reference"},{id:"borders",hk:"b",label:"Border styles",cnt:"8"},{id:"palette",hk:"p",label:"Palette",cnt:"17"},{id:"rules",hk:"u",label:"Rules"},
-  {grp:"cs-rotate"},{id:"rotate",hk:"r",label:"Rotate capsule",cnt:"9 presets"},{id:"coverage",hk:"c",label:"Coverage check"},
+  {grp:"cs mod"},{id:"rotate",hk:"r",label:"Rotate capsule",cnt:"9 presets"},{id:"coverage",hk:"c",label:"Coverage check"},
 ];
 const PANELS=NAV.filter(n=>n.id);
 function buildRail(){

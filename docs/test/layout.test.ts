@@ -88,7 +88,7 @@ test('validate names the nests the engine refuses', () => {
 })
 
 // The oracle: the band the shipped mod draws (percent 47, nothing armed),
-// read off mods/cs-rotate/hooks/register.tsx and hand-worked, not recomputed.
+// read off mods/cs/hooks/register.tsx and hand-worked, not recomputed.
 test('the shipped rotate band lays out as the mod draws it', () => {
   const band = B({ borderStyle: 'round', borderColor: 'claude', paddingX: 1, key: 'cs-rotate-band' },
     T({ color: 'coral', bold: true }, '✳ '),

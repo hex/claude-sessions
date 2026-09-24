@@ -1,4 +1,4 @@
-// ABOUTME: Unit tests for the cs-rotate mod against a fake engine `$`.
+// ABOUTME: Unit tests for the cs mod against a fake engine `$`.
 // ABOUTME: Covers the band's gate (crit, working, survey), the three presses and the wrap key's two-press guard, the armed handoff, and the heartbeat.
 import { test, expect, beforeEach } from 'bun:test'
 
@@ -315,7 +315,7 @@ test('an empty marker names no handoff, so the band behaves as unarmed', async (
 test('session.start writes a heartbeat under the session meta dir', async () => {
   const r = await hooks['session.start']($, { cwd: '/work', surface: 'terminal', isInteractive: true }, async (e) => ({ cwd: e.cwd }))
   expect(r).toEqual({ cwd: '/work' })
-  const text = written['/work/.cs/local/cs-rotate.heartbeat']
+  const text = written['/work/.cs/local/cs.heartbeat']
   expect(text).toMatch(/^\d{4}-\d{2}-\d{2}T.*Z\n$/)
 })
 
@@ -381,18 +381,18 @@ test('a forced rotation runs once per conversation, and a failed /rotate is not 
   envVars.CS_ROTATE_FORCE_CTX = '70'
   percent = 80
   await turnComplete()
-  expect(written['/work/.cs/local/cs-rotate.forced']).toBe('uuid-lead\n')
+  expect(written['/work/.cs/local/cs.forced']).toBe('uuid-lead\n')
   await turnComplete(); await turnComplete()
   expect(timers).toHaveLength(1)
   // the marker is written before the timer is scheduled, so a rejected run stays rejected
   $.command.run = async () => { throw new Error('unknown command') }
   await fireAfter()
-  expect(toasts).toEqual(['cs-rotate: /rotate did not run: Error: unknown command'])
+  expect(toasts).toEqual(['cs: /rotate did not run: Error: unknown command'])
   await turnComplete()
   expect(timers).toHaveLength(1)
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
   // a marker from an earlier conversation of the session does not count
-  files['/work/.cs/local/cs-rotate.forced'] = 'uuid-earlier\n'
+  files['/work/.cs/local/cs.forced'] ='uuid-earlier\n'
   await turnComplete()
   expect(timers).toHaveLength(2)
 })
@@ -561,7 +561,7 @@ test('a rejected /clear at zero shows a toast and clears nothing else', async ()
   $.command.run = async () => { throw new Error('no session') }
   await tick(GRACE_SECONDS)
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
-  expect(toasts).toEqual(['cs-rotate: /clear did not run: Error: no session'])
+  expect(toasts).toEqual(['cs: /clear did not run: Error: no session'])
   expect(ran).toEqual([])
 })
 
@@ -604,7 +604,7 @@ test('a conversation met at load is forced whatever it started at; one born of a
   percent = 71
   await turnComplete(); await turnComplete()
   expect(timers).toHaveLength(1)
-  expect(toasts).toEqual(['cs-rotate: CS_ROTATE_FORCE_CTX=70 is below this conversation\'s starting context (71%); not forcing a rotation'])
+  expect(toasts).toEqual(['cs: CS_ROTATE_FORCE_CTX=70 is below this conversation\'s starting context (71%); not forcing a rotation'])
   // a teammate past the line is not the lead: no rotation, and no toast about one
   sessionId = 'uuid-teammate'
   percent = 90
@@ -732,7 +732,7 @@ test('a /clear the mod runs itself that is rejected leaves no birth behind: a la
   $.command.run = async () => { throw new Error('no session') }
   await tick(GRACE_SECONDS)
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
-  expect(toasts).toEqual(['cs-rotate: /clear did not run: Error: no session'])
+  expect(toasts).toEqual(['cs: /clear did not run: Error: no session'])
   files = { '/work/.cs/local/state': 'claude_session_id: uuid-resumed\n' }
   sessionId = 'uuid-resumed'
   percent = 72
@@ -797,7 +797,7 @@ test('a /wrap the answer runs that the engine refuses is said once', async () =>
   $.command.run = async () => { throw new Error('no session') }
   await wrapButton(await band()).props.onPress()
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
-  expect(toasts).toEqual(['cs-rotate: /wrap did not run: Error: no session'])
+  expect(toasts).toEqual(['cs: /wrap did not run: Error: no session'])
   expect(ran).toEqual([])
 })
 
