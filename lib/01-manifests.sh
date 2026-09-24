@@ -83,6 +83,7 @@ RETIRED_SKILLS=(
     voice   # renamed to write-as-me; Claude Code 2.1.227 ships a built-in /voice (Toggle voice mode)
     merge   # replaced by finish: integrate and report, never remove
     cs-hint # a mod (deployed under skills/ like every mod): the hint line under the prompt, retired
+    cs-rotate # a mod: renamed to cs, cs's in-session mod (the rotate band, forced rotation, the wrap key)
 )
 
 # Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
@@ -94,9 +95,9 @@ CS_SKILL_FILES=(
 # Mods cs ships: Claude Code function-hooks plugins, deployed file by file as
 # ~/.claude/skills/<mod>/<path> (the mod's bun tests stay in the checkout).
 CS_MOD_FILES=(
-    cs-rotate/.claude-plugin/plugin.json
-    cs-rotate/hooks/hooks.json
-    cs-rotate/hooks/register.tsx
+    cs/.claude-plugin/plugin.json
+    cs/hooks/hooks.json
+    cs/hooks/register.tsx
     cs-update/.claude-plugin/plugin.json
     cs-update/hooks/hooks.json
     cs-update/hooks/register.tsx

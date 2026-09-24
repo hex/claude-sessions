@@ -60,7 +60,7 @@ _rotate_force_notice_file() {
     echo "${XDG_CONFIG_HOME:-$HOME/.config}/cs/rotate-force-notice"
 }
 
-# Mirrors forceThreshold() in mods/cs-rotate/hooks/register.tsx: unset is the
+# Mirrors forceThreshold() in mods/cs/hooks/register.tsx: unset is the
 # default, `off` (any case) and zero turn it off, digits move it, and anything
 # else is the default rather than silence. KEEP IN SYNC with that resolver.
 _rotate_force_threshold() {  # -> prints the percentage, or nothing when off
