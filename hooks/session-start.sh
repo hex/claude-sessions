@@ -776,9 +776,13 @@ esac
 # Code waiting on the pipe, which would stall the very launch it is accelerating.
 #
 # Measured arm latency is ~1s (write at T+1.05s produced an event at T+1.75s), so
-# the default delay has room without being a visible pause. One sample, so the
-# fallback matters more than the margin: if the write lands early the event is
-# lost and the user is exactly where 06fbb44 left them, one word from starting.
+# the default delay has room without being a visible pause. But the child's clock
+# starts at its spawn, not at the arm: the arm waits for the REST of this hook,
+# which took 4.4 s on an idle machine and 21 s under a parallel test suite
+# (transcript durationMs), and a write landing before the arm is an event nobody
+# hears. So the child re-writes every delay until the wake records `delivered`,
+# bounded well past the hook's 30 s registration timeout, after which no watch
+# can arm at all.
 #
 # Scoped like the notice below: only a /clear that loaded a rotation. The startup
 # path is the r-answer, where _exec_fresh_rebind has already handed claude a
@@ -813,17 +817,18 @@ if [ -n "$ROTATION_HANDOFF" ] && [ "$SOURCE" = "clear" ] && [ "$IS_LEAD" = 1 ] \
                 { date +%s > "$_kick_dir/rotation.tmp.$$"; } 2>/dev/null \
                     && mv "$_kick_dir/rotation.tmp.$$" "$_kick_dir/rotation.kick" 2>/dev/null
             }
-            [ "$_kick_delay" = 0 ] || sleep "$_kick_delay"
-            _write_kick || true
-            # Written twice on purpose. The delay is one measurement on an idle
-            # machine, and if the watch arms after the first write that event is
-            # lost with no retry anywhere — the session then sits idle under a
-            # notice promising it would continue on its own, which is worse than
-            # the old "send any message" it replaced. A second write re-enters
-            # the branch (the triage filters only unlink), and the delivered
-            # marker makes it a no-op when the first write already woke.
-            [ "$_kick_delay" = 0 ] || sleep "$_kick_delay"
-            [ -f "$_kick_dir/delivered" ] || _write_kick || true
+            # Every write lost before the arm leaves the session idle under a
+            # notice promising it would continue on its own, so keep writing: a
+            # rename-over re-enters the wake branch (the triage filters only
+            # unlink), and the delivered marker — set by the wake, or by a later
+            # /clear that arms nothing — ends the loop. 30 writes at the default
+            # 2 s delay cover a minute.
+            _kick_tries=0
+            while [ "$_kick_tries" -lt 30 ] && [ ! -f "$_kick_dir/delivered" ]; do
+                [ "$_kick_delay" = 0 ] || sleep "$_kick_delay"
+                [ -f "$_kick_dir/delivered" ] || _write_kick || true
+                _kick_tries=$((_kick_tries + 1))
+            done
         ) </dev/null >/dev/null 2>&1 &
     fi
 elif [ "$SOURCE" = "clear" ]; then
