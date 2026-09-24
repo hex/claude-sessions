@@ -168,12 +168,37 @@ test_rotate_skill_has_a_home_for_rejected_alternatives() {
 # characterisation." The template asks for no epistemic status, so a claim read
 # off a README and a claim measured live look identical to a reader with zero
 # memory of how either was learned.
+# Pass one must carry every conversation-only fact, but the section list gave
+# them no container and step 4 said "pass two is where exact readings live".
+# In 4 sampled handoffs, 3 writers invented their own section for these facts;
+# the one that did not carried both of the wrong claims found. A named section
+# in pass one, checked item by item before the first commit, closes both.
+test_rotate_skill_has_a_home_for_conversation_only_facts() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "3\. Conversation-only facts" \
+        "the body needs a pass-one section for facts that exist nowhere else" || return 1
+    assert_file_contains "$skill" "check each one off" \
+        "and a checklist before the first commit" || return 1
+    if grep -q 'pass two is where exact readings live' "$skill"; then
+        echo "  FAIL: exact readings belong to pass one, not pass two"; return 1
+    fi
+}
+
 test_rotate_skill_requires_provenance_on_claims() {
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
     assert_file_contains "$skill" "was established" \
         "behavioural claims must carry their provenance" || return 1
     assert_file_contains "$skill" "assumed" \
         "and an honest default when the writer cannot recall it" || return 1
+    # Measured 2026-09-24 across 40 handoffs: "measured" in 38, "assumed" in 1.
+    # The label landed per bullet, so a cause inferred beside a measured symptom
+    # rode under MEASURED and its successor built on it; and a bare "--host
+    # ghost fails" sent a full suite to the local machine when the working
+    # host was already in memory.
+    assert_file_contains "$skill" "on the claim, not on the bullet" \
+        "an inferred cause inside a measured bullet needs its own label" || return 1
+    assert_file_contains "$skill" "the command that failed" \
+        "a claim that something fails must carry the failing command" || return 1
 }
 
 # The successor is told to execute the next-step section, and in-document
@@ -186,6 +211,11 @@ test_rotate_skill_puts_the_next_step_first() {
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
     assert_file_contains "$skill" "1\. Next Step" \
         "Next Step must open the body, not close it" || return 1
+    # The successor acts on Next Step before it reads anything else, so a fact
+    # the first action needs has to be there even when it also lives in a
+    # committed file or in memory.
+    assert_file_contains "$skill" "without looking anything up" \
+        "Next Step must carry every fact its first action needs" || return 1
     assert_file_contains "$skill" "append" \
         "the second pass must append, since a Write replaces the whole file" || return 1
     assert_file_contains "$skill" "second commit" \
@@ -351,6 +381,10 @@ test_rotate_skill_governs_what_goes_into_the_handoff() {
     # because there is no path to point at.
     assert_file_contains "$skill" "restate what a successor cannot recover" \
         "the skill must require conversation-only facts be written down" || return 1
+    # A handoff said "use drive.sh" for a cs session; drive.sh ran bare claude,
+    # and the successor spent 23 tool calls finding out and writing a new one.
+    assert_file_contains "$skill" "says in one clause what it does" \
+        "a pointer to a script must say what the script does" || return 1
     # Rotation fires when context is hot, and past ~88% an autocompaction can
     # land first — the handoff would then be distilled from a summary, losing
     # the verbatim facts, with nothing to show it happened.
@@ -388,6 +422,7 @@ test_rotate_skill_reads_parent_from_state_not_the_launch_env() {
 
 run_test test_rotate_skill_exists_with_frontmatter
 run_test test_rotate_skill_has_a_home_for_rejected_alternatives
+run_test test_rotate_skill_has_a_home_for_conversation_only_facts
 run_test test_rotate_skill_requires_provenance_on_claims
 run_test test_rotate_skill_puts_the_next_step_first
 run_test test_rotate_skill_arms_last
@@ -1102,6 +1137,10 @@ test_rotation_preamble_reconciles_the_inherited_native_tasks() {
         "the preamble must ask for a reconcile, not a mirror into an empty list" || return 1
     assert_output_contains "$out" "carried over from the previous conversation" \
         "and say the list is inherited, so the model does not assume it is empty" || return 1
+    # Whether a handoff carried enough was only knowable by digging through
+    # transcripts afterwards; the successor is the one reader who knows.
+    assert_output_contains "$out" "## Successor report" \
+        "the successor must append what it had to re-derive or found wrong" || return 1
 }
 
 test_rotation_preamble_makes_the_first_message_mean_begin() {

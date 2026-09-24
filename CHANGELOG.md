@@ -4,6 +4,17 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Changed
+- Rotation handoffs label each claim, not each bullet. A cause inferred beside a measured symptom is `assumed`, and a claim that something fails carries the command that failed and what it printed. Across 40 handoffs "measured" appeared in 38 and "assumed" in one, and the two wrong claims a review found were both unlabelled conclusions.
+- The handoff body has a `Conversation-only facts` section in its first pass, for exact readings, run ids, counts, event order and the user's own words. The writer checks each such fact off before the first commit. The skill no longer says exact readings live in the second pass, which contradicted the two-pass rule.
+- A handoff's Next Step carries every fact its first action needs (command, path, host, branch), even when the fact is also written down elsewhere. A pointer to a script says in one clause what the script does.
+- The conversation that picks up a rotation appends a `## Successor report` to the handoff once its next step is done: what it had to look up again, re-derive, or found wrong, or `none`.
+
+### Fixes
+- `/wrap` reads its sweep and summary instructions with the Read tool. It had been reading them through the Bash tool, whose shell is zsh on macOS, and a separator line like `echo ======` is a failed command lookup in zsh that stops the rest of the command, so the summary instructions were never read.
+
 ## 2026.9.21
 
 ### Changed

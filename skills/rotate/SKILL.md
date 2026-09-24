@@ -48,10 +48,11 @@ one-key rotation it exists for.
    ```
 
    The body is a continuation plan with these sections, distilled from the
-   live conversation: 1. Next Step; 2. Settled and rejected; 3. Primary
-   Request and Intent; 4. Key Technical Concepts; 5. Files and Code Sections
-   (with the snippets that matter); 6. Problem Solving; 7. Pending Tasks;
-   8. Current Work. Write for a successor with zero conversation memory.
+   live conversation: 1. Next Step; 2. Settled and rejected;
+   3. Conversation-only facts; 4. Primary Request and Intent; 5. Key Technical
+   Concepts; 6. Files and Code Sections (with the snippets that matter);
+   7. Problem Solving; 8. Pending Tasks; 9. Current Work. Write for a
+   successor with zero conversation memory.
    Under cs the native task list is keyed to the session, not to this
    conversation (`CLAUDE_CODE_TASK_LIST_ID` is the session name), so it
    survives the `/clear` and the successor inherits it. Pending Tasks still
@@ -61,7 +62,13 @@ one-key rotation it exists for.
 
    **Next Step opens the body.** The successor is told to execute it, and
    retrieval degrades over a long document — so the thing it needs first must
-   not be the thing it finds last.
+   not be the thing it finds last. It carries every fact its first action
+   needs, inline: the exact command, path, host, branch or flag. Include them
+   even when the same fact is in a committed file, an older handoff or
+   memory: the successor acts on Next Step before reading anything else,
+   without looking anything up. A handoff that said "rerun the suite" sent
+   it to the local machine while the working host sat in memory the
+   successor never read.
 
    **Settled and rejected** holds decisions already made, alternatives
    rejected with the reason they lost, and approaches tried that failed with
@@ -72,6 +79,15 @@ one-key rotation it exists for.
    commit carries what was done and never what was rejected, so a successor
    without them re-opens settled questions and retries dead ends with less
    information than the person who first decided.
+
+   **Conversation-only facts** holds everything else that dies with this
+   conversation: exact readings and error text, run and job identifiers,
+   counts observed at one moment, the order events happened in, and what the
+   user said that no file records. One fact per line, each with its
+   provenance label (below). Before step 4 commits pass one, list from memory
+   every such fact the conversation produced, and check each one off against
+   this section or Settled and rejected; add what is missing. Write `none`
+   when there is nothing, as for Settled and rejected.
 
    Two rules govern the body, both following from where it goes — step 4
    commits it, and the next conversation reads it as its opening prompt:
@@ -92,7 +108,11 @@ one-key rotation it exists for.
      path to point at — a rejected alternative and the reason it lost, an
      exact reading taken while debugging, a run identifier, a count observed
      at one moment, the order two events actually happened in. Write those
-     down as they were, or they are gone with the conversation. Length spent
+     down as they were, or they are gone with the conversation. A pointer to
+     a script or command says in one clause what it does when run, read
+     from the script itself rather than remembered: "use `drive.sh`" sent a
+     successor to a script that launched bare `claude` where it expected a
+     cs session. Length spent
      on them is not padding; it is how many of them survive. Be complete on
      these even at the cost of length, and keep everything else concise: a
      body that is long everywhere buries the facts it was written to carry.
@@ -111,6 +131,14 @@ one-key rotation it exists for.
      not hypothetical — a handoff in this store asserted that a tool rewrote
      its input, and its successor recorded: "It does not. I built an entire
      investigation on that unchecked characterisation."
+
+     The label goes on the claim, not on the bullet or heading it sits
+     under: a cause you inferred from a measured symptom is `assumed`, even
+     inside a bullet headed MEASURED. A claim that something fails, is
+     unavailable or does not work carries the command that failed and what
+     it printed; without them it is `assumed`. Across 40 handoffs "measured"
+     appeared in 38 and "assumed" in one, and the two wrong claims found
+     were both unlabelled conclusions.
    - **Say what you could not carry.** Rotation runs when context is already
      hot, and a compaction can land before you finish writing — in which case
      you are distilling a summary, not the conversation, and the exact facts
@@ -118,7 +146,7 @@ one-key rotation it exists for.
 
      So write the body in TWO passes, and make the first one durable. The
      first Write carries the frontmatter, Next Step, Settled and rejected,
-     and every conversation-only fact — the material that dies with the
+     and Conversation-only facts — the material that dies with the
      conversation. Commit that (step 4) before continuing. The second pass
      then APPENDS the remaining sections (step 5) — recoverable from the
      repo if this rotation never finishes — and lands as a second commit.
@@ -138,7 +166,8 @@ one-key rotation it exists for.
      the successor trusts.
 4. Commit the first pass. Stage the handoff by name. Re-read the body for
    secrets first (the Redact rule above) — the same re-read runs again before
-   step 6, because pass two is where exact readings live.
+   step 6, because pass two quotes files and code, and a secret can sit in
+   either.
 5. Append the second pass with Edit or `cat >>`, never Write.
 6. Second commit for the appended body. Re-read it for secrets first.
 

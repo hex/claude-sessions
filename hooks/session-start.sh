@@ -863,7 +863,9 @@ if [ -n "$ROTATION_HANDOFF" ]; then
 --- Conversation Rotation ---
 This fresh conversation continues rotated work. Read .cs/handoffs/$ROTATION_HANDOFF FIRST — it is the previous conversation's handoff; the prior transcript is not loaded, and the handoff plus your own .cs/memory/narrative.$ACTOR_SLUG.md carry the context.
 
-Nothing has run yet. $ROTATION_START A BARE NUDGE — \"go\", \"continue\", \"ok\" — means begin: reconcile your native task list, which carried over from the previous conversation, with the handoff (mark what it says is done, add any next-step step that is missing, one task per step), then execute the next step and report what you did, without re-summarising it or asking which part to start with. A first message carrying its own content takes precedence over the handoff; answer that instead. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible."
+Nothing has run yet. $ROTATION_START A BARE NUDGE — \"go\", \"continue\", \"ok\" — means begin: reconcile your native task list, which carried over from the previous conversation, with the handoff (mark what it says is done, add any next-step step that is missing, one task per step), then execute the next step and report what you did, without re-summarising it or asking which part to start with. A first message carrying its own content takes precedence over the handoff; answer that instead. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible.
+
+Once that next step is done, append a \`## Successor report\` section to the end of .cs/handoffs/$ROTATION_HANDOFF: each thing you had to look up again, re-derive, or found wrong in the handoff, with how you found out, or \`none\`. Append only; never rewrite what the previous conversation wrote."
 elif [ -n "$FRESH_NOTICE" ]; then
     CONTEXT="${CONTEXT}
 
