@@ -361,6 +361,11 @@ if [ "$HOOK_EVENT" = "FileChanged" ] && [ "${FC_PATH%/*.kick}" != "$FC_PATH" ]; 
     # content-takes-precedence rule covers only a FIRST message, not a
     # system-reminder landing after one. Unconditional wording here would let
     # the auto-start override the person it just told to take over.
+    #
+    # Two overlapping wakes would need a second kick event to land inside the
+    # span between the delivered check above and the marker below, which holds
+    # only this printf, while the writer re-writes every CS_ROTATION_KICK_DELAY
+    # seconds. Benign by design; do not add a lock here.
     printf '%s\n' "The rotation is loaded and nothing has run yet. First reconcile your native task list, which carried over from the previous conversation, with the handoff, then execute the handoff's next-step section now and report what you did, without re-summarising it or asking which part to start with. If the user has already sent a message of their own, theirs wins — do what they asked and treat this wake as spent. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible." >&2
     { : > "$_kick_dir/delivered"; } 2>/dev/null || true
     exit 2

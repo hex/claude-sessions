@@ -823,6 +823,11 @@ if [ -n "$ROTATION_HANDOFF" ] && [ "$SOURCE" = "clear" ] && [ "$IS_LEAD" = 1 ] \
             # unlink), and the delivered marker — set by the wake, or by a later
             # /clear that arms nothing — ends the loop. 30 writes at the default
             # 2 s delay cover a minute.
+            #
+            # A child from an earlier rotation still looping when a later /clear
+            # removes `delivered` writes into the same directory: benign, since
+            # that rotation wants a kick too and the wake reads no generation.
+            # Do not add a per-rotation token for this.
             _kick_tries=0
             while [ "$_kick_tries" -lt 30 ] && [ ! -f "$_kick_dir/delivered" ]; do
                 [ "$_kick_delay" = 0 ] || sleep "$_kick_delay"
@@ -831,9 +836,10 @@ if [ -n "$ROTATION_HANDOFF" ] && [ "$SOURCE" = "clear" ] && [ "$IS_LEAD" = 1 ] \
             done
         ) </dev/null >/dev/null 2>&1 &
     fi
-elif [ "$SOURCE" = "clear" ]; then
-    # A /clear that arms nothing must SPEND any kick still in flight from a
-    # previous one. Otherwise: /clear #1 arms and its child sleeps; the user
+elif [ "$SOURCE" = "clear" ] && [ "$IS_LEAD" = 1 ]; then
+    # A lead /clear that arms nothing must SPEND any kick still in flight from a
+    # previous one. Lead-only because a teammate's /clear would otherwise stop
+    # the lead's retries and make the lead's own wake decline. Otherwise: /clear #1 arms and its child sleeps; the user
     # runs /clear #2 inside that window wanting a genuinely clean break (the
     # handoff is consumed now, so the fresh-conversation notice fires instead);
     # the child's write lands before Claude Code has replaced the watch list,
