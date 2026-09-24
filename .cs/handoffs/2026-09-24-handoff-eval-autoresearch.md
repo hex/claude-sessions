@@ -71,3 +71,52 @@ Cost warning to give Alex before the first run: one round with 2 variants, 5 wri
   - "how about the handoff quality now vs before?"
   - "the results are not that great though. no? let's rotate then use /autoresearch:autoresearch until we have the best results"
 - measured at 10:58Z: main is 16 commits ahead of origin. v2026.9.22 is not released. The CHANGELOG `## Unreleased` section holds the handoff spec edits, the /wrap fix and the rotation-kick fix.
+
+# 4. Primary Request and Intent
+
+- **This conversation:** resumed from the handoff `2026-09-24-after-handoff-spec.md`. Alex picked the missing-wake investigation, and it was fixed, reviewed, merged and measured live.
+- **Now:** Alex wants handoff quality driven up by an automated keep/discard loop (autoresearch) rather than one-off A/B runs, "until we have the best results".
+- **Durable intent (inherited):** handoffs should carry facts correctly, not merely more of them, and changes to the rotate spec should be measured against a control, not argued.
+
+# 5. Key Technical Concepts
+
+- **The rotate spec is `skills/rotate/SKILL.md`,** installed at `~/.claude/skills/rotate/`. It defines the 9-section body, the two-pass commits, and the provenance labels on each claim.
+- **Eval shape** (from PREREG.md): writers distil `core.txt` under a given spec. Zero-memory successors answer the `briefs.json` questions from the handoff alone. A grader blind to the arm scores each answer CORRECT, PARTIAL, MUST_LOOKUP or WRONG against the gold. A leak check greps successor transcripts for strings that appear only in the live repo.
+- **Subagent isolation is a harness claim, not a prompt one** (memory `project_subagent_context_leak`): grep each transcript for a canary, or the run is void.
+- **Eval saturation** (memory `project_eval_saturation`): an eval where every arm passes measured nothing. It needs a control arm, a rejection region and single-occurrence golds.
+- **Test suites never run locally; they run on ghost.** The wrapper is `~/.claude/plugins/cache/temp_git_1790170091228_30i6zh/scripts/remote-tests.sh --host ghost@ghost --repo . --cmd "bash tests/run_all.sh" --exclude scratchpad`. It rsyncs the checkout and writes its exit code to `ci/claude-sessions/suite.status` on ghost. This matters only if SKILL.md edits touch `tests/test_rotation.sh`, which pins spec phrases; run that suite after each accepted edit.
+
+# 6. Files and Code Sections
+
+- `skills/rotate/SKILL.md`: the loop target.
+- `tests/test_rotation.sh`: pins phrases from SKILL.md, e.g. `test_rotate_skill_has_a_home_for_conversation_only_facts` and `test_rotate_skill_keeps_successor_reports`. An autoresearch edit that removes a pinned phrase turns the suite red.
+- `hooks/session-start.sh`: the rotation preamble and the kick writer. This conversation changed the kick into a loop that retries until `delivered` exists (up to 30 writes; one write at delay 0), and made the spend branch lead-only.
+- `.cs/research/handoff-ab-2026-09-24/`: the eval assets listed in section 1.
+
+# 7. Problem Solving
+
+- **Missing wake (09-23): fixed.** Root cause, from transcript `durationMs`: the SessionStart hook ran 21 s under load, so both of the old fixed writes landed before the watch armed. Fix: retry until delivered. Commits `d535d79`, `bba3d13`, `6e0cc0a`, `1928491`, `7e32b27`, `1e72b5e`; merge `1361785`. Ghost 68/68 on main. Codex and Fable both reviewed; Fable's verdict was MERGE.
+- **Two self-inflicted problems, both fixed:**
+  - 30 back-to-back writes at delay 0 raced the test teardown's `rm -r`. Delay 0 now writes once.
+  - `git commit -qam` swept `.cs` files into a fix commit. It was split out again; never use `-a` in this repo.
+
+# 8. Pending Tasks
+
+Native list (session-keyed; inherited):
+- #554 [pending] PARKED: SessionStart notice for tool calls left pending at the end of the previous conversation.
+- #606 [pending] POSTPONED: `cs --remote` via Claude Remote Control.
+- #670 [completed] Rotation kick fix.
+
+Not in the native list:
+- The handoff eval harness and the autoresearch loop (section 1).
+- Release v2026.9.22 via `/release`; tag only after CI is green.
+- Deleting the throwaway `measure-wake` session (asked, unanswered).
+- The doctor warning "no shadow ref refs/worktree/cs/session/da093a8c-..." (not investigated).
+
+# 9. Current Work
+
+- Nothing is running. The ghost suite is idle, and the `cswake` tmux server was killed.
+- The installed hooks match main (cmp and doctor drift OK).
+- Uncommitted before this rotation: `.cs/handoffs/2026-09-24-after-handoff-spec.md` (its successor report) and my narrative. This rotation's step 8 commits both.
+
+**Completeness:** both passes were written from live context, with no compaction. Not carried: the per-question A/B answers (never saved; `succ/` is empty) and the full Codex and Fable review texts, whose findings are summarised above.
