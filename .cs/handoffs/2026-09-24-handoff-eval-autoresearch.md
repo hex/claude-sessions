@@ -2,7 +2,8 @@
 parent: 8692f800-a0f0-4c5d-babe-c5d06b336ff8
 created: 2026-09-24T10:58:14Z
 purpose: Build a scriptable eval harness for handoff quality, then run /autoresearch on skills/rotate/SKILL.md against it
-status: unconsumed
+status: consumed
+consumed_by: bbc43868-d259-4b9e-9b18-87d9a69f2e9c
 ---
 
 # 1. Next Step
@@ -120,3 +121,10 @@ Not in the native list:
 - Uncommitted before this rotation: `.cs/handoffs/2026-09-24-after-handoff-spec.md` (its successor report) and my narrative. This rotation's step 8 commits both.
 
 **Completeness:** both passes were written from live context, with no compaction. Not carried: the per-question A/B answers (never saved; `succ/` is empty) and the full Codex and Fable review texts, whose findings are summarised above.
+
+## Successor report
+
+- **Wrong: "succ/ is empty ... successor and Codex-grader prompts must be rebuilt".** The six successor sandboxes (handoff.md, questions.md, answers.md, err.txt, prompt.md) were still at `/private/tmp/claude-501/ab-sbx/h1..h6`, which the handoff never named. The goldsmith, writer and Codex-grader prompts were recoverable verbatim from the parent transcript (`jq` over `da093a8c-....jsonl`, `Agent` tool_use inputs). Found by `ls` of the old scratch dir, then jq. Copied into `.cs/research/handoff-ab-2026-09-24/succ/`.
+- **Re-derived: the serialiser.** The handoff said a text cut "needs a serialiser"; the exact jq that produced core.txt was the Bash call at parent-transcript line 1723 (`head -n 5048 524ba3e7....jsonl | jq ...`). Reproduced byte-identical (`cmp`). The scratch `hr/ex.sh` and `turns.sh` are different formats.
+- **Re-derived: which parents can be cut.** Of 25 handoffs whose parent JSONL exists, only 3 transcripts contain a user `<command-name>/rotate</command-name>` line (655bde7e, be426d62, 601bd3d4) besides 524ba3e7; the rest rotated without one (forced rotation or skill call). Found by grep over each parent.
+- The old scratch dir had not been rebooted away; nothing in it was lost.

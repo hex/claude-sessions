@@ -1992,3 +1992,16 @@ Follow-up 2026-09-23 (tab title, Codex round 2): P2 said the launch EXIT/INT/TER
 ## 2026-09-24 14:00Z: rotated into 2026-09-24-handoff-eval-autoresearch.md
 - Alex: "the results are not that great though. no? let's rotate then use /autoresearch:autoresearch until we have the best results". A/B assets copied to .cs/research/handoff-ab-2026-09-24/ (gitignored, machine-local). Successor opens by asking Alex about the four eval conditions, then builds a scriptable Verify.
 - Prune skipped: .cs/handoffs/2026-08-24-theme-and-claide-followup.md is consumed and >30 days old, but untracked with no git history, so deleting it would lose the only copy.
+
+## 2026-09-24 ~11:05Z — handoff-eval harness: Alex picked all four eval conditions
+- Resumed from handoff 2026-09-24-handoff-eval-autoresearch.md. Task #671 created.
+- Alex's ruling (AskUserQuestion): build the harness with ALL FOUR conditions before any /autoresearch loop:
+  (1) >1 source conversation + one held out, never scored by the loop; (2) >=5 writers per arm;
+  (3) handoff length recorded as a covariate; (4) spec-A kept as control every round, rejection region pre-registered.
+- Harness home: .cs/research/handoff-eval/ (did not exist at 11:05Z). Loop branch: feat/rotate-autoresearch, never main.
+- 11:40Z harness skeleton: .cs/research/handoff-eval/harness.py (serialise | round | probe). Sandboxes at /private/tmp/claude-501/handoff-eval/<run> (outside any repo), results copied to runs/<run>/. All model calls are `claude -p --restricted --strict-mcp-config --no-session-persistence --output-format json`, cs env scrubbed; writers Read,Write acceptEdits (opus), successors Read (opus), grader Read (default fable, non-opus per advisor). Score: CORRECT 1 / PARTIAL .5 / MUST_LOOKUP 0 / WRONG -1 over non-control briefs; a missed control voids the handoff to -1. METRIC = mean over sources of (cand mean - ctrl mean).
+- Sources: tab-title (524ba3e7, cut 5049, reproduced core.txt byte-identical), first-paint (be426d62, cut 2930, 270 KB). HELD OUT: test-races (655bde7e, cut 2206, 200 KB) at ~/.cache/handoff-eval-heldout/ (outside the loop's tree). Goldsmiths (fable) writing briefs for first-paint and held-out.
+- Canary probe in a sandbox: no repo/branch/project seen. Dry run (1 writer/arm, tab-title) running in background -> /private/tmp/claude-501/dryrun.out.
+- Successor report appended to the handoff.
+- 14:15Z DRY RUN OK (run 20260924T140903, 1 writer/arm, tab-title): cand 0.562 (23.6 KB) vs ctrl 0.312 (16.8 KB), METRIC +0.25 (n=1, noise). Isolation measured: writers read only core.txt/spec.md/handoff.md, successors only handoff.md/questions.md, 0 permission denials. Cost (API-equivalent total_cost_usd): writer ~$4.3 and ~200 s each on the 475 KB source; successor ~$0.16/30 s; grader ~$0.33/35 s. Full round 2 src x 2 arms x 5 = ~$95 equiv, ~20-25 min at concurrency 4; reusing control writers halves writer cost.
+- 14:20Z Alex (AskUserQuestion): control = baseline once and reuse (round 0: 10 ctrl writers/source; loop iterations write 5 cand/source and reuse round 0's ctrl via --control-from). First loop = 5 iterations, then score the held-out source once and review.
