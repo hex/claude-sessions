@@ -2,7 +2,8 @@
 parent: bbc43868-d259-4b9e-9b18-87d9a69f2e9c
 created: 2026-09-24T12:54:46Z
 purpose: Run the handoff-eval loop: write 2-3 bold rewrites of skills/rotate/SKILL.md step 3 and score each at 10 writers/source against the stored baseline
-status: unconsumed
+status: consumed
+consumed_by: 4af1b056-f98e-45a9-b6c7-ccbb98d68352
 ---
 
 # 1. Next Step
