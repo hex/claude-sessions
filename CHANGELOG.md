@@ -9,7 +9,7 @@ All notable changes to cs are documented here. Release notes are also available 
 ### Changed
 - Rotation handoffs label each claim, not each bullet. A cause inferred beside a measured symptom is `assumed`, and a claim that something fails carries the command that failed and what it printed. Across 40 handoffs "measured" appeared in 38 and "assumed" in one, and the two wrong claims a review found were both unlabelled conclusions.
 - The handoff body has a `Conversation-only facts` section in its first pass, for exact readings, run ids, counts, event order and the user's own words. The writer checks each such fact off before the first commit. The skill no longer says exact readings live in the second pass, which contradicted the two-pass rule.
-- A handoff's Next Step carries every fact its first action needs (command, path, host, branch), even when the fact is also written down elsewhere. A pointer to a script says in one clause what the script does.
+- A handoff's Next Step carries every fact its first action needs (command, path, host, branch), even when the fact is also written down elsewhere. A pointer to a script says in one clause what the script does. An action in Next Step that starts work first says how to tell whether it is already done or still running.
 - The conversation that picks up a rotation appends a `## Successor report` to the handoff once its next step is done: what it had to look up again, re-derive, or found wrong, or `none`. The next rotation commits the report, and the rotate skill's prune never deletes a handoff with uncommitted changes.
 
 ### Fixes

@@ -68,7 +68,10 @@ one-key rotation it exists for.
    memory: the successor acts on Next Step before reading anything else,
    without looking anything up. A handoff that said "rerun the suite" sent
    it to the local machine while the working host sat in memory the
-   successor never read.
+   successor never read. An action that starts work (a test run, a build,
+   a merge, a deploy) first says how to tell whether it is already done or still running,
+   and what to do in each case: "rerun the suite if its result file has no
+   `rc=` line" starts a second full run beside one that may still be going.
 
    **Settled and rejected** holds decisions already made, alternatives
    rejected with the reason they lost, and approaches tried that failed with

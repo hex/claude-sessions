@@ -229,6 +229,10 @@ test_rotate_skill_puts_the_next_step_first() {
     # committed file or in memory.
     assert_file_contains "$skill" "without looking anything up" \
         "Next Step must carry every fact its first action needs" || return 1
+    # A/B 2026-09-24: a Next Step said "no rc= line -> rerun the suite" while
+    # the run could still be going, which starts a second full suite beside it.
+    assert_file_contains "$skill" "already done or still running" \
+        "an action that starts work must say how to check it is not in flight" || return 1
     assert_file_contains "$skill" "append" \
         "the second pass must append, since a Write replaces the whole file" || return 1
     assert_file_contains "$skill" "second commit" \
