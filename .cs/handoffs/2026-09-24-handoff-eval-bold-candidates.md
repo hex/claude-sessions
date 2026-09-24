@@ -101,3 +101,12 @@ Not in the native list:
 - Uncommitted before this rotation: the narrative and the previous handoff's successor report; step 8 of this rotation commits them.
 
 **Completeness:** written from live context, no compaction. Not carried: the per-brief golds (deliberately; contamination rule) and the verbatim agent reports (summarised in section 3).
+
+## Successor report
+
+- main was `f848b37`, not `5c49a75` as Next Step step 2 says (`git log --oneline -1`); two rotation commits had landed after the handoff was written. Harmless: branched from f848b37 + the consumed flip (53c83aa).
+- Section 3's usage reading ("weekly 75%") was stale in both directions: `cs -usage` read week 25% at 16:10 and 76% at 16:45, then 37% at 20:45. The number is not stable enough to plan rounds on.
+- The handoff's `verify --resume` recipe covers a round that dies at grading only. A round that dies in the WRITER phase (5h session limit, "You've hit your session limit · resets 8:10pm") cannot be resumed: `cmd_verify` sends `--resume` straight to `score_run` (harness.py ~line 354). Found when candidate C's first run stopped at 6/20 writers; re-ran fresh.
+- Fable ran out of credits twice mid-grading (not once); Alex topped up each time.
+- The contamination rule assumed harness stdout never carries per-question grades. It does on one error path: `grader output malformed` prints the first 300 chars of the grader's JSON, including `why` text. Seen on the held-out run; recorded in the narrative.
+- Needed a local pin checker for `tests/test_rotation.sh`: its `assert_file_contains` pins are single-line greps, so a rewrap that splits a pinned phrase across lines fails the suite. Not in the handoff; found by building the checker.
