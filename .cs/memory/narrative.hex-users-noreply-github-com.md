@@ -1860,3 +1860,83 @@ Follow-up 2026-09-23 (tab title, Codex round 2): P2 said the launch EXIT/INT/TER
 - 13:10 Alex: "1, then merge both". Lock built on feat/tab-title-panes: 97629b2 + 9553f00. `_cs_tmux_title_lock` in lib/02-shared.sh: mkdir lock dir `$TMPDIR/cs-title-<socket_path+window_id sanitised>.lock` holding the caller's $$; dead pid -> take over at once; no pid after ~1-2 s -> take over; live holder -> wait up to 5 s then write unlocked (never steal from a live holder, never stall a hook). Measured: one uncontended title call = 385 ms at load ~12 (≈10 forks), so six queued panes wait ~2 s: a fixed 2 s steal timer would have broken live holders. `{ read -r x < f; } 2>/dev/null` needed: a trailing `2>/dev/null` after a failed `<` still prints the error. Probe: unlocked 3/30 lost names (6 panes, claims only). Test test_concurrent_claims_leave_the_name_the_claims_make (6 panes, 20 rounds claim+release): unlocked red 3/3 at 20 rounds, 4/5 at 10 rounds (so kept 20); locked green 5/5; 105 s at load ~10. hooks 149/149, shellcheck -S error clean, bash 3.2 edge probe OK.
 - Merged to main: 304eb72 (tab-title-panes), 2b8f437 (handoff-pane-text). MISTAKE: the CHANGELOG conflict resolver failed but was chained with `;` so `git add && git commit` recorded the merge WITH conflict markers (01a5944); caught by the printed grep count, fixed and amended before anything else ran on it. Gate-then-commit must be `&&` end to end.
 - 13:45 ghost gate on main 2b8f437: 67/68, test_mod_update failed "validate exits 0": ghost had Claude Code 2.1.72, whose `plugin validate` refuses the cs-update manifest's `userConfig` ("Unrecognized key"); the old-claude SKIP in both mod tests sits AFTER the exit assert, so rotate (no userConfig) skipped and update failed. Alex chose "update claude on ghost": `claude update` 2.1.72 -> 2.1.280; test_mod_update 4/5 + test_mod_rotate 7/8 (only bun skips; ghost has no bun) on ghost, validate pins now actually run there. Installed from main, deploy drift OK, ~/.claude/skills/cs-rotate/hooks/register.tsx identical to main. Not pushed. Worktrees wt-664, wt-title, wt-pane (old conversation's scratchpad) left in place; branches kept.
+
+## 2026-09-23: release 2026.9.21 in progress
+- /release after the wrap. Content 9e3922b pushed (46b2760..9e3922b); CI run 35852586981 on it, watcher in background. Fable adversarial review of v2026.9.20..HEAD running (read-only brief, consumers named by path).
+- Docs review: README's "current directory decides … all get the picker" paragraph described the old bare-cs auto-open; rewritten for `cs .` (subdir/unrelated refused; resolved `cs .` is `cs <name>`, same collision menu). Uncommitted, rides the release commit. hooks/secrets/session-layout/statusline docs: no issues.
+- test_install.sh 54/54 on ghost (remote-tests --cmd). tui untouched in range. /simplify skipped: working-tree diff is the README edit only.
+- CI run 35852586981 on 9e3922b: 5/6 green, bash (ubuntu-latest) red on test_a_claim_after_the_last_release_locks_the_titles_again ("expected off off, actual off "): ubuntu-latest ships tmux 3.4 and `allow-set-title` arrived in tmux 3.5 (tmux CHANGES 3.4->3.5). Production sets it with 2>/dev/null, a no-op on 3.4 (correct). Test fixed in 5ec4b53: asserts allow-set-title only when `show-options -gw allow-set-title` succeeds (probe verified: present on 3.7c, absent for an unknown name). ghost is tmux 3.6a; test_hooks 149/149 there. Not pushed yet: waiting on the Fable range review to fold in one push.
+- Alex asked whether varar.dev could replace the tests: no. It binds Markdown prose to sensors in TS/Java/Kotlin/Python/Ruby/Rust/C#/Go; no bash, no process/exit-code/stdout support. Only conceivable fit: docs-claim checks (test_docs.sh partly covers).
+- Fable range review: FIX FIRST. (1) Important CONFIRMED: `_cs_tmux_title_lock` takeover reset `start`, so a mkdir failing for another reason (TMPDIR missing/read-only, full disk) spun forever; the launch never reached claude and hooks hung (repro >68 s). Fixed e949b30: one deadline set once, takeovers never extend it, every loop sleeps; red-first test test_an_unmakeable_lock_still_names_the_window_in_bounded_time (TMPDIR=no-such-dir; red "still waiting after 15 s", green on ghost). Test gotcha: `( VAR=.. bash -c .. ) &` puts the SUBSHELL in $!; killing it orphans the spinning child, which keeps the pipe open and hangs the runner; use `VAR=.. bash -c .. &` so $! is the process. (2) Important CONFIRMED: `#` line inside a fenced block ended the Next Step section; nextStep now tracks ``` / ~~~ fences (bun 80/80). Minors left: dead-pid takeover race (documented in the lock comment, next claim repairs), tmux <3.0 has no pane options (no floor stated), MARKDOWN_LIMIT cut can land inside a fence, empty Markdown text unverified live.
+- Release commit a54c8f0 "Release v2026.9.21" pushed after Alex approved the notes; CI on it running; tag only after all six jobs are green (gh release create --target <full sha>).
+- Released v2026.9.21 on a54c8f0: CI 6/6 on the release commit (run 35854075499), release workflow 35854565200 green, 12 assets incl. .minisig + install.sh, installed via cs -update (cs 2026.9.21), doctor drift OK.
+
+## 2026-09-23: claude-council asked whether "specialists" should move into cs
+
+- The claude-council session asked: should Codex-driven "specialists" live in cs? Answered read-only via SendMessage.
+- Found: cs has no create-only feature worktree. `cs <base>@<f>` and `cs -spawn` both launch claude. `-features --porcelain` can be scripted. `-finish` cannot (it arms /finish at launch). The hidden `-integrate-feature` / `-retire-feature` can be scripted.
+- Unmeasured: does a `$.process.run` child of the base's claude pass session_lock_owned_by_invoker (CLAUDE_SESSION_NAME plus ancestry)?
+- Advised: keep specialists out of cs. Alex dropped delegation twice (2026-09-08). Borrow the integrate-in-temp then ff-only landing, instead of `merge --no-ff` straight into the live checkout.
+
+## 2026-09-23: /wrap's pass files cut short by zsh `=` expansion
+
+- A /wrap run (in another session) ran `cat sweep.md; echo ======; cat summary.md`. The Bash tool's zsh read `======` as a command lookup, and the failed lookup aborted the list with rc 1, so summary.md was never read. Reproduced with `zsh -c 'echo A; echo ======; echo B'`.
+- Fixed on fix/wrap-read-tool 108cbd8: commands/wrap.md now says to read each pass file with the Read tool, one call per file. test_commands 47/47. Not merged or installed; waiting on Alex.
+- Added the trap to the project_bash_tool_is_zsh memory.
+
+## 2026-09-24: rotation handoff size, measured
+
+- Measured the 30 newest of the 40 handoffs in .cs/handoffs/: lines min 77, median 233, max 388; bytes min 7.7 KB, median 13.1 KB, max 21.7 KB (about 2k / 3.3k / 5.4k tokens at 4 bytes per token).
+- Largest section in the newest handoff (2026-09-23-finish-tab-title-panes.md): Settled and rejected, about 46 lines.
+
+## 2026-09-24: rotation handoff quality review (Fable + Opus + council)
+
+- Fable and Opus traced 4 handoffs to their successors via `consumed_by:`: 2026-09-15-test-the-mods-feel, 2026-09-17-merge-parallel-test-races, 2026-09-15-build-rotation-mod, 2026-09-23-finish-tab-title-panes. All 4 followed Next Step. 0 re-asks, 0 contradictions of Settled and rejected. Productive within 1-4 minutes, 11-23 tool calls. Verdict: no size change. The 8.8 KB 0/12 result came from compressing a whole conversation; it does not transfer to mid-task rotations.
+- Measured defects:
+  - 09-23 handoff :75: said `--host ghost` fails, so the successor ran the full suite locally until Alex asked "do we run it on ghost@ghost?" (transcript line 844).
+  - 09-23 :99: says SessionEnd on /clear has source `clear`; session.log:109481 shows `user_exit`.
+  - 2026-09-17-parallel-test-races.md:117: an inferred cause sat inside a bullet labelled MEASURED.
+  - The provenance label goes on the bullet, not on each claim: "measured" in 38-39 of 40 handoffs, "assumed" in 1.
+- Spec self-contradiction, verified: skills/rotate/SKILL.md:141 says "pass two is where exact readings live", but the two-pass rule puts conversation-only facts in pass one. 3 of 4 writers invented their own section for those facts.
+- The mods-feel handoff pointed at drive.sh as a cs launch, but drive.sh ran bare `claude --plugin-dir`, so the successor wrote a new driver (23 tool calls).
+- Opus: after the 09-23 /clear the wake never fired. Alex typed "continue" 7 minutes later; other successors were woken in 3-8 s. Separate bug, not investigated.
+- Council .claude/council-cache/council-1790237994.md. Cursor hit its usage limit; openrouter-3 `xiaomi/mimo-v2.6` is an invalid model id; grok-cli fell back to the grok-4.6 API. 4 seats asked for a conversation-only-facts checklist.
+- Proposed to Alex, awaiting a yes:
+  1. Provenance per claim; a "fails" claim carries its command.
+  2. A "Conversation-only facts" section in pass one; fix :141.
+  3. A pointer to a script states what the script does.
+  No size target.
+- I hit the zsh `echo ====` trap myself mid-session. Use `---`.
+- Addendum, same day: Alex updated the OpenRouter seats to 4: `~deepseek/deepseek-pro-latest`, `z-ai/glm-5.3-prime`, `xiaomi/mimo-v2.6-pro` (now a valid model id), `qwen/qwen3.8-max-prime`. Re-ran the council; all 4 answered (.claude/council-cache/council-1790238632.md).
+  - All 4 back a pre-commit checklist of conversation-only facts.
+  - GLM, mimo and qwen want a floor of about 15 KB. They reasoned from the 2026-08 experiment alone. The successor check contradicts them: a 15 KB floor would flag 3 of the 4 handoffs that worked.
+  - New ideas: deepseek suggests a successor-written report of what it had to re-derive; qwen suggests Next Step carries every fact needed to start. Both added to the proposal, now 5 edits and still no size target. Awaiting Alex.
+- ELI5 page for the 5 proposed handoff edits: https://claude.ai/artifact/M7zLBAJH1PFSuCxEKe8YbB (source in this conversation's scratchpad, handoff-eli5/index.html; opened locally for Alex). The edits are still awaiting Alex's yes.
+
+## 2026-09-24: handoff spec edits built; old-vs-new A/B in flight
+
+- Alex said yes to the 5 edits. Branch feat/handoff-spec-edits, commit 8474134. Changes: SKILL.md (claim labels, section 3 "Conversation-only facts", sections now 1-9, self-sufficient Next Step, script pointers); session-start.sh preamble (`## Successor report`); tests; CHANGELOG `## Unreleased` (also covers the /wrap fix). Red first: 8 assertions. Ghost test_rotation 111/111.
+- Codex review: FIX-FIRST. P2 (valid): step 7's prune can delete an old handoff whose appended successor report is still uncommitted. Fix: skip handoffs with uncommitted changes. Also docs/hooks.md omits the report, and the new tests pin wording. Fable review is still running.
+- A/B harness in this conversation's scratchpad, under ab/:
+  - core.txt: 475 KB, from transcript 524ba3e7 lines 1-5048, cut before /rotate. The real ghost error sits at core ~3955: "no host store ... 'ghost' cannot be resolved".
+  - spec-A.md (main) and spec-B.md (branch); PREREG.md with metrics M1-M5.
+  - Writers (opus, 3 per arm) write handoffs/raw-{A,B}{1,2,3}.md; the Fable goldsmith writes briefs.json.
+  - Successors run in /private/tmp/claude-501/ab-sbx via `claude -p --restricted --tools Read --no-session-persistence` with the cs env unset. The probe saw no repo, branch or commit.
+- I broke the ghost rule yesterday by running tests/test_commands.sh locally; noted to Alex.
+- 2026-09-24 A/B interim:
+  - Review fix 36920c4: the prune skips handoffs with uncommitted changes, step 8 stages successor reports, docs/hooks.md updated.
+  - All 6 writers done. Sizes: A 20.2/18.2/19.9 KB, B 26.4/24.5/23.7 KB, so B runs about 27% larger (a length confound).
+  - M3 ghost trap FALSIFIED: 6/6 carry the `no host store` error, old spec included. The real 09-23 handoff did not. Suspect live-context-at-80% versus a clean transcript replay; the replay may not reproduce the failure mode.
+  - Fable's review ran test_rotation locally (111/111); the brief did not forbid it.
+- 2026-09-24 A/B RESULT (full table in the A/B scratch dir, RESULTS.md):
+  - Codex graded blind, and the leak check was clean. Old vs new: CORRECT 12 vs 13, WRONG 1 vs 2, once-facts 5/18 vs 8/18, unsupported "fails" claims 32 vs 21.
+  - Q6 (the unverified label): new 3/3 vs old 0/3, the clearest arm effect.
+  - Q10: old carried the plain-iTerm claim labelled assumed 3/3; new dropped it.
+  - The M1 rejection region was hit (2 vs 1), but both new-arm WRONGs came from writer B3 and are soft. M3 did not discriminate.
+  - Writer draw is at least the size of the arm effect. Verdict: a modest improvement, not proven; no harm shown beyond noise.
+- 2026-09-24 A/B WRONG breakdown (Alex asked why wrongs remain):
+  - B3 Q2 is a real writer defect. Its Next Step said "no rc= line -> rerun the suite", which risks a second concurrent full suite. A2 and B2 said to check the process first.
+  - B3 Q9: the successor compressed the full error its handoff quoted into "ghost can't be resolved".
+  - A3 Q9: the writer's own ellipsis ("no host store at …"); graded strictly.
+  - Proposed fix 1 (spec): a Next Step action that starts work first says how to check it isn't already done or running. Fix 2 (preamble: relay errors verbatim) is low value; recommended skipping it. Awaiting Alex.
+- 2026-09-24 SHIPPED: Alex said "ok" to fix 1. f77dc82 adds the rule that a Next Step action which starts work says how to tell whether it is already done or still running (red-first pin). Ghost test_rotation 112/112 at the tip. Merged to main ff77451 (--no-ff), full run_all on ghost 68/68, installed; the installed rotate skill is identical to main, the session-start hook carries the report line, doctor drift OK. Branch deleted. Not pushed; CHANGELOG `## Unreleased` holds the handoff edits and the /wrap fix. First real /rotate is the live check; also open: the missing wake after the 09-23 /clear.

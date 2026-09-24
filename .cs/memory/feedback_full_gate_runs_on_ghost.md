@@ -49,3 +49,7 @@ old `claude plugin validate` refuses newer manifest keys (`userConfig`: "Unrecog
 sits after the exit assert). Alex's ruling: update claude on ghost (`ssh ghost@ghost claude update`),
 not guard the test. Before reading a mod-suite failure or skip on ghost, compare `claude --version`
 on both machines.
+
+**Dispatched reviewers count too (2026-09-24):** a Fable review agent ran `tests/test_rotation.sh`
+locally because its brief did not forbid it. Every review or verify brief must say "no local
+test_*.sh runs; ask me for a ghost run".
