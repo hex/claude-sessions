@@ -131,6 +131,17 @@ test_queue_add_clears_declined() {
     assert_file_not_exists "$CLAUDE_SESSION_META_DIR/local/queue.declined" "add re-enables gating" || return 1
 }
 
+# The done log and the listing are line-oriented, so a task body is one line,
+# as cs -msg --kind task and cs -spawn --task already require.
+test_queue_add_rejects_a_multiline_task() {
+    local out
+    if out=$("$CS_BIN" -queue add "$(printf 'one\ntwo')" 2>&1); then
+        echo "  FAIL: expected non-zero for a multi-line task"; return 1
+    fi
+    assert_output_contains "$out" "Error: task bodies must be a single line (the queue's done log and listing are line-oriented)" "names the single-line rule" || return 1
+    assert_eq "0" "$(QCOUNT)" "nothing queued despite the rejection" || return 1
+}
+
 test_queue_requires_session() {
     unset CLAUDE_SESSION_META_DIR
     local out; if out=$("$CS_BIN" -queue add "x" 2>&1); then
@@ -312,6 +323,7 @@ run_test test_queue_clear_empties_and_resets_state
 run_test test_queue_start_sets_armed
 run_test test_queue_defer_writes_declined_epoch
 run_test test_queue_add_clears_declined
+run_test test_queue_add_rejects_a_multiline_task
 run_test test_queue_requires_session
 run_test test_queue_add_via_session_scoped_arm
 

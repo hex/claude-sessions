@@ -267,4 +267,5 @@ process and its hooks can find the session:
 - `CLAUDE_SESSION_META_DIR` - Path to the `.cs/` metadata directory
 - `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence; a feature worktree gets its own list under its `base@task` name, not the base's
 - `CLAUDE_CODE_AUTO_MEMORY_PATH` / `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` - Redirect Claude Code's auto-memory writer into `<session>/.cs/memory/`
-- `CS_UPDATE_AVAILABLE` / `CS_UPDATE_BIN` - Exported by a cs launch, never set by hand: the version a newer cs was found at and the path of the running cs. The cs-update mod reads them to draw the release-notes pane and to run `cs -update` from inside the session. Absent when nothing is pending
+- `CS_BIN` - Exported by every cs launch, never set by hand: the absolute path of the running cs, replacing any value inherited from a parent launch. The mods run cs through it (`cs -update`, `/queue`), since the claude process's `PATH` is not the launching shell's
+- `CS_UPDATE_AVAILABLE` - Exported by a cs launch, never set by hand: the version a newer cs was found at. The cs-update mod reads it to draw the release-notes pane. Absent when nothing is pending

@@ -87,8 +87,7 @@ _spawn_window() {  # name
 }
 
 run_spawn() {
-    local name="" brief="" nl='
-'
+    local name="" brief=""
     local usage='Usage: cs -spawn <name> [--brief <file>] [--task "..."] ...'
     local tasks
     tasks=()
@@ -100,7 +99,7 @@ run_spawn() {
                 local t
                 t="$(_trim "$1")"
                 [ -n "$t" ] || error "cs -spawn --task needs a non-empty task"
-                case "$t" in *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";; esac
+                _queue_require_single_line "$t"
                 tasks+=("$t");;
             --brief)
                 [ $# -ge 2 ] || error "--brief needs a file"

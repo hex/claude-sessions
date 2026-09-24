@@ -73,10 +73,24 @@ _queue_convert_legacy() {  # qdir
 # never read a torn entry — the queue executes what it reads, which makes a
 # spliced line worse than a lost one. Names are <zero-padded epoch>-<pid>-<n>;
 # lexical order approximates arrival order (same caveats as mail filenames).
+# A task body is one line: the done log and the listing are line-oriented.
+# Every way in checks here: cs -queue add, task-kind mail (through
+# _queue_add), and cs -spawn --task before it stages its seed.
+_queue_require_single_line() {  # text
+    # $(printf '\n') would collapse to "" (command substitution strips
+    # trailing newlines); the literal embedded newline below does not.
+    local nl='
+'
+    case "$1" in
+        *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";;
+    esac
+}
+
 _queue_add() {  # qdir, text
     local qdir="$1" text="$2"
     text="$(_trim "$text")"
     [ -n "$text" ] || { error "cs -queue add needs a non-empty task"; }
+    _queue_require_single_line "$text"
     # Senders write into other sessions' queues (task-kind mail), so a
     # recipient that has not reopened since the upgrade converts here.
     _queue_convert_legacy "$qdir"

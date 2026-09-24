@@ -3,6 +3,7 @@
 /* @jsxFrag Fragment */
 // ABOUTME: cs mod: keys above the prompt: rotate past the threshold, wrap up, or /clear once a handoff is armed.
 // ABOUTME: With CS_ROTATE_FORCE_CTX set a turn ending past it runs /rotate itself, then counts down to the /clear (session colour, amber, crit); session.start writes a heartbeat for doctor.
+// ABOUTME: /queue adds a task to the session's walk-away queue through `cs -queue add`, at once even mid-turn; bare, it prints `cs -queue list`.
 import type { On, EngineInterface } from 'claude-code'
 
 declare const h: any
@@ -161,17 +162,49 @@ let adopted: string | undefined
 let clearSeen = false
 let birth: string | undefined
 let startPercent: number | undefined
+// Whether this load has registered /queue: session.start fires at load, and
+// registering the same name again would only replace it.
+let registered = false
 
 export function register(on: On) {
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; preview = undefined; previewShown = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined
+  left = undefined; ticker = undefined; bandIdle = false; preview = undefined; previewShown = false; adopted = undefined; clearSeen = false; birth = undefined; startPercent = undefined; registered = false
   on('session.start', async ($, e, next) => {
+    if (!registered) {
+      registered = true
+      await $.command.register({ name: 'queue', description: "Add a task to this cs session's walk-away queue, or list it.", argumentHint: '[task]', immediate: true })
+    }
     // Only a cs session has .cs/local; anywhere else the mod stays silent.
     const local = `${e.cwd}/.cs/local`
     if (await $.fs.exists(local)) {
       await $.fs.write(`${e.cwd}/${HEARTBEAT}`, `${new Date().toISOString()}\n`)
     }
     return next(e)
+  })
+
+  // `/queue <task>` runs `cs -queue add` by the path the launch exported;
+  // `/queue` alone runs `cs -queue list`. The child inherits the claude
+  // process's environment, and CLAUDE_SESSION_META_DIR there picks the queue.
+  // Registered immediate, so the hook may run while a turn streams: it reads
+  // nothing of the turn. cs is the judge of the task: whatever it refuses
+  // (an empty or multi-line body) comes back as its own stderr.
+  on('command.run', { command: 'queue' }, async ($, e) => {
+    const task = e.args.trim()
+    const argv = task === '' ? ['-queue', 'list'] : ['-queue', 'add', e.args]
+    const bin = await $.env.get("CS_BIN")
+    if (!bin) return { text: 'The launch did not say where cs is (CS_BIN); run `cs -queue add "<task>"` from a shell in this session.' }
+    const what = `cs ${argv.slice(0, 2).join(' ')}`
+    let result: { exitCode: number; stdout: string; stderr: string }
+    try {
+      result = await $.process.run([bin, ...argv])
+    } catch (err) {
+      return { text: `${what} did not run: ${String(err instanceof Error ? err.message : err)}` }
+    }
+    if (result.exitCode !== 0) {
+      const tail = result.stderr.split('\n').filter(l => l.trim() !== '').slice(-5).join('\n')
+      return { text: tail === '' ? `${what} exited ${result.exitCode}.` : `${what} exited ${result.exitCode}.\n${tail}` }
+    }
+    return { text: task === '' ? result.stdout.trimEnd() : `Queued: ${task}` }
   })
 
   // The end of a turn is the one moment a rotation can be started for the

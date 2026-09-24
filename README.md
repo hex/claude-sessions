@@ -352,6 +352,11 @@ taken of an ambiguous task. (The gate itself
 runs `cs -queue start` / `cs -queue defer` on your behalf — you don't
 need to run those directly.)
 
+Inside a cs session, `/queue <task>` does the same as `cs -queue add` without
+leaving Claude Code, and runs at once even while Claude is mid-turn; `/queue`
+alone prints `cs -queue list`. It comes from the `cs` mod, so
+`CS_NO_FUNCTION_HOOKS=1` withholds it.
+
 In the session picker (`cs` with no argument), the right pane shows a
 **To-Do** panel for the highlighted session: press `Tab` to focus its
 input, type a task and press `Enter` to queue it; `Down` moves into the

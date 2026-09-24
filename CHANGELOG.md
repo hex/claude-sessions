@@ -6,14 +6,19 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Added
+- `/queue <task>` in a cs session adds a task to the walk-away queue, even while Claude is mid-turn; `/queue` alone lists the queue. It comes from the `cs` mod and runs `cs -queue add` through `CS_BIN`.
+
 ### Changed
 - Rotation handoffs label each claim, not each bullet. A cause inferred beside a measured symptom is `assumed`, and a claim that something fails carries the command that failed and what it printed. Across 40 handoffs "measured" appeared in 38 and "assumed" in one, and the two wrong claims a review found were both unlabelled conclusions.
 - The handoff body has a `Conversation-only facts` section in its first pass, for exact readings, run ids, counts, event order and the user's own words. The writer checks each such fact off before the first commit. The skill no longer says exact readings live in the second pass, which contradicted the two-pass rule.
 - A handoff's Next Step carries every fact its first action needs (command, path, host, branch), even when the fact is also written down elsewhere. A pointer to a script says in one clause what the script does. An action in Next Step that starts work first says how to tell whether it is already done or still running.
 - The conversation that picks up a rotation appends a `## Successor report` to the handoff once its next step is done: what it had to look up again, re-derive, or found wrong, or `none`. The next rotation commits the report, and the rotate skill's prune never deletes a handoff with uncommitted changes.
 - The rotate mod is now `cs`, deployed to `~/.claude/skills/cs/`; the installer and `cs -uninstall` remove the old `~/.claude/skills/cs-rotate`.
+- Every launch exports `CS_BIN`, the path of the running cs, in place of `CS_UPDATE_BIN`, which was exported only when an update was pending. The cs-update mod runs `cs -update` through it.
 
 ### Fixes
+- `cs -queue add` refuses a multi-line task, as `cs -msg --kind task` and `cs -spawn --task` already did: the queue's done log and listing are line-oriented. The three share one check.
 - A rotation starts on its own after `/clear` even when the machine is busy. The kick that wakes the new conversation was written twice, 2 and 4 seconds after session start launched its writer, but Claude Code only watches for it once session start has finished, which took 21 seconds under a parallel test suite. Both writes were missed and the conversation sat waiting under a notice saying it would continue by itself. The kick is now rewritten every 2 seconds until the wake lands, up to 30 times. A teammate's `/clear` also no longer cancels the lead's pending kick.
 - `/wrap` reads its sweep and summary instructions with the Read tool. It had been reading them through the Bash tool, whose shell is zsh on macOS, and a separator line like `echo ======` is a failed command lookup in zsh that stops the rest of the command, so the summary instructions were never read.
 

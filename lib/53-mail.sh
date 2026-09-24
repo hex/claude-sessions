@@ -142,15 +142,9 @@ _mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
         error "Message body exceeds ${MAIL_BODY_MAX} bytes"
     fi
     if [ "$kind" = "task" ]; then
-        # $(printf '\n') would collapse to "" (command substitution strips
-        # trailing newlines); the literal embedded newline below does not.
-        local nl='
-'
-        case "$body" in
-            *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";;
-        esac
-        # Queue first, attribution second: if the queue write fails nothing is
-        # sent; if the mail write fails the work is still delivered.
+        # Queue first, attribution second: if the queue write fails (a
+        # multi-line body among the ways it refuses) nothing is sent; if the
+        # mail write fails the work is still delivered.
         _queue_add "$target_dir/.cs/local" "$body"
     fi
     # Deliver into the RECIPIENT's tmp/, then rename into its new/: both live

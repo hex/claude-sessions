@@ -2,7 +2,7 @@
 /* @jsx h */
 /* @jsxFrag Fragment */
 // ABOUTME: cs-update mod: when a cs launch found a newer release, one pane per load with its release notes, `1` to install it in place, Esc for later.
-// ABOUTME: Reads the launch's verdict from CS_UPDATE_AVAILABLE / CS_UPDATE_BIN and the span cs cached; /cs-update reopens the pane; session.start writes a heartbeat for doctor.
+// ABOUTME: Reads the launch's verdict from CS_UPDATE_AVAILABLE, the cs path from CS_BIN, and the span cs cached; /cs-update reopens the pane; session.start writes a heartbeat for doctor.
 import type { On, EngineInterface, PluginOptions } from 'claude-code'
 
 declare const h: any
@@ -239,7 +239,7 @@ async function runUpdate($: EngineInterface) {
   phase = 'running'; outcome = ''
   $.ui.invalidate('ui.render')
   try {
-    const bin = await $.env.get('CS_UPDATE_BIN')
+    const bin = await $.env.get('CS_BIN')
     if (!bin) {
       phase = 'failed'; outcome = 'The launch did not say where cs is; run `cs -update` from a shell.'
       $.ui.invalidate('ui.render'); return

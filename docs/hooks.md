@@ -461,6 +461,16 @@ a plain script and `tests/test_mods_layout.sh` drives through bun. It
 approximates the engine rather than porting it: a row that overruns the band is
 clipped and named, where the real one shrinks a Text to fit.
 
+The mod also registers `/queue`, marked immediate so it runs while a turn is
+in flight instead of waiting for it to end. `/queue <task>` runs
+`cs -queue add "<task>"` through `$.process.run` by the path the launch
+exports in `CS_BIN` (no shell; the claude process's `PATH` is not the
+launching shell's), and `/queue` alone runs `cs -queue list` and prints it.
+The child inherits the claude process's environment, so the
+`CLAUDE_SESSION_META_DIR` the launch exported picks the session's queue. A
+refused task (empty, or more than one line) prints cs's exit code and the end
+of its stderr as cs wrote them.
+
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
 `mods/cs/test/` (a fake engine drives the band, the press and the
 heartbeat) and `claude plugin validate` when each binary is on PATH, and
@@ -474,9 +484,11 @@ the same way as the `cs` mod: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, which every
 `cs <name>` launch exports and `CS_NO_FUNCTION_HOOKS=1` withholds even when the
 launching shell already carries it.
 
-A launch that finds a newer cs exports two variables the mod reads and nothing
-else: `CS_UPDATE_AVAILABLE`, the pending version, and `CS_UPDATE_BIN`, the path
-of the running cs. Absent, there is nothing to show and the mod does nothing.
+The mod reads two variables the launch exports and nothing else:
+`CS_UPDATE_AVAILABLE`, the pending version, exported only when a launch finds
+a newer cs, and `CS_BIN`, the path of the running cs, exported on every
+launch. Without `CS_UPDATE_AVAILABLE` there is nothing to show and the mod does
+nothing.
 Present, the mod reads the changelog span the launch's check cached at
 `~/.cache/cs/update-notes-full-<version>` (KEEP IN SYNC with
 `check_update_notify` in `lib/20-update.sh`), strips its markdown the way
@@ -499,7 +511,7 @@ the conversation cs launched; run with nothing pending it says so instead of
 opening an empty pane.
 
 Pressing `1` runs `cs -update` through the engine's own process runner
-(`$.process.run`, the path from `CS_UPDATE_BIN`; no shell, since the claude
+(`$.process.run`, the path from `CS_BIN`; no shell, since the claude
 process's `PATH` is not the launching shell's), with a ten-minute timeout for
 the download, the checksum and the signature. The pane shows `updating…`
 while it runs and hides the key so a second press cannot start a second

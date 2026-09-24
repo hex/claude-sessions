@@ -4211,8 +4211,7 @@ _spawn_window() {  # name
 }
 
 run_spawn() {
-    local name="" brief="" nl='
-'
+    local name="" brief=""
     local usage='Usage: cs -spawn <name> [--brief <file>] [--task "..."] ...'
     local tasks
     tasks=()
@@ -4224,7 +4223,7 @@ run_spawn() {
                 local t
                 t="$(_trim "$1")"
                 [ -n "$t" ] || error "cs -spawn --task needs a non-empty task"
-                case "$t" in *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";; esac
+                _queue_require_single_line "$t"
                 tasks+=("$t");;
             --brief)
                 [ $# -ge 2 ] || error "--brief needs a file"
@@ -4430,15 +4429,9 @@ _mail_send() {  # target, [--kind|-k KIND] [--reply THREAD] body
         error "Message body exceeds ${MAIL_BODY_MAX} bytes"
     fi
     if [ "$kind" = "task" ]; then
-        # $(printf '\n') would collapse to "" (command substitution strips
-        # trailing newlines); the literal embedded newline below does not.
-        local nl='
-'
-        case "$body" in
-            *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";;
-        esac
-        # Queue first, attribution second: if the queue write fails nothing is
-        # sent; if the mail write fails the work is still delivered.
+        # Queue first, attribution second: if the queue write fails (a
+        # multi-line body among the ways it refuses) nothing is sent; if the
+        # mail write fails the work is still delivered.
         _queue_add "$target_dir/.cs/local" "$body"
     fi
     # Deliver into the RECIPIENT's tmp/, then rename into its new/: both live
@@ -4801,10 +4794,24 @@ _queue_convert_legacy() {  # qdir
 # never read a torn entry — the queue executes what it reads, which makes a
 # spliced line worse than a lost one. Names are <zero-padded epoch>-<pid>-<n>;
 # lexical order approximates arrival order (same caveats as mail filenames).
+# A task body is one line: the done log and the listing are line-oriented.
+# Every way in checks here: cs -queue add, task-kind mail (through
+# _queue_add), and cs -spawn --task before it stages its seed.
+_queue_require_single_line() {  # text
+    # $(printf '\n') would collapse to "" (command substitution strips
+    # trailing newlines); the literal embedded newline below does not.
+    local nl='
+'
+    case "$1" in
+        *"$nl"*) error "task bodies must be a single line (the queue's done log and listing are line-oriented)";;
+    esac
+}
+
 _queue_add() {  # qdir, text
     local qdir="$1" text="$2"
     text="$(_trim "$text")"
     [ -n "$text" ] || { error "cs -queue add needs a non-empty task"; }
+    _queue_require_single_line "$text"
     # Senders write into other sessions' queues (task-kind mail), so a
     # recipient that has not reopened since the upgrade converts here.
     _queue_convert_legacy "$qdir"
@@ -7721,19 +7728,22 @@ launch_claude_code() {
     # headless `claude -p` carries this value while owning a different pid.
     export CS_LEAD_PID=$$
 
+    # Where this cs is, for the mods: `$.process.run` takes no shell and the
+    # claude process's PATH is not this shell's. Set on every launch, so a
+    # value inherited from a parent launch is always replaced by this one's.
+    local self_bin
+    self_bin="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+    export CS_BIN="$self_bin"
+
     # The cs-update mod draws the pending release's notes and runs the update
     # from inside the session. It gets the launch's verdict, never its own:
-    # the version check_update_notify found newer than this cs, and where this
-    # cs is, since `$.process.run` takes no shell and the claude process's
-    # PATH is not this shell's. Absent when nothing is pending, so the mod is
-    # silent by absence rather than by a value it has to read; cleared first,
-    # since a nested launch inherits its parent's verdict.
-    unset CS_UPDATE_AVAILABLE CS_UPDATE_BIN
+    # the version check_update_notify found newer than this cs. Absent when
+    # nothing is pending, so the mod is silent by absence rather than by a
+    # value it has to read; cleared first, since a nested launch inherits its
+    # parent's verdict.
+    unset CS_UPDATE_AVAILABLE
     if [ -n "$UPDATE_AVAILABLE" ]; then
         export CS_UPDATE_AVAILABLE="$UPDATE_AVAILABLE"
-        local self_bin
-        self_bin="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
-        export CS_UPDATE_BIN="$self_bin"
     fi
 
     # Spawn seed: tasks and a brief staged by cs -spawn for this session.
