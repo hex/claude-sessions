@@ -828,8 +828,13 @@ if [ -n "$ROTATION_HANDOFF" ] && [ "$SOURCE" = "clear" ] && [ "$IS_LEAD" = 1 ] \
             # removes `delivered` writes into the same directory: benign, since
             # that rotation wants a kick too and the wake reads no generation.
             # Do not add a per-rotation token for this.
+            # A zero delay waits for no arm, so retrying buys nothing: it writes
+            # once. Thirty back-to-back writes would also race whatever removes
+            # the directory next.
+            _kick_max=30
+            [ "$_kick_delay" != 0 ] || _kick_max=1
             _kick_tries=0
-            while [ "$_kick_tries" -lt 30 ] && [ ! -f "$_kick_dir/delivered" ]; do
+            while [ "$_kick_tries" -lt "$_kick_max" ] && [ ! -f "$_kick_dir/delivered" ]; do
                 [ "$_kick_delay" = 0 ] || sleep "$_kick_delay"
                 [ -f "$_kick_dir/delivered" ] || _write_kick || true
                 _kick_tries=$((_kick_tries + 1))
