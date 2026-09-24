@@ -2035,3 +2035,13 @@ Follow-up 2026-09-23 (tab title, Codex round 2): P2 said the launch EXIT/INT/TER
 - 18:10Z /queue built (1e38087 CS_BIN always + CS_UPDATE_BIN retired, 034ca69 _queue_require_single_line shared by add/spawn/mail, 6930957 /queue immediate), agent evidence: red->green auto_update 24->25/25, queue 41->42/42, cs mod bun 86/86 (3 mutations caught after one test fix), cs-update bun 33/33; ghost touched suites green; shellcheck 0. Merged main 5c49a75 (not pushed). Full ghost gate from main running. Then: install, live mid-turn /queue test in an isolated tmux -L socket throwaway session.
 - 18:30Z /queue MEASURED LIVE (2.1.281, throwaway measure-wake on isolated tmux -L csqueue): prompt "sleep 45 with Bash" running (Combobulating 10s, Bash(sleep 45) in flight), typed `/queue live test task one` -> transcript `❯ /queue live test task one` / `⎿ cs: Queued: live test task one`; `cs -queue list` showed "Pending: 1. live test task one"; status bar showed ▤ 1. When the turn ended the Stop hook offered the drain (AskUserQuestion Start / Not yet) as designed. Cleaned: /exit, queue cleared, tmux -L csqueue killed. Main 5c49a75: ghost 68/68 (status fresh 15:49:09 ghost time), installed, drift OK. Worktree + branch removed. #673 done.
 - 12:58Z rotated into 2026-09-24-handoff-eval-bold-candidates.md (b0f2b34, e6123d4). Prune skipped again: 2026-08-24-theme-and-claide-followup.md is consumed and >30 days old but untracked with no git history (only copy).
+
+## 2026-09-24 ~16:10 EEST — handoff-eval bold candidates (conversation 4af1b056)
+- Consumed handoff 2026-09-24-handoff-eval-bold-candidates.md; main was f848b37 (not 5c49a75 as written); consumed flip committed 53c83aa; branch feat/rotate-autoresearch.
+- Usage at start (cs -usage): 5h 16%, week 25% (window reset since the handoff's 75%).
+- Three candidates for SKILL.md step 3, drafts in the conversation scratchpad:
+  A (7bfc04b) verbatim fact ledger built by a chronological sweep before prose (IDS/READINGS/ERRORS/USER/DECISIONS/UNVERIFIED/STATE), sections 4-9 short.
+  B fill-in template with fixed slots (Next Step: Goal/Where/Check first/If done/If running/Then run/Expect/If it fails; facts subsections incl. Not verified + Traps).
+  C main's step 3 unchanged + a cold-read self-test: 20 questions from the conversation, answer from the handoff text only, fix every gap before each commit.
+- Candidate A: ghost test_rotation.sh 114/114. Round run 20260924T161024 launched ~16:10 -> /private/tmp/claude-501/cand-a.out.
+- Local pin checker (grep only) at scratchpad/pincheck.sh + pins.txt; phrases break when wrapped across lines.
