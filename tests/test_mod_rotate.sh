@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# ABOUTME: Tests for the cs-rotate mod under mods/cs-rotate (a Claude Code function-hooks plugin).
+# ABOUTME: Tests for the cs mod under mods/cs (a Claude Code function-hooks plugin).
 # ABOUTME: Pins the manifest shape and the default threshold; runs the bun unit tests and plugin validate when present.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
-MOD="$SCRIPT_DIR/../mods/cs-rotate"
+MOD="$SCRIPT_DIR/../mods/cs"
 
 setup() { :; }
 teardown() { :; }
 
 test_mod_manifest_names_the_plugin_and_its_module() {
-    assert_eq "cs-rotate" "$(jq -r .name "$MOD/.claude-plugin/plugin.json")" "plugin name" || return 1
+    assert_eq "cs" "$(jq -r .name "$MOD/.claude-plugin/plugin.json")" "plugin name" || return 1
     local module
     module="$(jq -r '.modules[0]' "$MOD/hooks/hooks.json")"
     assert_eq "./register.tsx" "$module" "hooks.json names the register module" || return 1
@@ -95,12 +95,12 @@ test_mod_ramp_inks_match_the_statusline() {
         "mod crit dark and light == statusline crit" || return 1
 }
 
-# The installer deploys the mod under ~/.claude/skills/cs-rotate and a cs
+# The installer deploys the mod under ~/.claude/skills/cs and a cs
 # launch exports the flag Claude Code loads it behind, so the mod runs with
 # nothing for the person to place. Both halves are pinned here by name; the
 # install and launch suites test the behaviour.
 test_mod_is_deployed_by_the_installer_and_enabled_at_launch() {
-    assert_file_contains "$SCRIPT_DIR/../install.sh" "cs-rotate/hooks/register.tsx" "install.sh lists the module" || return 1
+    assert_file_contains "$SCRIPT_DIR/../install.sh" "^    cs/hooks/register.tsx$" "install.sh lists the module" || return 1
     assert_file_contains "$SCRIPT_DIR/../lib/75-launch.sh" "CLAUDE_CODE_ENABLE_FUNCTION_HOOKS" "launch exports the loader flag" || return 1
 }
 

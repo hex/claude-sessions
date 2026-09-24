@@ -17,7 +17,7 @@ empty, tell the user rotation needs a cs session and stop.
 
 A rotation needs a purpose — one line describing what the next conversation
 should do. If the user did not give one, take it from the conversation: the
-work in flight and its next step. Do not stop to ask; the `cs-rotate` mod's
+work in flight and its next step. Do not stop to ask; the `cs` mod's
 button runs `/rotate` with no argument, and a question there would defeat the
 one-key rotation it exists for.
 
@@ -250,7 +250,7 @@ one-key rotation it exists for.
 
    This is the one step you cannot take for the user. A hook cannot submit
    to Claude Code's command queue (it accepts the TUI's own input only); the
-   `cs-rotate` mod's button can, and once the marker is armed it reads
+   `cs` mod's button can, and once the marker is armed it reads
    `1: /clear and continue from the handoff`. The keystroke is theirs unless
    they launched with `CS_ROTATE_FORCE_CTX`, when the mod counts twenty
    seconds down and runs the `/clear` itself — which is why the line must not

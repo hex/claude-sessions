@@ -279,7 +279,7 @@
   // ---- JSX ----
   // The order props are spelled in, so two trees that differ only in the order
   // the editor set them print the same.
-  // The order the shipped mod spells them in (mods/cs-rotate/hooks/register.tsx):
+  // The order the shipped mod spells them in (mods/cs/hooks/register.tsx):
   // layout, then the frame, then the ink, then what a Button is.
   var PROP_ORDER = ["key", "flexDirection", "justifyContent", "alignItems", "flexWrap", "flexGrow", "gap",
     "width", "height",

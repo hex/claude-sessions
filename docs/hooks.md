@@ -279,9 +279,9 @@ Known multi-machine limitation: if a session is cloned to a second machine while
 
 A run that overruns the hook's timeout leaves a trail that stops mid-run, which names the stage it hung on — the only evidence such a run ever produces, since it never reaches an exit where it could write a summary. A trail ending anywhere but `exit` or `emit` marks a killed run. The trace reads the clock through shell builtins only (`$EPOCHREALTIME`, or `$SECONDS` on bash 3.2), so it adds no forks to a hook already under suspicion for running slow. The file is machine-local — which machine was slow is half the finding — and one run in 64 trims it to its last 2000 lines. Opt-out per-session: `export CS_SCOPE_TRACE_DISABLE=1`.
 
-## cs-rotate (not a hook script — a Claude Code mod)
+## cs (not a hook script — a Claude Code mod)
 
-`mods/cs-rotate/` is a Claude Code function-hooks plugin: TypeScript that runs
+`mods/cs/` is a Claude Code function-hooks plugin: TypeScript that runs
 inside Claude Code's own process rather than a shell script it spawns. It adds
 one key to conversation rotation. Once the context window reaches 40% (the
 status bar's warn band, where the Stop hook gives its headroom notice), the band
@@ -341,7 +341,7 @@ that has not been told prints one notice naming the threshold and the way out,
 and records it in `${XDG_CONFIG_HOME:-~/.config}/cs/rotate-force-notice`. The
 end of a turn whose context reads at or past that percentage
 runs `/rotate` as if you had pressed `1`, once per conversation: the mod
-records the conversation id in `.cs/local/cs-rotate.forced` before it schedules
+records the conversation id in `.cs/local/cs.forced` before it schedules
 the run, so a `/rotate` that fails is not tried again at the end of every turn. A run
 the engine refuses shows as a toast; a run that starts but whose turn ends
 without arming a handoff (the skill refused, or was interrupted) is not seen
@@ -415,7 +415,7 @@ a handoff armed it adds one `cwd`, two `exists`, one `read` and one `id` call.
 The band renders a handful of times per turn, not per keystroke.
 
 
-`install.sh` deploys the mod's three files under `~/.claude/skills/cs-rotate/`
+`install.sh` deploys the mod's three files under `~/.claude/skills/cs/`
 beside the skills (the installer replaces a symlink an earlier opt-in left there
 with a real directory), and `cs -uninstall` removes the directory. Claude Code
 loads function-hooks plugins only behind `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`,
@@ -429,7 +429,7 @@ even when the shell carried one. cs writes no settings file.
 
 
 When Claude Code loads the plugin, at process start or on a plugin reload but
-not on `/clear`, the mod writes `.cs/local/cs-rotate.heartbeat` (one UTC
+not on `/clear`, the mod writes `.cs/local/cs.heartbeat` (one UTC
 timestamp) when the cwd has `.cs/local`, and `cs -doctor` reports the mod by
 that file inside a session: `last ran <stamp> in this session` as OK, or a WARN
 when the directory is there and no heartbeat is, naming the ways that happens
@@ -462,7 +462,7 @@ approximates the engine rather than porting it: a row that overruns the band is
 clipped and named, where the real one shrinks a Text to fit.
 
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
-`mods/cs-rotate/test/` (a fake engine drives the band, the press and the
+`mods/cs/test/` (a fake engine drives the band, the press and the
 heartbeat) and `claude plugin validate` when each binary is on PATH, and
 always checks the manifest, the threshold pin, and that the installer and
 the launch name the mod and the flag.
@@ -470,7 +470,7 @@ the launch name the mod and the flag.
 ## cs-update (not a hook script — a Claude Code mod)
 
 `mods/cs-update/` is a Claude Code function-hooks plugin, deployed and gated
-the same way as `cs-rotate`: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, which every
+the same way as the `cs` mod: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, which every
 `cs <name>` launch exports and `CS_NO_FUNCTION_HOOKS=1` withholds even when the
 launching shell already carries it.
 
@@ -486,7 +486,7 @@ opens the pane with a one-line fallback instead of a blank body.
 
 The pane is for the lead conversation of a cs session only: the mod checks
 `.cs/local/state`'s `claude_session_id` against its own conversation id, as
-`cs-rotate`'s button does, and a `.cs/local/disabled` directory refuses it
+the `cs` mod's button does, and a `.cs/local/disabled` directory refuses it
 outright. A teammate claude in the same directory reads the same state file
 and does not match, so it gets no pane of its own.
 
@@ -529,11 +529,11 @@ the launch pane; `/cs-update` still opens it with the option off.
 
 `install.sh` deploys the mod's three files (`.claude-plugin/plugin.json`,
 `hooks/hooks.json`, `hooks/register.tsx`) under `~/.claude/skills/cs-update/`,
-the same layout as `cs-rotate`, and `cs -uninstall` removes the directory. When
+the same layout as the `cs` mod, and `cs -uninstall` removes the directory. When
 Claude Code loads the plugin, the mod writes `.cs/local/cs-update.heartbeat`
 (one UTC timestamp) when the cwd has `.cs/local`, and `cs -doctor` reports the
 mod from that file through the same `_doctor_check_mod` check it runs for
-`cs-rotate`: OK naming when it last ran in this session, or a WARN naming the
+the `cs` mod: OK naming when it last ran in this session, or a WARN naming the
 ways it has not (no cs launch since the install, function hooks withheld by
 `CS_NO_FUNCTION_HOOKS` or a preset `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=0`, or a
 Claude Code that no longer loads mods behind the flag).

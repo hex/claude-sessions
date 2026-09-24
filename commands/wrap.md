@@ -30,7 +30,7 @@ Run this once, from the session root, only after the three passes above complete
 [ -z "$CLAUDE_CODE_SESSION_ID" ] || printf '%s\n' "$CLAUDE_CODE_SESSION_ID" > .cs/local/wrapped
 ```
 
-It names the conversation this wrap finished in (its own id, so a teammate's wrap never marks the lead), so the cs-rotate band stops offering `2: wrap up this session` until the next prompt. Skip it if any pass failed: a wrap that did not finish should stay one key away.
+It names the conversation this wrap finished in (its own id, so a teammate's wrap never marks the lead), so the cs mod's band stops offering `2: wrap up this session` until the next prompt. Skip it if any pass failed: a wrap that did not finish should stay one key away.
 
 ## Report
 

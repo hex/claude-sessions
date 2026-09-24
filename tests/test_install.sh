@@ -599,7 +599,7 @@ test_manifest_arrays_match_repo_files() {
     fi
 }
 
-# The rotate mod deploys as plain files under ~/.claude/skills/cs-rotate, so
+# The rotate mod deploys as plain files under ~/.claude/skills/cs, so
 # the manifest lists each one. Every listed file exists, and every file the
 # mod needs (manifest, hooks list, module) is listed; the bun tests are not.
 test_mod_files_manifest_matches_the_repo() {
@@ -628,36 +628,36 @@ test_install_deploys_the_rotate_mod_and_uninstall_removes_it() {
         cmp -s "$SCRIPT_DIR/../mods/$entry" "$fake_home/.claude/skills/$entry" \
             || { echo "  FAIL: mod file not deployed or differs: $entry"; return 1; }
     done
-    [ ! -e "$fake_home/.claude/skills/cs-rotate/test" ] \
+    [ ! -e "$fake_home/.claude/skills/cs/test" ] \
         || { echo "  FAIL: the mod's bun tests were deployed"; return 1; }
     printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 || { echo "  FAIL: cs -uninstall exited non-zero"; return 1; }
-    [ ! -d "$fake_home/.claude/skills/cs-rotate" ] \
-        || { echo "  FAIL: uninstall left ~/.claude/skills/cs-rotate behind"; return 1; }
+    [ ! -d "$fake_home/.claude/skills/cs" ] \
+        || { echo "  FAIL: uninstall left ~/.claude/skills/cs behind"; return 1; }
 }
 
-# An earlier opt-in shape had the person symlink ~/.claude/skills/cs-rotate at
-# the checkout. Copying through that link would overwrite the checkout's own
+# An earlier opt-in shape had the person symlink the mod's directory under
+# ~/.claude/skills at the checkout. Copying through that link would overwrite the checkout's own
 # files and leave the link in place; the installer replaces the link with a
 # real directory and leaves the link's target alone.
 test_install_replaces_a_symlinked_mod_directory() {
     local fake_home="$TEST_TMPDIR/modlink-home" elsewhere="$TEST_TMPDIR/modlink-target"
     mkdir -p "$fake_home/.claude/skills" "$elsewhere/hooks"
     echo 'sentinel' > "$elsewhere/hooks/register.tsx"
-    ln -s "$elsewhere" "$fake_home/.claude/skills/cs-rotate"
+    ln -s "$elsewhere" "$fake_home/.claude/skills/cs"
     HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || { echo "  FAIL: install.sh exited non-zero"; return 1; }
-    [ ! -L "$fake_home/.claude/skills/cs-rotate" ] && [ -d "$fake_home/.claude/skills/cs-rotate" ] \
+    [ ! -L "$fake_home/.claude/skills/cs" ] && [ -d "$fake_home/.claude/skills/cs" ] \
         || { echo "  FAIL: the symlink was not replaced by a real directory"; return 1; }
     assert_eq "sentinel" "$(cat "$elsewhere/hooks/register.tsx")" "the link's target is untouched" || return 1
-    cmp -s "$SCRIPT_DIR/../mods/cs-rotate/hooks/register.tsx" "$fake_home/.claude/skills/cs-rotate/hooks/register.tsx" \
+    cmp -s "$SCRIPT_DIR/../mods/cs/hooks/register.tsx" "$fake_home/.claude/skills/cs/hooks/register.tsx" \
         || { echo "  FAIL: the module was not deployed into the real directory"; return 1; }
     # A real mod directory whose hooks/ is the symlink redirects the copy the
     # same way; the installer replaces that link too.
     local sub_home="$TEST_TMPDIR/modsub-home" sub_target="$TEST_TMPDIR/modsub-target"
-    mkdir -p "$sub_home/.claude/skills/cs-rotate" "$sub_target"
+    mkdir -p "$sub_home/.claude/skills/cs" "$sub_target"
     echo 'sentinel' > "$sub_target/register.tsx"
-    ln -s "$sub_target" "$sub_home/.claude/skills/cs-rotate/hooks"
+    ln -s "$sub_target" "$sub_home/.claude/skills/cs/hooks"
     HOME="$sub_home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || { echo "  FAIL: install.sh exited non-zero (subdir link)"; return 1; }
-    [ ! -L "$sub_home/.claude/skills/cs-rotate/hooks" ] && [ -d "$sub_home/.claude/skills/cs-rotate/hooks" ] \
+    [ ! -L "$sub_home/.claude/skills/cs/hooks" ] && [ -d "$sub_home/.claude/skills/cs/hooks" ] \
         || { echo "  FAIL: the hooks/ symlink was not replaced by a real directory"; return 1; }
     assert_eq "sentinel" "$(cat "$sub_target/register.tsx")" "the subdirectory link's target is untouched" || return 1
 }
@@ -771,7 +771,26 @@ test_install_removes_the_retired_hint_mod() {
         echo "  FAIL: retired cs-hint mod directory survived the install"
         return 1
     fi
-    assert_dir "$fake_home/.claude/skills/cs-rotate" "the shipped mod is still deployed" || return 1
+    assert_dir "$fake_home/.claude/skills/cs" "the shipped mod is still deployed" || return 1
+}
+
+# The cs mod shipped as cs-rotate before it took the name cs; a copy left
+# under the old name keeps loading into every Claude Code the machine starts,
+# beside the mod under its current name.
+test_install_removes_the_mod_under_its_old_name() {
+    local fake_home="$TEST_TMPDIR/home-oldmodname"
+    mkdir -p "$fake_home/.claude/skills/cs-rotate/hooks"
+    echo '{"modules":["./register.tsx"]}' > "$fake_home/.claude/skills/cs-rotate/hooks/hooks.json"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    if [ -d "$fake_home/.claude/skills/cs-rotate" ]; then
+        echo "  FAIL: the mod's old cs-rotate directory survived the install"
+        return 1
+    fi
+    cmp -s "$SCRIPT_DIR/../mods/cs/hooks/register.tsx" "$fake_home/.claude/skills/cs/hooks/register.tsx" \
+        || { echo "  FAIL: the mod was not deployed under ~/.claude/skills/cs"; return 1; }
 }
 
 test_install_writes_version_stamp() {
@@ -1455,4 +1474,5 @@ run_test test_install_refreshes_registered_statusline_despite_marker
 run_test test_statusline_disable_sets_and_enable_clears_declined_marker
 run_test test_uninstall_removes_declined_marker
 run_test test_install_removes_the_retired_hint_mod
+run_test test_install_removes_the_mod_under_its_old_name
 report_results

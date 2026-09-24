@@ -12,7 +12,7 @@ export const PANE = 'cs-update'
 // The /config row (`cs-update.showReleaseNotes`): off, the launch pane is
 // skipped and /cs-update still opens it.
 export const OPTION = 'showReleaseNotes'
-// Doctor observes the mod RUNNING, not merely installed (see cs-rotate).
+// Doctor observes the mod RUNNING, not merely installed (see the cs mod).
 export const HEARTBEAT = '.cs/local/cs-update.heartbeat'
 // The finished pane's outcome, written on a clean `cs -update` exit and read
 // back on the reloaded module's next render: installing the update rewrites
@@ -57,7 +57,7 @@ export function parseSpan(text: string): Section[] {
   return sections
 }
 
-// What the pane shows. Module state survives a /clear (as in cs-rotate) and is
+// What the pane shows. Module state survives a /clear (as in the cs mod) and is
 // dropped on a reload, which is what "once per load" means. A finished update
 // is the one exception: the DONE marker survives the reload the update itself
 // causes, and the marker is redrawn from disk, either by session.start at the
@@ -123,7 +123,7 @@ export function register(on: On, options: PluginOptions) {
           {(phase === 'done' || phase === 'failed') && <Text>{outcome}</Text>}
           {(phase === 'idle' || phase === 'failed') && (
             <Box>
-              {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured in cs-rotate), so the keys stand in a Box */}
+              {/* a Button is a block: nested in a Text the engine refuses the whole tree (measured in the cs mod), so the keys stand in a Box */}
               <Button key="cs-update-now" hotkey="1" plain label="update now" onPress={() => runUpdate($)} />
               <Text dimColor>{'   Esc: later'}</Text>
             </Box>
@@ -173,7 +173,7 @@ export function register(on: On, options: PluginOptions) {
 // The conversation cs launched is the one whose id cs recorded before the
 // launch; a teammate in the same directory reads the same file and does not
 // match. A directory without the file is not a cs session: no pane. The id
-// may be quoted (KEEP IN SYNC with ownsRotation in mods/cs-rotate).
+// may be quoted (KEEP IN SYNC with ownsRotation in mods/cs).
 async function isLead($: EngineInterface, cwd: string): Promise<boolean> {
   if (await $.fs.exists(`${cwd}/.cs/local/disabled`)) return false
   let state: string
