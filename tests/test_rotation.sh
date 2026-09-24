@@ -184,6 +184,19 @@ test_rotate_skill_has_a_home_for_conversation_only_facts() {
     fi
 }
 
+# A successor appends its report to the handoff it consumed, and nothing
+# committed it: step 7's prune deletes spent handoffs on the premise that git
+# history keeps them, which is false for an uncommitted report (Codex and
+# Fable, 2026-09-24). The prune must skip a handoff with uncommitted changes,
+# and step 8 must stage the report.
+test_rotate_skill_keeps_successor_reports() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "it has no uncommitted changes" \
+        "the prune must not delete an uncommitted successor report" || return 1
+    assert_file_contains "$skill" "Successor report" \
+        "step 8 must stage consumed handoffs carrying a report" || return 1
+}
+
 test_rotate_skill_requires_provenance_on_claims() {
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
     assert_file_contains "$skill" "was established" \
@@ -423,6 +436,7 @@ test_rotate_skill_reads_parent_from_state_not_the_launch_env() {
 run_test test_rotate_skill_exists_with_frontmatter
 run_test test_rotate_skill_has_a_home_for_rejected_alternatives
 run_test test_rotate_skill_has_a_home_for_conversation_only_facts
+run_test test_rotate_skill_keeps_successor_reports
 run_test test_rotate_skill_requires_provenance_on_claims
 run_test test_rotate_skill_puts_the_next_step_first
 run_test test_rotate_skill_arms_last

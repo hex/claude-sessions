@@ -195,22 +195,28 @@ one-key rotation it exists for.
 
    Then prune what is spent. A `consumed`, `discarded` or `superseded` handoff
    has done its job, and git history keeps it after the file is gone, so
-   nothing is lost by dropping it. Delete one only when all three hold:
+   nothing is lost by dropping it. Delete one only when all four hold:
 
    - its `status:` is one of those three — never `status: unconsumed`, which
      may be a co-worker's armed rotation and is not yours to drop;
    - its `created:` date is more than 30 days before today;
    - it is not among the 10 newest handoffs in the directory by `created:`,
      counting every handoff whatever its status, so a week of heavy rotation
-     never empties the store.
+     never empties the store;
+   - it has no uncommitted changes (`git status --porcelain -- <file>`
+     prints nothing). The conversation that consumed a handoff appends its
+     `## Successor report` to it, and git history keeps only what was
+     committed.
 
    Take the age from `created:` in the frontmatter, never the file's mtime.
    `.cs/handoffs/` is shared, and a clone stamps every file with its checkout
    time: mtime would read as "all new" on a fresh machine and prune nothing,
    while saying nothing about when the handoff was written. Stage the
    deletions with step 8's commit.
-8. Commit the supersedings and any tracked session state, like narratives.
-   Stage those paths by name.
+8. Commit the supersedings, every consumed handoff whose uncommitted change
+   is a `## Successor report` appended by the conversation that took it
+   over, and any tracked session state, like narratives. Stage those paths
+   by name.
 9. Arm it, LAST: write its basename (no path) to `.cs/local/pending-handoff`.
    Machine-local state — never commit it.
 
