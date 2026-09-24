@@ -461,6 +461,16 @@ a plain script and `tests/test_mods_layout.sh` drives through bun. It
 approximates the engine rather than porting it: a row that overruns the band is
 clipped and named, where the real one shrinks a Text to fit.
 
+The mod also registers `/queue`, marked immediate so it runs while a turn is
+in flight instead of waiting for it to end. `/queue <task>` runs
+`cs -queue add "<task>"` through `$.process.run` by the path the launch
+exports in `CS_BIN` (no shell; the claude process's `PATH` is not the
+launching shell's), and `/queue` alone runs `cs -queue list` and prints it.
+The child inherits the claude process's environment, so the
+`CLAUDE_SESSION_META_DIR` the launch exported picks the session's queue. A
+refused task (empty, or more than one line) prints cs's exit code and the end
+of its stderr as cs wrote them.
+
 Tests: `tests/test_mod_rotate.sh` runs the bun unit tests under
 `mods/cs/test/` (a fake engine drives the band, the press and the
 heartbeat) and `claude plugin validate` when each binary is on PATH, and

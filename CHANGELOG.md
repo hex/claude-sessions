@@ -6,6 +6,9 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Added
+- `/queue <task>` in a cs session adds a task to the walk-away queue, even while Claude is mid-turn; `/queue` alone lists the queue. It comes from the `cs` mod and runs `cs -queue add` through `CS_BIN`.
+
 ### Changed
 - Rotation handoffs label each claim, not each bullet. A cause inferred beside a measured symptom is `assumed`, and a claim that something fails carries the command that failed and what it printed. Across 40 handoffs "measured" appeared in 38 and "assumed" in one, and the two wrong claims a review found were both unlabelled conclusions.
 - The handoff body has a `Conversation-only facts` section in its first pass, for exact readings, run ids, counts, event order and the user's own words. The writer checks each such fact off before the first commit. The skill no longer says exact readings live in the second pass, which contradicted the two-pass rule.

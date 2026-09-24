@@ -1,5 +1,5 @@
 // ABOUTME: Unit tests for the cs mod against a fake engine `$`.
-// ABOUTME: Covers the band's gate (crit, working, survey), the three presses and the wrap key's two-press guard, the armed handoff, and the heartbeat.
+// ABOUTME: Covers the band's gate (crit, working, survey), the three presses and the wrap key's two-press guard, the armed handoff, the heartbeat, and /queue.
 import { test, expect, beforeEach } from 'bun:test'
 
 // The plugin realm provides `h` and `Fragment` as globals; the test does the same.
@@ -32,6 +32,10 @@ let asks: { question: string; options: any }[]
 let panes: { op: 'open' | 'close'; args: any }[]
 // What the person does with the next dialog: a label, or a rejection (dismissed, or a `-p` run).
 let answer: string | Error
+// What `$.process.run` was asked to run, and what it answers with (or rejects with).
+let runs: { argv: string[]; init: any }[]
+let runResult: { exitCode: number; stdout: string; stderr: string } | Error
+let commands: any[]
 const timer = (kind: 'after' | 'every') => (ms: number, fn: () => void) => {
   const t = { ms, fn, kind, cancelled: false }
   timers.push(t)
@@ -45,7 +49,17 @@ const $ = {
     id: async () => sessionId,
   },
   prompt: { fill: async (args: any) => { filled.push(args); return { isFilled: true } } },
-  command: { run: async (args: any) => { ran.push(args); return { text: '' } } },
+  command: {
+    run: async (args: any) => { ran.push(args); return { text: '' } },
+    register: async (spec: any) => { commands.push(spec); return { command: spec.name } },
+  },
+  process: {
+    run: async (argv: string[], init: any) => {
+      runs.push({ argv, init })
+      if (runResult instanceof Error) throw runResult
+      return runResult
+    },
+  },
   ui: {
     resolve: async () => ({ Box: 'Box', Text: 'Text', Button: 'Button', Markdown: 'Markdown' }),
     invalidate: (event: string) => { invalidated.push(event) },
@@ -81,6 +95,7 @@ beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
   percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
   timers = []; invalidated = []; toasts = []; asks = []; answer = WRAP_YES; panes = []
+  runs = []; runResult = { exitCode: 0, stdout: '', stderr: '' }; commands = []
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   envVars = {}
@@ -1089,4 +1104,50 @@ test('the pane counts down on a twenty-block bar in the ramp\'s colour, beside t
   expect(textOf(b)).toBe('█'.repeat(5) + '░'.repeat(15))
   expect(b.props.color).toBe('rgb(180,83,9)')
   expect(JSON.stringify(await pane())).toContain('press 1 to clear now, or send a prompt to stay')
+})
+
+// /queue hands the task to `cs -queue add` by the path the launch exported,
+// which resolves this session's queue from the environment claude inherited.
+const startSession = () => hooks['session.start']($, { cwd: '/work', surface: 'terminal', isInteractive: true }, async (e) => ({ cwd: e.cwd }))
+const queue = (args: string) => hooks['command.run:queue']($, { command: 'queue', args }, async () => ({ text: 'unhandled' }))
+
+test('the mod registers /queue at load, to run at once even mid-turn', async () => {
+  await startSession()
+  expect(commands).toHaveLength(1)
+  expect(commands[0]).toMatchObject({ name: 'queue', immediate: true, argumentHint: '[task]' })
+})
+
+test('/queue with a task runs cs -queue add with the task as one argument and says it is queued', async () => {
+  envVars.CS_BIN = '/opt/cs/bin/cs'
+  const r = await queue('fix the flaky "rotate" test; then rerun it')
+  expect(runs.map(x => x.argv)).toEqual([['/opt/cs/bin/cs', '-queue', 'add', 'fix the flaky "rotate" test; then rerun it']])
+  expect(r).toEqual({ text: 'Queued: fix the flaky "rotate" test; then rerun it' })
+})
+
+test('/queue with no task, or only spaces, prints cs -queue list', async () => {
+  envVars.CS_BIN = '/opt/cs/bin/cs'
+  runResult = { exitCode: 0, stdout: 'Pending:\n  1. first\n  2. second\n', stderr: '' }
+  expect(await queue('')).toEqual({ text: 'Pending:\n  1. first\n  2. second' })
+  expect(await queue('   ')).toEqual({ text: 'Pending:\n  1. first\n  2. second' })
+  expect(runs.map(x => x.argv)).toEqual([['/opt/cs/bin/cs', '-queue', 'list'], ['/opt/cs/bin/cs', '-queue', 'list']])
+})
+
+test('a refused add prints the exit code and cs\'s own stderr, verbatim', async () => {
+  envVars.CS_BIN = '/opt/cs/bin/cs'
+  runResult = { exitCode: 1, stdout: '', stderr: "warning: an earlier line\n\nError: task bodies must be a single line (the queue's done log and listing are line-oriented)\n" }
+  const r = await queue('one\ntwo')
+  expect(runs[0].argv).toEqual(['/opt/cs/bin/cs', '-queue', 'add', 'one\ntwo'])
+  expect(r).toEqual({ text: "cs -queue add exited 1.\nwarning: an earlier line\nError: task bodies must be a single line (the queue's done log and listing are line-oriented)" })
+})
+
+test('a run that cannot start says why', async () => {
+  envVars.CS_BIN = '/opt/cs/bin/cs'
+  runResult = new Error('spawn ENOENT')
+  expect(await queue('')).toEqual({ text: 'cs -queue list did not run: spawn ENOENT' })
+})
+
+test('without CS_BIN /queue says the launch did not say where cs is, and runs nothing', async () => {
+  const r = await queue('something')
+  expect(runs).toHaveLength(0)
+  expect(r).toEqual({ text: 'The launch did not say where cs is (CS_BIN); run `cs -queue add "<task>"` from a shell in this session.' })
 })
