@@ -50,3 +50,53 @@ Then:
 - measured (agent, throwaway session dir): `cs -queue add` prints nothing on success (exit 0); empty/whitespace -> exit 1 `Error: cs -queue add needs a non-empty task`; multi-line now -> exit 1 `task bodies must be a single line (the queue's done log and listing are line-oriented)`.
 - Contamination record: this conversation (bbc43868) saw the full golds of tab-title Q1-Q10 and first-paint Q1-Q10 (goldsmith returned them). Q11-Q22 of all keys and all held-out golds were never shown to any conversation.
 - Leftover on ghost: dir `ci/wt-queue` (agent's worktree runs); harmless.
+
+# 4. Primary Request and Intent
+
+- Alex wants handoff quality driven up by measurement, "until we have the best results", with the old spec as a control and a rejection region set before data. After seeing the noise he accepted that the honest outcome may be "no winner".
+- Side request this conversation, now shipped: `/queue` to queue tasks while Claude is busy, via the mods API; Alex asked to rename the mod rather than fold into `cs-rotate`.
+- Durable intent (inherited): handoffs should carry facts correctly, not merely more of them; spec changes are measured, not argued.
+
+# 5. Key Technical Concepts
+
+- **Eval pipeline** (`.cs/research/handoff-eval/harness.py`, gitignored, machine-local): writers (opus, `claude -p --restricted --tools Read,Write --permission-mode acceptEdits`) distil `sources/<src>/core.txt` under a spec into `handoff.md`; successors (opus, Read only) answer the key's briefs from the handoff alone; a blind grader (fable, Read only) grades each answer CORRECT 1 / PARTIAL .5 / MUST_LOOKUP 0 / WRONG -1. Handoff score = mean over non-control briefs; a missed control voids it to -1. METRIC = 100 x mean over sources of (cand mean - ctrl mean); REJECT_BELOW = 100 x mean of 2 x sqrt(sd_c^2/n_c + sd_b^2/n_b).
+- Every call runs in a sandbox under `/private/tmp/claude-501/handoff-eval/<run>/` (outside any repo) with `--strict-mcp-config --no-session-persistence --output-format json` and the cs env scrubbed (`SCRUBBED_ENV` in harness.py). Canary probe (`harness.py probe`) showed no repo/branch/project visible.
+- **Out-of-tree state** (`~/.cache/handoff-eval/`, DO NOT READ from the loop conversation): `keys/<src>/briefs.json` (22 briefs each: Q1-2 control, Q3-8 + Q11-19 once, Q9-10 + Q20-22 trap), `heldout/test-races/{core.txt,source.json}`, `runs/<id>/` (handoffs, mapping.json, writes.json, scores.json, SUMMARY.txt), `baseline` (run id marker).
+- Sources: `tab-title` (parent 524ba3e7, cut before line 5049, 475 KB, byte-identical to the old A/B core.txt), `first-paint` (be426d62, cut 2930, 270 KB), held-out `test-races` (655bde7e, cut 2206, 200 KB). Cut = last user `<command-name>/rotate</command-name>` line; only these 4 parents had one (others rotated by forced rotation).
+- harness subcommands (read in source): `serialise <uuid> <dir>` cuts a parent transcript; `round [--writers N] [--control-writers N] [--sources a,b] [--control-from RUN] [--grader M]`; `verify` = the loop's Verify (first call makes a baseline, later calls 10 cand/source reusing the baseline's control); `verify --resume RUN` finishes a run whose grading died, reusing saved answers/grades; `rescore RUN [--baseline]` re-answers and re-grades a run's handoffs against current keys in a new run; `probe`.
+- Power (measured sd ~.15): 10 cand vs 10 ctrl per source should give REJECT_BELOW ~9 on 20-brief keys (assumed from the formula, not yet measured).
+
+# 6. Files and Code Sections
+
+- `.cs/research/handoff-eval/harness.py`, `serialise.jq` (reproduces the old core.txt byte-for-byte), `specs/control.md` (= main's SKILL.md before 8474134), `sources/`, `PREREG.md` (design + Amendment 1). Gitignored; this machine only.
+- `.cs/research/handoff-ab-2026-09-24/` (morning A/B assets; `succ/` now holds the 6 recovered successor sandboxes).
+- `skills/rotate/SKILL.md`: the loop target (step 3). `tests/test_rotation.sh` pins its phrases.
+- Shipped today on main (not pushed): `mods/cs/` (renamed from `mods/cs-rotate/`, `/queue` in `hooks/register.tsx`), `lib/75-launch.sh` (`export CS_BIN` every launch, ~line 310), `lib/55-queue.sh` (`_queue_require_single_line` ~line 79, shared by add/spawn/mail), `lib/01-manifests.sh` (`cs-rotate` in RETIRED_SKILLS), CHANGELOG Unreleased.
+
+# 7. Problem Solving
+
+- Handoff errors found and reported in the previous handoff's Successor report (appended to `2026-09-24-handoff-eval-autoresearch.md`): succ/ was not lost; prompts were recoverable from the parent transcript.
+- Fable 429 mid-grading: made grading resumable instead of re-running writers.
+- Noise too high for small edits: widened keys 10 -> 22 briefs; threshold 18 -> 10.5 at no writer cost.
+- /queue agent correctly stopped when `CS_UPDATE_BIN` turned out to exist only with a pending update; Alex ruled CS_BIN always + retire CS_UPDATE_BIN + refuse multi-line tasks everywhere.
+
+# 8. Pending Tasks
+
+Native list (session-keyed, inherited):
+- #671 [in_progress] Handoff eval harness + loop on skills/rotate/SKILL.md (this handoff's Next Step).
+- #672 [completed] mod rename; #673 [completed] /queue.
+- #554 [pending] PARKED: SessionStart notice for tool calls left pending.
+- #606 [pending] POSTPONED: cs --remote via Remote Control.
+Not in the native list:
+- Release v2026.9.22 via `/release` (tag only after CI green on the release commit); main 29 ahead of origin.
+- `cs -rm measure-wake` (asked yesterday, unanswered).
+- Doctor warning "no shadow ref refs/worktree/cs/session/da093a8c-..." (not investigated).
+- ghost leftover dir `ci/wt-queue` (harmless).
+
+# 9. Current Work
+
+- Nothing running: round 0, rescore, both gates, all agents finished; tmux `-L csqueue` killed; worktrees `wt-mod-rename` and `wt-queue` removed with their branches.
+- main `5c49a75` installed, doctor drift OK.
+- Uncommitted before this rotation: the narrative and the previous handoff's successor report; step 8 of this rotation commits them.
+
+**Completeness:** written from live context, no compaction. Not carried: the per-brief golds (deliberately; contamination rule) and the verbatim agent reports (summarised in section 3).
