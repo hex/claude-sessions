@@ -47,125 +47,124 @@ one-key rotation it exists for.
    ---
    ```
 
-   The body has nine sections, in this order, each under its numbered
-   heading: 1. Next Step; 2. Settled and rejected; 3. Conversation-only
-   facts; 4. Primary Request and Intent; 5. Key Technical Concepts; 6. Files
-   and Code Sections (with the snippets that matter); 7. Problem Solving;
-   8. Pending Tasks; 9. Current Work. Write for a successor with zero
-   conversation memory. A section with nothing in it says `none` rather
-   than disappearing: an empty section stated is a claim, a missing one is
-   indistinguishable from a section the writer ran out of context to fill.
-   Under cs the native task list is keyed to the session, not to this
-   conversation (`CLAUDE_CODE_TASK_LIST_ID` is the session name), so it
-   survives the `/clear` and the successor inherits it. Pending Tasks still
-   lists every open native item with its status: the handoff has to read
-   whole on its own, and the successor reconciles the list it inherited
-   against what you wrote rather than mirroring the handoff into it.
+   The body is the template below, copied and filled in. Keep every
+   heading and every slot label, in this order; replace each `<...>` with
+   what it asks for, and write `none` in a slot that has nothing rather
+   than dropping it: an empty slot stated is a claim, a missing one is
+   indistinguishable from a slot the writer ran out of context to fill.
+   Write for a successor with zero conversation memory, who acts on
+   1. Next Step without looking anything up and trusts every line equally
+   unless the line tells it not to.
 
-   **Build the ledger before you write any prose.** A handoff is only as
-   good as the facts that survive into it, and a writer who summarises from
-   memory keeps whichever facts happen to be vivid. So the first thing you
-   do is not writing: go back over the conversation from its first message
-   to its last, in order, and at every user message and every tool result
-   copy out each item below that it contains. Copy, do not paraphrase: the
-   successor will quote your ledger back as an answer, and a number
-   rounded or an error reworded is a wrong answer.
+   ```
+   # 1. Next Step
+   Goal: <one line: what finishing this step achieves>
+   Where: <host, checkout path, branch, and the commit it should be at>
+   Check first: <command that shows whether this is already done or
+     still running> -> done if <what it prints>; running if <what it prints>
+   If done: <what to do instead>
+   If running: <what to do instead; never start a second copy>
+   Then run: <the exact command(s), with every flag and path inline>
+   Expect: <what success prints and roughly how long it takes>
+   If it fails: <the known failure modes, and the recovery for each>
+   After: <the step that follows, one line>
+   Ask the user before: <anything in this step that is theirs to decide>
 
-   - **IDs**: run, job, task, PR, commit and conversation identifiers;
-     branch, host, pid, port, tmux target; every path the conversation
-     created or depended on.
-   - **READINGS**: every number observed: counts, scores, sizes, timings,
-     percentages, versions, exit codes, and the moment it was read at.
-   - **ERRORS**: every failure, as the command that failed plus the text it
-     printed, verbatim, trimmed to the line that matters.
-   - **USER**: every request, ruling, correction, preference and answer the
-     user gave, quoted in their own words, with what it answered. Keep them
-     close to their own words; a correction paraphrased is a correction
-     drifted, and the successor has no way back to the original.
-   - **DECISIONS**: every choice made, every alternative
-     rejected with the reason they lost, every approach tried that
-     failed and the symptom it failed on.
-   - **UNVERIFIED**: every claim the conversation relied on but never
-     checked, every inference from a symptom, every "should" and "probably".
-   - **STATE**: what is running, where, and how to tell whether it finished;
-     what is uncommitted; what was promised and not done.
+   # 2. Settled and rejected
+   - DECIDED: <decision> | by: <user, quoted; or you, with why> | <date>
+   - REJECTED: <alternative> | lost because: <reason> | by: <who>
+   - FAILED: <approach tried> | symptom: <command -> what it printed>
 
-   Then check each one off as it lands in the body: DECISIONS go to Settled
-   and rejected; IDS, READINGS, ERRORS, USER and UNVERIFIED go to
-   Conversation-only facts; STATE feeds Next Step and Current Work. Nothing
-   in the ledger may be dropped for length. The ledger is the part of the
-   handoff that nothing else can recover; spend length on it and
-   keep everything else concise.
+   # 3. Conversation-only facts
+   ## User's words
+   - "<verbatim quote>" -- <what it answered or ruled on>
+   ## Identifiers
+   - <label>: <run/job/commit/PR/pid/branch/host/path> = <value> -- <what it is>
+   ## Readings
+   - <label>: <what was measured> = <exact value> (<when, and by what command>)
+   ## Errors
+   - <label>: `<command>` printed `<verbatim line>` -- <what it meant>
+   ## Not verified
+   - assumed: <claim the work relies on that nobody checked> -- <how to check>
+   ## Traps
+   - <thing a successor would naturally believe or do that is wrong here>
+     -- <why, and what to do instead>
 
-   **1. Next Step opens the body.** The successor is told to execute it, and
-   retrieval degrades over a long document, so the thing it needs first must
-   not be the thing it finds last. It carries every fact its first action
-   needs, inline: the exact command, path, host, branch or flag, even when
-   the same fact is in a committed file, an older handoff or memory, because
-   the successor acts on it without looking anything up. An action that
-   starts work (a test run, a build, a merge, a deploy) first says how to
-   tell whether it is already done or still running, and what to do in each
-   case.
+   # 4. Primary Request and Intent
+   # 5. Key Technical Concepts
+   # 6. Files and Code Sections
+   # 7. Problem Solving
+   # 8. Pending Tasks
+   # 9. Current Work
+   Completeness: <from live context or from a compacted summary; what you
+     could not carry>
+   ```
 
-   **2. Settled and rejected** is the DECISIONS ledger, one line each:
-   `<decision or rejected alternative> | <who decided, with the user's words
-   when it was the user> | <reason, or the symptom it failed on>`. A commit
-   carries what was done and never what was rejected, so a successor without
-   this re-opens settled questions. Write `none` when there is nothing.
+   Slot rules:
 
-   **3. Conversation-only facts** is the rest of the ledger, grouped under
-   the category names above (IDS, READINGS, ERRORS, USER, UNVERIFIED), one
-   fact per line, each line starting with its provenance label:
-
-   - `measured:` you ran it and saw the result; give the command and the
-     reading.
-   - `read in source:` give the path (and line) you read it from.
-   - `inherited:` from a prior handoff, memory or a reviewer; name which.
-   - `user:` the user said it; quote them.
-   - `assumed:` everything else, including every UNVERIFIED line and every
-     cause inferred from a measured symptom.
-
-   Say how each claim was established: a claim read off a README and a claim
-   measured live look identical to a successor, and it will build on both
-   equally. The label goes on the claim, not on the bullet or heading it
-   sits under. A claim that something fails, is unavailable or does not work
-   carries the command that failed and what it printed; without them it is
-   `assumed`. When you cannot recall which label fits, `assumed` is the
-   honest answer and costs nothing. Write `none` for an empty category.
-
-   Four rules govern the body, all following from where it goes: step 4
-   commits it, and the next conversation reads it as its opening prompt.
-
+   - **1. Next Step opens the body** because retrieval degrades over a long
+     document and the successor executes it first. Every slot is filled
+     inline, even when the same fact is in a committed file, an older
+     handoff or memory: the successor acts without looking anything up.
+     "Check first" exists because an action that starts work (a test run,
+     a build, a merge, a deploy) must say how to tell whether it is
+     already done or still running, and what to do in each case; "rerun the suite"
+     with no check starts a second run beside one that may still be going.
+   - **Settled and rejected** has one line per decision, every alternative
+     rejected with the reason they lost, and every approach that failed
+     with the symptom it failed on. A commit carries what was done and
+     never what was rejected.
+   - **3. Conversation-only facts** holds everything that dies with this
+     conversation. Before step 4 commits pass one, list from memory every
+     exact reading, identifier, error, user statement and unchecked claim
+     the conversation produced, and check each one off against a slot;
+     add what is missing. One fact per line; length spent here is how many
+     facts survive, so keep everything else concise.
+   - **The label says how each claim was established**, and it goes
+     on the claim, not on the bullet or heading above it: `measured` (you
+     ran it; the command and reading are on the line), `read in source` (path), `inherited`
+     (from a prior handoff, memory or a reviewer), `user` (quoted), or
+     `assumed`. A cause inferred from a measured symptom is `assumed`. A
+     claim that something fails, is unavailable or does not work carries
+     the command that failed and what it printed, or it is `assumed`.
+     When you cannot recall which, `assumed` is the honest answer.
+   - **User's words** stay close to their own words: a correction
+     paraphrased is a correction drifted. Your own reasoning condenses to
+     what it concluded.
+   - **Traps** is for the mistakes a capable newcomer would make here: a
+     plausible command that targets the wrong host, a file that looks
+     stale but is load-bearing, a result that looks final but was noise.
+   - **Sections 4-9** are short pointers. Under cs the
+     native task list is keyed to the session, not to this conversation
+     (`CLAUDE_CODE_TASK_LIST_ID` is the session name), so it survives the
+     `/clear` and the successor inherits it; 8. Pending Tasks still lists
+     every open native item with its status, since the handoff must read
+     whole on its own.
    - **Redact.** API keys, tokens, passwords and personally identifying
-     information stay out of the file, including out of the verbatim
-     ledger. `.cs/handoffs/` is tracked, so writing one here publishes it;
-     credentials live in `cs -secrets`. Name the secret's purpose instead:
-     "the deploy token, in `cs -secrets get DEPLOY_TOKEN`".
-     Re-read the finished body before step 4 commits it: an exact reading is where a
-     secret hides.
+     information stay out of every slot. `.cs/handoffs/` is tracked, so
+     writing one here publishes it; credentials live in `cs -secrets`.
+     Name the secret's purpose instead: "the deploy token, in
+     `cs -secrets get DEPLOY_TOKEN`".
+     Re-read the finished body before step 4 commits it: an exact
+     reading is where a secret hides.
    - **Reference committed work; restate what a successor cannot recover.**
-     Work captured in a commit, spec, plan, diff or narrative gets a path and
-     a one-line pointer in sections 4-9, never a re-summary. The ledger is
-     the opposite case: it holds only what has no path to point at. A
-     pointer to a script or command says in one clause what it does when
-     run, read from the script itself rather than remembered.
-   - **Sections 4-9 are short.** Each is a handful of lines of pointers and
-     conclusions. Your own explanations and reasoning condense to what they
-     concluded; the user's words do not condense.
-   - **Say what you could not carry.** If you are working from compacted
-     context, or you cut anything short, say so in the handoff: a thin
-     handoff that admits it is thin beats one the successor trusts.
+     Work captured in a commit, spec, plan, diff or narrative gets a path
+     and a one-line pointer. A pointer to a script or command
+     says in one clause what it does when run, read from the script
+     itself rather than remembered.
+   - **Completeness**: when you worked from compacted context or cut
+     anything short, say so in the handoff: a thin handoff that admits
+     it is thin beats one the successor trusts.
 
-   Write the body in TWO passes, and make the first one durable. Rotation
-   runs when context is already hot, and a compaction can land before you
-   finish. The first Write carries the frontmatter, Next Step, Settled and
-   rejected, and Conversation-only facts: the ledger, which dies with the
-   conversation. Commit that (step 4) before continuing. The second pass
-   then APPENDS sections 4-9 (step 5), recoverable from the repo if this
-   rotation never finishes, and lands as a second commit. Append, never a
-   second Write: a Write replaces the whole file and re-emits pass one from
-   whatever context you have by then. Never rewrite the first commit
-   either; it is the only faithful copy of pass one.
+   Write the body in TWO passes, and make the first one durable, because
+   rotation runs when context is hot and a compaction can land before you
+   finish. The first Write carries the frontmatter and sections 1-3, the
+   material that dies with the conversation; commit that (step 4). The
+   second pass then APPENDS sections 4-9 (step 5) and lands as a
+   second commit. Append, never a second Write: a Write replaces the
+   whole file and re-emits pass one from whatever context you have by then. Never
+   rewrite the first commit either; it is the only faithful copy of pass
+   one.
 4. Commit the first pass. Stage the handoff by name. Re-read the body for
    secrets first (the Redact rule above) — the same re-read runs again before
    step 6, because pass two quotes files and code, and a secret can sit in
