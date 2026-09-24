@@ -1373,6 +1373,36 @@ test_the_detached_child_actually_writes_the_kick() {
     [ -s "$kick" ] || { echo "  FAIL: the kick is empty; the child died mid-write"; return 1; }
 }
 
+# The watch arms only once session-start.sh has RETURNED its watchPaths, so a
+# write landing before that is an event nobody hears. On 2026-09-23 the hook
+# ran 21 s under a loaded machine and both of the old fixed writes (+2 s, +4 s
+# after spawn) landed before the arm: the rotation sat idle. The child has to
+# keep re-writing until the wake records `delivered`, however long the hook
+# took. Each consumed kick below stands in for a write the watcher never saw.
+test_the_kick_is_rewritten_until_delivered() {
+    _rot_hook_session "rot-kick-retry"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    CS_ROTATION_KICK_DELAY=1 _start_hook "$UUID_B" clear >/dev/null || return 1
+    local d="$CLAUDE_SESSION_META_DIR/local/rotation-kick" n i
+    for n in 1 2 3; do
+        i=0
+        while [ ! -f "$d/rotation.kick" ] && [ "$i" -lt 30 ]; do
+            i=$((i + 1))
+            sleep 0.1
+        done
+        [ -f "$d/rotation.kick" ] \
+            || { echo "  FAIL: write $n never came; a kick the watcher missed is never retried"; : > "$d/delivered"; return 1; }
+        rm -f "$d/rotation.kick"
+    done
+    # Delivery ends the retries: a re-write after it would be a second wake.
+    : > "$d/delivered"
+    sleep 2.5
+    [ ! -f "$d/rotation.kick" ] \
+        || { echo "  FAIL: the child kept writing after the wake was delivered"; return 1; }
+}
+
 # --- the wake itself ----------------------------------------------------------
 # Drives narrative-reminder's FileChanged branch as this session's lead. The
 # payload rides on stderr and delivery IS the exit code, so streams pass
@@ -1573,6 +1603,7 @@ run_test test_kick_watch_is_scoped_to_a_clear_rotation
 run_test test_a_second_rotation_in_the_same_session_still_wakes
 run_test test_a_clear_without_a_rotation_spends_an_in_flight_kick
 run_test test_the_detached_child_actually_writes_the_kick
+run_test test_the_kick_is_rewritten_until_delivered
 run_test test_rotation_kick_wakes_the_model
 run_test test_rotation_kick_wakes_exactly_once
 run_test test_rotation_kick_does_not_yield_to_a_stale_queue_state
