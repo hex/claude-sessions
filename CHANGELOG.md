@@ -15,6 +15,7 @@ All notable changes to cs are documented here. Release notes are also available 
 - Every launch exports `CS_BIN`, the path of the running cs, in place of `CS_UPDATE_BIN`, which was exported only when an update was pending. The cs-update mod runs `cs -update` through it.
 
 ### Fixes
+- `cs -queue add` refuses a multi-line task, as `cs -msg --kind task` and `cs -spawn --task` already did: the queue's done log and listing are line-oriented. The three share one check.
 - A rotation starts on its own after `/clear` even when the machine is busy. The kick that wakes the new conversation was written twice, 2 and 4 seconds after session start launched its writer, but Claude Code only watches for it once session start has finished, which took 21 seconds under a parallel test suite. Both writes were missed and the conversation sat waiting under a notice saying it would continue by itself. The kick is now rewritten every 2 seconds until the wake lands, up to 30 times. A teammate's `/clear` also no longer cancels the lead's pending kick.
 - `/wrap` reads its sweep and summary instructions with the Read tool. It had been reading them through the Bash tool, whose shell is zsh on macOS, and a separator line like `echo ======` is a failed command lookup in zsh that stops the rest of the command, so the summary instructions were never read.
 
