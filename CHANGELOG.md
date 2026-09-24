@@ -13,6 +13,7 @@ All notable changes to cs are documented here. Release notes are also available 
 - The conversation that picks up a rotation appends a `## Successor report` to the handoff once its next step is done: what it had to look up again, re-derive, or found wrong, or `none`. The next rotation commits the report, and the rotate skill's prune never deletes a handoff with uncommitted changes.
 
 ### Fixes
+- A rotation starts on its own after `/clear` even when the machine is busy. The kick that wakes the new conversation was written twice, 2 and 4 seconds after session start launched its writer, but Claude Code only watches for it once session start has finished, which took 21 seconds under a parallel test suite. Both writes were missed and the conversation sat waiting under a notice saying it would continue by itself. The kick is now rewritten every 2 seconds until the wake lands, up to 30 times. A teammate's `/clear` also no longer cancels the lead's pending kick.
 - `/wrap` reads its sweep and summary instructions with the Read tool. It had been reading them through the Bash tool, whose shell is zsh on macOS, and a separator line like `echo ======` is a failed command lookup in zsh that stops the rest of the command, so the summary instructions were never read.
 
 ## 2026.9.21
