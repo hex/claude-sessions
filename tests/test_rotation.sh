@@ -1265,6 +1265,20 @@ test_a_clear_without_a_rotation_spends_an_in_flight_kick() {
     assert_eq "0" "$rc" "the spent kick must not wake" || return 1
 }
 
+# Spending is the lead's call alone. Every claude resolving the session runs
+# this hook, and a teammate's /clear marking `delivered` would stop the lead's
+# retries and make the lead's own wake decline: the rotation strands.
+test_a_teammate_clear_leaves_the_leads_kick_alone() {
+    _rot_hook_session "rot-kick-teammate"
+    local d="$CLAUDE_SESSION_META_DIR/local/rotation-kick"
+    mkdir -p "$d"
+    printf '%s\n' "$(date +%s)" > "$d/rotation.kick"   # the lead's kick in flight
+    printf 'claude_session_id: %s\n' "$UUID_A" > "$CLAUDE_SESSION_META_DIR/local/state"
+    CLAUDE_PID=1 CS_ROTATION_KICK_DELAY=0 _start_hook "$UUID_B" clear >/dev/null || return 1
+    [ ! -f "$d/delivered" ] \
+        || { echo "  FAIL: a non-lead /clear spent the lead's kick"; return 1; }
+}
+
 # Scoped exactly like the notice. A plain /clear has nothing to continue, and
 # the startup path has already been kicked by _exec_fresh_rebind — a wake there
 # would arrive on top of a turn that is already running.
@@ -1396,8 +1410,12 @@ test_the_kick_is_rewritten_until_delivered() {
             || { echo "  FAIL: write $n never came; a kick the watcher missed is never retried"; : > "$d/delivered"; return 1; }
         rm -f "$d/rotation.kick"
     done
-    # Delivery ends the retries: a re-write after it would be a second wake.
+    # Delivery ends the retries. A write already past its check when the
+    # marker lands may still finish (the wake declines it), so allow that one,
+    # then require silence for longer than two more delays.
     : > "$d/delivered"
+    sleep 1.5
+    rm -f "$d/rotation.kick"
     sleep 2.5
     [ ! -f "$d/rotation.kick" ] \
         || { echo "  FAIL: the child kept writing after the wake was delivered"; return 1; }
@@ -1602,6 +1620,7 @@ run_test test_clear_rotation_arms_a_kick_watch
 run_test test_kick_watch_is_scoped_to_a_clear_rotation
 run_test test_a_second_rotation_in_the_same_session_still_wakes
 run_test test_a_clear_without_a_rotation_spends_an_in_flight_kick
+run_test test_a_teammate_clear_leaves_the_leads_kick_alone
 run_test test_the_detached_child_actually_writes_the_kick
 run_test test_the_kick_is_rewritten_until_delivered
 run_test test_rotation_kick_wakes_the_model
