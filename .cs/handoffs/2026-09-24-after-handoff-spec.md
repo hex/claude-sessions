@@ -2,7 +2,8 @@
 parent: da093a8c-e4e0-40f6-97dd-dc13e6fc09a8
 created: 2026-09-24T09:26:49Z
 purpose: Nothing is in flight. Record whether this wake fired, report the state, and ask Alex which open item comes next (wake bug, release, or parked tasks)
-status: unconsumed
+status: consumed
+consumed_by: 8692f800-a0f0-4c5d-babe-c5d06b336ff8
 ---
 
 # 1. Next Step
@@ -113,3 +114,11 @@ Done and shipped locally:
 Not pushed. No branches are left open from this conversation.
 
 **Completeness:** both passes were written from live context; no compaction happened in this conversation. Not carried: the full council transcripts (in `.claude/council-cache/`) and the per-question A/B answers (in the scratch paths in section 3).
+
+## Successor report
+
+- Wake arrival time is not logged anywhere. Step 1 asks for "seconds after the /clear", but session.log records only SessionEnd (source `user_exit`, 12:29:23) and SessionStart (`clear`, 12:29:45); the wake itself leaves no line. I bounded it by my own first Bash timestamp (12:30:00), so the reading is "within ~15 s of SessionStart", not an exact figure. Found by grepping session.log for the wake.
+- The `/clear` shows up as `Session ended (source: user_exit ...)`, not as a clear. Known (memory project_sessionend_source_asymmetry), but the handoff's wording "the `/clear` was at ..." made me look for a clear line first.
+- `git log origin/main..main` printed 9, not the 7 the handoff states. Not wrong: the handoff timestamps its 7 at 09:26Z, and the two rotate commits came after. The timestamp made this a 5-second check instead of a doubt.
+- Nothing else re-derived; the Next Step's options, commands and the release pre-check all worked as written.
+- The handoff's 09-23 times (`/clear` at 08:55:50, "continue" at 09:03:11) are UTC, while session.log is EEST (UTC+3) and unlabelled. My first grep for `2026-09-23 08:5x` found nothing; the /clear is at 11:55:55 in the log. Found by widening the grep to the session's own Session started line. A handoff time should name its zone.

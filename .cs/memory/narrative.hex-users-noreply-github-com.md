@@ -1940,3 +1940,55 @@ Follow-up 2026-09-23 (tab title, Codex round 2): P2 said the launch EXIT/INT/TER
   - A3 Q9: the writer's own ellipsis ("no host store at …"); graded strictly.
   - Proposed fix 1 (spec): a Next Step action that starts work first says how to check it isn't already done or running. Fix 2 (preamble: relay errors verbatim) is low value; recommended skipping it. Awaiting Alex.
 - 2026-09-24 SHIPPED: Alex said "ok" to fix 1. f77dc82 adds the rule that a Next Step action which starts work says how to tell whether it is already done or still running (red-first pin). Ghost test_rotation 112/112 at the tip. Merged to main ff77451 (--no-ff), full run_all on ghost 68/68, installed; the installed rotate skill is identical to main, the session-start hook carries the report line, doctor drift OK. Branch deleted. Not pushed; CHANGELOG `## Unreleased` holds the handoff edits and the /wrap fix. First real /rotate is the live check; also open: the missing wake after the 09-23 /clear.
+
+## 2026-09-24: rotated into 2026-09-24-after-handoff-spec.md
+
+- Handoff written in two passes (cca2777, 6210c3d), 12.6 KB, and armed. This is the first live rotation under the new spec: it fills section 3 and labels each claim.
+- Prune gap found: 2026-08-24-theme-and-claide-followup.md met age, status and top-10, but was never committed; it is gitignored and untracked. `git status --porcelain` prints nothing for an ignored file, so the new uncommitted-changes check passes it, yet git history does not hold it. Kept it rather than delete. The prune rule needs a "tracked by git" condition (`git ls-files --error-unmatch`). Not fixed.
+
+## 2026-09-24 12:30: wake data point (conversation 8692f800)
+- This conversation WAS woken by cs (system-reminder "cs woke this session"), no typed message. SessionEnd user_exit 12:29:23, SessionStart clear 12:29:45, my first Bash 12:30:00, so the wake landed within ~15 s of SessionStart. Fourth woken rotation out of five; the 09-23 miss (0924fa25) is still the only one.
+
+## 2026-09-24 12:40: missing-wake root cause (task #670)
+- MEASURED from transcript hook_success attachments (durationMs): cs session-start.sh took 21,054 ms on the 09-23 /clear (0924fa25) vs 4,385 ms today (8692f800). A 7-job LOCAL run_all.sh ran 11:44-12:26 EEST across that /clear (/tmp/claude-501/runall-title2.out).
+- 0924fa25 transcript has "woken shortly" + "continuing automatically" (kick WAS armed) and zero FileChanged traces; today's has 6. So armed, event lost.
+- Mechanism: the kick child's clock starts at spawn (session-start.sh ~line 805), writes at +2 s and +4 s (double-write since 4af70de, 09-01). The watch only arms after the hook RETURNS watchPaths. Rebind (line 415) logged 12 s into the 21 s hook, so both writes landed >=5 s before the arm. Today the first write landed ~at hook exit (09:29:48.2): the second write is what woke us. Margin is thin even unloaded.
+- Other clears: Session started -> Rebound gap 0-1 s on all 7; 09-23 was 7 s.
+- Fix direction: condition-anchored retry (rewrite every ~2 s until `delivered`, bounded) instead of count-anchored double write. Also correct docs/hooks.md:135 ("silent and benign ... will not surface as a bug report": it did).
+
+## 2026-09-24 13:05: fix/rotation-kick-retry progress
+- Red then green: test_the_kick_is_rewritten_until_delivered failed on old code at "write 3" (ghost 112/113), passed with the retry loop (113/113); full ghost suite 68/68 on 9b-ish commit (fix commit before review folds).
+- Codex review (task-mufc9uds-xrgvcg): folded #3 (a teammate /clear spent the lead's kick; spend branch now lead-only, red test test_a_teammate_clear_leaves_the_leads_kick_alone), #4 (test allows one in-flight write), #5 (doc wording + stale docs/hooks.md "yields to queue" bullet, contradicted by the consumer). Declined #1 (overlapping wakes: check-to-marker span is one printf) and #2 (earlier rotation's child writing into a later rotation: that rotation wants a kick too), both with in-code "do not re-fix" notes.
+- Gotcha: a wait loop grepping `codex-companion status` for "completed" matched the progress line "Command completed"; match the job row's status column instead.
+
+## 2026-09-24 13:30: fix/rotation-kick-retry ready for merge gate
+- Ghost full suite run 2 FAILED 1/68: test_rotation.sh aborted in teardown ("rm: ... rotation-kick: Directory not empty") after test_clear_rotation_arms_a_kick_watch. Cause (mine): delay 0 now looped 30 back-to-back writes that raced the harness rm -r. The two earlier greens were luck. Fixed: delay 0 writes once (commit "a zero kick delay writes once"). Run 3: 68/68, zero "Directory not empty".
+- Also: `git commit -qam` swept the tracked .cs handoff + narrative into a fix commit; soft-reset and recommitted with `-- hooks/session-start.sh`. Never -a in this repo.
+- Branch: 5 commits (2 red tests, 3 fixes). Not merged, not installed. Awaiting Alex: merge, and whether to hold for a Fable review.
+- MEASURED 13:35: a rename-over onto an existing rotation.kick DOES fire FileChanged. Today's kick birth 09:29:50.045Z (write 2; mv keeps the tmp inode), delivered 09:29:50.963Z; write 2 only runs if delivered is absent, so write 1 (~09:29:48, pre-arm) woke nothing and the rename-over woke us. The retry loop is not dead code.
+
+## 2026-09-24 14:00: Fable MERGE, merged to main
+- Correction to the 13:30 entry ("Awaiting Alex"): Alex chose hold-for-Fable. Fable verdict MERGE, 3 minors folded (1e72b5e): docs/configuration.md still described the delay as arm-wait; double-wake note now states the real condition (asyncRewake instances run concurrently; needs run-up skew > delay; Fable measured 12/12 single wakes at 0-2 s staggers); comment rewrap.
+- Hand-merged --no-ff to main as 1361785, build.sh clean. Full ghost gate on main running; install + doctor after. Not pushed. Rides v2026.9.22.
+- 14:10: ghost 68/68 on main 1361785; installed, hooks cmp-identical, doctor drift OK. Doctor WARN (not investigated): no shadow ref refs/worktree/cs/session/da093a8c-... (previous conversation's id). main 16 ahead of origin; v2026.9.22 would carry fe5d1e4, ff77451, 1361785.
+
+## 2026-09-24 14:30: live wake measurement (throwaway measure-wake, isolated tmux -L cswake, 2.1.281)
+- Setup: patched copies of old (6210c3d) and new session-start.sh with a test-only sleep before the final emit, swapped into ~/.claude/hooks/cs/ per arm; scratch in this conversation's scratchpad/wake/ (arm.sh, result-*.txt).
+- Run 1 old, sleep 15, previous conversation = fresh startup: cs hook 29.1 s (too near the 30 s timeout), kick last write 11.1 s before hook end, NO delivered, no wake.
+- Run 2 old, sleep 8, previous conversation = the rotation from run 1: cs hook 18.4 s, kick 6.5 s before hook end, delivered 4.1 s BEFORE hook end, WOKE. Hypothesis: the kick watch armed by the previous rotation conversation survives /clear, so the pre-arm writes land on a live watch. Only the first rotation after a startup/resume lacks it (09-23 came from a resume). Arms must each start from a fresh launch.
+- 14:40 RESULT, each arm from a fresh launch (previous conversation = startup), test sleep 8 s after the kick spawn, times relative to the cs hook's return (transcript hook_success timestamp):
+  | arm | hook | last kick write | delivered | woke |
+  | old #1 | 11.5 s | -4.3 s | absent | no |
+  | old #2 | 12.5 s | -4.1 s | absent | no |
+  | new #1 | 17.2 s | +2.9 s | +3.9 s | yes (turn started; my Escape interrupted it) |
+  | new #2 | 11.3 s | +2.0 s | +2.9 s | yes, replied WOKE-new |
+  Old reproduces 09-23 (0/2), new fixes it (2/2). Pre-armed run (old, previous conv was a rotation) woke 4.1 s BEFORE hook return: the kick watch survives /clear, so only the first rotation after startup/resume is exposed. Void run: killed claude kept the cs lock, relaunch refused; fresh.sh now /exit's first.
+- Restored: ./install.sh, session-start.sh cmp-identical, doctor drift OK, cswake tmux server gone. Throwaway session measure-wake still on disk.
+
+## 2026-09-24 14:50: handoff quality, old vs new (answer to Alex)
+- Only evidence: the previous conversation's blind A/B (da093a8c scratchpad/ab/RESULTS.md, dies on reboot). n=3/arm, B = new spec WITHOUT fix 1 (f77dc82). B: once-facts 8 vs 5 /18, unsupported "fails" 21 vs 32, WRONG 2 vs 1 (pre-registered M1 failed, both from writer B3), B 27% longer (uncontrolled); writer variance ~ arm effect. Shipped spec (with fix 1) never A/B'd. This conversation's successor report = 1 uncontrolled data point (3 re-lookups, 0 wrong facts).
+- Offered: rerun at n=5-6/arm with the shipped spec, length as a covariate. Awaiting Alex.
+
+## 2026-09-24 14:00Z: rotated into 2026-09-24-handoff-eval-autoresearch.md
+- Alex: "the results are not that great though. no? let's rotate then use /autoresearch:autoresearch until we have the best results". A/B assets copied to .cs/research/handoff-ab-2026-09-24/ (gitignored, machine-local). Successor opens by asking Alex about the four eval conditions, then builds a scriptable Verify.
+- Prune skipped: .cs/handoffs/2026-08-24-theme-and-claide-followup.md is consumed and >30 days old, but untracked with no git history, so deleting it would lose the only copy.
