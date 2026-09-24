@@ -106,7 +106,7 @@ function load(options: Record<string, unknown> = {}) {
 }
 
 beforeEach(() => {
-  envVars = { CS_UPDATE_AVAILABLE: '2026.99.3', CS_UPDATE_BIN: '/opt/cs/bin/cs', HOME: '/home/u' }
+  envVars = { CS_UPDATE_AVAILABLE: '2026.99.3', CS_BIN: '/opt/cs/bin/cs', HOME: '/home/u' }
   files = {
     '/work/.cs/local/state': 'claude_session_color: red\nclaude_session_id: uuid-lead\n',
     '/home/u/.cache/cs/update-notes-full-2026.99.3': SPAN,
@@ -267,7 +267,7 @@ test('1 runs cs -update once, by the exported path, with a ten-minute timeout, a
 test('a second press returns at the running guard before any lookup', async () => {
   await start()
   let giveBin!: (v: any) => void
-  ;($ as any).env.get = async (name: string) => name === 'CS_UPDATE_BIN' ? new Promise(r => { giveBin = r }) : envVars[name]
+  ;($ as any).env.get = async (name: string) => name === 'CS_BIN' ? new Promise(r => { giveBin = r }) : envVars[name]
   const press = buttons(await draw())[0].props.onPress
   const a = press(); const b = press()
   await Promise.resolve()
@@ -308,8 +308,8 @@ test('a run that cannot start shows the rejection', async () => {
   expect(texts(await draw()).join('\n')).toContain('spawn ENOENT')
 })
 
-test('no CS_UPDATE_BIN means the key says so instead of running nothing', async () => {
-  delete envVars.CS_UPDATE_BIN
+test('no CS_BIN means the key says so instead of running nothing', async () => {
+  delete envVars.CS_BIN
   await start()
   await buttons(await draw())[0].props.onPress()
   expect(runs).toHaveLength(0)

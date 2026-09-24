@@ -304,19 +304,22 @@ launch_claude_code() {
     # headless `claude -p` carries this value while owning a different pid.
     export CS_LEAD_PID=$$
 
+    # Where this cs is, for the mods: `$.process.run` takes no shell and the
+    # claude process's PATH is not this shell's. Set on every launch, so a
+    # value inherited from a parent launch is always replaced by this one's.
+    local self_bin
+    self_bin="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
+    export CS_BIN="$self_bin"
+
     # The cs-update mod draws the pending release's notes and runs the update
     # from inside the session. It gets the launch's verdict, never its own:
-    # the version check_update_notify found newer than this cs, and where this
-    # cs is, since `$.process.run` takes no shell and the claude process's
-    # PATH is not this shell's. Absent when nothing is pending, so the mod is
-    # silent by absence rather than by a value it has to read; cleared first,
-    # since a nested launch inherits its parent's verdict.
-    unset CS_UPDATE_AVAILABLE CS_UPDATE_BIN
+    # the version check_update_notify found newer than this cs. Absent when
+    # nothing is pending, so the mod is silent by absence rather than by a
+    # value it has to read; cleared first, since a nested launch inherits its
+    # parent's verdict.
+    unset CS_UPDATE_AVAILABLE
     if [ -n "$UPDATE_AVAILABLE" ]; then
         export CS_UPDATE_AVAILABLE="$UPDATE_AVAILABLE"
-        local self_bin
-        self_bin="$(cd "$(dirname "$0")" && pwd -P)/$(basename "$0")"
-        export CS_UPDATE_BIN="$self_bin"
     fi
 
     # Spawn seed: tasks and a brief staged by cs -spawn for this session.
