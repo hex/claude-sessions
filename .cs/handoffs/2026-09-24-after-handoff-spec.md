@@ -64,3 +64,52 @@ It rsyncs the checkout to `ghost@ghost:ci/claude-sessions`, runs detached, and w
   - picked "Run /wrap"
 - measured at 09:26Z: main is 7 commits ahead of origin/main; the working tree has only the untracked `scratchpad/`.
 - Scratch that dies on reboot: the A/B harness is under this conversation's scratchpad `/private/tmp/claude-501/-Users-alex-geana--claude-sessions-claude-sessions/da093a8c-e4e0-40f6-97dd-dc13e6fc09a8/scratchpad/ab/` (RESULTS.md, briefs.json, PREREG.md, six handoffs, mapping.json). The blind runs are in `/private/tmp/claude-501/ab-sbx/h1`..`h6`.
+
+# 4. Primary Request and Intent
+
+The conversation was a chain of Alex's questions, each leading to the next (his words are in section 3). The durable intent: rotation handoffs should carry facts correctly, not merely more of them, and changes to the handoff rules should be tested rather than argued. Alex values blind comparisons that run the old spec as a control arm, and asks "why" when a result is imperfect.
+
+# 5. Key Technical Concepts
+
+- **Rotation:** the rotate skill (`skills/rotate/SKILL.md`, installed at `~/.claude/skills/rotate/`) writes a handoff to `.cs/handoffs/`, commits it in two passes and arms `.cs/local/pending-handoff`. On `/clear`, `hooks/session-start.sh` marks the handoff consumed (`consumed_by:`) and injects the "Conversation Rotation" preamble.
+- **The preamble now asks for a successor report** (session-start.sh, around line 868): once its next step is done, the new conversation appends `## Successor report` to the handoff. The next rotation commits that report (step 8), and the prune (step 7) skips handoffs with uncommitted changes.
+- **The handoff body is now 9 sections.** New section 3, "Conversation-only facts", sits in pass one. Each claim carries its own provenance label, and a "fails" claim carries its command and output. Next Step carries every fact its first action needs, plus how to tell whether that action is already done or running. Script pointers say what the script does.
+- The dev repo gitignores `.cs/` wholesale, so a NEW handoff needs `git add -f`, while tracked `.cs` files commit with `git commit -- <path>`.
+
+# 6. Files and Code Sections
+
+- `skills/rotate/SKILL.md`: the spec. Read it whole before the next spec change; the diff is `git show 8474134 36920c4 f77dc82 -- skills/rotate/SKILL.md`.
+- `hooks/session-start.sh`: the rotation preamble with the successor-report sentence (search for `Successor report`).
+- `tests/test_rotation.sh`: new pins in `test_rotate_skill_has_a_home_for_conversation_only_facts` and `test_rotate_skill_keeps_successor_reports`, plus extended assertions in the provenance, next-step and content tests and in the preamble test.
+- `docs/hooks.md`: the pending-handoff bullet describes the report.
+- `CHANGELOG.md`: the `## Unreleased` section.
+- `commands/wrap.md`: pass files are read with the Read tool.
+- `.cs/summary.md`: this conversation's full summary (commit 94cfa70).
+
+# 7. Problem Solving
+
+- The Codex and Fable reviews both found that the successor report had no commit path, and that the prune could delete it. Fixed in 36920c4.
+- The A/B test's written-down rule failed on wrong answers (2 vs 1). The breakdown showed one real writer defect, which led to the fix-1 rule (f77dc82). The other two wrongs came from answer compression and strict grading.
+- The `MEMORY.md` index hit its 24,400-byte budget at wrap. Pointers were rewritten shorter, not deleted; the "CI alone judges bash 3.2" clause was dropped once and restored.
+
+# 8. Pending Tasks
+
+Native list (session-keyed; you inherit it):
+- #554 [pending] PARKED: SessionStart notice for tool calls left pending at the end of the previous conversation.
+- #606 [pending] POSTPONED: `cs --remote` via Claude Remote Control (Mac Mini host).
+
+Not in the native list:
+- The missing-wake bug from 09-23.
+- The next release (the `## Unreleased` section).
+- The first live check of the new handoff rules (this handoff is it).
+
+# 9. Current Work
+
+Done and shipped locally:
+- The wrap fix (fe5d1e4).
+- The handoff spec edits (ff77451): ghost 112/112 on the rotation suite and 68/68 on the full suite, installed, doctor drift OK.
+- The session wrap (94cfa70).
+
+Not pushed. No branches are left open from this conversation.
+
+**Completeness:** both passes were written from live context; no compaction happened in this conversation. Not carried: the full council transcripts (in `.claude/council-cache/`) and the per-question A/B answers (in the scratch paths in section 3).
