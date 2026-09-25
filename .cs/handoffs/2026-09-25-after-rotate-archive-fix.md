@@ -2,7 +2,8 @@
 parent: 07851eda-6e7a-4ab3-8052-8e9b9bf0db41
 created: 2026-09-25T11:36:53Z
 purpose: Nothing in flight; ask Alex whether to cut release v2026.9.22 or /wrap
-status: unconsumed
+status: consumed
+consumed_by: 680306b3-2f50-44c0-b802-39d8be5fad2b
 ---
 
 # 1. Next Step
