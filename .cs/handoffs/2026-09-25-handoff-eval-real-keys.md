@@ -2,7 +2,8 @@
 parent: 4af1b056-f98e-45a9-b6c7-ccbb98d68352
 created: 2026-09-25T06:44:06Z
 purpose: Build real-successor answer keys for the handoff eval and rescore the existing control, A and held-out handoffs against them
-status: unconsumed
+status: consumed
+consumed_by: 465be02e-d61d-4eea-9e06-1ebe62bd5ef4
 ---
 
 # 1. Next Step
@@ -117,3 +118,10 @@ STATE
 - Nothing running. main bbce419 installed (rotate skill with the ledger + prune fix, session-end index fix), doctor drift OK at last check.
 
 **Completeness:** written from live context, no compaction. Not carried: per-handoff score tables (in the run .out files under /private/tmp/claude-501/, which a reboot clears) and any gold text (deliberately).
+
+## Successor report
+
+- Re-derived (the handoff flagged it UNVERIFIED): whether `rescore` of A's run 161024 includes the control arm. Read in source: `cmd_round --control-from` copies the baseline's `ctrl*.md` into the run's own `handoffs/` and lists them in `writes.json`/`mapping.json`, and `cmd_rescore` copies the whole tree, so one rescore grades A and control together.
+- Not in the handoff: `harness.py serialise` cuts before the LAST `/rotate`, which is the wrong cut for a successor transcript. The key builders ran `serialise.jq` directly on the successor JSONL instead.
+- Not in the handoff: the line numbers it gave (KEYS ~37, load ~161, cmd_rescore ~333) were right. `cs -usage` printed no limit lines when I checked the budget before launching, so the Fable budget was unknown.
+- Found wrong: none in the handoff. The held-out key built from it has defective control briefs (7/20 handoffs voided), which is a key-building problem, not a handoff one.
