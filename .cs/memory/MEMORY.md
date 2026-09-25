@@ -60,7 +60,7 @@
 - [Transcript core is 1-2%](project_transcript_core_ratio.md): a Claude Code JSONL is 98% machinery (1.3-2.3% core in 4-84 MB files), so transcript work is a serialiser problem
 - [Subagent context leaks](project_subagent_context_leak.md): "the agent sees only X" is a harness claim, not a prompt one; grep agent transcripts for a canary or the run is void
 - [Eval saturation](project_eval_saturation.md): every arm passing measured nothing; needs a control arm, a rejection region, single-occurrence golds, status quo as an arm
-- [Handoff fact carriage](project_handoff_fact_carriage.md): 0/12 vs 12/12 facts, yet bigger isn't better (retrieval degrades); transcript replays don't reproduce live-context failures
+- [Handoff fact carriage](project_handoff_fact_carriage.md): 0/12 vs 12/12 facts, bigger isn't better; replays don't reproduce live failures; fact-ledger spec +20, held-out in noise
 - [Tests stage their preconditions](project_test_stages_its_precondition.md): a test whose outcome depends on state it never sets asserts the developer's machine
 - [Mutation testing needs isolation](project_mutation_testing_needs_isolation.md): one clone per mutating agent; a peer-reverted mutation looks like a vacuous test
 - [BSD cmp -n is length-sensitive](project_bsd_cmp_n_length.md): `cmp -n N a b` fails when total lengths differ even with identical first N bytes; compare `<(head -c N)` streams
