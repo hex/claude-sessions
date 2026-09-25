@@ -2,7 +2,8 @@
 parent: 465be02e-d61d-4eea-9e06-1ebe62bd5ef4
 created: 2026-09-25T07:59:54Z
 purpose: Read the ghost gate for fix/handoff-prompt-rows, then merge both fix branches on Alex's say and install; report the real-key eval result and the peer's rotate-skill request
-status: unconsumed
+status: consumed
+consumed_by: c5408bd8-9b38-4cdc-9c83-5583291b9f0e
 ---
 
 # 1. Next Step
