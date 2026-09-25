@@ -2130,3 +2130,4 @@ Follow-up 2026-09-23 (tab title, Codex round 2): P2 said the launch EXIT/INT/TER
 - Goal drift (e): 0 in the claude-council chain 09-23..09-25 (7 Intents, 3 reports); that chain is mostly pre-ledger.
 - Installed SKILL.md mtime (13:04) cannot date an earlier install; ledger shape (IDS/READINGS/UNVERIFIED headers) is the check instead.
 - Verdict: keep collecting; the 5th report is this conversation's successor's.
+- Ruling, Alex: "no, keep them separate". UNVERIFIED re-checks (u) are not lookups; the #679 Keep bound uses lookup alone. Recorded in the field log.
