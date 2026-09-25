@@ -69,3 +69,40 @@ UNVERIFIED
 - assumed: handoff-eval-real-keys.md (~09:45) was written under the ledger spec: 2bfd619 merged ~09:10 and install ran right after per the narrative; not checked against the installed SKILL.md mtime.
 - assumed: $CLAUDE_CODE_SESSION_ID equals a teammate's or subagent's own hook session_id (Codex verified only the main-conversation path in the 2.1.282 bundle).
 - assumed: the claude-council chain's handoffs are under ~/.claude-sessions/claude-council/.cs/handoffs/ (not listed this conversation).
+
+# 4. Primary Request and Intent
+
+- Current goal (latest instruction): "let's check #679", an interim coding of the fact-ledger successor reports, reported to Alex.
+- Done this conversation and closed: CHANGELOG fact-ledger line reworded; measure-wake removed; peer rotate-skill request declined for now; doctor autosave warning fixed, merged, installed; /wrap run.
+- Still open, not asked for now: release v2026.9.22 (push needs Alex's go).
+
+# 5. Key Technical Concepts
+
+- #679's data is the `## Successor report` each successor appends to the handoff it consumed; the field log holds the baseline and the pre-set rule.
+- Handoffs are tracked inside a gitignored `.cs/`: a new one needs `git add -f`, an existing one commits with `git commit -- <path>`.
+
+# 6. Files and Code Sections
+
+- `.cs/research/handoff-field-log.md`: baseline + decision rule for #679 (gitignored).
+- `.cs/handoffs/2026-09-25-*.md`: the three ledger handoffs with reports, plus this one.
+- `.cs/summary.md` (acbc2912): the 09-25 morning, including the real-key rescore result (A +0.21, threshold 6.62).
+- `lib/60-doctor.sh` `_doctor_check_shadow_ref`: caller id order `$CLAUDE_CODE_SESSION_ID`, state, launch id; registration check via jq on settings.json PostToolUse.
+
+# 7. Problem Solving
+
+- Doctor autosave warning: root cause and fix in commits 5857a0e8, 8e2f10d4, 44e1427e; narrative entries dated 2026-09-25 have the detail.
+
+# 8. Pending Tasks
+
+Native list (inherited):
+- #679 [pending] Field check: code the Successor reports of 5 fact-ledger rotations (or on 2026-10-15). Description lists codes (a)-(e). This is the Next Step.
+- #554 [pending] PARKED. #606 [pending] POSTPONED.
+- #680 completed this conversation.
+
+Open with Alex: release v2026.9.22.
+
+# 9. Current Work
+
+- main at acbc2912 plus this handoff's commits; installed; doctor drift OK; nothing running; nothing pushed. Worktree: only `scratchpad/` untracked.
+
+**Completeness:** written from live context at ~56%, no compaction.
