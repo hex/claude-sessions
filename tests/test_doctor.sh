@@ -1113,6 +1113,22 @@ test_doctor_does_not_accept_an_autosave_lookalike_registration() {
     assert_output_contains "$output" "Shadow ref: no snapshot for this conversation yet (autosave runs on Edit/Write)" \
         "the installer's registration must be accepted" || return 1
 }
+
+test_doctor_reads_the_autosave_registration_past_an_invalid_matcher() {
+    # Another tool's entry with a matcher that is not a valid regex cannot fire,
+    # but it says nothing about the entries after it: the autosave registration
+    # that follows still counts.
+    local id="11111111-2222-3333-4444-555555555555" output
+    cat > "$CS_CLAUDE_DIR/settings.json" << 'EOF'
+{"hooks": {"PostToolUse": [
+  {"matcher": "(", "hooks": [{"type": "command", "command": "/opt/other/hook.sh"}]},
+  {"matcher": "Write|Edit", "hooks": [{"type": "command", "command": "~/.claude/hooks/cs/autosave-commits.sh"}]}
+]}}
+EOF
+    output=$(CLAUDE_CODE_SESSION_ID="$id" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Shadow ref: no snapshot for this conversation yet (autosave runs on Edit/Write)" \
+        "a registration after an invalid matcher must still be read" || return 1
+}
 run_test test_doctor_fails_on_unparseable_settings
 run_test test_doctor_does_not_accept_a_hook_named_only_in_a_permission_rule
 run_test test_doctor_checks_the_callers_shadow_ref_not_the_recorded_lead
@@ -1120,6 +1136,7 @@ run_test test_doctor_falls_back_to_the_recorded_id_not_the_launch_id
 run_test test_doctor_does_not_warn_before_the_first_autosave
 run_test test_doctor_warns_when_the_autosave_hook_is_not_registered
 run_test test_doctor_does_not_accept_an_autosave_lookalike_registration
+run_test test_doctor_reads_the_autosave_registration_past_an_invalid_matcher
 # Build a PATH resolving everything doctor needs EXCEPT jq. bash included: this
 # PATH is what starts the binary, and omitting it fails at exec and reads like a
 # doctor bug.

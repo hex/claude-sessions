@@ -9,21 +9,35 @@ set -uo pipefail
 # its source and the session resolve below all run before the stage trace opens,
 # and a run the UserPromptSubmit cap kills in there would otherwise leave no line
 # at all: a hook that stalled on its first forks and one that never started would
-# read the same. Builtins only (no fork to stall on), and only for a cs launch,
-# whose contract already names the session; a session found by walking is not
-# known yet. Absolute epoch milliseconds, like the start mark.
-case "${EPOCHREALTIME:-}" in
-    *[.,]*)
-        _launch_local="${CLAUDE_SESSION_META_DIR:-${CLAUDE_SESSION_DIR:-}/.cs}/local"
-        if [ "${CS_SCOPE_TRACE_DISABLE:-}" != "1" ] && [ -n "${CLAUDE_SESSION_DIR:-}" ] \
-            && [ -d "$_launch_local" ] && [ ! -f "$_launch_local/disabled" ]; then
+# read the same. Only for a cs launch, whose contract already names the session;
+# a session found by walking is not known yet. Absolute epoch milliseconds, like
+# the start mark: from $EPOCHREALTIME without a fork where the shell has it. Bash
+# 3.2 has no builtin epoch clock, so there one `date` fork supplies whole seconds;
+# a `date` that stalls leaves no mark, which reads the same as a hook that never
+# started.
+_launch_local="${CLAUDE_SESSION_META_DIR:-${CLAUDE_SESSION_DIR:-}/.cs}/local"
+if [ "${CS_SCOPE_TRACE_DISABLE:-}" != "1" ] && [ -n "${CLAUDE_SESSION_DIR:-}" ] \
+    && [ -d "$_launch_local" ] && [ ! -f "$_launch_local/disabled" ]; then
+    _launch_ms=""
+    case "${EPOCHREALTIME:-}" in
+        *[.,]*)
             _launch_s="${EPOCHREALTIME%%[.,]*}"
             _launch_f="${EPOCHREALTIME#*[.,]}"
-            { printf '%s %s launch\n' "$$" "$(( 10#$_launch_s * 1000 + 10#${_launch_f:0:3} ))" \
-                >> "$_launch_local/scope-prompt.trace"; } 2>/dev/null || true
-        fi
-        ;;
-esac
+            _launch_ms=$(( 10#$_launch_s * 1000 + 10#${_launch_f:0:3} ))
+            ;;
+        *)
+            _launch_s=$(date +%s 2>/dev/null) || _launch_s=""
+            case "$_launch_s" in
+                ''|*[!0-9]*) ;;
+                *) _launch_ms="${_launch_s}000" ;;
+            esac
+            ;;
+    esac
+    if [ -n "$_launch_ms" ]; then
+        { printf '%s %s launch\n' "$$" "$_launch_ms" \
+            >> "$_launch_local/scope-prompt.trace"; } 2>/dev/null || true
+    fi
+fi
 
 # --- Defensive early exits (silent pass-through) ---
 
@@ -547,7 +561,7 @@ EXCLUDE_RE='(^|/)(node_modules|target|dist|build|\.next|coverage|\.cs)/|(^|/)\.g
 #  - Non-English tokens are mangled: `tr -cs '[:alnum:]'` splits at non-ASCII letters in the C
 #    locale, so "münchen" won't match "café/münchen.ts". Known gap; non-English was never a goal.
 #  - The awk pass is ~255ms on a 10k-file tree (vs ~137ms for the old rg -iF) — bounded and well
-#    under the hook's 3s timeout.
+#    under the scan's 1500 ms default budget (CS_SCOPE_BUDGET_MS).
 RELEVANT_FILES=""
 if [ -n "$PATH_TOKENS" ] || [ -n "$WORD_PARTS" ]; then
     # splitcamel() is a hand-rolled char loop ON PURPOSE: BSD awk (macOS) has no gensub /

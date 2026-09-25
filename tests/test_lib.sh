@@ -14,7 +14,10 @@ set -euo pipefail
 # stay green while the hook writes into that live session. Cleared here rather
 # than in setup() because suites override setup() and this must hold for all of
 # them. CS_ACTOR is cleared for the same reason: it decides resolved identity.
-unset CLAUDE_PROJECT_DIR CS_ACTOR 2>/dev/null || true
+# The two conversation ids go too: doctor judges the shadow ref of whichever id
+# it inherits, so a suite run inside a live conversation would check that
+# conversation's ref instead of the state the test set up.
+unset CLAUDE_PROJECT_DIR CS_ACTOR CLAUDE_CODE_SESSION_ID CS_CLAUDE_SESSION_ID 2>/dev/null || true
 
 # --- State ---
 TESTS_RUN=0
