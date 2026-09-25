@@ -5,6 +5,26 @@
 # No `set -e`: this hook must NEVER block the prompt. Every error path exits 0.
 set -uo pipefail
 
+# Launch mark, written before anything that can stall. The library parse-check,
+# its source and the session resolve below all run before the stage trace opens,
+# and a run the UserPromptSubmit cap kills in there would otherwise leave no line
+# at all: a hook that stalled on its first forks and one that never started would
+# read the same. Builtins only (no fork to stall on), and only for a cs launch,
+# whose contract already names the session; a session found by walking is not
+# known yet. Absolute epoch milliseconds, like the start mark.
+case "${EPOCHREALTIME:-}" in
+    *[.,]*)
+        _launch_local="${CLAUDE_SESSION_META_DIR:-${CLAUDE_SESSION_DIR:-}/.cs}/local"
+        if [ "${CS_SCOPE_TRACE_DISABLE:-}" != "1" ] && [ -n "${CLAUDE_SESSION_DIR:-}" ] \
+            && [ -d "$_launch_local" ] && [ ! -f "$_launch_local/disabled" ]; then
+            _launch_s="${EPOCHREALTIME%%[.,]*}"
+            _launch_f="${EPOCHREALTIME#*[.,]}"
+            { printf '%s %s launch\n' "$$" "$(( 10#$_launch_s * 1000 + 10#${_launch_f:0:3} ))" \
+                >> "$_launch_local/scope-prompt.trace"; } 2>/dev/null || true
+        fi
+        ;;
+esac
+
 # --- Defensive early exits (silent pass-through) ---
 
 # Test before sourcing rather than catching a failed source with ||: under

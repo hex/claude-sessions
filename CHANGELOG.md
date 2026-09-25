@@ -19,6 +19,7 @@ All notable changes to cs are documented here. Release notes are also available 
 - Every launch exports `CS_BIN`, the path of the running cs, in place of `CS_UPDATE_BIN`, which was exported only when an update was pending. The cs-update mod runs `cs -update` through it.
 
 ### Fixes
+- The prompt hook that adds the scope block now gets 10 seconds instead of 5. On a loaded machine a `/wrap` lost its scope block to a timeout error, and the hook had not yet written its first trace line when Claude Code killed it: the other prompt hooks on that same prompt took 2.3 seconds to answer. The hook now also writes a `launch` line to `.cs/local/scope-prompt.trace` before loading its library, so the next such kill shows whether the hook stalled in its first steps or never started.
 - `/clear` and exit no longer wait about 8 seconds for cs. On every session end cs rebuilds `~/.claude-sessions/index.md`, and it ran about six small processes for each session to read its README, so 138 sessions took 8 to 27 seconds. One awk process now reads them all, in 0.15 seconds, and writes the same index.
 - The rotate skill's prune no longer deletes a handoff that git does not track. Where `.cs/` is gitignored, `git status --porcelain` prints nothing for such a file, so it passed the uncommitted-changes check, and deleting it would have deleted the only copy.
 - `cs -queue add` refuses a multi-line task, as `cs -msg --kind task` and `cs -spawn --task` already did: the queue's done log and listing are line-oriented. The three share one check.
