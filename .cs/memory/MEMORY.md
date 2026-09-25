@@ -35,7 +35,7 @@
 - [TUI byte-count torn files](project_tui_byte_count_torn_files.md): read_to_string errs on invalid UTF-8 and unwrap_or_default() empties the WHOLE file; count newlines via fs::read
 - [Retire benign hardening](feedback_retire_benign_hardening.md): benign-by-design concerns get an in-code "do not re-fix" note and leave the backlog
 - [Statusline memo inheritance trap](project_statusline_memo_inheritance.md): an inherited env var of the same name seeds a bare global memo; ready-flag, reset at main(), 10#-normalise
-- [cs single launch-prompt slot](project_cs_launch_prompt_slot.md): one auto-run-at-LAUNCH channel (claude's positional prompt), actions compete by precedence; asyncRewake exit 2 is a second
+- [cs launch-prompt slot](project_cs_launch_prompt_slot.md): ONE auto-run-at-LAUNCH channel (claude's positional prompt), actions compete by precedence; asyncRewake exit 2 is a second
 - [Wording-rename long tail](project_wording_rename_surfaces.md): a user-facing rename spans lib strings, hook contracts, generated READMEs, errors, TUI labels, docs
 - [Windows support REMOVED](project_windows_support_state.md): dropped 2026-08-08; macOS + Linux/WSL2 only; never re-add msys arms, .exe naming, the Windows CI lane, WCM
 - [Release gate skips CI](project_release_gate_skips_ci.md): Alex's shape: skip the repeat local run, push the release commit, tag ONLY after its CI is green, --target <full sha>
@@ -52,7 +52,7 @@
 - [/code-review level arg ignored](project_code_review_skill_is_pr_shaped.md): `high` ran at LOW (1 pass, no verify); read the agent brief for the real level, else Step 4b
 - [No real identities in fixtures](feedback_no_real_identities_in_fixtures.md): never a real name, email or handle in fixtures, tests, comments or docs; example.com placeholders
 - [Session narrative; hex-users-noreply-github-com (lab notebook)](narrative.hex-users-noreply-github-com.md): looser-bar work-in-progress; its owner reads it in full on resume
-- [Secret-shaped fixtures vs push protection](project_secret_fixtures_push_protection.md): GH013 blocks literal credential patterns even in fixtures; build tokens at runtime, never unblock
+- [Secret-shaped fixtures vs push protection](project_secret_fixtures_push_protection.md): GH013 blocks literal credentials even in fixtures; build tokens at runtime, never unblock
 - [/write-as-me corpus sweeps every project](project_voice_corpus_sweeps_all_projects.md): no exclusion mechanism; an exclusion feature was DECLINED 2026-08-10, do not re-propose
 - [Measure before you poll](feedback_measure_before_you_poll.md): dispatch the agent that can check the facts BEFORE asking advisers who cannot
 - [Mail `from` is empty, not null](project_mail_from_empty_string.md): `cs -msg` writes `from:""` outside a cs session so jq's `//` never fires; test emptiness explicitly
@@ -78,7 +78,7 @@
 - [Skill examples get copied](project_skill_examples_get_copied.md): a named outcome becomes the modal output; for entropy, seed AND mapping live in a script, not the prompt
 - [Teammate shares session slots](project_teammate_shares_session_slots.md): a tmux teammate is a full claude with its own Stop and statusline; gate every .cs/local/ slot on the lead
 - [Gate: one at a time, --changed for the loop](project_gate_one_at_a_time.md): one background gate at a time, never beside a council; never edit a script mid-run; capture output to files
-- [Bash trap needs a background child](project_bash_trap_needs_background_child.md): TERM/INT traps wait for the foreground command; background + wait, kill the recorded pid, never `kill -- -$$`
+- [Bash trap needs a background child](project_bash_trap_needs_background_child.md): TERM/INT traps wait on the foreground command; background + wait, kill the saved pid, never `kill -- -$$`
 - [No auto-commit of sessions](project_no_auto_commit_of_sessions.md): removed in v2026.6.9 after it committed real code onto an adopted repo; never re-add auto-commit or `git add .cs`
 - [Claude Code hook/statusline limits](reference_claude_code_hook_statusline_limits.md): PreCompact cannot inject; renderer keeps bold/fg/bg and needs refreshInterval
 - [Visible surfaces need consent](feedback_visible_surfaces_need_consent.md): a status line, tab title or banner needs explicit revocable consent: prompt if interactive, else print it
@@ -103,7 +103,7 @@
 - [codex prompts with shell operators](project_codex_prompt_shell_operators.md): inline `||` breaks the zsh eval wrapper; pass the prompt via "$(cat file)"
 - [mv-over drops the exec bit](project_mv_drops_exec_bit.md): temp-then-mv rewrites lose 100755; check git diff --summary for mode changes
 - [cs-tui is untracked](project_cs_tui_untracked_in_ci.md): absent in CI checkouts; never assert its presence in install tests
-- [CS_CLAUDE_SESSION_ID is the launch id](project_cs_claude_session_id_is_launch_id.md): stale after the first /clear by design (crash recovery); read claude_session_id in .cs/local/state
+- [CS_CLAUDE_SESSION_ID is the launch id](project_cs_claude_session_id_is_launch_id.md): stale after /clear by design; state claude_session_id is the LEAD; caller = $CLAUDE_CODE_SESSION_ID
 - [Review newly reachable code](feedback_review_newly_reachable_code.md): a diff-scoped review misses untouched lines the change exposes; lifetime/resolution changes are security
 - [Claude desktop measurements](reference_claude_desktop_measurements.md): not sandboxed, user hooks fire, autoMemoryDirectory honoured, CLAUDE_PROJECT_DIR constant, source startup
 - [teammate-message frame is no discriminator](project_transcript_teammate_frame.md): leads carry it once reports arrive; key on the first type:user line; re-measure once the feature runs
@@ -112,7 +112,7 @@
 - [Foreign-model pass before done](feedback_foreign_model_pass_on_research.md): Alex expects a Codex or council falsification pass after research AND after a build
 - [jq runtime error exits 0](project_jq_runtime_error_exit_zero.md): a shape error on any record but the last prints to stderr and jq exits 0; capture stderr per pass and fail on content
 - [mktemp template form](project_mktemp_template_form.md): `mktemp -t prefix` is BSD-only, GNU rejects it; always `mktemp "${TMPDIR:-/tmp}/name.XXXXXX"`
-- [Full gate runs on ghost](feedback_full_gate_runs_on_ghost.md): every test_*.sh run (one suite, review agents too) via `--host ghost@ghost`; keep its claude current; CI alone judges bash 3.2
+- [Full gate runs on ghost](feedback_full_gate_runs_on_ghost.md): every test_*.sh run (one suite, agents too) via `--host ghost@ghost`; keep its claude current; CI alone judges bash 3.2
 - [Headless e2e inside a cs session](project_e2e_inside_cs_session_headless.md): claude -p from a throwaway session dir, inherited contract env -u'd; a logging hook proves META_DIR
 - [No base-URL gateway](project_no_base_url_gateway.md): do NOT route cs through an ANTHROPIC_BASE_URL gateway: Claude Code sends it the subscription OAuth token; rewriter keeps it
 - [pwd -P keeps typed case](project_pwd_p_keeps_typed_case.md): bash `pwd -P` echoes the case you typed on APFS (zsh normalises); identity checks use `-ef`, not string equality
@@ -123,7 +123,7 @@
 - [clonefile vs cp -cR](project_clonefile_directory_syscall.md): cp -cR walks per file (15.6s) vs one clonefile(2) on the dir (0.5s); never judge a filesystem by its CLI
 - [Peer session control is the user's](feedback_peer_session_control.md): never send-keys, signal or mark a Claude session for closing; refuse, naming what to close and run after
 - [Statusline render tests pin the clock](project_statusline_clock_pin.md): asserts on pulsing tokens (mark, crit text) need CS_STATUSLINE_NOW even, else red on odd seconds
-- [Codex review briefs](project_codex_readonly_no_probes.md): "do not edit files" = no fixtures, grant a scratch dir; /codex:review: flags ONLY, stops on an untracked dir
+- [Codex review briefs](project_codex_readonly_no_probes.md): "do not edit" = no fixtures, grant scratch; /codex:review flags ONLY, stops on untracked dirs; late rescue: fetch via companion result
 - [Remote Control contract](project_remote_control_contract.md): subscription-only, one account per server, no cs launch env on phones; `cswap run`, never `cswap switch`, with a live server
 - [Agent servers studied](project_agent_servers_studied.md): codehero + infaiw read and rejected 2026-09-14; Remote Control supersedes both; never re-study
 - [Alex is both actor slugs](user_two_actor_identities.md): hex-users-noreply-github-com and alex-geana-erepubliklabs-com are one person, two git identities; CS_ACTOR=<email> picks one
