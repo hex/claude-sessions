@@ -2,7 +2,8 @@
 parent: d03d1e48-a718-47f2-b73c-8cd763c16ea5
 created: 2026-09-25T10:30:00Z
 purpose: Check task #679 now: code the fact-ledger successor reports that exist so far (interim, fewer than 5) and report to Alex
-status: unconsumed
+status: consumed
+consumed_by: 07851eda-6e7a-4ab3-8052-8e9b9bf0db41
 ---
 
 # 1. Next Step
