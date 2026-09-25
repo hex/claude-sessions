@@ -115,3 +115,9 @@ STATE
 - On main, both fix branches unmerged; ghost gate for fix/handoff-prompt-rows in flight; no local processes running.
 
 **Completeness:** written from live context at ~77%, no compaction.
+
+# Addendum (after rotation armed)
+
+- measured: the ghost full gate for fix/handoff-prompt-rows at 3f98ffc FAILED 1/68: test_rotation 114/116. `test_discard_answer_dismisses_pending_handoff` pinned the old text "d = discard handoff"; `test_discard_does_not_offer_the_retired_handoff` matched "stays pending" in the new n row.
+- Fix 7896ce2 on fix/handoff-prompt-rows: n row now reads "fresh conversation; the handoff waits for later" (lib, test, README); the d pin now matches the row `    d  discard         retire the handoff, then resume`. Ghost test_rotation 116/116 (measured).
+- So Next Step 1 changes: the branch has NOT had a green FULL gate at 7896ce2. Run the full gate on ghost for fix/handoff-prompt-rows first (check out the branch locally; remote-tests.sh syncs the working tree), then ask Alex about merging.
