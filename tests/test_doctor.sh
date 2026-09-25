@@ -999,13 +999,16 @@ EOF
         "the failure must name the unregistered hook" || return 1
 }
 
-# Seed settings.json with the autosave hook registered (or not) the way
-# install.sh registers it: a PostToolUse command ending in autosave-commits.sh.
-_seed_autosave_registration() {  # yes|no
-    local cmd="/opt/cs/hooks/other.sh"
+# Seed settings.json with one PostToolUse registration, the way install.sh
+# writes the autosave hook: matcher "Write|Edit", command ending in
+# autosave-commits.sh. yes|no picks that command or an unrelated one; a second
+# and third argument override the command and matcher.
+_seed_autosave_registration() {  # yes|no [command] [matcher]
+    local cmd="/opt/cs/hooks/other.sh" matcher="${3:-Write|Edit}"
     [ "$1" = yes ] && cmd="/opt/cs/hooks/autosave-commits.sh"
+    [ -n "${2:-}" ] && cmd="$2"
     cat > "$CS_CLAUDE_DIR/settings.json" << EOF
-{"hooks": {"PostToolUse": [{"matcher": "Write|Edit", "hooks": [{"type": "command", "command": "$cmd"}]}]}}
+{"hooks": {"PostToolUse": [{"matcher": "$matcher", "hooks": [{"type": "command", "command": "$cmd"}]}]}}
 EOF
 }
 
@@ -1082,18 +1085,41 @@ test_doctor_warns_when_the_autosave_hook_is_not_registered() {
 
     local output
     output=$(CLAUDE_CODE_SESSION_ID="11111111-2222-3333-4444-555555555555" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "Shadow ref: autosave-commits.sh is not registered for PostToolUse in $CS_CLAUDE_DIR/settings.json; edits are not snapshotted" \
+    assert_output_contains "$output" "Shadow ref: autosave-commits.sh is not registered for PostToolUse on Write and Edit in $CS_CLAUDE_DIR/settings.json; edits are not snapshotted" \
         "an unregistered autosave hook must warn" || return 1
     assert_output_not_contains "$output" "no snapshot for this conversation yet" \
         "an unregistered hook is not the normal no-snapshot-yet state" || return 1
 }
 
+test_doctor_does_not_accept_an_autosave_lookalike_registration() {
+    # A registration only counts if it would run the hook on Write and Edit:
+    # the hook exits at once for any other tool, so a Read-only matcher never
+    # snapshots, and a different script whose name merely ends the same way is
+    # not the hook.
+    local id="11111111-2222-3333-4444-555555555555" output
+    _seed_autosave_registration yes "" "Read"
+    output=$(CLAUDE_CODE_SESSION_ID="$id" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "autosave-commits.sh is not registered for PostToolUse on Write and Edit" \
+        "a Read-only matcher never fires on an edit" || return 1
+
+    _seed_autosave_registration yes "/opt/cs/hooks/not-autosave-commits.sh"
+    output=$(CLAUDE_CODE_SESSION_ID="$id" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "autosave-commits.sh is not registered for PostToolUse on Write and Edit" \
+        "a lookalike script name is not the hook" || return 1
+
+    # Positive control: the installer's own form is accepted.
+    _seed_autosave_registration yes "~/.claude/hooks/cs/autosave-commits.sh"
+    output=$(CLAUDE_CODE_SESSION_ID="$id" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Shadow ref: no snapshot for this conversation yet (autosave runs on Edit/Write)" \
+        "the installer's registration must be accepted" || return 1
+}
 run_test test_doctor_fails_on_unparseable_settings
 run_test test_doctor_does_not_accept_a_hook_named_only_in_a_permission_rule
 run_test test_doctor_checks_the_callers_shadow_ref_not_the_recorded_lead
 run_test test_doctor_falls_back_to_the_recorded_id_not_the_launch_id
 run_test test_doctor_does_not_warn_before_the_first_autosave
 run_test test_doctor_warns_when_the_autosave_hook_is_not_registered
+run_test test_doctor_does_not_accept_an_autosave_lookalike_registration
 # Build a PATH resolving everything doctor needs EXCEPT jq. bash included: this
 # PATH is what starts the binary, and omitting it fails at exec and reads like a
 # doctor bug.

@@ -6205,14 +6205,25 @@ _doctor_check_shadow_ref() {
     else
         local settings="${CS_CLAUDE_DIR:-$HOME/.claude}/settings.json" commands
         if [ -f "$settings" ] && command -v jq >/dev/null 2>&1 && _doctor_settings_parse_ok "$settings"; then
-            commands=$(jq -r '.hooks.PostToolUse // [] | .[].hooks[]?.command // empty' "$settings" 2>/dev/null || true)
-            case $'\n'"$commands"$'\n' in
-                *autosave-commits.sh$'\n'*) ;;
-                *)
-                    _doctor_warn "Shadow ref: autosave-commits.sh is not registered for PostToolUse in $settings; edits are not snapshotted"
-                    return
-                    ;;
-            esac
+            # A registration counts only if it runs the hook on both Write and
+            # Edit (the hook exits at once for any other tool) and the command
+            # is the hook itself, not a script whose name merely ends the same
+            # way. The matcher is a regex, as Claude Code reads it; an empty or
+            # "*" matcher covers every tool. An invalid regex errors jq out,
+            # leaving no match, which is the right verdict for a registration
+            # that cannot fire.
+            commands=$(jq -r '
+                .hooks.PostToolUse // [] | .[]
+                | select((.matcher // "") as $m
+                    | $m == "" or $m == "*"
+                      or (("Write" | test("^(" + $m + ")$")) and ("Edit" | test("^(" + $m + ")$"))))
+                | .hooks[]?.command // empty
+                | select(test("(^|[ /])autosave-commits\\.sh$"))
+            ' "$settings" 2>/dev/null || true)
+            if [ -z "$commands" ]; then
+                _doctor_warn "Shadow ref: autosave-commits.sh is not registered for PostToolUse on Write and Edit in $settings; edits are not snapshotted"
+                return
+            fi
         fi
         _doctor_ok "Shadow ref: no snapshot for this conversation yet (autosave runs on Edit/Write)"
     fi
