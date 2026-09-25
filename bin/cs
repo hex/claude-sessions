@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.9.21"
+VERSION="2026.9.22"
 SESSIONS_ROOT="${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}"
 CLAUDE_CODE_BIN="${CLAUDE_CODE_BIN:-claude}"
 
@@ -6199,7 +6199,7 @@ _doctor_check_shadow_ref() {
     # registered, so a hook missing from both is invisible to them. An absent
     # or unreadable settings file is reported by those rows already.
     if [ -z "$ref" ]; then
-        _doctor_ok "Shadow ref: no conversation id in environment to check"
+        _doctor_ok "Shadow ref: no conversation id to check"
     elif [ -n "$shadow_sha" ]; then
         local ts now age
         ts=$(git -C "$dir" log -1 --format=%ct "$shadow_sha" 2>/dev/null || echo 0)
@@ -6213,14 +6213,14 @@ _doctor_check_shadow_ref() {
             # Edit (the hook exits at once for any other tool) and the command
             # is the hook itself, not a script whose name merely ends the same
             # way. The matcher is a regex, as Claude Code reads it; an empty or
-            # "*" matcher covers every tool. An invalid regex errors jq out,
-            # leaving no match, which is the right verdict for a registration
-            # that cannot fire.
+            # "*" matcher covers every tool. An invalid regex counts as no
+            # match for its own entry only, since a registration under it
+            # cannot fire; the entries after it are still read.
             commands=$(jq -r '
                 .hooks.PostToolUse // [] | .[]
                 | select((.matcher // "") as $m
                     | $m == "" or $m == "*"
-                      or (("Write" | test("^(" + $m + ")$")) and ("Edit" | test("^(" + $m + ")$"))))
+                      or (try (("Write" | test("^(" + $m + ")$")) and ("Edit" | test("^(" + $m + ")$"))) catch false))
                 | .hooks[]?.command // empty
                 | select(test("(^|[ /])autosave-commits\\.sh$"))
             ' "$settings" 2>/dev/null || true)

@@ -4,7 +4,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.9.22
 
 ### Added
 - `/queue <task>` in a cs session adds a task to the walk-away queue, even while Claude is mid-turn; `/queue` alone lists the queue. It comes from the `cs` mod and runs `cs -queue add` through `CS_BIN`.
@@ -30,6 +30,9 @@ All notable changes to cs are documented here. Release notes are also available 
 - `cs -queue add` refuses a multi-line task, as `cs -msg --kind task` and `cs -spawn --task` already did: the queue's done log and listing are line-oriented. The three share one check.
 - A rotation starts on its own after `/clear` even when the machine is busy. The kick that wakes the new conversation was written twice, 2 and 4 seconds after session start launched its writer, but Claude Code only watches for it once session start has finished, which took 21 seconds under a parallel test suite. Both writes were missed and the conversation sat waiting under a notice saying it would continue by itself. The kick is now rewritten every 2 seconds until the wake lands, up to 30 times. A teammate's `/clear` also no longer cancels the lead's pending kick.
 - `/wrap` reads its sweep and summary instructions with the Read tool. It had been reading them through the Bash tool, whose shell is zsh on macOS, and a separator line like `echo ======` is a failed command lookup in zsh that stops the rest of the command, so the summary instructions were never read.
+
+### Docs
+- README, docs/hooks.md, docs/session-layout.md and docs/statusline.md corrected against the code: the rotation wake after `/clear`, session liveness (lock or statusline heartbeat), `/queue` and `/cs-update` in the slash-command list, scope-prompt's five responsibilities and trace stages, the Fable window's 50% threshold and 5h reveal, colour-depth order inside tmux, and missing timeline events and layout rows.
 
 ## 2026.9.21
 
