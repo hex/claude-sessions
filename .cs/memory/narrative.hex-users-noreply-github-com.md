@@ -2121,3 +2121,12 @@ Follow-up 2026-09-23 (tab title, Codex round 2): P2 said the launch EXIT/INT/TER
 - 2026-09-25: Codex re-review of 8e2f10d4 = FIX: both prior findings closed; 2 new Important on the registration check (matcher ignored; suffix match accepted not-autosave-commits.sh). Folded in 44e1427e: jq keeps entries whose matcher regex matches both Write and Edit (empty/* = all), command must end in autosave-commits.sh as a whole path component. Red 73/75, green 75/75; live no-ref path accepts the real install. Codex left teammate/subagent CLAUDE_CODE_SESSION_ID equivalence UNVERIFIED (main path verified in the 2.1.282 bundle). Full gate running.
 - 2026-09-25: ghost full gate on 44e1427e: OK all 68 suites. Branch = 5857a0e8, 8e2f10d4, 44e1427e. Awaiting Alex: merge, or a third Codex round.
 - 2026-09-25: MERGED fix/doctor-shadow-ref-live-id to main 0cdf38a1 (--no-ff; tree == gated 44e1427e, ghost 68/68). ./install.sh exit 0, doctor drift OK, shadow row OK on the live id. Not pushed. Only remaining WARN is the pre-existing non-cs statusline. Open: release v2026.9.22 (push needs Alex), #679.
+- 2026-09-25: rotated into 2026-09-25-check-679-field-reports.md (1742e641, 26315dab), armed. Successor does an interim #679 read (3 ledger reports + its own), claude-council chain for goal drift. Nothing to supersede; the only >30-day handoff is untracked, kept.
+
+## 2026-09-25 ~13:50 EEST: #679 interim read (n=4), conversation 07851eda
+
+- Coded 4 ledger Successor reports into `.cs/research/handoff-field-log.md` (gitignored). wrong 0 (baseline 1/3), lookup 2 = 0.5/rot (baseline 1.3), friction 2, (a)-(e) 0. UNVERIFIED re-checks counted apart as u=4; counted as lookup they give 1.5/rot, over the 1.3 Keep bound: a definition question for Alex.
+- First coded the merge-launch stamp incident as (d); advisor pointed out nothing moved under the successor (it never left main), so recoded lookup. Its missing precondition was closed by c2d273cc (11:21 EEST).
+- Goal drift (e): 0 in the claude-council chain 09-23..09-25 (7 Intents, 3 reports); that chain is mostly pre-ledger.
+- Installed SKILL.md mtime (13:04) cannot date an earlier install; ledger shape (IDS/READINGS/UNVERIFIED headers) is the check instead.
+- Verdict: keep collecting; the 5th report is this conversation's successor's.
