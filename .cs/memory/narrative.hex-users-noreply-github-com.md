@@ -968,3 +968,4 @@ Follow-up 2026-09-23 (tab title, Codex round 2): P2 said the launch EXIT/INT/TER
 ## 2026-09-25 ~14:10 EEST: #679 correction
 
 - Correction to the 13:50 entry "the 5th report is this conversation's successor's": wrong. The ledger spec is installed globally, so claude-council's `2026-09-25-specialist-e2e-and-merge.md` (created 07:48Z, ledger blocks, report appended) is already the 5th. I read that chain for goal drift and missed it as data. My draft coding: wrong 1 (pid 30259, in Next Step not the ledger), friction 1, none 2 (a retry suggestion and a conflict prediction) -> Keep at the wrong<=1 edge. Alex: "validate with fable first"; a blind Fable coder is running (rule-only brief in scratchpad/rule.md, field log withheld).
+- 14:30: #679 closed, KEEP. Fable blind coding: wrong 1, lookup 0.4/rot, friction 3, u 5, (a)-(e) 0; verdict agreed with mine, four item-level differences (I missed the council report's 5th bullet). Recorded in the field log.
