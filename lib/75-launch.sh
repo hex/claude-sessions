@@ -127,6 +127,13 @@ _disarm_rotation_marker() {  # session_dir [surviving_handoff]
     printf "${DIM}Rotation marker disarmed; the handoff stays pending — answer r, or re-run the rotate skill.${NC}\n"
 }
 
+# One row of the pending-handoff answers: the key, a padded label, and a dim
+# consequence column, in the already-open menu's layout.
+_resume_menu_row() {  # key color label consequence
+    printf '    %b%b%s%b  %b%-16s%b%b%s%b\n' \
+        "$BOLD" "$2" "$1" "$NC" "$WHITE" "$3" "$NC" "$DIM" "$4" "$NC"
+}
+
 launch_claude_code() {
     local session_name="$1"
     local session_dir="$2"
@@ -602,8 +609,16 @@ EOF
                 local _origin=""
                 _handoff_is_local "$pending_handoff" "$session_dir" \
                     || _origin=" ${DIM}(from another checkout)${NC}"
-                printf "${DIM}Rotation handoff pending:${NC} %s%s\n" "$(basename "$pending_handoff")" "$_origin"
-                printf "${DIM}Continue previous conversation?${NC} [Y/n/r/d] ${DIM}(r = fresh conversation with handoff, d = discard handoff)${NC} "
+                printf "${DIM}Rotation handoff pending:${NC} %s%b\n" "$(basename "$pending_handoff")" "$_origin"
+                # One answer per row, key first, laid out like the already-open
+                # menu; the keys stay the letters the one-line ask used.
+                echo
+                _resume_menu_row y "$GREEN" 'resume' 'continue the previous conversation · default'
+                _resume_menu_row r "$GOLD" 'from handoff' 'fresh conversation that picks up the handoff'
+                _resume_menu_row n "$COMMENT" 'fresh' 'fresh conversation; the handoff waits for later'
+                _resume_menu_row d "$ORANGE" 'discard' 'retire the handoff, then resume'
+                echo
+                printf '    %b›%b ' "$GOLD" "$NC"
             else
                 printf "${DIM}Continue previous conversation?${NC} [Y/n] "
             fi
