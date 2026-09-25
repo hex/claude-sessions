@@ -409,7 +409,7 @@ Rotation handoff pending: 2026-07-16-continue-f5-plan.md
 
     y  resume          continue the previous conversation · default
     r  from handoff    fresh conversation that picks up the handoff
-    n  fresh           fresh conversation; the handoff stays pending
+    n  fresh           fresh conversation; the handoff waits for later
     d  discard         retire the handoff, then resume
 
     ›

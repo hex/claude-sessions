@@ -681,7 +681,7 @@ test_handoff_prompt_lists_one_answer_per_row() {
     rows=$(printf '%s\n' "$output" | grep -E '^    [yrnd]  ')
     assert_eq "    y  resume          continue the previous conversation · default
     r  from handoff    fresh conversation that picks up the handoff
-    n  fresh           fresh conversation; the handoff stays pending
+    n  fresh           fresh conversation; the handoff waits for later
     d  discard         retire the handoff, then resume" "$rows" "one row per answer, in this order" || return 1
     if grep -q 'Y/n/r/d' <<< "$output"; then
         echo "  FAIL: the one-line answer list must be gone"; return 1
@@ -867,7 +867,7 @@ test_discard_answer_dismisses_pending_handoff() {
     _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
     local output
     output=$("$CS_BIN" rot-d <<< "d" 2>&1) || true
-    grep -q "d = discard handoff" <<< "$output" \
+    grep -q "^    d  discard         retire the handoff, then resume$" <<< "$output" \
         || { echo "  FAIL: prompt must offer the d answer"; return 1; }
     assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "status: discarded" \
         "d flips the handoff to discarded" || return 1

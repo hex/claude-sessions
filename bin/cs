@@ -8039,7 +8039,7 @@ EOF
                 echo
                 _resume_menu_row y "$GREEN" 'resume' 'continue the previous conversation · default'
                 _resume_menu_row r "$GOLD" 'from handoff' 'fresh conversation that picks up the handoff'
-                _resume_menu_row n "$COMMENT" 'fresh' 'fresh conversation; the handoff stays pending'
+                _resume_menu_row n "$COMMENT" 'fresh' 'fresh conversation; the handoff waits for later'
                 _resume_menu_row d "$ORANGE" 'discard' 'retire the handoff, then resume'
                 echo
                 printf '    %b›%b ' "$GOLD" "$NC"
