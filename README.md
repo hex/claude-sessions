@@ -402,16 +402,21 @@ section — the old transcript is not loaded. It
 waits for your next message, which can simply be what you want done next.
 
 If you would rather stop for the day, the handoff stays armed and the next
-`cs <name>` launch offers a third answer at the resume prompt:
+`cs <name>` launch lists the handoff answers under the launch card, one per row:
 
 ```
-Last conversation here used 64% of its context.
 Rotation handoff pending: 2026-07-16-continue-f5-plan.md
-Continue previous conversation? [Y/n/r/d] (r = fresh conversation with handoff, d = discard handoff)
+
+    y  resume          continue the previous conversation · default
+    r  from handoff    fresh conversation that picks up the handoff
+    n  fresh           fresh conversation; the handoff stays pending
+    d  discard         retire the handoff, then resume
+
+    ›
 ```
 
-The context line says how full the last conversation in this session got, so
-the choice between `Y` and `r` is not made blind. It reads the figure
+The launch card's context row says how full the last conversation in this session got, so
+the choice between `y` and `r` is not made blind. It reads the figure
 cs-statusline stamps on every render (`.cs/local/context-pct`), so it appears
 only where the status line is installed, and it is shown on the plain `[Y/n]`
 prompt too. The stamp is keyed by session, not by conversation — with a second
