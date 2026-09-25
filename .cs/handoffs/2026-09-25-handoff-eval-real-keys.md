@@ -80,3 +80,40 @@ STATE
 - Nothing running: no harness process; all rounds finished; ghost gates done.
 - Uncommitted: none beyond this handoff at write time (narrative committed in bbce419; step 8 commits the rest).
 - Promised, not done: v2026.9.22 release (Alex deferred behind the prune fix, then SessionEnd fix, then this eval); `cs -rm measure-wake` never answered.
+
+# 4. Primary Request and Intent
+
+- Alex wants handoff quality measured by results that matter, not a quiz: "how can we do a more relevant run? with actual results?". The rescore with real-successor keys is the cheap first answer; the full forked-writer rig is the follow-up only if it says A's gain is real.
+- Durable (inherited): spec changes are measured, not argued; the honest outcome may be "no winner".
+
+# 5. Key Technical Concepts
+
+- Harness scoring (read in source, harness.py): CORRECT 1 / PARTIAL .5 / MUST_LOOKUP 0 / WRONG -1 over non-control briefs; a missed control voids a handoff to -1; METRIC = 100 x mean over sources of (cand - ctrl); REJECT_BELOW = 100 x mean of 2 SE. Keys and runs live in `~/.cache/handoff-eval/` (never read from the scoring conversation).
+- PREREG: `.cs/research/handoff-eval/PREREG.md` (gitignored) has the design, Amendment 1, the contamination event and today's results.
+- Field check: `.cs/research/handoff-field-log.md` (gitignored), task #679.
+
+# 6. Files and Code Sections
+
+- `skills/rotate/SKILL.md`: step 3 is now the fact ledger (A), plus the 5th prune condition `git ls-files --error-unmatch -- <file>`.
+- `hooks/session-end.sh`: index.md built by one awk getline loop over names passed via `ENVIRON["CS_INDEX_NAMES"]`; `tests/test_hooks.sh` `test_index_dashes_unfilled_columns`; equivalence artifacts in this conversation's scratchpad `index-equiv/` (dies with /private/tmp).
+- `tests/test_rotation.sh`: `test_rotate_skill_prunes_only_tracked_handoffs`.
+- `.cs/research/handoff-eval/harness.py`: needs the `--keys DIR` option (Next Step 2).
+
+# 7. Problem Solving
+
+- Fable credit exhaustion and the 5h limit interrupted rounds three times; grading resumes, writing does not.
+- The slow `/clear` came from cs's own SessionEnd index loop (~6 forks x 138 sessions); traced with timestamped xtrace (xtrace inside `{ } 2>/dev/null` is hidden, so the gap appears on the next visible line).
+
+# 8. Pending Tasks
+
+- #680 [pending] Real-successor keys + rescore (this Next Step).
+- #679 [pending] Field check of 5 ledger rotations or 2026-10-15.
+- #554 [pending] PARKED: SessionStart notice for tool calls left pending.
+- #606 [pending] POSTPONED: cs --remote via Remote Control.
+- Not in the native list: release v2026.9.22 (59 commits ahead of origin; tag only after CI green on the release commit); `cs -rm measure-wake` unanswered; doctor warning about the missing shadow ref for da093a8c not investigated.
+
+# 9. Current Work
+
+- Nothing running. main bbce419 installed (rotate skill with the ledger + prune fix, session-end index fix), doctor drift OK at last check.
+
+**Completeness:** written from live context, no compaction. Not carried: per-handoff score tables (in the run .out files under /private/tmp/claude-501/, which a reboot clears) and any gold text (deliberately).
