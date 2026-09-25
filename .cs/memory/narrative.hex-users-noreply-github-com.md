@@ -2061,3 +2061,8 @@ Follow-up 2026-09-23 (tab title, Codex round 2): P2 said the launch EXIT/INT/TER
 ## 2026-09-25: field check of the fact-ledger spec set up
 - Alex asked what the research provided; answer: one probable (unconfirmed) improvement, several negative results (09-24 edits, template, self-test), a reusable harness. Proposed checking A on real rotations via Successor reports; Alex: "let's do it".
 - Log + pre-set decision rule: .cs/research/handoff-field-log.md (gitignored). Baseline from the 3 pre-ledger Successor reports: wrong 1, lookup 4, friction 2 (13-18 KB handoffs). Review after 5 ledger rotations or 2026-10-15. Native task created for it. No per-rotation work needed: the reports already land in .cs/handoffs/.
+
+## 2026-09-25: prune tracked-by-git fix (closes the 09-24 "prune gap" note)
+- Alex picked "Fix the prune gap first" (before release). Branch fix/prune-tracked: red test bafed28 (ghost 114/115), fix 16c7acd (5th prune condition `git ls-files --error-unmatch -- <file>` exits 0; CHANGELOG Fixes line), ghost test_rotation 115/115. Merged --no-ff to main; full ghost gate running (bg), then install, then ask about the v2026.9.22 release.
+- Measured on the real file: 2026-08-24-theme-and-claide-followup.md is ignored by `.gitignore:18:.cs/`, porcelain prints nothing, ls-files --error-unmatch exits 1.
+- Slip: started test_rotation.sh locally (rule: suites only on ghost); stopped it, re-ran on ghost.
