@@ -62,3 +62,45 @@ USER
 UNVERIFIED
 - assumed: the doctor WARN "Shadow ref: uncommitted changes but no refs/worktree/cs/session/c5408bd8-... (autosave may be broken)" disappeared on its own; the later doctor showed only the statusline WARN. Cause not investigated.
 - assumed: the CHANGELOG sentence has no test pin (only the rotate-skill paragraph was grepped).
+
+# 4. Primary Request and Intent
+
+- Continued from handoff 2026-09-25-merge-launch-mark-and-prompt-rows.md: gate and merge the two fix branches (done), report eval state (done).
+- Alex asked about the autoresearch result and whether to rerun; answer: no, measure better first.
+- Alex approved and merged a one-line rotate-skill fix from this conversation's successor report.
+
+# 5. Key Technical Concepts
+
+- Rotation pickup flips the handoff's `status:` to `consumed` (hooks/session-start.sh ~735 writes `consumed_by:`), leaving it uncommitted; the rotate skill now tells writers to say so in a clean-worktree Next Step (skills/rotate/SKILL.md, "1. Next Step" paragraph).
+- `.cs/` is gitignored wholesale in this repo: a NEW handoff needs `git add -f`; tracked ones commit with `git commit -- path`.
+
+# 6. Files and Code Sections
+
+- skills/rotate/SKILL.md: Next Step paragraph gained the consumed-flip sentence (c2d273cc).
+- tests/test_rotation.sh ~247: pin `flips its \`status:\` to \`consumed\``.
+- CHANGELOG.md Unreleased: Fixes line "A handoff whose next step needs a clean worktree ... now includes a step to commit the handoff first"; the "20 points" line still to reword (Next Step).
+
+# 7. Problem Solving
+
+- Branch switch refused by the consumed stamp; fixed by committing the stamp first, then generalised into the skill fix.
+
+# 8. Pending Tasks
+
+Native list (inherited by the successor):
+- #679 [pending] Field check: code the Successor reports of 5 fact-ledger rotations (or on 2026-10-15). This handoff's successor report counts toward it.
+- #680 [in_progress] Real-successor keys + rescore: done and reported; close once Alex has read the result (he has, this conversation) — successor may mark completed.
+- #554 [pending] PARKED. #606 [pending] POSTPONED.
+- #684, #685, #686 completed this conversation.
+
+Open with Alex, ranked (from the last reply):
+1. CHANGELOG "20 points" reword (Next Step).
+2. Cut v2026.9.22 (release commit push, CI green, tag with --target full sha; push needs Alex).
+3. Autosave-warning check (now gone; maybe drop).
+4. Peer rotate-skill request: recommend decline for now.
+5. `cs -rm measure-wake`: Alex's call.
+
+# 9. Current Work
+
+- main at the rotation commits on top of 6f5a1b7b; installed; drift OK; nothing running; nothing pushed. Worktree: only `scratchpad/` untracked after this rotation's commits.
+
+**Completeness:** written from live context at ~45%, no compaction.
