@@ -6173,10 +6173,14 @@ _doctor_check_shadow_ref() {
         return
     fi
     # Autosave is per-conversation: refs/worktree/cs/session/<uuid>, keyed on
-    # the LIVE conversation id. .cs/local/state carries it across /clear;
-    # CS_CLAUDE_SESSION_ID is the launch id and goes stale after the first one.
+    # the session_id of the conversation that made the edit. The caller's own
+    # id comes first: .cs/local/state holds one id per checkout, rebound by the
+    # lead only, so a teammate would be judged by the lead's ref. The recorded
+    # id covers a plain shell in the session; CS_CLAUDE_SESSION_ID is the
+    # launch id and goes stale after the first /clear, so it comes last.
     local uuid ref=""
-    uuid=$(_read_local_state "${CLAUDE_SESSION_META_DIR:-$dir/.cs}/local/state" claude_session_id)
+    uuid="${CLAUDE_CODE_SESSION_ID:-}"
+    [ -n "$uuid" ] || uuid=$(_read_local_state "${CLAUDE_SESSION_META_DIR:-$dir/.cs}/local/state" claude_session_id)
     [ -n "$uuid" ] || uuid="${CS_CLAUDE_SESSION_ID:-}"
     if [[ "$uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
         ref="refs/worktree/cs/session/$uuid"
@@ -6186,7 +6190,10 @@ _doctor_check_shadow_ref() {
     # No ref is not evidence of a broken hook: autosave fires on Edit/Write
     # only, and SessionEnd deletes a conversation's ref on a clean /clear, so a
     # dirty tree with no ref is the normal state before the first Edit/Write.
-    # Hook presence is the deploy-drift row's job.
+    # What doctor can still check is that the hook which would write it is
+    # registered: the file and registration rows enumerate what IS deployed or
+    # registered, so a hook missing from both is invisible to them. An absent
+    # or unreadable settings file is reported by those rows already.
     if [ -z "$ref" ]; then
         _doctor_ok "Shadow ref: no conversation id in environment to check"
     elif [ -n "$shadow_sha" ]; then
@@ -6196,6 +6203,17 @@ _doctor_check_shadow_ref() {
         age=$((now - ts))
         _doctor_ok "Shadow ref: $ref present (${age}s old)"
     else
+        local settings="${CS_CLAUDE_DIR:-$HOME/.claude}/settings.json" commands
+        if [ -f "$settings" ] && command -v jq >/dev/null 2>&1 && _doctor_settings_parse_ok "$settings"; then
+            commands=$(jq -r '.hooks.PostToolUse // [] | .[].hooks[]?.command // empty' "$settings" 2>/dev/null || true)
+            case $'\n'"$commands"$'\n' in
+                *autosave-commits.sh$'\n'*) ;;
+                *)
+                    _doctor_warn "Shadow ref: autosave-commits.sh is not registered for PostToolUse in $settings; edits are not snapshotted"
+                    return
+                    ;;
+            esac
+        fi
         _doctor_ok "Shadow ref: no snapshot for this conversation yet (autosave runs on Edit/Write)"
     fi
 }
