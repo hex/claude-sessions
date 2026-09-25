@@ -153,19 +153,60 @@ if [ -n "$SESSIONS_ROOT" ] && [ -d "$SESSIONS_ROOT" ]; then
         echo ""
         echo "| Session | Status | Objective | Created |"
         echo "|---------|--------|-----------|---------|"
+        # One awk reads every README: a per-session pipeline of head, grep and
+        # sed forked ~6 processes per session, ~8 s at 138 sessions, and
+        # SessionEnd runs on every /clear. The shell keeps only the glob, its
+        # order and the builtin tests; names reach awk through the environment,
+        # which does not rewrite backslashes as -v would.
+        _cs_index_names=""
         for dir in "$SESSIONS_ROOT"/*/; do
             [ -d "$dir/.cs" ] || continue
-            local_name=$(basename "$dir")
-            local_readme="$dir/.cs/README.md"
-            [ -f "$local_readme" ] || continue
-            # Extract frontmatter fields (always in first few lines)
-            local_status=$(head -6 "$local_readme" | grep '^status:' | sed 's/^status: *//' || true)
-            local_created=$(head -6 "$local_readme" | grep '^created:' | sed 's/^created: *//' || true)
-            # Extract objective
-            local_obj=$(sed -n '/^## Objective/,/^## /{/^## Objective/d;/^## /d;/^$/d;p;}' "$local_readme" 2>/dev/null | head -1 || true)
-            [[ "$local_obj" == "["*"]" ]] && local_obj=""
-            echo "| [${local_name}](${local_name}/.cs/README.md) | ${local_status:-—} | ${local_obj:-—} | ${local_created:-—} |"
+            [ -f "$dir/.cs/README.md" ] || continue
+            _cs_index_dir="${dir%/}"
+            _cs_index_names="${_cs_index_names}${_cs_index_dir##*/}
+"
         done
+        CS_INDEX_ROOT="$SESSIONS_ROOT" CS_INDEX_NAMES="$_cs_index_names" awk '
+            BEGIN {
+                count = split(ENVIRON["CS_INDEX_NAMES"], names, "\n")
+                for (i = 1; i <= count; i++) {
+                    name = names[i]
+                    if (name == "") continue
+                    readme = ENVIRON["CS_INDEX_ROOT"] "/" name "/.cs/README.md"
+                    status = ""; created = ""; objective = ""; n_status = 0; n_created = 0
+                    in_objective = 0; objective_found = 0; line_no = 0
+                    while ((getline line < readme) > 0) {
+                        line_no++
+                        # Frontmatter fields sit in the first few lines.
+                        if (line_no <= 6 && line ~ /^status:/) {
+                            value = line
+                            sub(/^status: */, "", value)
+                            status = (n_status++ ? status "\n" value : value)
+                        }
+                        if (line_no <= 6 && line ~ /^created:/) {
+                            value = line
+                            sub(/^created: */, "", value)
+                            created = (n_created++ ? created "\n" value : value)
+                        }
+                        # The first non-empty line under "## Objective".
+                        if (objective_found) continue
+                        if (!in_objective) {
+                            if (line ~ /^## Objective/) in_objective = 1
+                            continue
+                        }
+                        if (line ~ /^## /) { in_objective = 0; continue }
+                        if (line == "") continue
+                        objective = line; objective_found = 1
+                    }
+                    close(readme)
+                    # A shell capture drops trailing newlines; so does this.
+                    sub(/\n+$/, "", status); sub(/\n+$/, "", created)
+                    if (objective ~ /^\[/ && objective ~ /\]$/) objective = ""
+                    printf "| [%s](%s/.cs/README.md) | %s | %s | %s |\n", name, name, \
+                        (status == "" ? "—" : status), (objective == "" ? "—" : objective), \
+                        (created == "" ? "—" : created)
+                }
+            }'
     } > "$INDEX_FILE"; } 2>/dev/null || true
 fi
 

@@ -1814,6 +1814,27 @@ test_index_has_auto_generated_notice() {
     index_teardown
 }
 
+# A column the README does not fill shows a dash: an unfilled `[...]`
+# objective placeholder, and every column of an empty README.
+test_index_dashes_unfilled_columns() {
+    index_setup
+
+    create_indexed_session "placeholder" "active" "[What is this session for?]"
+    mkdir -p "$CS_SESSIONS_ROOT/empty/.cs"
+    : > "$CS_SESSIONS_ROOT/empty/.cs/README.md"
+
+    echo '{"session_id":"test-123"}' | bash "$HOOKS_DIR/session-end.sh"
+
+    assert_file_contains "$CS_SESSIONS_ROOT/index.md" \
+        '^| \[placeholder\](placeholder/.cs/README.md) | active | — | 2026-04-01 |$' \
+        "a placeholder objective shows a dash" || { index_teardown; return 1; }
+    assert_file_contains "$CS_SESSIONS_ROOT/index.md" \
+        '^| \[empty\](empty/.cs/README.md) | — | — | — |$' \
+        "an empty README shows a dash in every column" || { index_teardown; return 1; }
+
+    index_teardown
+}
+
 
 # ============================================================================
 # timeline.jsonl
@@ -2116,6 +2137,7 @@ run_test test_index_lists_all_sessions
 run_test test_index_shows_objectives
 run_test test_index_shows_status
 run_test test_index_has_auto_generated_notice
+run_test test_index_dashes_unfilled_columns
 
 # Timeline
 run_test test_session_start_appends_to_timeline
