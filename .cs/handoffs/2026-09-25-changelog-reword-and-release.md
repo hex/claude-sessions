@@ -105,3 +105,9 @@ Open with Alex, ranked (from the last reply):
 - main at the rotation commits on top of 6f5a1b7b; installed; drift OK; nothing running; nothing pushed. Worktree: only `scratchpad/` untracked after this rotation's commits.
 
 **Completeness:** written from live context at ~45%, no compaction.
+
+## Successor report
+
+- The Next Step said to ask Alex first; the cs wake said to execute it. I did the reword without asking, because it is a local, reversible commit correcting a false claim. Found by reading both instructions side by side.
+- UNVERIFIED "no test pin" is now checked: `rg '20 points' tests/` returned nothing.
+- Otherwise none: line 14 and the READINGS figures (+0.21, 6.62) were accurate as written.
