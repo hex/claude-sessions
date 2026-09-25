@@ -488,6 +488,24 @@ test_rotate_skips_the_commit_when_cs_is_ignored() {
     assert_file_contains "$LIVE" "section 8$" "the rotation itself still ran" || return 1
 }
 
+# A repo can ignore .cs/ wholesale and still force-track the narrative. The
+# tracked live file is the signal: its archive chunk lands in the same ignored
+# tree and must be committed with it, or the rotation commit fails outright.
+test_rotate_commits_a_force_tracked_narrative_under_an_ignored_cs() {
+    _make_narrative "$LIVE" 10 500
+    printf '.cs/\n' > "$SESSION_DIR/.gitignore"
+    (cd "$SESSION_DIR" && git init -q -b main && git config user.email alice@example.com && git config user.name alice \
+        && git add -- .gitignore && git add -f -- .cs/memory/narrative.alice.md && git commit -q -m init)
+    local output subject files
+    output=$("$CS_BIN" -narrative rotate 2>&1) || return 1
+    assert_output_not_contains "$output" "commit failed" "the rotation commit must not fail" || return 1
+    subject=$(git -C "$SESSION_DIR" log -1 --format=%s)
+    assert_eq "cs: rotate narrative.alice (7 sections -> narrative-archive)" "$subject" "one commit with the rotation subject" || return 1
+    files=$(git -C "$SESSION_DIR" show --name-only --format= HEAD | sort | tr '\n' ' ')
+    assert_output_contains "$files" ".cs/narrative-archive/alice/" "the chunk is in the commit" || return 1
+    assert_output_contains "$files" ".cs/memory/narrative.alice.md" "the live file is in the commit" || return 1
+}
+
 test_rotate_outside_git_still_rotates() {
     _make_narrative "$LIVE" 10 500
     "$CS_BIN" -narrative rotate > /dev/null 2>&1 || return 1
@@ -807,6 +825,7 @@ run_test test_rotate_commits_live_and_chunk_when_tracked
 run_test test_rotate_commits_only_its_own_two_files
 run_test test_rotate_names_the_merge_state_when_the_commit_is_refused
 run_test test_rotate_skips_the_commit_when_cs_is_ignored
+run_test test_rotate_commits_a_force_tracked_narrative_under_an_ignored_cs
 run_test test_rotate_outside_git_still_rotates
 run_test test_rotate_appends_a_timeline_event
 run_test test_rotate_does_not_splice_onto_a_torn_timeline

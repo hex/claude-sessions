@@ -138,8 +138,11 @@ rotate_narrative() {
         # user's own checkout — an adopted session IS their project repo — and a
         # bare `git commit` would sweep whatever they had staged into a commit
         # titled "cs: rotate narrative". The `add` still runs first so the newly
-        # written chunk is known to git and the pathspec can match it.
-        if ! { git -C "$session_dir" add -- "$live" "$chunk" \
+        # written chunk is known to git and the pathspec can match it. It forces
+        # both paths because a tracked live file can sit under an ignored .cs/
+        # (tracked with `add -f`): git refuses a plain add of any path there,
+        # tracked or not, and the archive belongs in git beside the live file.
+        if ! { git -C "$session_dir" add -f -- "$live" "$chunk" \
             && git -C "$session_dir" commit -q -m "cs: rotate narrative.$actor ($sections sections -> narrative-archive)" -- "$live" "$chunk"; } 2>/dev/null; then
             # Naming a pathspec makes this a PARTIAL commit, which git refuses
             # outright mid-merge — a state the old bare commit committed
