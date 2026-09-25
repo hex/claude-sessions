@@ -122,3 +122,9 @@ STATE
 - measured: the ghost full gate for fix/handoff-prompt-rows at 3f98ffc FAILED 1/68: test_rotation 114/116. `test_discard_answer_dismisses_pending_handoff` pinned the old text "d = discard handoff"; `test_discard_does_not_offer_the_retired_handoff` matched "stays pending" in the new n row.
 - Fix 7896ce2 on fix/handoff-prompt-rows: n row now reads "fresh conversation; the handoff waits for later" (lib, test, README); the d pin now matches the row `    d  discard         retire the handoff, then resume`. Ghost test_rotation 116/116 (measured).
 - So Next Step 1 changes: the branch has NOT had a green FULL gate at 7896ce2. Run the full gate on ghost for fix/handoff-prompt-rows first (check out the branch locally; remote-tests.sh syncs the working tree), then ask Alex about merging.
+
+## Successor report
+
+- Addendum was right that 7896ce2 had no full gate; ran it: ghost 68/68, exit=0 (measured).
+- Next Step 1's command block assumes the worktree is clean; the cs consumed stamp dirties this handoff, so `git switch` to the branch refuses. My piped `git switch | tail` hid the refusal and the first gate ran on main (0296bc4); stopped by process group on ghost. Fix: commit the stamp first (done, on main).
+- The handoff's `grep -E "FAIL|failed"` diagnostic also matches passing test names containing "failed"; read exit= and the OK line, not the grep.
