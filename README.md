@@ -145,7 +145,7 @@ cs -search <query>          # Search across all sessions
 cs -checkpoint "<label>"    # Snapshot git state + narrative (also: list, show <name>)
 cs -narrative rotate        # Archive the oldest narrative sections once the file passes its budget (/wrap runs this)
 cs <name> -narrative rotate # Same, for a session you are not in (the session manager's Rotate narrative entry runs this)
-cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear, log)
+cs -queue add "<task>"      # Walk-away task queue (also: list, rm <n>, clear, log; /queue <task> in a conversation)
 cs -msg <session> "note"    # Send mail to another session (--kind notify|task|text|result; '-' body reads stdin); bare cs -msg reads
 cs -msg --reply <thread> "note"  # Reply into a thread; the target comes from the thread
 cs -msg thread <id>         # Show one thread as a conversation, oldest first
@@ -398,8 +398,11 @@ Then rotate with **`/clear`**. The fresh conversation reads the handoff,
 reconciles the native task list it inherited with it (cs keys that list to
 the session, not the conversation, and opts every model into the Task tools;
 `CS_NO_TASK_TOOLS=1` leaves that to Claude Code), and continues from its next-step
-section — the old transcript is not loaded. It
-waits for your next message, which can simply be what you want done next.
+section — the old transcript is not loaded. It starts on its own: a moment
+after the `/clear`, the session wakes itself into the handoff's next step with
+nothing typed. The wake writes a kick file every `CS_ROTATION_KICK_DELAY`
+seconds (2 by default), up to 30 times, until one lands. `CS_NO_ROTATION_WAKE=1`
+makes the fresh conversation wait for your next message instead.
 
 If you would rather stop for the day, the handoff stays armed and the next
 `cs <name>` launch lists the handoff answers under the launch card, one per row:
@@ -424,9 +427,9 @@ conversation open here (a teammate, or one started outside cs) the figure is
 whichever rendered most recently, which is why the line says "here" rather than
 naming the conversation you are resuming.
 
-`r` rotates the same way, and additionally hands the fresh conversation a
-first prompt so it starts on the handoff without you typing anything — the one
-thing `/clear` cannot do. `Y` (or Enter) resumes as usual and
+`r` rotates the same way and hands the fresh conversation a first prompt, so it
+starts on the handoff without you typing anything, as a `/clear` rotation does
+through its wake. `Y` (or Enter) resumes as usual and
 `n` starts fresh — both disarm the marker and say so, leaving the handoff
 itself pending so a later rotate can re-arm it. `d` discards the handoff
 outright. A handoff this checkout never wrote is labelled `(from another
@@ -479,8 +482,10 @@ cs -status                     # show this session's status (falls back to the R
 cs -status --clear             # clear it (revert to the objective)
 ```
 
-Liveness is a local fact — a session is "live" when its process is running on
-this machine (the same `.cs/session.lock` signal the TUI uses). There is no
+Liveness is a local fact — a session is "live" when its `.cs/session.lock`
+names a running process on this machine, or when its statusline heartbeat is
+fresh (`.cs/local/context-pct` written within the last 900 seconds), the same
+two signals the TUI uses. There is no
 network or cross-machine presence. A session that never sets a status shows its
 README objective instead.
 
@@ -490,6 +495,8 @@ README objective instead.
 - `/sweep` — Distill the session into durable auto-memory entries (strict bar) and sweep findings into the narrative
 - `/summary` — Generate a narrative summary of the current session
 - `/checkpoint <label>` — Save a labelled state snapshot (narrative, changes, git HEAD)
+- `/queue <task>` — Add a task to this session's walk-away queue through `cs -queue add`, even mid-turn; `/queue` alone lists the queue (from the `cs` mod)
+- `/cs-update` — Open the release notes for a pending cs update, with `1` to install it (from the `cs-update` mod)
 
 ## Shell Completion
 

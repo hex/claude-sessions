@@ -17,7 +17,7 @@ All notable changes to cs are documented here. Release notes are also available 
 - A handoff's Next Step carries every fact its first action needs (command, path, host, branch), even when the fact is also written down elsewhere. A pointer to a script says in one clause what the script does. An action in Next Step that starts work first says how to tell whether it is already done or still running.
 - The conversation that picks up a rotation appends a `## Successor report` to the handoff once its next step is done: what it had to look up again, re-derive, or found wrong, or `none`. The next rotation commits the report, and the rotate skill's prune never deletes a handoff with uncommitted changes.
 - A handoff whose next step needs a clean worktree (a branch switch, a merge, a rebase) now includes a step to commit the handoff first. Session start marks the handoff consumed, which leaves it uncommitted, so git refused the branch switch the next step asked for.
-- The rotate mod is now `cs`, deployed to `~/.claude/skills/cs/`; the installer and `cs -uninstall` remove the old `~/.claude/skills/cs-rotate`.
+- The rotate mod is now `cs`, deployed to `~/.claude/skills/cs/`; the installer and `cs -uninstall` remove the old `~/.claude/skills/cs-rotate`. Its machine-local markers are renamed with it: `.cs/local/cs.heartbeat` and `.cs/local/cs.forced` replace `cs-rotate.heartbeat` and `cs-rotate.forced`. Old marker files are left in place and nothing reads them.
 - Every launch exports `CS_BIN`, the path of the running cs, in place of `CS_UPDATE_BIN`, which was exported only when an update was pending. The cs-update mod runs `cs -update` through it.
 
 ### Fixes

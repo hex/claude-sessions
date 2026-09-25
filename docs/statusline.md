@@ -23,12 +23,12 @@ Default order: `logo,session,notes,mail,git,model,ctx,limits`. One capsule holds
 | `model` | identity | display name in bold ink; the effort word, regular weight, in Claude Code's own `/effort` colour for its level (low gold, medium green, high blue, xhigh violet, max a blue-to-pink gradient across its letters) | — | no model on stdin | stdin `model.display_name`, `effort.level` |
 | `ctx` | ctx | `◔ ctx N%`, secondary ink; the pie fills with the band: `○` below 13, `◔` to warn, `◑` through amber, `◕` at crit, `●` from 88 | amber ink on the number at 40; crit inversion at 65 (`CS_STATUSLINE_CTX_WARN`/`_CRIT`; the half and three-quarter steps follow them) | no `context_window` on stdin | stdin `context_window.used_percentage` |
 | `limits` | limits | `◷ 5h N%` | the quota capsule `5h N% ⋮ wk N%` (5h always, wk from 50, joined by a vertical ellipsis) and a separate `fable N%` capsule from 50 on a Fable session: `5h N% · 2h14m`, `wk N% · 5d16h`, `fable N% · 18h`; neutral below 70, amber ink at 70, crit inversion at 90; the countdown joins 5h at 70 and the coarse windows at 80 | wk and fable below 50 | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at`, plus the usage cache when the model is Fable |
-| `fable` | limits | accepted as a name: the Fable window alone when `limits` is not named; a no-op beside `limits` | — | below 70, like every window | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) |
+| `fable` | limits | accepted as a name: the Fable window alone when `limits` is not named; a no-op beside `limits` | — | below 50, like wk | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) |
 | `cost` | cost | `$N.NN`, secondary ink, its own capsule after limits; only when named | — | not named, or no cost on stdin | stdin `cost.total_cost_usd` |
 
 Every segment is null-when-nothing: missing data means the segment and its separator simply do not render. Outside a cs session, `session` falls back to the directory name. `pane`, `fable` and `cost` ship but stay off the default order — name them in `CS_STATUSLINE_SEGMENTS` to turn them on.
 
-The limits group folds the three windows into one rule. The Fable window is model-scoped and lives only in the usage cache (see [Fable usage](#fable-usage)); it joins the candidate list only on a Fable session, and its refresh kick keeps its existing gate: the cache is read and the refresher detached whether or not the capsule ends up shown, so a hidden Fable window is still polled at its 600-second floor. The countdown appears once a window is tight: for 5h whenever it shows (its reveal and its countdown gate are both 70), for wk and fable at 80 and up.
+The limits group folds the three windows into one rule. The Fable window is model-scoped and lives only in the usage cache (see [Fable usage](#fable-usage)); it joins the candidate list only on a Fable session, and its refresh kick keeps its existing gate: the cache is read and the refresher detached whether or not the capsule ends up shown, so a hidden Fable window is still polled at its 600-second floor. The countdown appears once a window is tight: for 5h at 70 and up (the 5h window itself is always shown), for wk and fable at 80 and up.
 
 The two files the render writes, `.cs/local/context-pct` and `.cs/local/limits`, are produced in `_parse_stdin` before any segment runs and stay untouched by the gating above. Hiding a capsule never hides a heartbeat.
 
@@ -71,10 +71,10 @@ So cs fetches that one figure itself, from the same endpoint Claude Code polls:
 GET https://api.anthropic.com/api/oauth/usage
 ```
 
-The Fable bucket is the entry in the response's `limits[]` array whose
-`scope.model.display_name` names a model — the unified windows ride in that same
-array with a null model scope, which is why the filter keys on the display name
-rather than on position. Its `percent` is already 0–100 on the wire, and its
+The Fable bucket is the first entry in the response's `limits[]` array whose
+`scope.model.display_name` starts with `fable`, case-insensitively. The unified
+windows ride in that same array with a null model scope, which is why the filter
+keys on the display name rather than on position. Its `percent` is already 0–100 on the wire, and its
 `resets_at` is an ISO 8601 string rather than the epoch integer the stdin schema
 uses, so it is converted at read time.
 
@@ -89,8 +89,12 @@ repair. The token reaches `curl` on stdin as a `-K` config line, never on a
 command line where `ps` would expose it to every process on the machine.
 
 **The render performs no network I/O.** It reads a cache, and only on a Fable
-session, where it costs one extra `jq` that reads the cache and Claude Code's
-config together. When that cache is due, the render detaches
+session. The render reads the record's fields from a `.fields` file the
+refresher writes beside the cache, with shell builtins and no `jq`; only a
+record without that file is parsed with `jq`, until the next refresh writes one.
+The account id comes from a 300-second cache of Claude Code's config, and only
+a miss reads the config itself, in one `jq --stream` pass. When the usage cache
+is due, the render detaches
 `cs-statusline --refresh-usage` — a mode of this same script, so the feature adds
 no second binary and nothing to the install manifest — and renders whatever the
 cache already holds.
@@ -130,7 +134,7 @@ model costs the budget nothing.
 
 ### When the Fable capsule does not render
 
-The capsule is null-when-nothing, and deliberately strict about it: usage below 70%, no cache, no
+The capsule is null-when-nothing, and deliberately strict about it: usage below 50%, no cache, no
 Fable window on the account, no `jq` or `curl`, no readable credential, or a
 reading older than 1800 seconds. Identity is structural rather than checked: a
 record is addressed by account, so a reading can never be found under the wrong
@@ -152,7 +156,7 @@ Failure posture is fail-open: malformed stdin, a missing `jq`, or any internal e
 
 ## Colors
 
-Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLOR`, or `TERM=dumb` force plain text (segments joined with ` > `, no escape codes); `COLORTERM=truecolor`/`24bit` or iTerm2/WezTerm select truecolor; a `*256color*` `TERM` selects 256-color; anything else gets basic ANSI.
+Color depth is detected per render, in priority order: `FORCE_COLOR=0`, `NO_COLOR`, or `TERM=dumb` force plain text (segments joined with ` > `, no escape codes); inside a real tmux (not an inherited `TMUX`) without `CLAUDE_CODE_TMUX_TRUECOLOR`, the level is 256-color, since the host would quantise truecolor output anyway; otherwise `COLORTERM=truecolor`/`24bit` or iTerm2/WezTerm select truecolor; a `*256color*` `TERM` selects 256-color; anything else gets basic ANSI.
 
 | Token | Role | Truecolor | 256 | Basic |
 |---|---|---|---|---|
@@ -212,7 +216,7 @@ Failure posture matches the bar: fail-open, always exit 0, print nothing rather 
 
 cs detects the terminal's light/dark theme once at session launch, while it still owns the tty: an OSC 11 background query classified by BT.709 luminance first, falling back to `COLORFGBG` when the query gets no answer, then to OS appearance when neither says anything. The query outranks the variable because `COLORFGBG` goes stale across theme changes; OSC 11 asks the live terminal. Inside tmux `COLORFGBG` is a stale snapshot of the tmux server's start-time environment, so cs ignores it there. tmux that proxies OSC 11 forwards a plain query to the client terminal, so under `$TMUX` cs asks with a plain query first and takes any non-black answer as the real background; a pure-black reply is tmux's own default and is not trusted. When the plain query yields nothing trustworthy, cs retries wrapped for DCS passthrough (needs `allow-passthrough on`), then falls back to OS appearance (`defaults read -g AppleInterfaceStyle` on macOS; `unknown` elsewhere), which is right whenever the terminal theme follows the system. The launch detection sets the palette for cs's own UI and the TUI picker (exported as `CS_TERM_THEME`), and sets a `CS_TERM_THEME_AUTO` marker so the statusline knows the value came from auto-detection rather than an explicit pin. The status line never asks the operating system what the terminal looks like: the system's appearance says nothing about a terminal with a fixed scheme or one embedded in an app, which is where relying on it was reliably wrong. A terminal that can answer for itself does so through the rungs above; a terminal that cannot is taken to be dark, the assumption the rest of cs makes with nothing to go on. The cost is that a light terminal which reports nothing and was not launched by cs renders the dark palette — pin `CS_TERM_THEME=light` there. It cannot re-run the OSC query from a render, which would race its reply into claude's input stream. Setting `CS_TERM_THEME=light|dark` yourself is an explicit pin (no auto marker) that wins everywhere — use it when the terminal's theme is decoupled from the system. A session already open when the terminal switches keeps its launch palette until relaunched, on every platform: the rungs that could notice mid-session are the terminal's own answers, and a terminal that does not report its theme has none. On dark terminals the statusline lifts its neutral grey and softens white text; all other colors sit on their own capsule fill and are theme-independent. Run `cs -detect-theme` to see what launch detection yields.
 
-A session cs did not launch carries none of that, so two further rungs sit above the OS appearance and describe the terminal rather than the system. Outside tmux the statusline reads `COLORFGBG`, the terminal's own statement about itself; inside tmux it ignores it for the same reason the launch detector does — there it is the server's start-time snapshot and goes stale across theme changes. Inside tmux it instead asks the server for the attached client's reported theme (`#{client_theme}`), which is live and describes the client, but which only terminals that report their theme populate at all; when it is empty the ladder falls through. Neither rung reaches a terminal that is inside tmux and reports nothing, and for that combination no passive per-render signal exists.
+A session cs did not launch carries none of that, so the statusline makes three checks of its own, in order, before it falls back to the `CS_TERM_THEME` a launch exported and then to dark; none of them asks the OS appearance. The third reads back the background cs measured at launch for this terminal, described further down. The other two describe the terminal rather than the system. Outside tmux the statusline reads `COLORFGBG`, the terminal's own statement about itself; inside tmux it ignores it for the same reason the launch detector does — there it is the server's start-time snapshot and goes stale across theme changes. Inside tmux it instead asks the server for the attached client's reported theme (`#{client_theme}`), which is live and describes the client, but which only terminals that report their theme populate at all; when it is empty the ladder falls through. Neither rung reaches a terminal that is inside tmux and reports nothing, and for that combination no passive per-render signal exists.
 
 
 `TMUX` is ordinary environment and is inherited wholesale, so a program launched from a tmux pane passes it to everything it spawns — including a window it opens in a terminal of its own. That child claims a tmux membership it does not have, and every rung keyed off `TMUX` then reads the wrong terminal: the client rung asks a client that is not ours, and `COLORFGBG` is skipped to avoid a staleness that does not apply. The second field of `TMUX` is the tmux server pid, which is the one part of the claim that can be checked rather than believed — a process in a real pane has that server among its ancestors. The statusline walks its ancestry once per conversation (a single `ps`, only when `TMUX` is set) and, when the server is absent, treats the whole inherited terminal description as describing somewhere else: it takes dark rather than the inherited `CS_TERM_THEME`, drops `CS_TERM_BG_RGB` so the capsule surface does not shade toward another terminal's background, and hides the [pane segment](#segments) rather than print a pane id belonging to someone else's session. An explicit `CS_TERM_THEME` pin still wins over all of this. Observed with terminal-embedding apps that shell out before opening their own window, where the symptom is a light bar on a dark window.
@@ -227,7 +231,7 @@ Only the OSC 11 path ever learns the terminal's actual background RGB — the `C
 
 When even that misses, the capsule surface falls back to a fixed warm taupe instead of a derived shade — lighter on a dark terminal, deeper on a light one. Deriving an exact shade of the measured background needs truecolor's per-channel precision; classifying light or dark for the taupe fallback does not. Inside tmux the host mutes a truecolor status line to a fallback palette unless `CLAUDE_CODE_TMUX_TRUECOLOR` is set. cs exports it at launch for the claude it starts, and publishes it into the tmux session that launch runs in (`tmux set-environment`), so every pane opened in that tmux session afterwards, an agent-team teammate claude splits off included, inherits it; a pane in a tmux session no cs launch has run in renders that same taupe fallback in 256-color rather than the derived shade.
 
-`CS_TERM_BG_RGB` stays at its launch value for the life of the session, so a terminal that changes background mid-session keeps deriving its capsule surface from the old one. Set it yourself to override.
+An auto-detected `CS_TERM_BG_RGB` keeps its launch value while the live theme still matches the one detected at launch, so a terminal that changes background without changing theme keeps deriving its capsule surface from the old one. The render drops it when the live theme differs from the launch theme, or when the environment was inherited from another terminal, and the surface falls back to the taupe. An RGB you set yourself carries no auto marker and is never dropped, so set it to override.
 
 ### Pinning the background
 
