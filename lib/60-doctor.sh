@@ -390,31 +390,23 @@ _doctor_check_shadow_ref() {
         _doctor_warn "Shadow ref: session directory is not a git repo"
         return
     fi
-    # Autosave is per-conversation: refs/worktree/cs/session/<uuid>. Check this
-    # conversation's own ref, keyed on the UUID exported at launch.
-    local uuid="${CS_CLAUDE_SESSION_ID:-}" ref=""
+    # Autosave is per-conversation: refs/worktree/cs/session/<uuid>, keyed on
+    # the LIVE conversation id. .cs/local/state carries it across /clear;
+    # CS_CLAUDE_SESSION_ID is the launch id and goes stale after the first one.
+    local uuid ref=""
+    uuid=$(_read_local_state "${CLAUDE_SESSION_META_DIR:-$dir/.cs}/local/state" claude_session_id)
+    [ -n "$uuid" ] || uuid="${CS_CLAUDE_SESSION_ID:-}"
     if [[ "$uuid" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
         ref="refs/worktree/cs/session/$uuid"
     fi
     local shadow_sha=""
     [ -n "$ref" ] && shadow_sha=$(git -C "$dir" show-ref --verify "$ref" 2>/dev/null | awk '{print $1}' || true)
-    local has_changes=0
-    git -C "$dir" diff --quiet HEAD 2>/dev/null || has_changes=1
-    # The autosave hook snapshots with `git add -A`, which stages untracked
-    # files, so a session whose entire body of work is untracked still needs a
-    # shadow ref. Testing tracked changes alone reported "no uncommitted work to
-    # snapshot" on exactly the broken-autosave state this check exists to catch.
-    # Captured whole rather than piped: an early-exiting consumer would SIGPIPE
-    # the writer, and pipefail promotes that to the assignment's status.
-    if [ "$has_changes" = 0 ]; then
-        local untracked
-        untracked=$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null || true)
-        [ -n "$untracked" ] && has_changes=1
-    fi
+    # No ref is not evidence of a broken hook: autosave fires on Edit/Write
+    # only, and SessionEnd deletes a conversation's ref on a clean /clear, so a
+    # dirty tree with no ref is the normal state before the first Edit/Write.
+    # Hook presence is the deploy-drift row's job.
     if [ -z "$ref" ]; then
         _doctor_ok "Shadow ref: no conversation id in environment to check"
-    elif [ "$has_changes" = "1" ] && [ -z "$shadow_sha" ]; then
-        _doctor_warn "Shadow ref: uncommitted changes but no $ref (autosave may be broken)"
     elif [ -n "$shadow_sha" ]; then
         local ts now age
         ts=$(git -C "$dir" log -1 --format=%ct "$shadow_sha" 2>/dev/null || echo 0)
@@ -422,7 +414,7 @@ _doctor_check_shadow_ref() {
         age=$((now - ts))
         _doctor_ok "Shadow ref: $ref present (${age}s old)"
     else
-        _doctor_ok "Shadow ref: no uncommitted work to snapshot"
+        _doctor_ok "Shadow ref: no snapshot for this conversation yet (autosave runs on Edit/Write)"
     fi
 }
 

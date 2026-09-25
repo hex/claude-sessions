@@ -999,32 +999,54 @@ EOF
         "the failure must name the unregistered hook" || return 1
 }
 
-test_doctor_warns_when_only_untracked_work_has_no_shadow_ref() {
-    # The autosave hook snapshots with `git add -A`, which stages untracked
-    # files. The check tested `git diff --quiet HEAD` — tracked changes only —
-    # so a session whose entire body of work is untracked reported "no
-    # uncommitted work to snapshot" on exactly the broken-autosave state.
+test_doctor_checks_the_live_conversations_shadow_ref() {
+    # CS_CLAUDE_SESSION_ID is the LAUNCH id and goes stale after the first
+    # /clear, while the autosave hook keys its ref on the live session_id.
+    # Doctor read the launch id, so after a rotation it looked for a ref the
+    # previous conversation's SessionEnd had already deleted.
     local dir="$CLAUDE_SESSION_DIR"
+    local live="11111111-2222-3333-4444-555555555555"
+    local launch="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    mkdir -p "$dir/.cs/local"
+    printf 'claude_session_id: %s\n' "$live" > "$dir/.cs/local/state"
+    local snap
+    snap=$(git -C "$dir" commit-tree "HEAD^{tree}" -m snapshot) || { echo "  FAIL: fixture commit-tree"; return 1; }
+    git -C "$dir" update-ref "refs/worktree/cs/session/$live" "$snap" || { echo "  FAIL: fixture update-ref"; return 1; }
+
+    local output
+    output=$(CS_CLAUDE_SESSION_ID="$launch" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "refs/worktree/cs/session/$live present" \
+        "doctor must check the live conversation's ref" || return 1
+    assert_output_not_contains "$output" "$launch" \
+        "the stale launch id must not be checked" || return 1
+}
+
+test_doctor_does_not_warn_before_the_first_autosave() {
+    # Autosave fires on Edit/Write only, and SessionEnd deletes a conversation's
+    # ref on a clean /clear. A dirty tree with no ref for the live conversation
+    # is the normal state before its first Edit/Write (work done through Bash,
+    # or carried over from before the /clear), not a broken hook. Untracked
+    # work included: the fixture holds only an untracked file.
+    local dir="$CLAUDE_SESSION_DIR"
+    mkdir -p "$dir/.cs/local"
+    printf 'claude_session_id: %s\n' "11111111-2222-3333-4444-555555555555" > "$dir/.cs/local/state"
     echo "unsaved work" > "$dir/scratch-note.txt"
-    # Fixture sanity: tracked-clean, untracked-dirty, and no shadow ref — the
-    # precise state that produced the false OK.
-    git -C "$dir" diff --quiet HEAD 2>/dev/null \
-        || { echo "  FAIL: fixture has tracked changes; it would pass for the wrong reason"; return 1; }
     local others
     others=$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null || true)
     [ -n "$others" ] || { echo "  FAIL: fixture produced no untracked files"; return 1; }
 
     local output
     output=$(CS_CLAUDE_SESSION_ID="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "autosave may be broken" \
-        "untracked work with no shadow ref must warn" || return 1
-    assert_output_not_contains "$output" "no uncommitted work to snapshot" \
-        "untracked work is work" || return 1
+    assert_output_not_contains "$output" "autosave may be broken" \
+        "no snapshot yet is not a broken autosave" || return 1
+    assert_output_contains "$output" "Shadow ref: no snapshot for this conversation yet (autosave runs on Edit/Write)" \
+        "doctor must say why there is no ref" || return 1
 }
 
 run_test test_doctor_fails_on_unparseable_settings
 run_test test_doctor_does_not_accept_a_hook_named_only_in_a_permission_rule
-run_test test_doctor_warns_when_only_untracked_work_has_no_shadow_ref
+run_test test_doctor_checks_the_live_conversations_shadow_ref
+run_test test_doctor_does_not_warn_before_the_first_autosave
 # Build a PATH resolving everything doctor needs EXCEPT jq. bash included: this
 # PATH is what starts the binary, and omitting it fails at exec and reads like a
 # doctor bug.
