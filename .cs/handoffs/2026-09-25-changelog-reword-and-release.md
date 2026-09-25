@@ -2,7 +2,8 @@
 parent: c5408bd8-9b38-4cdc-9c83-5583291b9f0e
 created: 2026-09-25T08:38:48Z
 purpose: Reword the CHANGELOG line claiming candidate A's "20 points" against the real-key result, then take the open list to Alex (release v2026.9.22, peer request, measure-wake)
-status: unconsumed
+status: consumed
+consumed_by: d03d1e48-a718-47f2-b73c-8cd763c16ea5
 ---
 
 # 1. Next Step
