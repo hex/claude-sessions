@@ -1,74 +1,65 @@
 # Session Summary: claude-sessions
 
-**Date:** 2026-09-23 afternoon to 2026-09-24 morning
-**Duration:** one conversation (da093a8c), about 16:15 on 09-23 to about 13:00 on 09-24 Bucharest time, with the night in between. This summary covers that conversation only. The session has run since 2026-02-07; earlier days are in `.cs/README.md`'s outcome log, the narrative archive, and the previous summaries in git history.
+**Date:** 2026-09-24 about 12:30 to 2026-09-25 about 00:30, Bucharest time
+**Duration:** three conversations, each started by a rotation: 8692f800 (rotation wake fix), bbc43868 (eval harness, mod rename, `/queue`) and 4af1b056 (the eval loop). This summary covers those three. The session has run since 2026-02-07. The previous summary (conversation da093a8c, up to about 13:00 on 09-24) is in git history, and older days are in `.cs/README.md` and the narrative archive.
 
 ## Objective
 
-Nothing was planned in advance. Alex brought a chain of questions, and each one turned into the next:
+The day continued one question from the morning: are rotation handoffs good, and can a spec change make them measurably better? Two fixes and one feature were shipped along the way:
 
-1. The claude-council session asked, by cross-session message, whether its Codex "specialists" feature belonged in cs.
-2. A screenshot of a `/wrap` run failing with "Exit code 1". Alex asked whether it should be fixed in cs.
-3. "How big and detailed is a rotation handoff?" Then: "is it good? optimal? detailed enough? check with Fable and Opus", plus a council run, rerun once he had updated the OpenRouter seats.
-4. After an ELI5 page, a yes to five spec edits. Then "run them both, and maybe we can test them, old vs new": two reviews and an A/B experiment.
-5. "Why do we still have wrong answers?" That led to a sixth edit, then merge and install.
+1. Find out why one rotation on 09-23 never woke its successor, and fix it.
+2. After a small A/B, Alex said "the results are not that great though. no? let's rotate then use /autoresearch:autoresearch until we have the best results". That became a proper eval harness and a loop over rewrites of the rotate skill's handoff rules.
+3. Side requests: rename the in-session mod from `cs-rotate` to `cs`, and add `/queue` so tasks can be queued while Claude is busy.
 
 ## Environment
 
-The cs source checkout on Alex's MacBook, on main. The Bash tool runs zsh. Test suites run on ghost (`remote-tests.sh --host ghost@ghost`). The reviewers were Fable, Opus and Codex (through the codex plugin agent), and the council was nine seats. The A/B experiment ran the next-conversation agents as headless `claude -p --restricted` runs in a sandbox outside any repository.
+- Repo: the cs dev checkout at `~/.claude-sessions/claude-sessions`, main branch, Claude Code 2.1.281.
+- Full test gates run on the `ghost` host through `remote-tests.sh`, always from the real checkout: a worktree's `.git` file points at a Mac path and breaks git-using suites there.
+- Eval harness: `.cs/research/handoff-eval/` (gitignored, this machine only). Answer keys, held-out source and run outputs live in `~/.cache/handoff-eval/`, out of the loop conversation's reach. All model calls are `claude -p` on the subscription, not the API.
 
 ## Key Discoveries
 
-- **zsh reads `echo ======` as a command lookup.** A word starting with `=` asks zsh for a command of that name, and the failed lookup aborts the whole command list with exit 1. That was the `/wrap` failure: it printed `sweep.md` and never read `summary.md`. Reproduced with `zsh -c 'echo A; echo ======; echo B'`. I hit the same trap myself later in the conversation.
-- **Handoffs work in practice.** Fable and Opus traced four real handoffs to the conversations that picked them up, using the `consumed_by:` field. All four followed Next Step, none asked Alex again for anything the handoff carried, and each was doing useful work within 1 to 4 minutes. Size is fine: the median handoff is 13 KB, the largest 21.7 KB.
-- **The failures were wrong facts, not missing ones.** The 09-23 handoff said `--host ghost` "fails", which sent the next conversation to run the full suite locally until Alex asked about ghost@ghost. It also said SessionEnd on `/clear` reports source `clear`, when the session log shows `user_exit`. Provenance labels went on whole bullets, so an inferred cause could sit under "MEASURED". Across 40 handoffs, "measured" appears in 38 and "assumed" in one.
-- **The rotate spec contradicted itself.** It said "pass two is where exact readings live" while the two-pass rule puts those facts in pass one. Three of the four writers checked had invented their own section for them.
-- **The council would have added a size floor that measurement rules out.** Three of the four new OpenRouter seats wanted handoffs to be at least about 15 KB, reasoning only from the August experiment. Three of the four handoffs that demonstrably worked were under 15 KB.
-- **A/B result: a small improvement, not a proven one.** Blind, Codex-graded, three handoffs per arm:
+- **Why the 09-23 wake was missed.** The rotation kick wrote its wake file at +2 s and +4 s after spawn, but Claude Code only watches for it once the SessionStart hook returns. Under a parallel test suite that hook took 21 s, so both writes landed before the watch existed. A live A/B from fresh launches reproduced it: the old code woke 0 of 2, the fix 2 of 2. The watch set up by an earlier rotation survives `/clear`, so only the first rotation after a startup or resume is exposed.
+- **Why the current handoff spec needed an eval, not an opinion.** Round 0 put the spec shipped that morning against the pre-09-24 spec at METRIC -5.63, with noise of ±18 points. The variation between writers (sd 0.13 to 0.20) outweighed any spec effect. Widening each answer key from 10 to 22 questions cut the noise threshold from 17.97 to 10.50 with no extra writers. Even then the shipped spec still came out even with the old one (+3.00).
+- **What moved the score was extraction, not structure.** Three bold rewrites of step 3, 10 writers per source against 10 stored control handoffs:
 
-  | | Old spec | New spec |
-  |---|---|---|
-  | Correct answers | 12 | 13 |
-  | Wrong answers | 1 | 2 |
-  | One-off facts carried (of 18) | 5 | 8 |
-  | Unsupported "fails" claims | 32 | 21 |
+  | Candidate | Idea | METRIC | Threshold | Verdict |
+  |---|---|---|---|---|
+  | A | copy every fact out word for word, in order, before any prose | +20.25 | 5.58 | kept |
+  | B | fill-in template with fixed slots | +8.75 | 6.86 | discarded |
+  | C | existing spec plus a 20-question self-test | +8.00 | 8.35 | discarded |
 
-  - The clearest effect was the unverified label: all 3 new-spec agents correctly said nobody had seen the #664 countdown colours live, against 0 of 3 old-spec agents.
-  - The rule I wrote down before launch, that the new spec must not produce more wrong answers than the old, failed at 2 vs 1. Both new-spec wrong answers came from one writer.
-  - Which writer ran mattered as much as which spec it followed.
-- **A transcript replay does not reproduce a live-context failure.** All six replay writers, old spec included, quoted the exact ghost error that the real 09-23 writer dropped. The real writer was working at about 80% context, while the replays read a clean text copy of the conversation.
-- **Of the three wrong answers, only one points at a handoff defect.** A Next Step said "rerun the suite if its result has no `rc=` line", which risks a second full run beside one still going. The other two are a next-conversation agent shortening a correct error, and strict grading of a quote shortened with an ellipsis.
-- **Specialists stay out of cs.** A feature worktree cannot be created without launching claude. Alex has dropped delegation from cs twice. The pattern worth borrowing is cs's integrate-in-temp, then `--ff-only` landing.
+  A also cut the variation between writers from about 0.15 to 0.04, which is what the loop was designed to target.
+- **The held-out source did not confirm it.** On test-races, which no loop round had scored, A came out +9.00 against a threshold of 10.90. The pre-registered rule was not met. Its per-handoff scores sit on the 0.025 grid, so the key there is as wide as the loop keys. Writer variation was 0.124 there: how well A makes writers agree depends on the source conversation.
+- **Eval running costs are real limits.** One round needs about 40 Fable grader calls. Fable ran out of credits three times across two days, and once the 5-hour session limit stopped a round partway through its writers. The harness can only resume grading, so a round that dies while writing has to be re-run in full.
+- **The contamination guard had a hole on an error path.** A grader reply the harness could not parse was printed to stdout in the error message, grader reasoning included. The loop conversation read held-out grader text for two questions. This happened after all candidates were scored, and the error now prints only counts and a file path.
 
 ## Changes Made
 
-- **`/wrap` fix**: `commands/wrap.md` reads each pass file with the Read tool, one call per file. Merged as fe5d1e4 and installed.
-- **Rotate handoff spec** (`skills/rotate/SKILL.md`):
-  - Each claim carries its own label, and a "fails" claim carries the command and what it printed.
-  - A new section 3, "Conversation-only facts", goes in the first pass, with a check-off list before the first commit. The body now has 9 sections.
-  - Next Step carries every fact its first action needs, and an action that starts work says how to tell whether it is already done or running.
-  - A pointer to a script says in one clause what the script does.
-- **Successor report**: `hooks/session-start.sh` tells the conversation that takes over to append `## Successor report` to the handoff once its next step is done. The prune step skips handoffs with uncommitted changes, and step 8 commits the report. Both reviewers had flagged that the report could otherwise be deleted before anyone committed it.
-- **Docs**: `docs/hooks.md` describes the report, and `CHANGELOG.md` has a new `## Unreleased` section for all of this plus the `/wrap` fix.
-- **Memory**: `project_bash_tool_is_zsh` gained the `=` trap. Three entries were extended at wrap: handoff fact carriage (replay vs live), subagent context leak (the `--restricted` isolation recipe), and full gate on ghost (review agents too). `MEMORY.md` was trimmed back to 24,400 bytes.
+All merged locally to main, installed, and passing the full ghost gate (68/68) at each merge. Nothing pushed.
+
+- **Rotation wake** (1361785): the kick is re-written every 2 s until the wake is delivered, up to 30 times. Only the lead's `/clear` spends it. A zero delay writes once. A Fable review returned MERGE, with three minor fixes folded in.
+- **Mod rename** (f21a097): `mods/cs-rotate` became `mods/cs`, deployed to `~/.claude/skills/cs/`. The installer retires the old directory.
+- **`/queue`** (5c49a75): the `cs` mod registers an immediate `/queue <task>` that runs `cs -queue add` mid-turn. It was measured live on 2.1.281. Every launch now exports `CS_BIN`, and `CS_UPDATE_BIN` is retired. `cs -queue add`, `cs -msg --kind task` and `cs -spawn --task` share one single-line check.
+- **Rotate skill step 3** (2bfd619): candidate A, the verbatim fact ledger. Alex chose to merge it despite the held-out miss. The CHANGELOG line says the held-out result was inside the noise.
+- **Harness (machine-local)**: `verify`, `verify --resume`, `rescore --baseline`, 22-question keys, and PREREG.md with Amendment 1, the contamination event and the results.
 
 ## Key Files & Outputs
 
-- Commits on main: 108cbd8 and merge fe5d1e4 (the wrap fix); 8474134, 36920c4 and f77dc82, merged as ff77451 (the handoff spec work).
-- `skills/rotate/SKILL.md`, `hooks/session-start.sh`, `tests/test_rotation.sh`, `docs/hooks.md`, `CHANGELOG.md`, `commands/wrap.md`.
-- Council transcripts: `.claude/council-cache/council-1790237994.md` (nine seats) and `council-1790238632.md` (the four new OpenRouter seats).
-- The ELI5 artifact for the five edits: https://claude.ai/artifact/M7zLBAJH1PFSuCxEKe8YbB.
-- A/B material, in this conversation's scratchpad under `ab/`: `core.txt`, both specs, `PREREG.md`, `briefs.json`, six handoffs, `mapping.json`, `RESULTS.md`. The blind runs are in `/private/tmp/claude-501/ab-sbx/h1` through `h6`. All of it is scratch and will not survive a reboot.
+- `skills/rotate/SKILL.md`: step 3 rewritten around the fact ledger (7bfc04b, restored as 3e1516e after B and C lost).
+- `hooks/session-start.sh`, `docs/hooks.md`, `docs/configuration.md`: kick retry and its documentation.
+- `mods/cs/` (renamed), `lib/01-manifests.sh` (`cs-rotate` in RETIRED_SKILLS), `lib/75-launch.sh` (`CS_BIN`), `lib/55-queue.sh` (`_queue_require_single_line`).
+- `CHANGELOG.md` Unreleased: the rotation wake, the rename, `/queue`, `CS_BIN`, the multi-line refusal and the handoff spec changes.
+- `.cs/research/handoff-eval/{harness.py,PREREG.md}` (gitignored); run ids 20260924T150723 (baseline), 161024 (A), 165615 (B), 201123 (C), 204930 (held-out).
+- `.cs/handoffs/2026-09-24-handoff-eval-bold-candidates.md` with its Successor report.
 
 ## Outcome
 
-Everything Alex asked for shipped locally. The wrap fix and the handoff spec work are merged to main and installed. On ghost, the rotation suite passed 112/112 at the branch tip and the full suite 68/68 on main. `cs -doctor` shows no deploy drift. Nothing was pushed or released; the `Unreleased` changelog section waits for the next release. The specialists answer went back to claude-council.
+The loop finished as planned: three candidates scored, the best one run once on the held-out source, and the result reported. A beat the old spec on every source and never lost, by a wide margin on two and inside the noise on the held-out one. So the honest status is "best measured candidate, not confirmed". It is on main and installed on that basis, by Alex's decision. The wake bug is fixed and measured. `/queue` works live.
 
 ## Notes for Future Reference
 
-- **The first real `/rotate` is the live check.** The handoff should fill section 3, label each claim, and the next conversation should append a `## Successor report`. Read that report the next time handoff quality comes up; it replaces digging through transcripts.
-- **Open bug:** after the 09-23 `/clear`, the automatic wake never fired, and Alex typed "continue" 7 minutes later. Other rotations woke within 3 to 8 seconds. Not investigated.
-- **Testing rules:**
-  - A handoff-quality test has to reproduce the live writing conditions: a replay from a clean transcript produced better handoffs than the real one.
-  - Tell reviewer agents in their brief not to run test suites locally; one Fable review did.
-- **Council:** the Cursor seat is out of usage, and `xiaomi/mimo-v2.6` was an invalid OpenRouter model ID until Alex changed the seats. The four OpenRouter seats now sit on deepseek-pro-latest, glm-5.3-prime, mimo-v2.6-pro and qwen3.8-max-prime.
+- main is 50 commits ahead of origin, and v2026.9.22 is unreleased. The release gate: push the release commit, then tag only after its CI is green.
+- Future eval rounds: budget Fable credits per round, run one round at a time, and read only the summary lines of the harness output.
+- A's handoffs are about 40% longer. If rotations start to feel slow or successors miss facts in long handoffs, measure it before trimming the ledger.
+- Open, from the handoff: the rotate skill's prune needs a "tracked by git" check. `2026-08-24-theme-and-claide-followup.md` is consumed, older than 30 days and untracked, so pruning it would delete the only copy. `cs -rm measure-wake` was never answered. The doctor's missing-shadow-ref warning for da093a8c was not investigated.
