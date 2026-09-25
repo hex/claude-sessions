@@ -653,7 +653,6 @@ test_rotate_answer_consumes_pending_handoff() {
     output=$("$CS_BIN" rot-r <<< "r" 2>&1) || true
     assert_output_contains "$output" "Rotation handoff pending" "notice names the pending handoff" || return 1
     assert_output_contains "$output" "2026-07-16-test.md" "notice carries the basename" || return 1
-    assert_output_contains "$output" "\[Y/n/r/d\]" "prompt offers the handoff answers" || return 1
     local new
     new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
     [ "$new" != "$old" ] || { echo "  FAIL: r must rebind to a fresh UUID"; return 1; }
@@ -665,6 +664,28 @@ test_rotate_answer_consumes_pending_handoff() {
     ev=$(jq -c 'select(.event == "rotated")' "$dir/.cs/timeline.jsonl" 2>/dev/null | tail -1)
     assert_output_contains "$ev" '"reason":"handoff"' "deliberate rotation reason" || return 1
     assert_output_contains "$ev" '"handoff":"2026-07-16-test.md"' "event names the handoff" || return 1
+}
+
+# Four answers crammed into one line with a parenthetical gloss for two of them
+# hid the choice that matters (fresh conversation from the handoff) at the end
+# of the line. Each answer gets its own row, key first, like the already-open
+# menu, and the keys stay the letters people have been typing.
+test_handoff_prompt_lists_one_answer_per_row() {
+    _rot_session "rot-rows"
+    local dir="$CS_SESSIONS_ROOT/rot-rows"
+    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+    local output
+    output=$("$CS_BIN" rot-rows <<< "n" 2>&1) || true
+    assert_output_contains "$output" "Rotation handoff pending: 2026-07-16-test.md" "notice names the handoff" || return 1
+    local rows
+    rows=$(printf '%s\n' "$output" | grep -E '^    [yrnd]  ')
+    assert_eq "    y  resume          continue the previous conversation · default
+    r  from handoff    fresh conversation that picks up the handoff
+    n  fresh           fresh conversation; the handoff stays pending
+    d  discard         retire the handoff, then resume" "$rows" "one row per answer, in this order" || return 1
+    if grep -q 'Y/n/r/d' <<< "$output"; then
+        echo "  FAIL: the one-line answer list must be gone"; return 1
+    fi
 }
 
 # The r launch auto-starts the handoff: its positional prompt is the handoff
@@ -973,6 +994,7 @@ test_orphaned_marker_disarm_does_not_offer_a_spent_handoff() {
 
 run_test test_orphaned_marker_disarm_does_not_offer_a_spent_handoff
 run_test test_rotate_answer_consumes_pending_handoff
+run_test test_handoff_prompt_lists_one_answer_per_row
 run_test test_rotate_answer_auto_starts_handoff
 run_test test_continue_and_no_leave_handoff_unconsumed
 run_test test_consumed_handoffs_do_not_trigger_prompt
