@@ -197,7 +197,7 @@ one-key rotation it exists for.
 
    Then prune what is spent. A `consumed`, `discarded` or `superseded` handoff
    has done its job, and git history keeps it after the file is gone, so
-   nothing is lost by dropping it. Delete one only when all four hold:
+   nothing is lost by dropping it. Delete one only when all five hold:
 
    - its `status:` is one of those three — never `status: unconsumed`, which
      may be a co-worker's armed rotation and is not yours to drop;
@@ -208,7 +208,11 @@ one-key rotation it exists for.
    - it has no uncommitted changes (`git status --porcelain -- <file>`
      prints nothing). The conversation that consumed a handoff appends its
      `## Successor report` to it, and git history keeps only what was
-     committed.
+     committed;
+   - git tracks it (`git ls-files --error-unmatch -- <file>` exits 0).
+     Where `.cs/` is gitignored, `git status --porcelain` prints nothing
+     for a handoff git never saw, so the uncommitted-changes check passes
+     it, and deleting it deletes the only copy.
 
    Take the age from `created:` in the frontmatter, never the file's mtime.
    `.cs/handoffs/` is shared, and a clone stamps every file with its checkout
