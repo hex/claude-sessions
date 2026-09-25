@@ -197,6 +197,17 @@ test_rotate_skill_keeps_successor_reports() {
         "step 8 must stage consumed handoffs carrying a report" || return 1
 }
 
+# .cs/ is gitignored in some checkouts, and `git status --porcelain` prints
+# nothing for an ignored file, so the uncommitted-changes check passes a
+# handoff git never saw: 2026-08-24-theme-and-claide-followup.md was consumed,
+# 30+ days old and outside the newest 10, and pruning it would have deleted the
+# only copy (2026-09-24). The prune must require the file to be tracked.
+test_rotate_skill_prunes_only_tracked_handoffs() {
+    local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
+    assert_file_contains "$skill" "git ls-files --error-unmatch" \
+        "the prune must skip a handoff git does not track" || return 1
+}
+
 test_rotate_skill_requires_provenance_on_claims() {
     local skill="$SCRIPT_DIR/../skills/rotate/SKILL.md"
     assert_file_contains "$skill" "was established" \
@@ -441,6 +452,7 @@ run_test test_rotate_skill_exists_with_frontmatter
 run_test test_rotate_skill_has_a_home_for_rejected_alternatives
 run_test test_rotate_skill_has_a_home_for_conversation_only_facts
 run_test test_rotate_skill_keeps_successor_reports
+run_test test_rotate_skill_prunes_only_tracked_handoffs
 run_test test_rotate_skill_requires_provenance_on_claims
 run_test test_rotate_skill_puts_the_next_step_first
 run_test test_rotate_skill_arms_last
