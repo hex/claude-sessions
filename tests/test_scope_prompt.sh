@@ -566,6 +566,40 @@ STUB
     assert_output_not_contains "$stages" "emit" "a killed run must not read as finished" || return 1
 }
 
+test_stage_trace_marks_a_run_killed_before_the_trace_opens() {
+    seed_repo "src/api.ts"
+    # Under load a run can be killed by the UserPromptSubmit cap before the stage
+    # trace opens: the library parse-check, its source and the session resolve
+    # all come first. Such a run used to leave no line at all, which cannot tell
+    # a hook that stalled on its first forks from one that never started. A
+    # dirname that blocks parks the hook on its very first fork. A cs launch has
+    # already made .cs/local/ by the first prompt; the launch mark creates no
+    # directory itself, since that would be a fork before the trace.
+    local stub="$TEST_TMPDIR/stub" marker="$TEST_TMPDIR/stub-reached"
+    mkdir -p "$stub" "$CLAUDE_SESSION_META_DIR/local"
+    cat > "$stub/dirname" <<'STUB'
+#!/bin/sh
+printf 'reached\n' > "$STUB_MARKER"
+sleep 5
+STUB
+    chmod +x "$stub/dirname"
+    rm -f "$marker"
+
+    printf '{"prompt": "implement a retry wrapper in src/api.ts"}' \
+        | STUB_MARKER="$marker" PATH="$stub:$PATH" bash "$HOOK" >/dev/null 2>&1 &
+    local pid=$! i=0
+    while [ ! -f "$marker" ] && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.05; done
+    kill -9 "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    pkill -f "$stub/dirname" 2>/dev/null
+    [ -f "$marker" ] || { echo "  FAIL: hook never reached its first fork"; return 1; }
+
+    local stages; stages=$(_trace_stages)
+    assert_eq "launch" "$stages" "a run killed before the trace opens leaves only its launch mark" || return 1
+    awk '$3 == "launch" && $2 ~ /^[0-9]{13}$/ { ok = 1 } END { exit !ok }' "$(_trace_file)" \
+        || { echo "  FAIL: the launch mark must carry absolute epoch milliseconds"; return 1; }
+}
+
 test_stage_trace_records_the_invoking_directory() {
     seed_repo "src/api.ts"
     # Kills recorded so far came overwhelmingly from repo roots, but one came
@@ -887,6 +921,7 @@ run_test test_injection_prompt_is_data_not_code
 run_test test_firing_prompt_exits_zero
 run_test test_stage_trace_records_the_run_in_order
 run_test test_stage_trace_stops_where_a_killed_run_stopped
+run_test test_stage_trace_marks_a_run_killed_before_the_trace_opens
 run_test test_stage_trace_records_the_invoking_directory
 run_test test_stage_trace_opt_out
 
