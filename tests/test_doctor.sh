@@ -999,32 +999,127 @@ EOF
         "the failure must name the unregistered hook" || return 1
 }
 
-test_doctor_warns_when_only_untracked_work_has_no_shadow_ref() {
-    # The autosave hook snapshots with `git add -A`, which stages untracked
-    # files. The check tested `git diff --quiet HEAD` — tracked changes only —
-    # so a session whose entire body of work is untracked reported "no
-    # uncommitted work to snapshot" on exactly the broken-autosave state.
-    local dir="$CLAUDE_SESSION_DIR"
-    echo "unsaved work" > "$dir/scratch-note.txt"
-    # Fixture sanity: tracked-clean, untracked-dirty, and no shadow ref — the
-    # precise state that produced the false OK.
-    git -C "$dir" diff --quiet HEAD 2>/dev/null \
-        || { echo "  FAIL: fixture has tracked changes; it would pass for the wrong reason"; return 1; }
-    local others
-    others=$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null || true)
-    [ -n "$others" ] || { echo "  FAIL: fixture produced no untracked files"; return 1; }
-
-    local output
-    output=$(CS_CLAUDE_SESSION_ID="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "autosave may be broken" \
-        "untracked work with no shadow ref must warn" || return 1
-    assert_output_not_contains "$output" "no uncommitted work to snapshot" \
-        "untracked work is work" || return 1
+# Seed settings.json with one PostToolUse registration, the way install.sh
+# writes the autosave hook: matcher "Write|Edit", command ending in
+# autosave-commits.sh. yes|no picks that command or an unrelated one; a second
+# and third argument override the command and matcher.
+_seed_autosave_registration() {  # yes|no [command] [matcher]
+    local cmd="/opt/cs/hooks/other.sh" matcher="${3:-Write|Edit}"
+    [ "$1" = yes ] && cmd="/opt/cs/hooks/autosave-commits.sh"
+    [ -n "${2:-}" ] && cmd="$2"
+    cat > "$CS_CLAUDE_DIR/settings.json" << EOF
+{"hooks": {"PostToolUse": [{"matcher": "$matcher", "hooks": [{"type": "command", "command": "$cmd"}]}]}}
+EOF
 }
 
+# Give conversation <uuid> an autosave ref, as the hook would.
+_seed_shadow_ref() {  # uuid
+    local snap
+    snap=$(git -C "$CLAUDE_SESSION_DIR" commit-tree "HEAD^{tree}" -m snapshot) || return 1
+    git -C "$CLAUDE_SESSION_DIR" update-ref "refs/worktree/cs/session/$1" "$snap"
+}
+
+test_doctor_checks_the_callers_shadow_ref_not_the_recorded_lead() {
+    # .cs/local/state holds ONE id per checkout, rebound by the lead only, while
+    # the autosave hook keys each conversation's ref on its own session_id. A
+    # teammate running doctor must be judged by its own ref: the lead's being
+    # present says nothing about the teammate's.
+    local lead="11111111-2222-3333-4444-555555555555"
+    local mate="66666666-7777-8888-9999-000000000000"
+    printf 'claude_session_id: %s\n' "$lead" > "$CLAUDE_SESSION_META_DIR/local/state"
+    _seed_shadow_ref "$lead" || { echo "  FAIL: fixture ref"; return 1; }
+    _seed_autosave_registration yes
+
+    local output
+    output=$(CLAUDE_CODE_SESSION_ID="$mate" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "refs/worktree/cs/session/$lead present" \
+        "the lead's ref must not stand in for the caller's" || return 1
+    assert_output_contains "$output" "Shadow ref: no snapshot for this conversation yet (autosave runs on Edit/Write)" \
+        "the caller has no ref of its own" || return 1
+}
+
+test_doctor_falls_back_to_the_recorded_id_not_the_launch_id() {
+    # Without $CLAUDE_CODE_SESSION_ID (doctor run from a plain shell in the
+    # session), the recorded id is the best answer. CS_CLAUDE_SESSION_ID is the
+    # LAUNCH id and goes stale after the first /clear, whose SessionEnd has
+    # already deleted that conversation's ref.
+    local live="11111111-2222-3333-4444-555555555555"
+    local launch="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    printf 'claude_session_id: %s\n' "$live" > "$CLAUDE_SESSION_META_DIR/local/state"
+    _seed_shadow_ref "$live" || { echo "  FAIL: fixture ref"; return 1; }
+
+    local output
+    output=$(env -u CLAUDE_CODE_SESSION_ID CS_CLAUDE_SESSION_ID="$launch" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "refs/worktree/cs/session/$live present" \
+        "doctor must check the recorded conversation's ref" || return 1
+    assert_output_not_contains "$output" "$launch" \
+        "the stale launch id must not be checked" || return 1
+}
+
+test_doctor_does_not_warn_before_the_first_autosave() {
+    # Autosave fires on Edit/Write only, and SessionEnd deletes a conversation's
+    # ref on a clean /clear. A dirty tree with no ref for the live conversation
+    # is the normal state before its first Edit/Write (work done through Bash,
+    # or carried over from before the /clear), not a broken hook. Untracked
+    # work included: the fixture holds only an untracked file.
+    echo "unsaved work" > "$CLAUDE_SESSION_DIR/scratch-note.txt"
+    local others
+    others=$(git -C "$CLAUDE_SESSION_DIR" ls-files --others --exclude-standard 2>/dev/null || true)
+    [ -n "$others" ] || { echo "  FAIL: fixture produced no untracked files"; return 1; }
+    _seed_autosave_registration yes
+
+    local output
+    output=$(CLAUDE_CODE_SESSION_ID="11111111-2222-3333-4444-555555555555" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "autosave may be broken" \
+        "no snapshot yet is not a broken autosave" || return 1
+    assert_output_contains "$output" "Shadow ref: no snapshot for this conversation yet (autosave runs on Edit/Write)" \
+        "doctor must say why there is no ref" || return 1
+}
+
+test_doctor_warns_when_the_autosave_hook_is_not_registered() {
+    # With no ref, the one thing doctor can still check is that the hook that
+    # would write it is registered. The file and registration checks enumerate
+    # what IS deployed or registered, so a hook missing from both is invisible
+    # to them.
+    _seed_autosave_registration no
+
+    local output
+    output=$(CLAUDE_CODE_SESSION_ID="11111111-2222-3333-4444-555555555555" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Shadow ref: autosave-commits.sh is not registered for PostToolUse on Write and Edit in $CS_CLAUDE_DIR/settings.json; edits are not snapshotted" \
+        "an unregistered autosave hook must warn" || return 1
+    assert_output_not_contains "$output" "no snapshot for this conversation yet" \
+        "an unregistered hook is not the normal no-snapshot-yet state" || return 1
+}
+
+test_doctor_does_not_accept_an_autosave_lookalike_registration() {
+    # A registration only counts if it would run the hook on Write and Edit:
+    # the hook exits at once for any other tool, so a Read-only matcher never
+    # snapshots, and a different script whose name merely ends the same way is
+    # not the hook.
+    local id="11111111-2222-3333-4444-555555555555" output
+    _seed_autosave_registration yes "" "Read"
+    output=$(CLAUDE_CODE_SESSION_ID="$id" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "autosave-commits.sh is not registered for PostToolUse on Write and Edit" \
+        "a Read-only matcher never fires on an edit" || return 1
+
+    _seed_autosave_registration yes "/opt/cs/hooks/not-autosave-commits.sh"
+    output=$(CLAUDE_CODE_SESSION_ID="$id" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "autosave-commits.sh is not registered for PostToolUse on Write and Edit" \
+        "a lookalike script name is not the hook" || return 1
+
+    # Positive control: the installer's own form is accepted.
+    _seed_autosave_registration yes "~/.claude/hooks/cs/autosave-commits.sh"
+    output=$(CLAUDE_CODE_SESSION_ID="$id" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Shadow ref: no snapshot for this conversation yet (autosave runs on Edit/Write)" \
+        "the installer's registration must be accepted" || return 1
+}
 run_test test_doctor_fails_on_unparseable_settings
 run_test test_doctor_does_not_accept_a_hook_named_only_in_a_permission_rule
-run_test test_doctor_warns_when_only_untracked_work_has_no_shadow_ref
+run_test test_doctor_checks_the_callers_shadow_ref_not_the_recorded_lead
+run_test test_doctor_falls_back_to_the_recorded_id_not_the_launch_id
+run_test test_doctor_does_not_warn_before_the_first_autosave
+run_test test_doctor_warns_when_the_autosave_hook_is_not_registered
+run_test test_doctor_does_not_accept_an_autosave_lookalike_registration
 # Build a PATH resolving everything doctor needs EXCEPT jq. bash included: this
 # PATH is what starts the binary, and omitting it fails at exec and reads like a
 # doctor bug.
