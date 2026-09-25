@@ -107,3 +107,9 @@ Open with Alex: release v2026.9.22.
 - main at acbc2912 plus this handoff's commits; installed; doctor drift OK; nothing running; nothing pushed. Worktree: only `scratchpad/` untracked.
 
 **Completeness:** written from live context at ~56%, no compaction.
+
+## Successor report
+
+- UNVERIFIED "real-keys was written under the ledger spec" is now checked, but not the way the handoff suggested: the installed SKILL.md mtime is 13:04 (a later reinstall), so it cannot date the 09:45 install. Checked by shape instead: all three 09-25 handoffs carry the IDS/READINGS/UNVERIFIED ledger headers (12-23 `measured:` tags each), the 09-24 pre-ledger one carries none.
+- UNVERIFIED council handoff path was right: `~/.claude-sessions/claude-council/.cs/handoffs/`, 12 files, 7 in the 09-23..09-25 chain.
+- Found wrong: none. The field log size (2699 bytes), the three report paths and the rule were as stated.
