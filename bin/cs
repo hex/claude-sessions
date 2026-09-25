@@ -4076,15 +4076,19 @@ rotate_narrative() {
         # user's own checkout — an adopted session IS their project repo — and a
         # bare `git commit` would sweep whatever they had staged into a commit
         # titled "cs: rotate narrative". The `add` still runs first so the newly
-        # written chunk is known to git and the pathspec can match it.
-        if ! { git -C "$session_dir" add -- "$live" "$chunk" \
+        # written chunk is known to git and the pathspec can match it. It forces
+        # both paths because a tracked live file can sit under an ignored .cs/
+        # (tracked with `add -f`): a plain add of any path there exits 1, even
+        # one it stages, and the archive belongs in git beside the tracked live
+        # file even when the archive directory itself is ignored.
+        if ! { git -C "$session_dir" add -f -- "$live" "$chunk" \
             && git -C "$session_dir" commit -q -m "cs: rotate narrative.$actor ($sections sections -> narrative-archive)" -- "$live" "$chunk"; } 2>/dev/null; then
             # Naming a pathspec makes this a PARTIAL commit, which git refuses
             # outright mid-merge — a state the old bare commit committed
             # straight through. Refusing is the safer half of that trade; the
             # message just has to say which failure it was.
             if git -C "$session_dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
-                warn "rotation written but the commit was refused: $session_dir is mid-merge, and cs commits only its own paths. Finish the merge, then commit .cs/memory/narrative.$actor.md and $chunk_rel"
+                warn "rotation written but the commit was refused: $session_dir is mid-merge, and cs commits only its own paths. .cs/memory/narrative.$actor.md and $chunk_rel are staged, so they go into the merge commit unless you unstage them first"
             else
                 warn "rotation written but the commit failed; commit .cs/memory/narrative.$actor.md and $chunk_rel by hand"
             fi
