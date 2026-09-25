@@ -78,3 +78,40 @@ STATE
 - Running: ghost full gate for fix/handoff-prompt-rows (see Next Step 1). Nothing else running.
 - Uncommitted: none after this rotation's commits. Worktree on main.
 - Promised, not done: merge + install both branches (awaiting Alex); decision on the peer's rotate-skill request; CHANGELOG line claiming A's "20 points" not reworded (Alex's call); held-out keys-real control briefs need rebuilding before that number means anything; v2026.9.22 release still open; `cs -rm measure-wake` unanswered.
+
+# 4. Primary Request and Intent
+
+- Inherited: measure handoff quality by what real successors needed (real-key rescore) — done; result: A's quiz gain does not hold.
+- Alex (this conversation): stop the scope-prompt 5 s timeout under load; make the pending-handoff launch prompt show one answer per row like the already-open menu.
+
+# 5. Key Technical Concepts
+
+- scope-prompt's in-hook budget clock starts after the library parse/source/resolve; the registered timeout counts everything including spawn. New `launch` trace line (absolute epoch ms) is written before that; `launch` with no `start` = stalled in first forks, no `launch` = never ran.
+- Eval scoring: harness.py, METRIC = 100 x mean(cand - ctrl), REJECT_BELOW = 2 SE; a missed control brief voids a handoff to -1.
+
+# 6. Files and Code Sections
+
+- hooks/scope-prompt.sh top: launch mark block (case on EPOCHREALTIME, `_launch_local`, printf to scope-prompt.trace); tests/test_scope_prompt.sh `test_stage_trace_marks_a_run_killed_before_the_trace_opens` (blocking dirname stub).
+- install.sh.in:596 `_merge_cs_hook UserPromptSubmit scope-prompt.sh 10`; docs/hooks.md, docs/session-layout.md, CHANGELOG Fixes.
+- lib/75-launch.sh `_resume_menu_row` + the pending-handoff branch (y resume / r from handoff / n fresh / d discard, `    ›` prompt); tests/test_rotation.sh `test_handoff_prompt_lists_one_answer_per_row`; README example; CHANGELOG Changed + Fixes.
+- .cs/research/handoff-eval/harness.py `--keys` (gitignored).
+
+# 7. Problem Solving
+
+- Timeout: traces across all sessions showed killed runs stopping at random stages with <=2.5 s in-hook; the real /wrap kill left no trace line at all -> pre-clock stall; machine load (opendirectoryd, EndpointSecurity) not cs.
+- Held-out real-key number unusable: 7/20 voids -> the key's control briefs are not plainly in every handoff.
+
+# 8. Pending Tasks
+
+- #680 [in_progress] Real-successor keys + rescore: rescores done; report delivered; close after Alex reads it.
+- #684 [pending] Report + successor report + commit handoff: successor report appended to 2026-09-25-handoff-eval-real-keys.md (committed with this rotation).
+- #685 [pending] scope-prompt launch mark + 10 s (fix/scope-prompt-launch-mark): ghost green, awaiting merge.
+- #686 [pending] Pending-handoff prompt rows (fix/handoff-prompt-rows): ghost gate running, awaiting merge.
+- #679 [pending] Field check of 5 ledger rotations or 2026-10-15.
+- #554 [pending] PARKED. #606 [pending] POSTPONED.
+
+# 9. Current Work
+
+- On main, both fix branches unmerged; ghost gate for fix/handoff-prompt-rows in flight; no local processes running.
+
+**Completeness:** written from live context at ~77%, no compaction.
