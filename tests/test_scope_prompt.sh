@@ -539,7 +539,7 @@ test_stage_trace_records_the_run_in_order() {
 test_stage_trace_stops_where_a_killed_run_stopped() {
     seed_repo "src/api.ts"
     # A git that blocks parks the hook in the grounded scan, exactly where the
-    # 3s UserPromptSubmit cap parks it in production. The trail it leaves is the
+    # UserPromptSubmit cap parks it in production. The trail it leaves is the
     # only evidence such a run ever produces, so it has to name the last stage
     # reached and must not claim the run finished.
     local stub="$TEST_TMPDIR/stub" marker="$TEST_TMPDIR/stub-reached"

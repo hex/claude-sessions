@@ -593,7 +593,7 @@ else
     _merge_cs_hook PostToolUseFailure tool-failure-logger.sh 10 "" true
     _merge_cs_hook PermissionRequest  session-auto-approve.sh 5 "Write|Edit"
     _merge_cs_hook PreToolUse         bash-logger.sh          5 "Bash"
-    _merge_cs_hook UserPromptSubmit   scope-prompt.sh         5
+    _merge_cs_hook UserPromptSubmit   scope-prompt.sh        10
     _merge_cs_hook FileChanged        narrative-reminder.sh  10 "" "" true
     _merge_cs_hook CwdChanged         narrative-reminder.sh   5
 
