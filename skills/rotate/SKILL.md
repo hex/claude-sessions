@@ -105,7 +105,10 @@ one-key rotation it exists for.
    the successor acts on it without looking anything up. An action that
    starts work (a test run, a build, a merge, a deploy) first says how to
    tell whether it is already done or still running, and what to do in each
-   case.
+   case. An action that needs a clean worktree (a branch switch, a merge, a
+   rebase) says the successor starts with this handoff uncommitted, because
+   session start flips its `status:` to `consumed`, and says to commit that
+   change first.
 
    **2. Settled and rejected** is the DECISIONS ledger, one line each:
    `<decision or rejected alternative> | <who decided, with the user's words
