@@ -234,7 +234,7 @@ This converts the current directory into a cs session in place:
 - Symlinks `~/.claude-sessions/<name>` to the current directory
 - Writes the session protocol to `CLAUDE.local.md` (machine-local, gitignored, regenerated per machine); a project's existing `CLAUDE.md` is never touched
 - Initializes a git repo if one doesn't exist (preserves existing repos)
-- Since the working directory doesn't change, `claude --continue` picks up previous conversations
+- Since the working directory doesn't change, `claude --continue` picks up previous conversations, and the first `cs <name>` offers to resume the newest one; a project with none starts a new conversation without asking
 
 ## Session Structure
 

@@ -121,7 +121,21 @@ adopt_session() {
 
     # create_session_structure writes CLAUDE.local.md, never CLAUDE.md — a
     # project's own CLAUDE.md is left untouched.
+    #
+    # It also stages a conversation id for a brand-new session's first launch.
+    # An adopted directory already exists, so its first open is a reopen, and a
+    # staged id made that open ask to continue a conversation that never
+    # existed. A first adoption keeps no id (the launch records one when it
+    # starts the first conversation); re-adopted records keep the conversation
+    # they name, which the staged id used to replace.
+    local prior_binding
+    prior_binding=$(_read_local_state "$target_dir/.cs/local/state" claude_session_id)
     create_session_structure "$target_dir"
+    if _is_uuid "$prior_binding"; then
+        _set_local_state "$target_dir/.cs/local/state" claude_session_id "$prior_binding"
+    else
+        _unset_local_state "$target_dir/.cs/local/state" claude_session_id
+    fi
 
     # An adopted session's name is the link's, not the directory's, and the link
     # is the only place it lives — so a hook that resolves this project by

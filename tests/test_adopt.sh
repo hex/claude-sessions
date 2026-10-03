@@ -381,6 +381,196 @@ test_adopt_gitignores_the_vault_mount() {
 }
 
 # ============================================================================
+# First launch after adopt
+# ============================================================================
+
+UUID_PRIOR="33333333-3333-4333-8333-333333333333"
+
+# A claude stub that records each launch's argv, one line per launch, and fails
+# a --resume at once, as claude does for an id that names no conversation.
+_adopt_claude_stub() {
+    cat > "$TEST_TMPDIR/claude-stub" << SCRIPT
+#!/bin/bash
+printf '%s\n' "\$*" >> "$TEST_TMPDIR/claude-args"
+case "\$*" in *--resume*) exit 1 ;; esac
+exit 0
+SCRIPT
+    chmod +x "$TEST_TMPDIR/claude-stub"
+    export CLAUDE_CODE_BIN="$TEST_TMPDIR/claude-stub"
+}
+
+_adopt_state_id() {  # project_dir
+    awk '/^claude_session_id:/ { print $2; exit }' "$1/.cs/local/state" 2>/dev/null
+}
+
+# An adopted directory already exists, so its first open is a reopen. It used to
+# ask "Continue previous conversation?" for a conversation that never existed;
+# the default answer's --resume then failed and a fallback started fresh.
+test_first_launch_after_adopt_starts_fresh_without_asking() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && "$CS_BIN" -adopt probe >/dev/null 2>&1)
+    _adopt_claude_stub
+
+    local output
+    output=$("$CS_BIN" probe <<< "" 2>&1) || true
+
+    if grep -q "Continue previous conversation" <<< "$output"; then
+        echo "  FAIL: the first launch must not offer to resume: $output"; return 1
+    fi
+    if grep -q "No previous conversation found" <<< "$output"; then
+        echo "  FAIL: the first launch must not go through the resume-failed fallback: $output"; return 1
+    fi
+    assert_output_contains "$output" "(+ new)" "the card calls the first launch new" || return 1
+
+    local launches recorded
+    launches=$(cat "$TEST_TMPDIR/claude-args" 2>/dev/null)
+    assert_eq "1" "$(printf '%s\n' "$launches" | grep -c .)" "claude launches exactly once" || return 1
+    recorded=$(_adopt_state_id "$project_dir")
+    [ -n "$recorded" ] || { echo "  FAIL: the launch must record the conversation it starts"; return 1; }
+    assert_output_contains "$launches" "--session-id $recorded" "claude starts the recorded conversation" || return 1
+    assert_output_contains "$launches" "--name probe" "the conversation is named after the session" || return 1
+    if grep -qE -- '--resume|--continue' <<< "$launches"; then
+        echo "  FAIL: nothing to resume, so no --resume or --continue: $launches"; return 1
+    fi
+    if grep -q '"event":"rotated"' "$project_dir/.cs/timeline.jsonl" 2>/dev/null; then
+        echo "  FAIL: the first conversation rotates from nothing"; return 1
+    fi
+}
+
+# A project Claude Code already ran in has a conversation to resume: the first
+# open binds the newest one and asks, as before.
+test_first_launch_after_adopt_offers_the_projects_newest_conversation() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(cd "$project_dir" && pwd -P | tr '/.' '--')"
+    mkdir -p "$proj"
+    printf '{"type":"user","sessionId":"%s"}\n' "$UUID_PRIOR" > "$proj/$UUID_PRIOR.jsonl"
+    (cd "$project_dir" && "$CS_BIN" -adopt probe >/dev/null 2>&1)
+    _adopt_claude_stub
+
+    local output
+    output=$("$CS_BIN" probe <<< "y" 2>&1) || true
+    assert_output_contains "$output" "Continue previous conversation?" "an existing conversation is offered" || return 1
+    assert_output_contains "$(head -1 "$TEST_TMPDIR/claude-args")" "--resume $UUID_PRIOR" \
+        "the answer resumes the project's conversation" || return 1
+}
+
+# The conversation the first launch recorded is the one the second resumes.
+test_second_launch_after_adopt_asks_and_resumes() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && "$CS_BIN" -adopt probe >/dev/null 2>&1)
+    _adopt_claude_stub
+    "$CS_BIN" probe <<< "" >/dev/null 2>&1 || true
+    local first
+    first=$(_adopt_state_id "$project_dir")
+    # Claude writes the transcript once the conversation talks; without it
+    # migrate would treat the id as an orphan.
+    local proj
+    proj="$CS_TRANSCRIPTS_DIR/$(cd "$project_dir" && pwd -P | tr '/.' '--')"
+    mkdir -p "$proj"
+    printf '{"type":"user","sessionId":"%s"}\n' "$first" > "$proj/$first.jsonl"
+    : > "$TEST_TMPDIR/claude-args"
+
+    local output
+    output=$("$CS_BIN" probe <<< "y" 2>&1) || true
+    assert_output_contains "$output" "Continue previous conversation?" "a bound session still asks" || return 1
+    assert_output_contains "$(cat "$TEST_TMPDIR/claude-args")" "--resume $first" \
+        "the answer resumes the conversation the first launch recorded" || return 1
+}
+
+# Re-adopting orphaned records keeps the conversation they name; it used to be
+# replaced with a fresh id, losing the binding (the transcript stayed on disk).
+test_readopt_keeps_the_prior_conversation_binding() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && "$CS_BIN" -adopt old-name >/dev/null 2>&1)
+    printf 'claude_session_id: %s\n' "$UUID_PRIOR" >> "$project_dir/.cs/local/state"
+    rm "$CS_SESSIONS_ROOT/old-name"
+
+    (cd "$project_dir" && printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -adopt new-name >/dev/null 2>&1) \
+        || { echo "  FAIL: re-adopt should succeed"; return 1; }
+    assert_eq "$UUID_PRIOR" "$(_adopt_state_id "$project_dir")" \
+        "re-adopt keeps the recorded conversation" || return 1
+
+    _adopt_claude_stub
+    local output
+    output=$("$CS_BIN" new-name <<< "y" 2>&1) || true
+    assert_output_contains "$output" "Continue previous conversation?" "the kept binding still asks" || return 1
+    assert_output_contains "$(head -1 "$TEST_TMPDIR/claude-args")" "--resume $UUID_PRIOR" \
+        "the answer resumes the kept conversation" || return 1
+}
+
+# Records whose machine-local state did not travel (a clone of a project that
+# tracks .cs/) name no conversation, so they open the way a first adoption does.
+test_readopt_without_local_state_starts_fresh_without_asking() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && "$CS_BIN" -adopt old-name >/dev/null 2>&1)
+    rm "$CS_SESSIONS_ROOT/old-name"
+    rm -f "$project_dir/.cs/local/state"
+
+    (cd "$project_dir" && printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -adopt new-name >/dev/null 2>&1) \
+        || { echo "  FAIL: re-adopt should succeed"; return 1; }
+    _adopt_claude_stub
+    local output
+    output=$("$CS_BIN" new-name <<< "" 2>&1) || true
+    if grep -q "Continue previous conversation" <<< "$output"; then
+        echo "  FAIL: records with no binding must not offer to resume: $output"; return 1
+    fi
+    assert_output_contains "$(cat "$TEST_TMPDIR/claude-args")" "--session-id $(_adopt_state_id "$project_dir")" \
+        "claude starts the recorded conversation" || return 1
+}
+
+# A project that commits .cs/ brings its README frontmatter along. Adopt leaves
+# the conversation slot empty, so the first open's migration imported the
+# README's claude_session_id and the resume prompt passed it to claude unquoted:
+# whoever wrote the project chose words on claude's command line.
+test_adopt_ignores_a_committed_readme_id_that_is_not_a_uuid() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir/.cs"
+    printf -- '---\nstatus: active\nclaude_session_id: --dangerously-skip-permissions --model x\n---\n# Session\n' \
+        > "$project_dir/.cs/README.md"
+    (cd "$project_dir" && printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -adopt probe >/dev/null 2>&1) \
+        || { echo "  FAIL: re-adopt should succeed"; return 1; }
+    _adopt_claude_stub
+
+    local output
+    output=$("$CS_BIN" probe <<< "" 2>&1) || true
+
+    if grep -q "Continue previous conversation" <<< "$output"; then
+        echo "  FAIL: an id that is not a UUID must not be offered for resume: $output"; return 1
+    fi
+    local launches recorded
+    launches=$(cat "$TEST_TMPDIR/claude-args" 2>/dev/null)
+    assert_eq "1" "$(printf '%s\n' "$launches" | grep -c .)" "claude launches exactly once" || return 1
+    if grep -q -- '--dangerously-skip-permissions' <<< "$launches"; then
+        echo "  FAIL: the README's words reached claude's argv: $launches"; return 1
+    fi
+    recorded=$(_adopt_state_id "$project_dir")
+    [[ "$recorded" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+        || { echo "  FAIL: the open must record a real conversation id: '$recorded'"; return 1; }
+    assert_output_contains "$launches" "--session-id $recorded" "claude starts the recorded conversation" || return 1
+}
+
+# Re-adopt puts back the conversation the records name, and only a conversation
+# id: words in the slot name nothing to resume.
+test_readopt_drops_a_prior_binding_that_is_not_a_uuid() {
+    local project_dir="$TEST_TMPDIR/my-project"
+    mkdir -p "$project_dir"
+    (cd "$project_dir" && "$CS_BIN" -adopt old-name >/dev/null 2>&1)
+    printf 'claude_session_id: --dangerously-skip-permissions\n' >> "$project_dir/.cs/local/state"
+    rm "$CS_SESSIONS_ROOT/old-name"
+
+    (cd "$project_dir" && printf 'y\n' | CS_ASSUME_TTY=1 "$CS_BIN" -adopt new-name >/dev/null 2>&1) \
+        || { echo "  FAIL: re-adopt should succeed"; return 1; }
+    assert_eq "" "$(_adopt_state_id "$project_dir")" \
+        "re-adopt keeps no id when the prior one is not a UUID" || return 1
+}
+
+# ============================================================================
 # Runner
 # ============================================================================
 
@@ -409,6 +599,15 @@ run_test test_adopt_preserves_existing_git_repo
 run_test test_adopt_inits_git_when_none_exists
 run_test test_adopt_into_git_repo_without_claude_md_stages_bookkeeping
 run_test test_adopt_commits_only_its_own_bookkeeping
+
+# First launch after adopt
+run_test test_first_launch_after_adopt_starts_fresh_without_asking
+run_test test_first_launch_after_adopt_offers_the_projects_newest_conversation
+run_test test_second_launch_after_adopt_asks_and_resumes
+run_test test_readopt_keeps_the_prior_conversation_binding
+run_test test_readopt_without_local_state_starts_fresh_without_asking
+run_test test_adopt_ignores_a_committed_readme_id_that_is_not_a_uuid
+run_test test_readopt_drops_a_prior_binding_that_is_not_a_uuid
 
 # README frontmatter
 run_test test_readme_has_yaml_frontmatter

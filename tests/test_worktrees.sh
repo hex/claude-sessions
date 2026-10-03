@@ -1997,6 +1997,11 @@ test_finish_yields_to_an_explicit_rotation_choice() {
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")
     cs_launch "myproj@fix-auth"
+    # The prompt belongs to a session with a conversation to resume; one with
+    # none starts its first without asking. Record the one the handoff's
+    # parent names.
+    mkdir -p "$base_dir/.cs/local"
+    printf 'claude_session_id: 00000000-0000-4000-8000-000000000000\n' >> "$base_dir/.cs/local/state"
     mkdir -p "$base_dir/.cs/handoffs"
     cat > "$base_dir/.cs/handoffs/2026-07-16-test.md" << 'EOF'
 ---

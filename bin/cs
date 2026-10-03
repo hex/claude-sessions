@@ -2869,6 +2869,13 @@ _alloc_uuid() {
     fi
 }
 
+# A conversation id goes onto claude's command line, and the README a clone or an
+# adopted project brings can say anything, so only a UUID counts as one. Same
+# pattern as hooks/session-start.sh's UUID_RE.
+_is_uuid() {
+    [[ "$1" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
+}
+
 # The 8 colors claude's /color slash command accepts (verified against the
 # binary's own error message in claude 2.1.162). Anything else errors with
 # "Invalid color X". Notably absent: teal, magenta, white, black, gray, hex.
@@ -2919,6 +2926,15 @@ _set_local_state() {
         fi
         printf '%s: %s\n' "$key" "$value"
     } > "$tmp" && mv "$tmp" "$state"
+}
+
+# Remove a key's line from a machine-local state file. A missing file or key is
+# a no-op. Atomic (tmp+mv), like _set_local_state.
+_unset_local_state() {
+    local state="$1" key="$2"
+    [ -f "$state" ] || return 0
+    local tmp="$state.tmp"
+    awk -v key="$key" 'index($0, key ":") != 1' "$state" > "$tmp" && mv "$tmp" "$state"
 }
 
 # Return the path to claude's per-cwd transcript directory. Symlinks in the
@@ -3825,7 +3841,9 @@ migrate_session() {
         local _legacy_uuid _legacy_color
         _legacy_uuid=$(awk '/^claude_session_id:/ { sub(/^claude_session_id:[[:space:]]*/, ""); gsub(/["\r]/, ""); print; exit }' "$readme")
         _legacy_color=$(awk '/^claude_session_color:/ { sub(/^claude_session_color:[[:space:]]*/, ""); gsub(/["\r]/, ""); print; exit }' "$readme")
-        if [ -n "$_legacy_uuid" ] && [ -z "$(_read_local_state "$_state" claude_session_id)" ]; then
+        # The README is whatever the clone or the adopted project committed, so
+        # only a UUID is taken as a conversation id.
+        if _is_uuid "$_legacy_uuid" && [ -z "$(_read_local_state "$_state" claude_session_id)" ]; then
             _set_local_state "$_state" claude_session_id "$_legacy_uuid"
         fi
         if [ -n "$_legacy_color" ] && [ -z "$(_read_local_state "$_state" claude_session_color)" ]; then
@@ -3858,14 +3876,14 @@ migrate_session() {
         else
             local _discovered
             _discovered=$(_discover_session_uuid_in "$_proj")
+            # No transcripts: a recorded UUID is left alone (claude hasn't
+            # written the jsonl yet, eg. the session was just created with
+            # --session-id but hasn't talked to the user), and so is an empty
+            # slot. An id allocated here would name no conversation, and the
+            # launch would offer to resume it; with none, the launch starts
+            # the first conversation and records its id.
             if [ -n "$_discovered" ]; then
                 _bind_uuid="$_discovered"
-            elif [ -z "$_existing" ]; then
-                # No transcripts and no recorded UUID — allocate fresh.
-                # A recorded UUID without transcripts is left alone: claude
-                # hasn't written the jsonl yet (eg. session was just created
-                # with --session-id but hasn't talked to the user).
-                _bind_uuid=$(_alloc_uuid)
             fi
         fi
 
@@ -8346,12 +8364,16 @@ launch_claude_code() {
     fi
 
     # Read the session's recorded UUID (allocated by create_session_structure
-    # on new sessions or backfilled by migrate_session Phase 8 on legacy ones).
-    # Used for both the CS_CLAUDE_SESSION_ID env export below and for the
-    # spawn args at exec time. Empty only if the state file is somehow
-    # missing — exec paths fall back gracefully.
+    # on new sessions or backfilled by migrate_session Phase 8 from a
+    # transcript on disk). Used for both the CS_CLAUDE_SESSION_ID env export
+    # below and for the spawn args at exec time. Empty on an existing session
+    # that has never had a conversation, such as the first open after
+    # cs -adopt; the launch below starts one and records it. A value that is
+    # not a UUID (written before ids were checked, or by hand) names no
+    # conversation and counts as empty.
     local claude_session_id claude_session_color
     claude_session_id=$(_read_local_state "$session_dir/.cs/local/state" claude_session_id)
+    _is_uuid "$claude_session_id" || claude_session_id=""
     claude_session_color=$(_read_local_state "$session_dir/.cs/local/state" claude_session_color)
 
     # Build the trailing positional prompt arg that applies the session's
@@ -8584,9 +8606,10 @@ launch_claude_code() {
     # the /color re-apply for this one launch (color returns next open).
     local launch_prompt="${merge_kick:-${spawn_kick:-$color_arg}}"
 
-    # Status indicator
+    # Status indicator. An existing session with no recorded conversation starts
+    # its first one below, so it is new, not resuming.
     local status_icon status_text
-    if [ "$is_new" = "true" ]; then
+    if [ "$is_new" = "true" ] || [ -z "$claude_session_id" ]; then
         status_icon="+"
         status_text="new"
     else
@@ -8717,8 +8740,24 @@ EOF
 
     cd "$session_dir"
 
-    # For existing sessions, ask if user wants to continue previous conversation
-    local continue_flag=""
+    # An existing session with no recorded conversation has nothing to resume:
+    # the first open after cs -adopt, or adopted records whose machine-local
+    # state did not travel. Asking offered a conversation that never existed,
+    # and with no id to resume the answer fell back to --continue, which picks
+    # up whatever claude last ran in this folder. Start it the way a new
+    # session starts: record an id and hand it to claude. Not a rotation, so
+    # no timeline event and no CS_FRESH_REBIND.
+    if [ "$is_new" = "false" ] && [ -z "$claude_session_id" ]; then
+        claude_session_id=$(_alloc_uuid)
+        _set_local_state "$session_dir/.cs/local/state" claude_session_id "$claude_session_id"
+        export CS_CLAUDE_SESSION_ID="$claude_session_id"
+        # shellcheck disable=SC2086
+        exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${launch_prompt:+"$launch_prompt"}
+    fi
+
+    # For existing sessions, ask if user wants to continue previous conversation.
+    # The answer sets the id to resume; it goes to claude as one quoted argument.
+    local resume_id=""
     if [ "$is_new" = "false" ]; then
         # cs records only the conversation it launched, so one started any other
         # way on this folder — a `/desktop` handoff, a claude opened on the
@@ -8818,7 +8857,7 @@ EOF
         case "$response" in
             [nN]|[nN][oO])
                 _disarm_rotation_marker "$session_dir" "$pending_handoff"
-                continue_flag=""
+                resume_id=""
                 ;;
             [rR])
                 if [ -n "$pending_handoff" ]; then
@@ -8836,11 +8875,7 @@ EOF
                 # r without a pending handoff was never offered: treat as the
                 # default resume answer, disarm included.
                 _disarm_rotation_marker "$session_dir"
-                if [ -n "$claude_session_id" ]; then
-                    continue_flag="--resume $claude_session_id"
-                else
-                    continue_flag="--continue"
-                fi
+                resume_id="$claude_session_id"
                 ;;
             [dD])
                 # Nothing survives d: it retires the handoff it was offered, and
@@ -8863,36 +8898,29 @@ EOF
                 fi
                 # d without a pending handoff was never offered: treat as the
                 # default resume answer.
-                if [ -n "$claude_session_id" ]; then
-                    continue_flag="--resume $claude_session_id"
-                else
-                    continue_flag="--continue"
-                fi
+                resume_id="$claude_session_id"
                 ;;
             *)
                 # Also the unattended spawn path, which takes this default
                 # without asking.
                 _disarm_rotation_marker "$session_dir" "$pending_handoff"
-                # Prefer --resume <uuid> when the session has a recorded UUID:
-                # it names the exact conversation, vs --continue which means
-                # "most recent" and may resolve to a sibling Claude session
-                # the user ran in a different terminal between cs launches.
-                if [ -n "$claude_session_id" ]; then
-                    continue_flag="--resume $claude_session_id"
-                else
-                    continue_flag="--continue"
-                fi
+                # --resume <uuid>, never --continue: the uuid names the exact
+                # conversation, while --continue means "most recent" and may
+                # resolve to a sibling Claude session the user ran in a
+                # different terminal between cs launches. A session reaching
+                # this prompt always has one (the unbound case started above).
+                resume_id="$claude_session_id"
                 ;;
         esac
         echo ""
     fi
 
-    if [ -n "$continue_flag" ]; then
+    if [ -n "$resume_id" ]; then
         # Try continuing previous conversation
         SECONDS=0
         local rc=0
         # shellcheck disable=SC2086
-        $CLAUDE_CODE_BIN --name "$session_name" $continue_flag ${launch_prompt:+"$launch_prompt"} || rc=$?
+        $CLAUDE_CODE_BIN --name "$session_name" --resume "$resume_id" ${launch_prompt:+"$launch_prompt"} || rc=$?
         if [ $rc -ne 0 ] && [ $SECONDS -lt 3 ]; then
             # Quick failure suggests no conversation to continue. Rebind so
             # the fresh transcript claude is about to create is tracked by
@@ -8912,8 +8940,10 @@ EOF
         #     and pass --session-id <new> so cs stays bound to the new
         #     conversation. Without rebind, next launch resumes the OLD
         #     conversation while the fresh one becomes orphaned.
-        #   - is_new=false with no claude_session_id (shouldn't happen
-        #     post-Phase-8 but handled defensively): naked exec.
+        #   - is_new=true with no claude_session_id (create_session_structure
+        #     always writes one; handled defensively): naked exec. An
+        #     is_new=false session with none never gets here: it started
+        #     its first conversation before the resume prompt.
         if [ "$is_new" = "true" ] && [ -n "$claude_session_id" ]; then
             # shellcheck disable=SC2086
             exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${launch_prompt:+"$launch_prompt"}
@@ -9072,7 +9102,21 @@ adopt_session() {
 
     # create_session_structure writes CLAUDE.local.md, never CLAUDE.md — a
     # project's own CLAUDE.md is left untouched.
+    #
+    # It also stages a conversation id for a brand-new session's first launch.
+    # An adopted directory already exists, so its first open is a reopen, and a
+    # staged id made that open ask to continue a conversation that never
+    # existed. A first adoption keeps no id (the launch records one when it
+    # starts the first conversation); re-adopted records keep the conversation
+    # they name, which the staged id used to replace.
+    local prior_binding
+    prior_binding=$(_read_local_state "$target_dir/.cs/local/state" claude_session_id)
     create_session_structure "$target_dir"
+    if _is_uuid "$prior_binding"; then
+        _set_local_state "$target_dir/.cs/local/state" claude_session_id "$prior_binding"
+    else
+        _unset_local_state "$target_dir/.cs/local/state" claude_session_id
+    fi
 
     # An adopted session's name is the link's, not the directory's, and the link
     # is the only place it lives — so a hook that resolves this project by

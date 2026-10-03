@@ -463,8 +463,17 @@ test_open_that_stops_leaves_a_running_session_vault_mounted() {
     assert_eq "" "$(cat "$FAKE_HDIUTIL_LOG")" "joined the mount, never detached it" || return 1
 }
 
+# The resume prompt belongs to a session with a conversation to resume; one
+# with none starts its first without asking. The fixture's state line is not in
+# state-file form, so it records no conversation.
+_bind_conversation() {  # name
+    printf 'claude_session_id: %s\n' "33333333-3333-4333-8333-333333333333" \
+        >> "$CS_SESSIONS_ROOT/$1/.cs/local/state"
+}
+
 test_open_cancelled_at_a_prompt_detaches_the_vault_it_mounted() {
     _encrypted_session enc || return 1
+    _bind_conversation enc
     local out rc=0
     out=$(_open enc 2>&1) || rc=$?
     assert_eq "130" "$rc" "no answer to 'Continue previous conversation?' cancels" || return 1
@@ -517,6 +526,7 @@ _claude_snapshot() {
 # runs, and cs, its last holder, detaches it once claude exits.
 test_open_resuming_keeps_the_vault_while_claude_runs() {
     _encrypted_session enc || return 1
+    _bind_conversation enc
     local out rc=0
     out=$(CLAUDE_CODE_BIN="$(_claude_snapshot)" _open enc "y
 " 2>&1) || rc=$?
@@ -529,10 +539,22 @@ detach $FAKE_MNT" "$(cat "$FAKE_HDIUTIL_LOG")" "detached after claude exits" || 
 # Fresh, cs execs claude: cs is gone, and the SessionEnd waiter owns the detach.
 test_open_fresh_leaves_the_detach_to_the_waiter() {
     _encrypted_session enc || return 1
+    _bind_conversation enc
     local out rc=0
     out=$(CLAUDE_CODE_BIN="$(_claude_snapshot)" _open enc "n
 " 2>&1) || rc=$?
     assert_eq "0" "$rc" "the open reaches claude: $out" || return 1
+    assert_eq "attach -nobrowse -mountpoint $FAKE_MNT $(_vault_path enc)" "$(cat "$FAKE_HDIUTIL_LOG")" "no detach from cs" || return 1
+}
+
+# A first open with no conversation to resume execs claude as a fresh start
+# does, so the detach is the waiter's there too.
+test_first_open_leaves_the_detach_to_the_waiter() {
+    _encrypted_session enc || return 1
+    local out rc=0
+    out=$(CLAUDE_CODE_BIN="$(_claude_snapshot)" _open enc 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open reaches claude without asking: $out" || return 1
+    assert_output_not_contains "$out" "Continue previous conversation?" "nothing to resume, so no prompt" || return 1
     assert_eq "attach -nobrowse -mountpoint $FAKE_MNT $(_vault_path enc)" "$(cat "$FAKE_HDIUTIL_LOG")" "no detach from cs" || return 1
 }
 
@@ -678,6 +700,7 @@ run_test test_open_that_stops_leaves_a_vault_another_holder_keeps
 run_test test_open_handing_off_to_the_session_manager_leaves_the_holders
 run_test test_open_resuming_keeps_the_vault_while_claude_runs
 run_test test_open_fresh_leaves_the_detach_to_the_waiter
+run_test test_first_open_leaves_the_detach_to_the_waiter
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
 run_test test_session_end_ignores_a_session_cs_did_not_encrypt

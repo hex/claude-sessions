@@ -13,6 +13,13 @@ _alloc_uuid() {
     fi
 }
 
+# A conversation id goes onto claude's command line, and the README a clone or an
+# adopted project brings can say anything, so only a UUID counts as one. Same
+# pattern as hooks/session-start.sh's UUID_RE.
+_is_uuid() {
+    [[ "$1" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]
+}
+
 # The 8 colors claude's /color slash command accepts (verified against the
 # binary's own error message in claude 2.1.162). Anything else errors with
 # "Invalid color X". Notably absent: teal, magenta, white, black, gray, hex.
@@ -63,6 +70,15 @@ _set_local_state() {
         fi
         printf '%s: %s\n' "$key" "$value"
     } > "$tmp" && mv "$tmp" "$state"
+}
+
+# Remove a key's line from a machine-local state file. A missing file or key is
+# a no-op. Atomic (tmp+mv), like _set_local_state.
+_unset_local_state() {
+    local state="$1" key="$2"
+    [ -f "$state" ] || return 0
+    local tmp="$state.tmp"
+    awk -v key="$key" 'index($0, key ":") != 1' "$state" > "$tmp" && mv "$tmp" "$state"
 }
 
 # Return the path to claude's per-cwd transcript directory. Symlinks in the

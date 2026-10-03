@@ -218,6 +218,116 @@ EOF
 }
 
 # ============================================================================
+# Cycle 3a: a conversation id that is not a UUID never reaches claude
+# ============================================================================
+
+HOSTILE_ID="--dangerously-skip-permissions --model x"
+
+# A claude stub that records each launch's argv, one line per launch.
+_argv_claude_stub() {
+    cat > "$TEST_TMPDIR/claude-stub" << SCRIPT
+#!/bin/bash
+printf '%s\n' "\$*" >> "$TEST_TMPDIR/claude-args"
+exit 0
+SCRIPT
+    chmod +x "$TEST_TMPDIR/claude-stub"
+    export CLAUDE_CODE_BIN="$TEST_TMPDIR/claude-stub"
+}
+
+# A shared session cloned into the sessions folder: the README travels with it,
+# .cs/local does not.
+_hostile_readme_session() {  # name
+    local session_dir="$CS_SESSIONS_ROOT/$1"
+    mkdir -p "$session_dir/.cs/memory"
+    printf -- '---\nstatus: active\nclaude_session_id: %s\naliases: ["%s"]\n---\n# Session: %s\n' \
+        "$HOSTILE_ID" "$1" "$1" > "$session_dir/.cs/README.md"
+    echo "# Session narrative" > "$session_dir/.cs/memory/narrative.md"
+    echo "# Session" > "$session_dir/CLAUDE.md"
+    (cd "$session_dir" && git init -q && git add -A && git commit -q -m "init")
+    echo "$session_dir"
+}
+
+_assert_uuid() {  # value, message
+    [[ "$1" =~ $UUID_V4_RE ]] || { echo "  FAIL: $2: '$1'"; return 1; }
+}
+
+# Phase 12 imported the README's claude_session_id verbatim, and the resume
+# prompt passed it to claude unquoted, so a committed README chose words on
+# claude's command line. A value that is not a UUID names no conversation: the
+# open starts the first one, as for a session with no id at all.
+test_clone_with_a_readme_id_that_is_not_a_uuid_starts_fresh() {
+    local session_dir
+    session_dir=$(_hostile_readme_session hostile-clone)
+    _argv_claude_stub
+
+    local output
+    output=$("$CS_BIN" hostile-clone <<< "" 2>&1) || true
+
+    if grep -q "Continue previous conversation" <<< "$output"; then
+        echo "  FAIL: an id that is not a UUID must not be offered for resume: $output"; return 1
+    fi
+    local launches recorded
+    launches=$(cat "$TEST_TMPDIR/claude-args" 2>/dev/null)
+    assert_eq "1" "$(printf '%s\n' "$launches" | grep -c .)" "claude launches exactly once" || return 1
+    if grep -q -- '--dangerously-skip-permissions' <<< "$launches"; then
+        echo "  FAIL: the README's words reached claude's argv: $launches"; return 1
+    fi
+    recorded=$(_extract_state_value "$session_dir/.cs/local/state" claude_session_id)
+    _assert_uuid "$recorded" "the open records a real conversation id" || return 1
+    assert_output_contains "$launches" "--session-id $recorded" "claude starts the recorded conversation" || return 1
+    _assert_readme_clean "$session_dir/.cs/README.md" || return 1
+}
+
+# The same clone on a machine where claude already ran in the folder. Phase 8
+# binds the newest transcript; had Phase 12 imported the README value first,
+# Phase 8 would print it back to the terminal as the orphan it repaired.
+test_migration_never_records_a_readme_id_that_is_not_a_uuid() {
+    local session_dir
+    session_dir=$(_hostile_readme_session hostile-history)
+    local proj uuid="44444444-4444-4444-8444-444444444444"
+    proj="$CS_TRANSCRIPTS_DIR/$(cd "$session_dir" && pwd -P | tr '/.' '--')"
+    mkdir -p "$proj"
+    printf '{"type":"user","sessionId":"%s"}\n' "$uuid" > "$proj/$uuid.jsonl"
+    _argv_claude_stub
+
+    local output
+    output=$("$CS_BIN" hostile-history <<< "" 2>&1) || true
+
+    if grep -q -- '--dangerously-skip-permissions' <<< "$output"; then
+        echo "  FAIL: the README's value was recorded and echoed: $output"; return 1
+    fi
+    assert_eq "$uuid" "$(_extract_state_value "$session_dir/.cs/local/state" claude_session_id)" \
+        "the folder's own conversation is bound" || return 1
+    assert_output_contains "$(cat "$TEST_TMPDIR/claude-args")" "--resume $uuid" \
+        "the open resumes the folder's conversation" || return 1
+}
+
+# Local state written before ids were checked (an import by an earlier cs, a
+# hand edit) can already hold a value that is not a UUID. The launch treats it
+# as no id: it starts the first conversation and records a real id over it.
+test_launch_ignores_a_recorded_id_that_is_not_a_uuid() {
+    local session_dir
+    session_dir=$(create_test_session_with_git recorded-junk)
+    printf 'claude_session_id: %s\n' "$HOSTILE_ID" > "$session_dir/.cs/local/state"
+    _argv_claude_stub
+
+    local output
+    output=$("$CS_BIN" recorded-junk <<< "" 2>&1) || true
+
+    if grep -q "Continue previous conversation" <<< "$output"; then
+        echo "  FAIL: an id that is not a UUID must not be offered for resume: $output"; return 1
+    fi
+    local launches recorded
+    launches=$(cat "$TEST_TMPDIR/claude-args" 2>/dev/null)
+    if grep -q -- '--dangerously-skip-permissions' <<< "$launches"; then
+        echo "  FAIL: the recorded words reached claude's argv: $launches"; return 1
+    fi
+    recorded=$(_extract_state_value "$session_dir/.cs/local/state" claude_session_id)
+    _assert_uuid "$recorded" "a real id replaces the recorded words" || return 1
+    assert_output_contains "$launches" "--session-id $recorded" "claude starts the recorded conversation" || return 1
+}
+
+# ============================================================================
 # Cycle 3b: migration relocates the session log to machine-local .cs/local/
 # ============================================================================
 
@@ -443,6 +553,9 @@ run_test test_resume_leaves_readme_untouched
 run_test test_migration_leaves_a_body_line_that_looks_like_a_field
 run_test test_migration_readme_survives_a_failed_frontmatter_write
 run_test test_migration_moves_fields_from_readme_to_local_state
+run_test test_clone_with_a_readme_id_that_is_not_a_uuid_starts_fresh
+run_test test_migration_never_records_a_readme_id_that_is_not_a_uuid
+run_test test_launch_ignores_a_recorded_id_that_is_not_a_uuid
 run_test test_migration_moves_session_log_to_local
 run_test test_session_start_rebinds_uuid_in_local_state
 run_test test_session_start_stamps_the_context_date_for_this_conversation

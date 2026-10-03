@@ -4,6 +4,12 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Fixes
+- The first `cs <name>` after `cs -adopt` no longer asks "Continue previous conversation?" in a project with no Claude Code conversation to resume. `cs -adopt` recorded an id for a conversation that did not exist yet, so the first open offered to resume it, the resume failed, and cs started fresh with "No previous conversation found". That open now starts a new conversation without asking, records it, and the launch card says `new`. A project Claude Code already ran in still opens on its newest conversation. Re-adopting the records a removed session left behind keeps the conversation they name; it used to be replaced with a new id, so the next open no longer resumed it.
+- cs hands `claude` a recorded conversation id only when it is a UUID. On the first open of a cloned session or an adopted project, a `claude_session_id:` line in the committed `.cs/README.md` was copied into machine-local state without a check, and the resume prompt passed it to `claude` word by word, so the repo could put options such as `--dangerously-skip-permissions` on the launch command. The README import, re-adopt's kept binding and the launch now take only a UUID; anything else counts as no conversation, and the open starts a new one.
+
 ## 2026.10.1
 
 ### Added
