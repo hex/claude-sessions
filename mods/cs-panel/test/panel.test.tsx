@@ -273,11 +273,12 @@ test('/cs-panel opens the pane asking for the keys, reads cs at once, and draws 
   expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
   expect(w.opens).toEqual([{ id: 'cs-panel', title: 'Sessions', focus: true, closeOnEscape: true, columns: 56 }])
   expect(w.runs).toEqual([{ argv: [BIN, '-list', '--porcelain'], stdin: undefined }])
-  const pane = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
-  fixture = { ...viewOf(GOLDEN), columns: 48, bodyRows: 12, hasKeys: true }
-  const lab = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'fixture', props: PANE_PROPS })
+  const props = { ...PANE_PROPS, bodyColumns: 40, isFocused: false, scroll: { offset: 0, bodyRows: 8 } }
+  const pane = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props })
+  fixture = { ...viewOf(GOLDEN), columns: 40, bodyRows: 8, hasKeys: false }
+  const lab = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'fixture', props })
   expect(shown(await pane.drawn())).toEqual(shown(await lab.drawn()))
-  expect(linesOf(await pane.drawn())[1]?.trimEnd()).toBe('› alpha         live      41%   2 mail   1 feat')
+  expect(linesOf(await pane.drawn()).slice(0, 2).map(line => line.trimEnd())).toEqual(['m: mail alpha   ctrl+x tab: keys', '› alpha          live      41%   2 mail'])
 })
 
 async function openPane($: Engine) {
