@@ -2809,7 +2809,7 @@ Commands:
   -statusline <cmd>   enable|disable the cs status line; caps on|off|ask records whether your font has the rounded caps
   -detect-theme       Show the detected terminal theme (light|dark)
   -tui                Open the interactive session manager (bare 'cs' does too)
-  -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived)
+  -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived; --porcelain prints tab-separated records for tools)
   -adopt <name>       Adopt current directory as a cs session (--yes re-adopts orphaned records without asking)
   -adopt --worktrees  Register Claude Code's .claude/worktrees/* here as <repo>.<worktree> sessions (--dry-run previews)
   -whoami             Show the current actor (for shared, multi-person sessions)
@@ -12347,7 +12347,7 @@ _doctor_check_session_id_match() {
     fi
 }
 
-# A mod (cs, cs-update; cs-mermaid writes no heartbeat) is a Claude Code function-hooks plugin the
+# A mod (cs, cs-update; cs-mermaid and cs-panel write no heartbeat) is a Claude Code function-hooks plugin the
 # installer deploys under ~/.claude/skills. Absent, it is not news. Present, the
 # row reads the heartbeat the mod writes when Claude Code loads it, never the
 # directory: the loader sits behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, which a
@@ -13315,7 +13315,7 @@ list_sessions() {
                 ;;
             --tag)
                 shift
-                [ -n "${1:-}" ] || error "Usage: cs -list [--archived] [--tag <tag>]"
+                [ -n "${1:-}" ] || error "Usage: cs -list [--archived] [--tag <tag>] | cs -list --porcelain"
                 # Stored tags are always lowercase (cs -tag add lowercases on
                 # write); lowercase the filter too so it matches regardless
                 # of case, mirroring the TUI's parse_tag_query.
@@ -13326,7 +13326,7 @@ list_sessions() {
                 archived_only="true"
                 shift
                 ;;
-            *) error "Unknown list option: $1. Usage: cs -list [--archived] [--tag <tag>]" ;;
+            *) error "Unknown list option: $1. Usage: cs -list [--archived] [--tag <tag>] | cs -list --porcelain" ;;
         esac
     done
 

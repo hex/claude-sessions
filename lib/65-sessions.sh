@@ -255,7 +255,7 @@ list_sessions() {
                 ;;
             --tag)
                 shift
-                [ -n "${1:-}" ] || error "Usage: cs -list [--archived] [--tag <tag>]"
+                [ -n "${1:-}" ] || error "Usage: cs -list [--archived] [--tag <tag>] | cs -list --porcelain"
                 # Stored tags are always lowercase (cs -tag add lowercases on
                 # write); lowercase the filter too so it matches regardless
                 # of case, mirroring the TUI's parse_tag_query.
@@ -266,7 +266,7 @@ list_sessions() {
                 archived_only="true"
                 shift
                 ;;
-            *) error "Unknown list option: $1. Usage: cs -list [--archived] [--tag <tag>]" ;;
+            *) error "Unknown list option: $1. Usage: cs -list [--archived] [--tag <tag>] | cs -list --porcelain" ;;
         esac
     done
 

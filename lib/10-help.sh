@@ -44,7 +44,7 @@ Commands:
   -statusline <cmd>   enable|disable the cs status line; caps on|off|ask records whether your font has the rounded caps
   -detect-theme       Show the detected terminal theme (light|dark)
   -tui                Open the interactive session manager (bare 'cs' does too)
-  -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived)
+  -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived; --porcelain prints tab-separated records for tools)
   -adopt <name>       Adopt current directory as a cs session (--yes re-adopts orphaned records without asking)
   -adopt --worktrees  Register Claude Code's .claude/worktrees/* here as <repo>.<worktree> sessions (--dry-run previews)
   -whoami             Show the current actor (for shared, multi-person sessions)
