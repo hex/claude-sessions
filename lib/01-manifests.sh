@@ -167,7 +167,7 @@ CS_MOD_FILES=(
     cs-panel/.claude-plugin/plugin.json
     cs-panel/hooks/hooks.json
     cs-panel/hooks/register.tsx
-    cs-panel/hooks/sessions.ts
+    cs-panel/hooks/settings.ts
     cs-panel/hooks/draw.tsx
 )
 

@@ -6,9 +6,6 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
-### Added
-- `/cs-panel` opens a pane that lists the machine's cs sessions, one row each: the name (a feature under its base), `live` or `idle`, the last context reading, unread mail and the feature count. Tab or an arrow selects a row, and a strip above the rows offers what that row admits: `o` opens an idle session in the cs tmux window (`cs -spawn`), `m` sends it mail (the body typed into one dialog, delivered on stdin), `r` retires an idle feature: `/finish <task>` in this conversation when it is the base's lead, task mail `/finish <task>` to the base otherwise, which its user accepts. A live session has no `o`, this session has no `o`, `m` or `r`, a locked vault has no `m`. The pane sits inline above the prompt under tmux and docks beside the chat in fullscreen; it opens only when asked, and while open it reads `cs -list --porcelain` every minute while no turn runs, after each turn and after each press. Shipped as the `cs-panel` mod in `~/.claude/skills/`.
-
 ### Changed
 - `cs -list` prints the cs-tui hint from the listing itself, so `cs -list --bogus` prints only the error.
 
