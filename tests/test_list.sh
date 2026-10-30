@@ -205,6 +205,26 @@ test_list_porcelain_refuses_another_option() {
     done
 }
 
+# A root find cannot read is an error that says why, never an empty answer:
+# the panel keeps its last rows for an error and draws none for no sessions.
+# The mode is put back before any assert, or teardown cannot remove the root.
+test_list_porcelain_refuses_an_unreadable_root() {
+    local rc=0
+    if [ "$(id -u)" = 0 ]; then
+        SKIP_REASON="root reads a mode 000 directory"
+        echo "    SKIP: $SKIP_REASON"
+        return 77
+    fi
+    create_test_session alpha >/dev/null
+    chmod 000 "$CS_SESSIONS_ROOT"
+    "$CS_BIN" -list --porcelain > "$TEST_TMPDIR/out" 2> "$TEST_TMPDIR/err" || rc=$?
+    chmod 755 "$CS_SESSIONS_ROOT"
+    assert_eq "1" "$rc" "cs -list --porcelain exits 1" || return 1
+    assert_eq "" "$(cat "$TEST_TMPDIR/out")" "stdout carries no records" || return 1
+    assert_eq "Error: cannot list the sessions under $CS_SESSIONS_ROOT: Permission denied" \
+        "$(sed "s/$(printf '\033')\[[0-9;]*m//g" "$TEST_TMPDIR/err")" "one stderr line names the root and the OS error" || return 1
+}
+
 test_tui_launch_exports_the_cs_binary_path() {
     # The picker forks cs back for its own subcommands, so cs must hand it its
     # own path. The launch itself needs a tty and a resolved cs-tui, neither of
@@ -226,6 +246,7 @@ run_test test_tui_launch_exports_the_cs_binary_path
 run_test test_list_porcelain_matches_the_golden_file
 run_test test_list_porcelain_prints_only_records
 run_test test_list_porcelain_refuses_another_option
+run_test test_list_porcelain_refuses_an_unreadable_root
 run_test test_list_porcelain_counts_a_heartbeat_as_live
 run_test test_list_porcelain_runs_under_old_bash
 

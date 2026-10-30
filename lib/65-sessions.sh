@@ -217,12 +217,17 @@ run_tui() {
 # cs -live / cs -msg / cs <base> -features cannot disagree. A name cs's own
 # validators refuse is skipped: cs cannot address it, and those validators
 # admit no tab, newline or byte outside printable ASCII. Unknown is '-'.
-# Reads the clock once.
+# Reads the clock once. A root find cannot read is an error, never an empty
+# answer, which reads as no sessions.
 _list_porcelain() {  # (no arguments)
     [ -d "$SESSIONS_ROOT" ] || return 0
-    local now dir name live context unread features
+    local now dir name live context unread features listed=""
     now="$(date +%s)"
     while IFS= read -r -d '' dir; do
+        case "$dir" in
+            /*) ;;
+            *) listed="$dir"; break ;;
+        esac
         is_session_dir "$dir" || continue
         _session_is_archived "$dir" && continue
         name="${dir##*/}"
@@ -241,7 +246,25 @@ _list_porcelain() {  # (no arguments)
         context="$(_resume_context_pct "$dir")"
         unread="$(_mail_unread_count "$dir/.cs")"
         printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$live" "${context:--}" "$unread" "$features"
-    done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | LC_ALL=C sort -z)
+    done < <(_list_session_dirs)
+    [ "$listed" = listed ] || error "cannot list the sessions under $SESSIONS_ROOT: ${listed:-the listing ended early}"
+}
+
+# The paths directly under the sessions root, sorted, each ended by a NUL;
+# then one record that cannot be a path, since the root is absolute: `listed`
+# once find has read the root, else why it could not (find's last complaint,
+# after its own `find: <path>: ` prefix, which BSD and GNU spell differently).
+_list_session_dirs() {  # (no arguments)
+    local why rc=0
+    { why=$( { find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 2>&4 \
+        | LC_ALL=C sort -z >&3; } 4>&1 ); } 3>&1 || rc=$?
+    if [ "$rc" = 0 ]; then
+        printf 'listed\0'
+        return 0
+    fi
+    why="${why##*$'\n'}"
+    why="${why##*: }"
+    printf '%s\0' "${why:-find exited $rc}"
 }
 
 # List all sessions
