@@ -12,12 +12,15 @@ SL="$REPO/bin/cs-statusline"
 
 # Each test starts from no CS_* setting at all: the files are what is under
 # test, and a value the runner exported would pin the key above them. Every
-# case seeds its own files under its own HOME.
+# case seeds its own files under its own HOME. The harness's own names stay:
+# a cs session exports CS_BIN, and the loop would otherwise drop the binary
+# under test and the ps stub with it.
 setup() {
     local _v
     while IFS='=' read -r _v _; do
         case "$_v" in
-            CS_*|CLAUDE_SESSION_*|COLORFGBG|COLORTERM|TERM_PROGRAM|ITERM_PROFILE|NO_COLOR) unset "$_v" 2>/dev/null || true ;;
+            CS_BIN|CS_PS_BIN|CS_PS_STUB) ;;
+            CS_*|CLAUDE_SESSION_*|CLAUDE_CODE_ENABLE_*|COLORFGBG|COLORTERM|TERM_PROGRAM|ITERM_PROFILE|NO_COLOR) unset "$_v" 2>/dev/null || true ;;
         esac
     done < <(env)
     TEST_TMPDIR="$(mktemp -d)"
