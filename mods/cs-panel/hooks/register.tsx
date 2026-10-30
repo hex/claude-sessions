@@ -78,8 +78,10 @@ export const LOGS = {
 // under. Read once per load; the environment does not change under a process.
 type Launch = { bin: string; self: SessionName | undefined }
 
-// The poll: off, being armed (claimed before the await that checks the pane
-// is open, so two callers cannot arm two clocks), or running.
+// The poll: off, being armed, or running. An arming is claimed before the
+// await that checks the pane is open, and arms only if its claim is still the
+// poll after it: a stop or a later claim in between supersedes it, so two
+// callers cannot arm two clocks and a close mid-arming arms none.
 type Poll = { kind: 'off' } | { kind: 'arming' } | { kind: 'on'; cancel: () => void }
 
 // Module state. Reset in register(): a reload drops it and the engine cancels
@@ -113,15 +115,17 @@ export function register(on: On) {
     return next(e)
   })
 
-  // /cs-panel: open (or raise) the pane and arm the poll afresh. `immediate`,
-  // so it opens mid-turn too: the first read runs at once whatever the turn
-  // does; only the clock's reads wait for idle.
+  // /cs-panel: open (or raise) the pane and read at once: a running poll reads
+  // now, else the poll is armed afresh, superseding an arming that asked for
+  // the panes before this open. `immediate`, so it opens mid-turn too: the
+  // first read runs at once whatever the turn does; only the clock's reads
+  // wait for idle.
   on('command.run', { command: 'cs-panel' }, async ($) => {
     launch ??= await readLaunch($)
     if (launch === undefined) return { text: REPLIES.noBin }
     const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true, closeOnEscape: true, columns: DOCK_COLUMNS })
-    stopPoll()
-    await startPoll($)
+    if (poll.kind === 'on') await refresh($)
+    else { stopPoll(); await startPoll($) }
     return { text: opened.isPlaced ? REPLIES.opened : REPLIES.notPlaced(opened.reason) }
   })
 
@@ -183,12 +187,16 @@ async function readLaunch($: EngineInterface): Promise<Launch | undefined> {
 }
 
 // Arms the clock if the pane is open, cs is known and nothing is armed, then
-// reads at once. A second call while arming or on does nothing.
+// reads at once. A second call while arming or on does nothing, and so does
+// one whose claim was superseded during its awaits.
 async function startPoll($: EngineInterface): Promise<void> {
   if (poll.kind !== 'off') return
-  poll = { kind: 'arming' }
+  const claim: Poll = { kind: 'arming' }
+  poll = claim
   launch ??= await readLaunch($)
-  if (launch === undefined || !(await $.ui.panes()).some(p => p.id === PANE)) { poll = { kind: 'off' }; return }
+  const isOpen = launch !== undefined && (await $.ui.panes()).some(p => p.id === PANE)
+  if (poll !== claim) return
+  if (!isOpen) { poll = { kind: 'off' }; return }
   const timer = $.clock.every(POLL_MS, () => { if (!working) inBackground($, refresh($)) })
   poll = { kind: 'on', cancel: timer.cancel }
   await refresh($)

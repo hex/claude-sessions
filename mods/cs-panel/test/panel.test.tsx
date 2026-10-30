@@ -229,9 +229,12 @@ type Answer = { exitCode?: number; stdout?: string; stderr?: string }
 
 // What sits beneath the mod: the engine's answers to each call it makes, and
 // a record of what it asked. `answer` gives cs's reply to an argv; a pane is
-// open from its ui.open until a ui.close.
+// open from its ui.open until a ui.close. While `panesHeld` is set, ui.panes
+// answers once it settles, with the panes open when it was asked. `logs` holds
+// each line a plugin logged.
 function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: readonly string[]) => Answer | Promise<Answer>; sessionId?: () => string; state?: string } = {}) {
-  const w = { runs: [] as { argv: string[]; stdin: string | undefined }[], toasts: [] as string[], opens: [] as PaneOpenArgs[], finishes: [] as string[], isOpen: false, invalidations: 0 }
+  const w = { runs: [] as { argv: string[]; stdin: string | undefined }[], toasts: [] as string[], opens: [] as PaneOpenArgs[], finishes: [] as string[], isOpen: false, invalidations: 0,
+    panesHeld: undefined as Promise<void> | undefined, logs: [] as string[] }
   mock.env(on, opts.env ?? { CS_BIN: BIN })
   const clock = mock.clock(on)
   on('process.run', async ($, e) => {
@@ -240,8 +243,13 @@ function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: rea
     return { value: { exitCode: a.exitCode ?? 0, stdout: a.stdout ?? '', stderr: a.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('ui.toast', ($, e) => { w.toasts.push(e.text); return { value: undefined } })
+  on('ui.log', ($, e) => { w.logs.push(e.text); return { value: undefined } })
   on('ui.open', ($, e) => { w.opens.push({ ...e }); w.isOpen = true; return { value: { isPlaced: true } } })
-  on('ui.panes', () => ({ value: w.isOpen ? [{ id: 'cs-panel', title: 'Sessions', isShown: true, isFocused: true, isPlaced: true }] : [] }))
+  on('ui.panes', async () => {
+    const panes = w.isOpen ? [{ id: 'cs-panel', title: 'Sessions', isShown: true, isFocused: true, isPlaced: true }] : []
+    if (w.panesHeld !== undefined) await w.panesHeld
+    return { value: panes }
+  })
   on('ui.close', () => { w.isOpen = false; return { value: undefined } })
   on('ui.focus', () => ({}))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
@@ -428,6 +436,65 @@ test('an open pane reads cs every minute while no turn runs and at each turn\'s 
   expect(lists()).toBe(5)
   await clock.advance(60000)
   expect(lists()).toBe(6)
+})
+
+// Logs each clock.every dispatch the plugins make: one when a timer is armed,
+// then one per period it runs. A plugin's hooks run from their own source,
+// sharing no binding with the test, so the count comes back through ui.log.
+const EVERIES = { name: 'everies', register(on: On) {
+  on('clock.every', async ($, e, next) => { await $.ui.log('clock.every'); return next(e) })
+} }
+
+// A promise the test settles: what a held ui.panes waits on.
+function gate(): { held: Promise<void>; open: () => void } {
+  let open = () => {}
+  const held = new Promise<void>(resolve => { open = resolve })
+  return { held, open }
+}
+
+test('a render\'s arming and /cs-panel\'s at once arm one clock: one read at the open and one a minute, none after a close', { plugins: [CLOSER, EVERIES] }, async ($, on) => {
+  const { w, clock } = world(on)
+  const everies = () => w.logs.filter(line => line === 'clock.every').length
+  const lists = () => w.runs.filter(r => r.argv[1] === '-list').length
+  const panes = gate()
+  w.panesHeld = panes.held
+  // The engine draws an opening pane before $.ui.open resolves: that render
+  // arms the poll from a timer, whose arming is still asking for the panes
+  // when /cs-panel arms its own.
+  w.isOpen = true
+  await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
+  await clock.settle()
+  const opening = $.command.run(COMMAND)
+  await clock.settle()
+  w.panesHeld = undefined
+  panes.open()
+  expect(await opening).toEqual({ text: REPLIES.opened })
+  await clock.settle()
+  expect([everies(), lists()]).toEqual([1, 1])
+  await clock.advance(60000)
+  expect(lists()).toBe(2)
+  await $.command.run({ ...COMMAND, command: 'close-panel' })
+  await clock.advance(180000)
+  expect(lists()).toBe(2)
+})
+
+test('a close while the poll is being armed leaves no clock, even when a render after the close starts arming again', { plugins: [CLOSER, EVERIES] }, async ($, on) => {
+  const { w, clock } = world(on)
+  const everies = () => w.logs.filter(line => line === 'clock.every').length
+  const lists = () => w.runs.filter(r => r.argv[1] === '-list').length
+  const panes = gate()
+  w.panesHeld = panes.held
+  const opening = $.command.run(COMMAND)
+  await clock.settle()
+  await $.command.run({ ...COMMAND, command: 'close-panel' })
+  expect(w.isOpen).toBe(false)
+  await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
+  await clock.settle()
+  w.panesHeld = undefined
+  panes.open()
+  expect(await opening).toEqual({ text: REPLIES.opened })
+  await clock.advance(180000)
+  expect([everies(), lists()]).toEqual([0, 0])
 })
 
 test('a failed or unreadable answer keeps the rows and draws why above them; the next good answer clears it', async ($, on) => {
