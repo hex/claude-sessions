@@ -3,7 +3,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { GOLDEN } from './golden'
-import { parseList, rowsOf, sessionName, type Pending, type Row, type Session, type SessionName } from '../hooks/sessions'
+import { parseList, parseReadiness, retireVerdict, rowsOf, sessionName, type Pending, type Readiness, type Row, type Session, type SessionName } from '../hooks/sessions'
 
 function nameOf(text: string): SessionName {
   const name = sessionName(text)
@@ -64,4 +64,40 @@ test('each row offers the keys its session allows: open when idle, mail when rea
   expect(rows.map(r => [r.session.name, r.pending, [...r.actions]])).toEqual([
     ['alpha', undefined, ['mail']], ['alpha@fix', undefined, ['open', 'mail', 'retire']], ['alpha@stale', undefined, ['open', 'mail', 'retire']], ['beta', 'opening', []],
   ])
+})
+
+// One `cs <base> -features --porcelain` line, as _feature_readiness prints it:
+// task branch ahead merged ff wt_dirty untracked base_dirty lock state.
+function readinessLine(f: { ahead?: number; merged?: 0 | 1; wtDirty?: 0 | 1; untracked?: number; lock?: string; state: string }): string {
+  return ['fix', 'cs/fix', f.ahead ?? 0, f.merged ?? 0, 1, f.wtDirty ?? 0, f.untracked ?? 0, 0, f.lock ?? 'none', f.state].join('\t')
+}
+
+function readinessOf(line: string): Readiness {
+  const parsed = parseReadiness(`${line}\n`)
+  if ('unreadable' in parsed || parsed[0] === undefined) throw new Error(`the readiness fixture is unreadable: ${line}`)
+  return parsed[0]
+}
+
+test('a readiness record parses strictly: ten fields, the three lock words, a lowercase state', () => {
+  expect(parseReadiness(`${readinessLine({ ahead: 3, state: 'ready' })}\n`)).toEqual([{ task: 'fix', ahead: 3, merged: false, wtDirty: false, untracked: 0, lock: 'none', state: 'ready' }])
+  for (const bad of [readinessLine({ state: 'ready' }).split('\t').slice(0, 9).join('\t'), readinessLine({ lock: 'both', state: 'locked' }), readinessLine({ state: 'Ready' }), readinessLine({ state: 'ready' }).replace('cs/fix\t0', 'cs/fix\tx')]) {
+    expect(parseReadiness(`${bad}\n`)).toEqual({ unreadable: bad })
+  }
+})
+
+test('a feature retires when ready with commits; the base\'s own lock does not stop the mail route, but what it hides in front of the merge does', () => {
+  const verdict = (f: Parameters<typeof readinessLine>[0], route: 'here' | 'mail') => retireVerdict(readinessOf(readinessLine(f)), route)
+  expect(retireVerdict(undefined, 'mail')).toEqual({ go: false, why: 'not a feature git lists' })
+  expect(verdict({ ahead: 3, state: 'ready' }, 'here')).toEqual({ go: true })
+  expect(verdict({ ahead: 3, state: 'ready' }, 'mail')).toEqual({ go: true })
+  expect(verdict({ ahead: 0, state: 'ready' }, 'here')).toEqual({ go: false, why: 'no commits' })
+  expect(verdict({ ahead: 3, wtDirty: 1, state: 'dirty' }, 'mail')).toEqual({ go: false, why: 'dirty' })
+  expect(verdict({ ahead: 0, merged: 1, state: 'merged' }, 'mail')).toEqual({ go: false, why: 'merged' })
+  expect(verdict({ ahead: 2, lock: 'base', state: 'locked' }, 'mail')).toEqual({ go: true })
+  expect(verdict({ ahead: 2, lock: 'base', state: 'locked' }, 'here')).toEqual({ go: false, why: 'locked' })
+  expect(verdict({ ahead: 2, lock: 'worktree', state: 'locked' }, 'mail')).toEqual({ go: false, why: 'locked' })
+  expect(verdict({ ahead: 2, wtDirty: 1, lock: 'base', state: 'locked' }, 'mail')).toEqual({ go: false, why: 'dirty' })
+  expect(verdict({ ahead: 2, untracked: 2, lock: 'base', state: 'locked' }, 'mail')).toEqual({ go: false, why: 'untracked' })
+  expect(verdict({ ahead: 0, merged: 1, lock: 'base', state: 'locked' }, 'mail')).toEqual({ go: false, why: 'merged' })
+  expect(verdict({ ahead: 0, lock: 'base', state: 'locked' }, 'mail')).toEqual({ go: false, why: 'no commits' })
 })

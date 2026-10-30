@@ -128,3 +128,72 @@ export function rowsOf(sessions: readonly Session[], self: SessionName | undefin
   for (const orphans of featuresOf.values()) for (const f of orphans) rows.push(row(f, 0))
   return rows
 }
+
+// The fields of one `cs <base> -features --porcelain` record the retire
+// decision reads (_feature_readiness: task branch ahead merged ff wt_dirty
+// untracked base_dirty lock state). The state word is kept as cs printed it:
+// the panel treats `ready` alone as special and draws the rest verbatim, so it
+// keeps no copy of the band's list of states. merged, wtDirty and untracked
+// are computed before the state picks its first blocker, so a `locked`
+// record still carries them.
+export type Readiness = {
+  task: string
+  ahead: number
+  merged: boolean
+  wtDirty: boolean
+  untracked: number
+  // Which lock stops the merge as seen from the asking session; a lock the
+  // asker owns is exempt. The base is checked first and wins.
+  lock: 'none' | 'base' | 'worktree'
+  state: string
+}
+
+const LOCKS: readonly Readiness['lock'][] = ['none', 'base', 'worktree']
+
+export function parseReadiness(stdout: string): Readiness[] | Unreadable {
+  const records: Readiness[] = []
+  for (const line of stdout.split('\n')) {
+    if (line === '') continue
+    const fields = line.split('\t')
+    const [task, , ahead, merged, , wtDirty, untracked, , lock, state] = fields
+    const known = LOCKS.find(word => word === lock)
+    if (fields.length !== 10 || !task || ahead === undefined || !/^\d+$/.test(ahead) || merged === undefined || !/^[01]$/.test(merged)
+      || wtDirty === undefined || !/^[01]$/.test(wtDirty) || untracked === undefined || !/^\d+$/.test(untracked)
+      || known === undefined || state === undefined || !/^[a-z-]+$/.test(state)) return { unreadable: line }
+    records.push({ task, ahead: Number(ahead), merged: merged === '1', wtDirty: wtDirty === '1', untracked: Number(untracked), lock: known, state })
+  }
+  return records
+}
+
+// How a feature is retired: in this conversation when it is the base's lead
+// (the band's /finish), else by task mail to the base.
+export type RetireRoute = 'here' | 'mail'
+
+export type Verdict = { go: true } | { go: false; why: string }
+
+// The two refusals that are not a state word of cs's.
+export const REFUSALS = {
+  stale: 'not a feature git lists',
+  noCommits: 'no commits',
+} as const
+
+// Whether the feature may be retired by `route`, from its readiness record
+// (undefined: git does not list it, a stale directory).
+//   ready                          -> go with commits ahead, else no commits
+//   locked by the base, mail route -> the asker sees the live base's own lock
+//       as foreign, but /finish runs in the base's conversation, which owns it
+//       and is exempt. The blockers computed before the lock decide, in the
+//       order cs's state takes them (dirty, untracked, merged), then commits
+//       ahead. Hidden behind the lock and left to /finish: base-dirty and
+//       vault-locked. The worktree lock cannot be held: retire is offered on
+//       an idle feature only.
+//   anything else                  -> the state word
+export function retireVerdict(record: Readiness | undefined, route: RetireRoute): Verdict {
+  if (record === undefined) return { go: false, why: REFUSALS.stale }
+  if (record.state === 'locked' && record.lock === 'base' && route === 'mail') {
+    if (record.wtDirty) return { go: false, why: 'dirty' }
+    if (record.untracked > 0) return { go: false, why: 'untracked' }
+    if (record.merged) return { go: false, why: 'merged' }
+  } else if (record.state !== 'ready') return { go: false, why: record.state }
+  return record.ahead > 0 ? { go: true } : { go: false, why: REFUSALS.noCommits }
+}
