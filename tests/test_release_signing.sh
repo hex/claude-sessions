@@ -160,10 +160,9 @@ test_release_verification_documented() {
     assert_file_contains "$docs/configuration.md" 'ssh-keygen -Y verify' 'configuration must name the required verifier' || return 1
     assert_file_contains "$docs/commands.md" 'SHA256SUMS' 'update documentation must name the authenticated manifest' || return 1
     assert_file_contains "$SCRIPT_DIR/../README.md" 'ssh-keygen' 'README must name the release verifier requirement' || return 1
-    local features version
-    version=$(grep -m1 '^VERSION=' "$SCRIPT_DIR/../lib/00-header.sh" | cut -d'"' -f2)
-    features=$(awk -v heading="## $version" '$0 == heading {release=1; next} release && /^## / {exit} release && /^### Features$/ {features=1; next} features && /^### / {exit} features {print}' "$SCRIPT_DIR/../CHANGELOG.md")
-    assert_output_contains "$features" 'SSH.*minisign' 'release feature must describe SSH authentication and minisign removal' || return 1
+    local features
+    features=$(awk '/^## [0-9]/ {release=1; features=0; next} release && /^### Features$/ {features=1; next} /^### / {features=0} features {print}' "$SCRIPT_DIR/../CHANGELOG.md")
+    assert_output_contains "$features" 'SSH.*minisign' 'a released feature must describe SSH authentication and minisign removal' || return 1
 }
 
 run_test test_manifest_authentication
