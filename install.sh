@@ -1431,8 +1431,8 @@ CS_PAYLOAD_SHA256=(
     "fba40610714fd7201f496d3e1d7a7a6553b06c0da937710f6da3fcf8f4409054  mods/cs-mermaid/hooks/register.tsx"
     "c9c48de571777b2e2e948770b4e43fce1f4f84f86547496772a5021fc3380757  mods/cs-mermaid/hooks/text.ts"
     "c591644117d9a870c4631ecb40c7fc47f7cbab7b74849feb07b318784ba85367  mods/cs-mermaid/skills/show-me/SKILL.md"
-    "d9adfb82412597f096190d1dfcd36d9ae67adbc5a230c9baa5d8485b010f8e78  completions/cs.bash"
-    "fa1619b5039452a62dafd4e373546dd2606db4e61a76f6c13af8272ec5be7d5e  completions/_cs"
+    "d551412bb1e97c8c04f5a6d08105150e202b4ab17e367b9291ce45de6638fb54  completions/cs.bash"
+    "f3e93304191339041b207e05ad008277fb1d2e62e5f29be4a36a0167072624a1  completions/_cs"
 )
 
 # Everything that lands in HOOKS_DIR, for the copy and cleanup loops. The
