@@ -5,7 +5,7 @@
 // ABOUTME: The only effects of the mod: its hooks, its module state, the cs runs, and the tables of every line it hands the engine.
 import type { EngineInterface, On } from 'claude-code'
 import { drawPane, type Handlers } from './draw'
-import { parseList, rowsOf, sessionName, type Pending, type Session, type SessionName } from './sessions'
+import { parseList, parseReadiness, retireVerdict, rowsOf, sessionName, type Action, type Pending, type RetireRoute, type Session, type SessionName } from './sessions'
 
 declare const h: any
 declare const Fragment: any
@@ -20,6 +20,17 @@ const DOCK_COLUMNS = 56
 // every key read it at once anyway. How long each cs run may take.
 const POLL_MS = 60000
 const LIST_TIMEOUT_MS = 20000
+const SPAWN_TIMEOUT_MS = 30000
+const MSG_TIMEOUT_MS = 10000
+// A readiness walk runs git per feature, about 1.4 s each.
+const FEATURES_TIMEOUT_MS = 20000
+
+// The mail dialog: free text under Other is the body. `$.ui.ask` wants 2-4
+// labels and pads fewer with Yes/No, which would send "Yes"; so the second
+// label is a real, common message rather than a filler.
+export const MAIL_CANCEL = 'Cancel'
+export const MAIL_STATUS = 'Ask for a status line'
+export const STATUS_BODY = 'What are you on right now, and is anything blocked?'
 
 // Every line handed to an engine surface, one table per surface; none names
 // the plugin first (the engine prefixes it). tests/test_mod_tables.sh greps
@@ -32,6 +43,23 @@ export const REPLIES = {
   noBin: 'The launch did not say where cs is (CS_BIN); open this conversation with cs to list its sessions.',
   opened: 'The sessions are in the panel: Tab moves, o opens, m mails, r retires, Esc closes.',
   notPlaced: (reason: string) => `The panel is open but not drawn yet: ${reason}`,
+} as const
+
+export const ASKS = {
+  mail: (name: string) => ({ question: `What should ${name} read? Type it under Other.`, header: 'Mail', options: [MAIL_STATUS, MAIL_CANCEL] }),
+} as const
+
+export const TOASTS = {
+  // cs -spawn's own line: the window and how to attach.
+  opened: (line: string) => line,
+  notOpened: (name: string, why: string) => `${name} did not open: ${why}`,
+  mailed: (name: string) => `mail sent to ${name}`,
+  notMailed: (name: string, why: string) => `mail to ${name} not sent: ${why}`,
+  retireAsked: (base: string, task: string) => `asked ${base} to /finish ${task}; it runs once ${base} accepts the task`,
+  retireNotAsked: (base: string, why: string) => `${base} was not asked to retire: ${why}`,
+  notRetired: (task: string, why: string) => `${task} not retired: ${why}`,
+  retireNotLead: (base: string) => `${base}'s features retire from its lead conversation; this one is a teammate`,
+  finishFailed: (task: string, err: string) => `/finish ${task} did not run: ${err}`,
 } as const
 
 // Lines the pane draws above the rows when the list is stale or missing.
@@ -109,6 +137,18 @@ export function register(on: On) {
     return drawPane({ rows, selected, problem, columns: e.props.bodyColumns, bodyRows: e.props.scroll.bodyRows, hasKeys: e.props.isFocused },
       $.ui.resolve(e), handlers($))
   })
+
+  // Selection follows the focus ring: Tab or an arrow landing on a row selects
+  // it, so the strip names that row before any key is pressed. The ring moves
+  // first; a ring moved to a strip key keeps the selection.
+  on('ui.focus', { requestId: PANE }, async ($, e, next) => {
+    const moved = await next(e)
+    if (moved.deny === undefined && e.element?.startsWith('row:')) {
+      const name = sessionName(e.element.slice('row:'.length))
+      if (name !== undefined) select($, name)
+    }
+    return moved
+  })
 }
 
 // CS_BIN and CLAUDE_SESSION_NAME; undefined without CS_BIN. A name that is not
@@ -170,7 +210,105 @@ function select($: EngineInterface, name: SessionName): void {
 }
 
 function handlers($: EngineInterface): Handlers {
-  return { select: name => select($, name), act: () => {} }
+  return { select: name => select($, name), act: (action, name) => inBackground($, act($, action, name)) }
+}
+
+// The one entry for every strip key. The row is looked up afresh and the press
+// refused when the action is no longer offered (a press from a drawing older
+// than the last read). The row is claimed before the first await, so a second
+// press finds nothing offered; whatever happens, it is released and the list
+// read again.
+async function act($: EngineInterface, action: Action, name: SessionName): Promise<void> {
+  const row = sessions && rowsOf(sessions, launch?.self, pending).find(r => r.session.name === name)
+  if (row === undefined || !row.actions.includes(action)) return
+  pending.set(name, PRESSED[action])
+  $.ui.invalidate('ui.render')
+  try {
+    // A switch, not a table of functions: the engine refuses `$` handed to a
+    // callee it cannot name.
+    switch (action) {
+      case 'open': await openSession($, row.session); break
+      case 'mail': await mailSession($, row.session); break
+      case 'retire': await retireFeature($, row.session); break
+    }
+  } finally {
+    pending.delete(name)
+    $.ui.invalidate('ui.render')
+    if (poll.kind === 'on') await refresh($)
+  }
+}
+
+const PRESSED: Record<Action, Pending> = { open: 'opening', mail: 'mailing', retire: 'checking' }
+
+// open: `cs -spawn <name>` opens a window in the cs tmux session; the toast is
+// cs's own line, which names the window and how to attach.
+async function openSession($: EngineInterface, s: Session): Promise<void> {
+  const run = await runCs($, ['-spawn', s.name], { timeoutMs: SPAWN_TIMEOUT_MS })
+  $.ui.toast(run.ok ? TOASTS.opened(lastLine(run.stdout)) : TOASTS.notOpened(s.name, run.why))
+}
+
+// mail: the body from the dialog (Other's free text, or the status line), on
+// stdin to `cs <name> -msg -`, so it never reaches argv. A dismissed dialog,
+// Cancel or an empty body sends nothing and says nothing.
+async function mailSession($: EngineInterface, s: Session): Promise<void> {
+  const ask = ASKS.mail(s.name)
+  let answer: string
+  try {
+    answer = await $.ui.ask(ask.question, { header: ask.header, options: ask.options })
+  } catch {
+    return // dismissed: the person chose not to send
+  }
+  const body = answer === MAIL_CANCEL ? '' : answer === MAIL_STATUS ? STATUS_BODY : answer.trim()
+  if (body === '') return
+  const run = await runCs($, [s.name, '-msg', '-'], { stdin: body, timeoutMs: MSG_TIMEOUT_MS })
+  $.ui.toast(run.ok ? TOASTS.mailed(s.name) : TOASTS.notMailed(s.name, run.why))
+}
+
+// retire: readiness on demand, then one of two routes.
+//   here : this conversation is the base's lead -> /finish <task> through
+//          $.command.run, as the band's press does.
+//   mail : any other session -> `cs <base> -msg --kind task -` with
+//          `/finish <task>` on stdin; the base's user accepts it.
+// This session is the base but a teammate of it: refused, since cs refuses
+// mail to the current session and /finish belongs to the lead.
+async function retireFeature($: EngineInterface, s: Session): Promise<void> {
+  if (s.feature === undefined) throw new Error(`cs-panel: retire pressed on ${s.name}, which is not a feature`)
+  const { base, task } = s.feature
+  const route: RetireRoute = base === launch?.self ? 'here' : 'mail'
+  if (route === 'here' && !(await isLead($))) { $.ui.toast(TOASTS.retireNotLead(base)); return }
+  const run = await runCs($, [base, '-features', '--porcelain'], { timeoutMs: FEATURES_TIMEOUT_MS })
+  if (!run.ok) { $.ui.toast(TOASTS.notRetired(task, run.why)); return }
+  const records = parseReadiness(run.stdout)
+  if ('unreadable' in records) { $.ui.toast(TOASTS.notRetired(task, records.unreadable)); return }
+  const verdict = retireVerdict(records.find(r => r.task === task), route)
+  if (!verdict.go) { $.ui.toast(TOASTS.notRetired(task, verdict.why)); return }
+  pending.set(s.name, 'retiring')
+  $.ui.invalidate('ui.render')
+  if (route === 'here') {
+    await $.command.run({ command: 'finish', args: task }).catch(err => $.ui.toast(TOASTS.finishFailed(task, message(err))))
+    return
+  }
+  const sent = await runCs($, [base, '-msg', '--kind', 'task', '-'], { stdin: `/finish ${task}`, timeoutMs: MSG_TIMEOUT_MS })
+  $.ui.toast(sent.ok ? TOASTS.retireAsked(base, task) : TOASTS.retireNotAsked(base, sent.why))
+}
+
+// The lead conversation is the one whose id cs recorded in .cs/local/state
+// before launching it; a teammate in the same directory has its own. No
+// sessions-root identity check: the caller has already matched
+// CLAUDE_SESSION_NAME, which only a cs launch sets, to the base, and a cloned
+// state file cannot carry this conversation's fresh id. The id pattern is
+// KEEP IN SYNC with isLead in mods/cs-update and ownsRotation in mods/cs.
+async function isLead($: EngineInterface): Promise<boolean> {
+  const cwd = await $.session.cwd()
+  if (await $.fs.exists(`${cwd}/.cs/local/disabled`)) return false
+  let state: string
+  try {
+    state = await $.fs.read(`${cwd}/.cs/local/state`)
+  } catch {
+    return false // no state file: cs did not launch this directory
+  }
+  const lead = state.match(/^claude_session_id: *"?([^"\s]+)"?[ \t]*$/m)?.[1]
+  return lead !== undefined && lead === (await $.session.id())
 }
 
 // Work nothing awaits (a timer's, a press's) reports a failure in the

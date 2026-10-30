@@ -6,7 +6,7 @@ import type { On, PaneOpenArgs } from 'claude-code'
 
 import { GOLDEN } from './golden'
 import { drawPane, type PanelView } from '../hooks/draw'
-import { REPLIES } from '../hooks/register'
+import { REPLIES, STATUS_BODY } from '../hooks/register'
 import { parseList, parseReadiness, retireVerdict, rowsOf, sessionName, type Pending, type Readiness, type Row, type Session, type SessionName } from '../hooks/sessions'
 
 function nameOf(text: string): SessionName {
@@ -226,7 +226,7 @@ type Answer = { exitCode?: number; stdout?: string; stderr?: string }
 // What sits beneath the mod: the engine's answers to each call it makes, and
 // a record of what it asked. `answer` gives cs's reply to an argv; a pane is
 // open from its ui.open until a ui.close.
-function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: readonly string[]) => Answer; sessionId?: string; state?: string } = {}) {
+function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: readonly string[]) => Answer; sessionId?: () => string; state?: string } = {}) {
   const w = { runs: [] as { argv: string[]; stdin: string | undefined }[], toasts: [] as string[], opens: [] as PaneOpenArgs[], finishes: [] as string[], isOpen: false, invalidations: 0 }
   mock.env(on, opts.env ?? { CS_BIN: BIN })
   const clock = mock.clock(on)
@@ -243,7 +243,7 @@ function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: rea
   on('ui.invalidate', ($, e, next) => { w.invalidations++; return next(e) })
   on('command.run', { command: 'finish' }, ($, e) => { w.finishes.push(e.args); return { text: '' } })
   on('session.cwd', () => ({ value: '/sessions/alpha' }))
-  on('session.id', () => ({ value: opts.sessionId ?? 'lead-id' }))
+  on('session.id', () => ({ value: opts.sessionId?.() ?? 'lead-id' }))
   on('fs.exists', () => ({ value: false }))
   on('fs.read', ($, e) => e.path === '/sessions/alpha/.cs/local/state' && opts.state !== undefined ? { value: opts.state } : { deny: `ENOENT: ${e.path}` })
   return { w, clock }
@@ -276,4 +276,106 @@ test('/cs-panel opens the pane asking for the keys, reads cs at once, and draws 
   const lab = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'fixture', props: PANE_PROPS })
   expect(shown(await pane.drawn())).toEqual(shown(await lab.drawn()))
   expect(linesOf(await pane.drawn())[1]?.trimEnd()).toBe('› alpha         live      41%   2 mail   1 feat')
+})
+
+async function openPane($: Engine) {
+  expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
+  return $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
+}
+
+const LIST = { argv: [BIN, '-list', '--porcelain'], stdin: undefined }
+
+test('the ring landing on a row selects it, and the strip names that row; a ring on a strip key keeps the selection', async ($, on) => {
+  world(on)
+  const pane = await openPane($)
+  expect(linesOf(await pane.drawn())[0]).toBe('m: mail alpha   Esc: close')
+  await $.ui.focus({ component: 'Pane', requestId: 'cs-panel', plugin: 'cs-panel', element: 'row:beta', origin: { kind: 'person' } })
+  expect(linesOf(await pane.drawn())[0]).toBe('o: open beta   Esc: close')
+  await $.ui.focus({ component: 'Pane', requestId: 'cs-panel', plugin: 'cs-panel', element: 'act:open', origin: { kind: 'person' } })
+  expect(linesOf(await pane.drawn())[0]).toBe('o: open beta   Esc: close')
+  await pane.press({ key: 'row:alpha@fix' })
+  expect(linesOf(await pane.drawn())[0]).toBe('o: open   m: mail   r: retire')
+})
+
+test('o spawns the selected idle session and toasts cs\'s own line, or why it did not open; the list is read again after', async ($, on) => {
+  let spawn: Answer = { stdout: 'spawned beta in tmux session cs (window @7). Attach: tmux attach -t cs\n' }
+  const { w } = world(on, { answer: argv => argv[1] === '-list' ? { stdout: GOLDEN } : spawn })
+  const pane = await openPane($)
+  await pane.press({ key: 'row:beta' })
+  await pane.press({ key: 'act:open' })
+  expect(w.runs).toEqual([LIST, { argv: [BIN, '-spawn', 'beta'], stdin: undefined }, LIST])
+  expect(w.toasts).toEqual(['spawned beta in tmux session cs (window @7). Attach: tmux attach -t cs'])
+  spawn = { exitCode: 1, stderr: 'Error: Session beta is already live\n' }
+  await pane.press({ key: 'act:open' })
+  expect(w.toasts.at(-1)).toBe('beta did not open: exited 1: Error: Session beta is already live')
+})
+
+test('m asks for a body and sends it on stdin to cs <name> -msg -; Cancel, a dismissed dialog and an empty body send nothing', async ($, on) => {
+  let reply: (question: string) => { result: unknown } | { deny: string } = () => ({ deny: 'dismissed' })
+  const asked: unknown[] = []
+  const { w } = world(on, { answer: argv => argv[1] === '-list' ? { stdout: GOLDEN } : argv[2] === '-msg' && w.toasts.length === 2 ? { exitCode: 1, stderr: 'Error: no such session\n' } : {} })
+  on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => { asked.push(e.questions); return reply(e.questions[0]?.question ?? '') as never })
+  const pane = await openPane($)
+  const answer = (text: string) => { reply = question => ({ result: { questions: [], answers: { [question]: text } } }) }
+  answer('ship it')
+  await pane.press({ key: 'act:mail' })
+  expect(asked[0]).toEqual([{ question: 'What should alpha read? Type it under Other.', header: 'Mail', multiSelect: false,
+    options: [{ label: 'Ask for a status line', description: '' }, { label: 'Cancel', description: '' }] }])
+  answer('Ask for a status line')
+  await pane.press({ key: 'act:mail' })
+  expect(STATUS_BODY).toBe('What are you on right now, and is anything blocked?')
+  for (const nothing of ['Cancel', '   ']) { answer(nothing); await pane.press({ key: 'act:mail' }) }
+  reply = () => ({ deny: 'dismissed' })
+  await pane.press({ key: 'act:mail' })
+  expect(w.runs.filter(r => r.argv[2] === '-msg')).toEqual([
+    { argv: [BIN, 'alpha', '-msg', '-'], stdin: 'ship it' },
+    { argv: [BIN, 'alpha', '-msg', '-'], stdin: STATUS_BODY },
+  ])
+  expect(w.toasts).toEqual(['mail sent to alpha', 'mail sent to alpha'])
+  answer('again')
+  await pane.press({ key: 'act:mail' })
+  expect(w.toasts.at(-1)).toBe('mail to alpha not sent: exited 1: Error: no such session')
+})
+
+test('r from another session checks readiness, then mails the base /finish <task> as a task; what stops the merge is toasted instead', async ($, on) => {
+  let features: Answer = { stdout: `${readinessLine({ ahead: 2, lock: 'base', state: 'locked' })}\n` }
+  let msg: Answer = {}
+  const { w } = world(on, { answer: argv => argv[1] === '-list' ? { stdout: GOLDEN } : argv[2] === '-features' ? features : msg })
+  const pane = await openPane($)
+  await pane.press({ key: 'row:alpha@fix' })
+  await pane.press({ key: 'act:retire' })
+  expect(w.runs).toEqual([LIST, { argv: [BIN, 'alpha', '-features', '--porcelain'], stdin: undefined },
+    { argv: [BIN, 'alpha', '-msg', '--kind', 'task', '-'], stdin: '/finish fix' }, LIST])
+  expect(w.toasts).toEqual(['asked alpha to /finish fix; it runs once alpha accepts the task'])
+  features = { stdout: `${readinessLine({ ahead: 2, wtDirty: 1, lock: 'base', state: 'locked' })}\n` }
+  await pane.press({ key: 'act:retire' })
+  features = { exitCode: 1, stderr: 'Error: Session not found: alpha\n' }
+  await pane.press({ key: 'act:retire' })
+  features = { stdout: `${readinessLine({ ahead: 2, state: 'ready' })}\n` }
+  msg = { exitCode: 1, stderr: 'Error: alpha\'s vault is locked\n' }
+  await pane.press({ key: 'act:retire' })
+  await pane.press({ key: 'row:alpha@stale' })
+  await pane.press({ key: 'act:retire' })
+  expect(w.toasts.slice(1)).toEqual(['fix not retired: dirty', 'fix not retired: exited 1: Error: Session not found: alpha',
+    'alpha was not asked to retire: exited 1: Error: alpha\'s vault is locked', 'stale not retired: not a feature git lists'])
+  expect(w.runs.filter(r => r.argv[2] === '-msg')).toHaveLength(2)
+})
+
+test('r in the base\'s lead conversation runs /finish <task> here; in a teammate of the base it is refused before cs is asked', async ($, on) => {
+  const lead = { env: { CS_BIN: BIN, CLAUDE_SESSION_NAME: 'alpha' }, state: 'session_name: alpha\nclaude_session_id: "lead-id"\n',
+    answer: (argv: readonly string[]) => argv[1] === '-list' ? { stdout: GOLDEN } : { stdout: `${readinessLine({ ahead: 2, state: 'ready' })}\n` } }
+  let sessionId = 'lead-id'
+  const { w } = world(on, { ...lead, sessionId: () => sessionId })
+  const pane = await openPane($)
+  await pane.press({ key: 'row:alpha@fix' })
+  await pane.press({ key: 'act:retire' })
+  expect(w.finishes).toEqual(['fix'])
+  expect(w.runs.filter(r => r.argv[2] === '-msg')).toEqual([])
+  expect(w.toasts).toEqual([])
+  sessionId = 'mate-id'
+  const asked = w.runs.length
+  await pane.press({ key: 'act:retire' })
+  expect(w.toasts).toEqual(["alpha's features retire from its lead conversation; this one is a teammate"])
+  expect(w.runs.slice(asked).map(r => r.argv[1])).toEqual(['-list'])
+  expect(w.finishes).toEqual(['fix'])
 })
