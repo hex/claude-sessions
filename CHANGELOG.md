@@ -6,6 +6,9 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Added
+- `cs -config set <KEY> <value>` keeps a cs setting in `~/.config/cs/config`, and `cs <name> -config set` in that session's own `.cs/local/config`, which outranks it there. Every cs command, hook and status line repaint reads both files each time it runs, a `cs -spawn` window and a teammate pane included, so an edit applies without a relaunch, and your shell's export of a key still wins over both. `cs -config get` prints the value readers see, `unset` removes one, and `list` prints all 41 settings with each value, where it comes from and when a change applies, then every line the files skip with its line number and why; `list --porcelain` prints one tab-separated record per setting for tools. `set` refuses a key no file keeps (secrets, programs cs runs, paths, `CS_ACTOR`, `CS_STATUSLINE_CAPS`) and a value the setting's readers would not take, each by name. The file is `KEY=value` lines, never run as shell; the writer keeps every other line as typed. A launch hands claude no value it read from a file. `cs -doctor` names each skipped line and each value your environment hides from a file, and its Authority rows say where each switch comes from; `cs -uninstall` keeps the file.
+
 ### Changed
 - `cs -list` prints the cs-tui hint from the listing itself, so `cs -list --bogus` prints only the error.
 

@@ -55,6 +55,15 @@ session-start.sh names the actor `unknown` and says the library is missing and t
 against a budget it does not have. The state writers are missing too, so session-start.sh
 records no `claude_session_id` or `last_resumed` and says so. An armed queue does not drain.
 
+The same build appends `lib/03-config.sh`, the [settings file](configuration.md#settings-file)
+loader, to `hooks/cs-shared.sh`, writes it alone to `hooks/cs-config.sh`, and splices it
+into `bin/cs-statusline` between two marker lines; CI's build-sync job diffs all three. At
+its source it fills every `CS_*` setting the environment does not pin from the session's
+`.cs/local/config`, else `~/.config/cs/config`, in that shell only. `scope-prompt.sh`,
+`prompt-rewriter.sh` and its two rewriters read a setting before they source
+`cs-shared.sh`, so each sources `cs-config.sh` first; without it they run on the
+environment alone.
+
 `cs_resolve_session` resolves in
 two ways and declines when neither applies, leaving each hook to take its own decline
 path (a silent exit, or the approval payload the blocking hooks owe Claude Code):

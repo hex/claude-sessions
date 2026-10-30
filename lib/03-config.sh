@@ -49,7 +49,7 @@ _CS_CONFIG_SPEC=(
     'CS_NERD_FONTS|Terminal|Nerd Font glyphs|flag|flag|-|off|now|applies at the next cs command'
     'CS_NO_TASK_TOOLS|Launch|No task tools|flag|flag|-|off|launch|applies at the next launch'
     'CS_NO_UPDATE_CHECK|Launch|No update check|flag|flag|-|off|launch|applies at the next launch'
-    'CS_NO_FUNCTION_HOOKS|Launch|No mods|shell|flag|-|off|launch|applies at the next launch; on, it loads no mod, this panel included'
+    'CS_NO_FUNCTION_HOOKS|Launch|No mods|shell|flag|-|off|launch|applies at the next launch; on, it loads no mod, the cs panel included'
 )
 
 # Keys a file never sets, each with the reason the writer gives. Each names a

@@ -11,7 +11,7 @@ _cs_completions() {
     }
 
     # Global flags
-    local global_flags="-tui -list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -narrative -queue -msg -spawn -conversations -search -statusline -detect-theme -doctor -diag -update -uninstall -help -h -version -v -live -usage -status -vet-session -tag -archive -unarchive -encrypt"
+    local global_flags="-tui -list -ls -adopt -remove -rm -whoami -who -secrets -checkpoint -narrative -queue -msg -spawn -conversations -search -statusline -config -detect-theme -doctor -diag -update -uninstall -help -h -version -v -live -usage -status -vet-session -tag -archive -unarchive -encrypt"
 
     # Secrets subcommands
     local secrets_cmds="set store get list ls delete rm purge rename export export-file import-file migrate migrate-backend backend age"
@@ -33,7 +33,7 @@ _cs_completions() {
     local update_cmds="--check -c --force -f"
 
     # Session-level options
-    local session_opts="-secrets -queue -msg -narrative -conversations -usage -tag -features -finish --force --remote --permission-mode"
+    local session_opts="-secrets -queue -msg -narrative -conversations -config -usage -tag -features -finish --force --remote --permission-mode"
 
     # Get list of session names. cs owns the definition of a session, including
     # which symlinks and marker directories count; asking it keeps this script
@@ -153,6 +153,23 @@ _cs_completions() {
                 fi
                 ;;
         esac
+    done
+
+    # Context: after -config, global or after a session name: its action,
+    # then for get, set and unset a setting's name, which cs itself lists.
+    local ci
+    for ((ci=1; ci < cword; ci++)); do
+        [[ "${words[ci]}" == "-config" ]] || continue
+        COMPREPLY=()
+        if (( cword == ci + 1 )); then
+            COMPREPLY=($(compgen -W "list get set unset" -- "$cur"))
+        elif (( cword == ci + 2 )); then
+            case "${words[ci+1]}" in
+                list) COMPREPLY=($(compgen -W "--porcelain" -- "$cur")) ;;
+                get|set|unset) COMPREPLY=($(compgen -W "$(cs -config list --porcelain 2>/dev/null | cut -f1)" -- "$cur")) ;;
+            esac
+        fi
+        return
     done
 
     # Context: global `cs -msg <session>` / `cs -spawn <session>` — the first arg

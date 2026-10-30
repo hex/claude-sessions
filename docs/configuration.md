@@ -1,8 +1,10 @@
 # Configuration
 
-cs reads its configuration from environment variables. None are required — cs
-runs with sensible defaults out of the box — but you can set any of these in
-`~/.bashrc` or `~/.zshrc` to override behavior.
+cs reads its configuration from environment variables and, for most of them,
+from the [settings files](#settings-file) `cs -config` writes. cs needs none of
+them and runs with sensible defaults out of the box. Set any of these in
+`~/.bashrc` or `~/.zshrc`, or keep one with `cs -config set`, to override
+behavior.
 
 This lists every variable a user would set, plus the ones cs exports for hooks
 and helper binaries. It deliberately excludes test seams and internal state —
@@ -69,6 +71,11 @@ Preserved files have these rules:
 - The [in-session switches](#in-session-switches) describe the compact launch card and the [update mod](hooks.md#cs-update-not-a-hook-script--a-claude-code-mod).
 
 ## Environment variables you set
+
+An export in your shell wins over every file. The [settings file](#settings-file)
+is where a setting persists without one: every cs command, hook and status line
+repaint reads it, a `cs -spawn` window and a teammate pane included, which a
+shell export never reaches.
 
 ```bash
 # Sessions directory (default: ~/.claude-sessions). A relative CS_SESSIONS_ROOT
@@ -344,6 +351,113 @@ export CS_TMUX_BIN="/opt/homebrew/bin/tmux"
 # macOS keychain and the encrypted file
 export CS_PLATFORM_OVERRIDE="linux"   # macos, wsl, or linux
 ```
+
+## Settings file
+
+Two files hold settings in one format: this machine's
+`~/.config/cs/config` (under `$XDG_CONFIG_HOME/cs/` when you set that), and a
+session's own `.cs/local/config`, which outranks it in that session. `cs
+-config` writes both:
+
+```
+cs -config list [--porcelain]          every setting: its value, where it comes from, when a change applies, then the lines the files skip
+cs -config get <KEY>                   the value readers see now; empty when nothing sets it
+cs -config set <KEY> <value>           keep it in this machine's file
+cs -config unset <KEY>                 remove it from this machine's file
+cs <name> -config list|get|set|unset   the same, for that session's own file
+```
+
+```
+$ cs -config set CS_STATUSLINE_LAYOUT band
+CS_STATUSLINE_LAYOUT=band in ~/.config/cs/config: applies at the next repaint
+$ cs my-session -config set CS_SCOPE_DISABLE 1
+CS_SCOPE_DISABLE=1 in my-session/.cs/local/config: applies at your next prompt
+```
+
+`set` refuses a key the files never hold, a key that is no cs setting and a
+value the setting's readers would not take, each by name. When your shell
+also exports the key, `set` still writes the file and says on stderr that the
+export wins until you unset it there. `cs <name> -config set` and `unset` run
+the same checks as opening the session first, so cs refuses a session whose
+`.cs/local` git tracks, or whose config links out of the session, before it
+writes anything.
+
+**Precedence.** Each reader takes, per setting, your environment, else the
+session's file, else this machine's, else the default, every time it runs: the
+status line at each repaint, a hook at each event, cs at each command. An
+edit applies without a relaunch, by the time the table below names.
+A launch reads the session it opens and exports no value it read from a file
+to claude, so nothing a file set can later pose as your shell's export. The
+terminal theme cs measures at launch is a measurement, not an export of yours:
+`CS_TERM_THEME` in a file wins over it. A teammate pane and a Claude Code
+started outside cs carry no session, so they read this machine's file only.
+
+**Format.** One `KEY=value` per line. Readers read the file line by line and
+never run it as shell: they strip no quotes, trim no spaces and expand
+nothing. Lines starting with `#` and blank lines are comments. Every reader
+skips a line that is not `KEY=value`, a key that is not a setting and a value
+its setting refuses, and the writer keeps them; `cs -config list` and `cs
+-doctor` name each with its line number and why. A skipped session value lets
+this machine's value apply. A key on two lines takes the last; `set` collapses
+them into one line at the end. On and off settings take `1` and `0`, and a
+session's `0` turns off this machine's `1`; an exported `CS_X=0` keeps the
+meaning it has in your shell.
+
+**Never in the file.** These stay environment variables, and `set` says why:
+`CS_SECRETS_PASSWORD` (a secret), `CLAUDE_CODE_BIN`, `CS_TMUX_BIN`,
+`CS_REWRITE_CMD` and `CS_REAL_EDITOR` (each names a program cs runs, and a
+file a plugin can write must not choose one), `CS_SESSIONS_ROOT` (where every
+session lives), `CS_SECRETS_BACKEND` and `CS_PLATFORM_OVERRIDE` (where
+cs-secrets looks), `CS_USAGE_DIR` (a directory the status line writes to),
+`CS_ACTOR` (a session pins its identity in `.cs/local/identity`) and
+`CS_STATUSLINE_CAPS` (its own record, which `cs -statusline caps` writes).
+
+`cs -uninstall` keeps `~/.config/cs/config` and says so; a session's file
+stays with its session.
+
+| Setting | Takes | Default | When a change applies |
+|---|---|---|---|
+| `CS_STATUSLINE_DISABLE` | `1` (on) or `0` (off) | off | at the next repaint |
+| `CS_STATUSLINE_LAYOUT` | `quiet`, `band`, `capsules` | quiet | at the next repaint |
+| `CS_STATUSLINE_SEGMENTS` | a comma-separated list of logo, session, notes, mail, pane, git, model, ctx, limits, fable and cost, each at most once | logo,session,notes,mail,git,model,ctx,limits | at the next repaint |
+| `CS_STATUSLINE_BAND` | a palette name, brand, periwinkle, session, none or r;g;b | session | at the next repaint |
+| `CS_STATUSLINE_COLS` | a column count from 1 to 9999 | measured | at the next repaint |
+| `CS_STATUSLINE_FRAME` | a whole number of 1 to 3 digits | 4 | at the next repaint |
+| `CS_STATUSLINE_CTX_WARN` | a whole number of 1 to 3 digits | 40 | at the next repaint |
+| `CS_STATUSLINE_CTX_CRIT` | a whole number of 1 to 3 digits | 65 | at the next repaint |
+| `CS_USAGE_NO_REFRESH` | `1` (on) or `0` (off) | off | at the next repaint |
+| `CS_SUBAGENT_STATUSLINE_DISABLE` | `1` (on) or `0` (off) | off | at the next repaint |
+| `CS_SCOPE_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
+| `CS_SCOPE_TRACE_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
+| `CS_SCOPE_BUDGET_MS` | milliseconds, 1 to 7 digits (0 skips the scan) | 1500 | at your next prompt |
+| `CS_OBJECTIVE_CAPTURE_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
+| `CS_DATE_REMINDER_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
+| `CS_CLARIFY_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
+| `CS_CTX_WARN_CTX` | a whole number of 1 to 3 digits | 40 | when the next turn ends |
+| `CS_ROTATE_NUDGE_CTX` | a whole number of 1 to 3 digits | 65 | when the next turn ends |
+| `CS_QUEUE_MAX_FAILURES` | a whole number of 1 to 3 digits | 5 | when the next turn ends |
+| `CS_QUEUE_MAX_CTX` | a whole number of 1 to 3 digits | 85 | when the next turn ends |
+| `CS_QUEUE_MAX_5H` | a whole number of 1 to 3 digits | 85 | when the next turn ends |
+| `CS_MAIL_WAKE_MAX` | a whole number of 1 to 3 digits | 5 | when the next turn ends |
+| `CS_NO_MAIL_WAKE` | `1` (on) or `0` (off) | off | when the next turn ends |
+| `CS_NARRATIVE_MAX_BYTES` | a byte count above 0, at most 15 digits | 131072 | when the next turn ends |
+| `CS_NARRATIVE_KEEP_BYTES` | a byte count above 0, at most 15 digits | 65536 | when the next turn ends |
+| `CS_ROTATE_FORCE_CTX` | `off`, `0` or a percentage from 1 to 100 | 80 | by your next prompt |
+| `CS_ROTATE_BUTTON_CTX` | a whole number of 1 to 3 digits | the warn % | by your next prompt |
+| `CS_NO_ROTATION_WAKE` | `1` (on) or `0` (off) | off | at the next `/clear` or launch |
+| `CS_ROTATION_KICK_DELAY` | seconds, 1 to 7 digits | 2 | at the next rotation |
+| `CS_REWRITE_PROVIDER` | `claude`, `claude-api`, `openai`, `openai-api`, `gemini`, `gemini-api`, `grok`, `xai` | claude | at the next ctrl+g |
+| `CS_REWRITE_MODEL` | letters, digits and `. _ : / -`, starting with a letter or digit, at most 128 characters | per provider | at the next ctrl+g |
+| `CS_REWRITE_TIMEOUT` | seconds, 1 to 7 digits | 25 | at the next ctrl+g |
+| `CS_REWRITE_PROGRESS` | `screen`, `native`, `line`, `static` | screen | at the next ctrl+g |
+| `CS_REWRITE_DISABLE` | `1` (on) or `0` (off) | off | on: at the next ctrl+g; off after a launch with it on: at the next launch, which installs the ctrl+g shim |
+| `CS_TERM_THEME` | `light`, `dark` | detected | at the next repaint |
+| `CS_TERM_BG_RGB` | r;g;b, each 0 to 255 | detected | at the next repaint |
+| `CS_NO_ITERM2` | `1` (on) or `0` (off) | off | the tab title, the bell bounce and the status line's iTerm reads: now; the launch's iTerm tmux path: at the next launch |
+| `CS_NERD_FONTS` | `1` (on) or `0` (off) | off | at the next cs command |
+| `CS_NO_TASK_TOOLS` | `1` (on) or `0` (off) | off | at the next launch |
+| `CS_NO_UPDATE_CHECK` | `1` (on) or `0` (off) | off | at the next launch |
+| `CS_NO_FUNCTION_HOOKS` | `1` (on) or `0` (off) | off | at the next launch; on, no mod loads, the cs panel included |
 
 ## Rotate and wrap keys
 

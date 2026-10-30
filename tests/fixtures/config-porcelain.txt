@@ -38,4 +38,4 @@ CS_NO_ITERM2	Terminal	No iTerm2 features	flag	-	off	now+launch	the tab title, th
 CS_NERD_FONTS	Terminal	Nerd Font glyphs	flag	-	off	now	applies at the next cs command	-	default	-
 CS_NO_TASK_TOOLS	Launch	No task tools	flag	-	off	launch	applies at the next launch	-	default	-
 CS_NO_UPDATE_CHECK	Launch	No update check	flag	-	off	launch	applies at the next launch	-	default	-
-CS_NO_FUNCTION_HOOKS	Launch	No mods	shell	-	off	launch	applies at the next launch; on, it loads no mod, this panel included	-	default	-
+CS_NO_FUNCTION_HOOKS	Launch	No mods	shell	-	off	launch	applies at the next launch; on, it loads no mod, the cs panel included	-	default	-

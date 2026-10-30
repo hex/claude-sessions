@@ -28,6 +28,7 @@ Aliases include `-help`, `-version`, `-ls`, `-diag`, and `-remove`.
 | `cs -encrypt <name>` | Moves a closed session's private files into a vault on macOS. Asks for a password at each open. |
 | `cs -statusline enable\|disable` | Registers or removes the statusline and agent rows. Restart Claude Code after enabling. |
 | `cs -statusline caps on\|off\|ask` | Records whether your font displays rounded capsule ends. |
+| `cs -config list\|get\|set\|unset` | Lists every cs setting with its value, source and when a change applies, reads one, or keeps or removes one in `~/.config/cs/config`. `cs <name> -config ...` uses that session's own file. `list --porcelain` prints one tab-separated record per setting for tools. See [Settings file](configuration.md#settings-file). |
 | `cs -detect-theme` | Reports terminal theme detection. |
 | `cs -rm <name>...` | Confirms each removal and names user files, including untracked worktree files. |
 | `cs -update [--check\|--force]` | Updates cs after SSH verification of `SHA256SUMS` and the installer's digest. `--check` checks without installing, and `--force` reinstalls the latest release with the same verification. |

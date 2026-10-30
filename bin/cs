@@ -2609,7 +2609,7 @@ _CS_CONFIG_SPEC=(
     'CS_NERD_FONTS|Terminal|Nerd Font glyphs|flag|flag|-|off|now|applies at the next cs command'
     'CS_NO_TASK_TOOLS|Launch|No task tools|flag|flag|-|off|launch|applies at the next launch'
     'CS_NO_UPDATE_CHECK|Launch|No update check|flag|flag|-|off|launch|applies at the next launch'
-    'CS_NO_FUNCTION_HOOKS|Launch|No mods|shell|flag|-|off|launch|applies at the next launch; on, it loads no mod, this panel included'
+    'CS_NO_FUNCTION_HOOKS|Launch|No mods|shell|flag|-|off|launch|applies at the next launch; on, it loads no mod, the cs panel included'
 )
 
 # Keys a file never sets, each with the reason the writer gives. Each names a
@@ -3262,6 +3262,11 @@ Commands:
   -conversations      Show the session's conversation chain (rotations, lineage)
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
   -statusline <cmd>   enable|disable the cs status line; caps on|off|ask records whether your font has the rounded caps
+  -config list        Every cs setting: its value, where it comes from and when a change applies, then the lines the files skip (--porcelain prints tab-separated records for tools)
+  -config get <KEY>   The value readers see now; empty when nothing sets it
+  -config set <KEY> <value>  Keep a setting in this machine's ~/.config/cs/config (your environment still wins)
+  -config unset <KEY>  Remove a setting from this machine's file
+  <name> -config list|get|set|unset  The same for <name>'s own .cs/local/config, which outranks this machine's
   -detect-theme       Show the detected terminal theme (light|dark)
   -tui                Open the interactive session manager (bare 'cs' does too)
   -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived; --porcelain prints tab-separated records for tools)
