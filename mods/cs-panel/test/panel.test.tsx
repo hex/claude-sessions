@@ -61,6 +61,10 @@ test('each row offers the keys its session allows: open when idle, mail when rea
   expect(asSelf.map(r => [r.session.name, r.isSelf, [...r.actions]])).toEqual([
     ['alpha', true, []], ['alpha@fix', false, ['open', 'mail', 'retire']], ['alpha@stale', false, ['open', 'mail', 'retire']], ['beta', false, ['open']],
   ])
+  const asFeature = rowsOf(sessionsOf(GOLDEN), nameOf('alpha@fix'), new Map())
+  expect(asFeature.map(r => [r.session.name, r.isSelf, [...r.actions]])).toEqual([
+    ['alpha', false, ['mail']], ['alpha@fix', true, []], ['alpha@stale', false, ['open', 'mail', 'retire']], ['beta', false, ['open']],
+  ])
   const liveFeature = sessionsOf('alpha\t1\t41\t2\t1\nalpha@fix\t1\t12\t0\t0\n')
   expect(shapeOf(rowsOf(liveFeature, undefined, new Map()))).toEqual([['alpha', 0, ['mail']], ['alpha@fix', 1, ['mail']]])
   const pending = new Map<SessionName, Pending>([[nameOf('beta'), 'opening']])

@@ -75,16 +75,17 @@ export type Action = 'open' | 'mail' | 'retire'
 //   open   : not live and not self. Raising a live session is peer control,
 //            and cs -spawn refuses a live one anyway.
 //   mail   : not self, and the mailbox is reachable.
-//   retire : a feature that is not live. A live feature holds its worktree
-//            lock, which /finish refuses on either route, so the key waits
-//            for that session to close. Which route lands it is the
-//            retire's business, not the strip's.
+//   retire : a feature that is not live and not self. A live feature holds its
+//            worktree lock, which /finish refuses on either route, so the key
+//            waits for that session to close; this conversation, even one cs
+//            reads as idle, is still running there. Which route lands it is
+//            the retire's business, not the strip's.
 export function actionsOf(s: Session, self: SessionName | undefined): Action[] {
   const isSelf = s.name === self
   const actions: Action[] = []
   if (!s.live && !isSelf) actions.push('open')
   if (!isSelf && s.unread !== undefined) actions.push('mail')
-  if (s.feature !== undefined && !s.live) actions.push('retire')
+  if (s.feature !== undefined && !s.live && !isSelf) actions.push('retire')
   return actions
 }
 

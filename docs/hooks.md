@@ -1126,7 +1126,7 @@ conversation is the base's lead (the `claude_session_id` in `.cs/local/state`
 is this conversation's, KEEP IN SYNC with cs-update's `isLead`), else task mail
 `--kind task` with body `/finish <task>` to the base, which its user accepts
 with `cs -queue accept`. A live session has no `o` (raising another session's
-terminal is out of bounds), this session has no `o` or `m`, a locked vault has
+terminal is out of bounds), this session has no `o`, `m` or `r`, a locked vault has
 no `m`, a live feature no `r` (it holds its worktree lock). Every row is cut to
 `bodyColumns` before it is drawn, columns dropping from the right until the
 name keeps eight cells, and a list longer than the pane shows `+N above` /
