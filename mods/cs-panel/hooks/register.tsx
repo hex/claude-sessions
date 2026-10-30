@@ -159,11 +159,13 @@ export function register(on: On) {
     return moved
   })
 
-  // Closing the pane (Esc, its mark, a plugin) stops the poll. Rows stay, so a
-  // reopen draws the last answer at once and the first read replaces it.
+  // Closing the pane (Esc, its mark, a plugin) stops the poll; a close another
+  // hook refused leaves it running. Rows stay, so a reopen draws the last
+  // answer at once and the first read replaces it.
   on('ui.close', { id: PANE }, async ($, e, next) => {
-    stopPoll()
-    return next(e)
+    const closed = await next(e)
+    if (closed.deny === undefined) stopPoll()
+    return closed
   })
 
   // The idle source: the main loop's turn events (a subagent's carry

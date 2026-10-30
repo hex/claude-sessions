@@ -235,7 +235,7 @@ type Answer = { exitCode?: number; stdout?: string; stderr?: string }
 // each line a plugin logged.
 function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: readonly string[]) => Answer | Promise<Answer>; sessionId?: () => string; state?: string } = {}) {
   const w = { runs: [] as { argv: string[]; stdin: string | undefined }[], toasts: [] as string[], opens: [] as PaneOpenArgs[], finishes: [] as string[], isOpen: false, invalidations: 0,
-    panesHeld: undefined as Promise<void> | undefined, refusal: undefined as { call: 'ui.open' | 'ui.panes'; text: string } | undefined, logs: [] as string[] }
+    panesHeld: undefined as Promise<void> | undefined, refusal: undefined as { call: 'ui.open' | 'ui.panes' | 'ui.close'; text: string } | undefined, logs: [] as string[] }
   mock.env(on, opts.env ?? { CS_BIN: BIN })
   const clock = mock.clock(on)
   on('process.run', async ($, e) => {
@@ -255,7 +255,10 @@ function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: rea
     if (w.panesHeld !== undefined) await w.panesHeld
     return { value: panes }
   })
-  on('ui.close', () => { w.isOpen = false; return { value: undefined } })
+  on('ui.close', () => {
+    if (w.refusal?.call === 'ui.close') return { deny: w.refusal.text }
+    w.isOpen = false; return { value: undefined }
+  })
   on('ui.focus', () => ({}))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -418,12 +421,14 @@ const TURN = { text: '', turnId: 't1' }
 const DONE = { answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
 
 // The kit raises no person's close; a plugin's close of the id is the same
-// ui.close the mod hooks (its origin aside, which the mod does not read).
+// ui.close the mod hooks (its origin aside, which the mod does not read). The
+// command answers the refusal when the close is refused.
 const CLOSER = { name: 'closer', register(on: On) {
-  on('command.run', { command: 'close-panel' }, async $ => { await $.ui.close({ id: 'cs-panel' }); return { text: '' } })
+  on('command.run', { command: 'close-panel' }, async $ => $.ui.close({ id: 'cs-panel' })
+    .then(() => ({ text: '' }), (err: unknown) => ({ text: err instanceof Error ? err.message : String(err) })))
 } }
 
-test('an open pane reads cs every minute while no turn runs and at each turn\'s end; a subagent\'s turns change nothing; a close stops the reads', { plugins: [CLOSER] }, async ($, on) => {
+test('an open pane reads cs every minute while no turn runs and at each turn\'s end; a subagent\'s turns change nothing; a refused close keeps the reads, a close stops them', { plugins: [CLOSER] }, async ($, on) => {
   const { w, clock } = world(on)
   const lists = () => w.runs.filter(r => r.argv[1] === '-list').length
   const pane = await openPane($)
@@ -442,19 +447,25 @@ test('an open pane reads cs every minute while no turn runs and at each turn\'s 
   await $.turn.complete(DONE)
   await clock.settle()
   expect(lists()).toBe(4)
+  w.refusal = { call: 'ui.close', text: 'kept open' }
+  expect(await $.command.run({ ...COMMAND, command: 'close-panel' })).toEqual({ text: 'closer: $.ui.close: kept open' })
+  expect(w.isOpen).toBe(true)
+  await clock.advance(60000)
+  expect(lists()).toBe(5)
+  w.refusal = undefined
   await $.command.run({ ...COMMAND, command: 'close-panel' })
   expect(w.isOpen).toBe(false)
   await clock.advance(180000)
-  expect(lists()).toBe(4)
-  await pane.redraw()
-  await clock.settle()
-  expect(lists()).toBe(4)
-  w.isOpen = true
+  expect(lists()).toBe(5)
   await pane.redraw()
   await clock.settle()
   expect(lists()).toBe(5)
-  await clock.advance(60000)
+  w.isOpen = true
+  await pane.redraw()
+  await clock.settle()
   expect(lists()).toBe(6)
+  await clock.advance(60000)
+  expect(lists()).toBe(7)
 })
 
 // Logs each clock.every dispatch the plugins make: one when a timer is armed,
