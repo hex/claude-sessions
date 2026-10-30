@@ -10,7 +10,6 @@ Aliases include `-help`, `-version`, `-ls`, `-diag`, and `-remove`.
 | `cs -- <name>` | Ends option parsing before creating or resuming a session. |
 | `cs -tui` | Opens the picker from any directory. |
 | `cs -list [--tag <tag>] [--archived]` | Lists sessions, filters a tag, or lists only archived sessions. |
-| `cs -list --porcelain` | Prints one line per unarchived session for tools, in byte order of the names, with five tab-separated fields: `name`, `live` (`1` or `0`, as `cs -live` decides), `context` (`0` to `100`, or `-` with no reading), `unread` (the unread mail count, or `-` when cs cannot reach the mailbox: the session's vault is not mounted, or it has no `.cs`) and `features` (the verified features `cs <base> -features` lists; `0` on a feature). Skips a name cs cannot address. Prints nothing else, and takes no other option. A sessions root it cannot read exits 1 with one line, `Error: cannot list the sessions under <root>: <the OS error>`, never an empty answer. |
 | `cs -search <query> [--include-archived]` | Searches session narratives, memory, and README files. |
 | `cs -whoami`, `cs -who` | Shows your actor name or contributors from git history. |
 | `cs -checkpoint "<label>"` | Saves narrative, changes, and the current git revision. Use `list` or `show <name>` to inspect snapshots. |

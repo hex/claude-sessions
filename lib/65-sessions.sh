@@ -210,75 +210,14 @@ run_tui() {
     exit 0
 }
 
-# One record per unarchived session cs can address, for tools (the cs-panel
-# mod), as docs/commands.md describes the five fields:
-#   name<TAB>live<TAB>context<TAB>unread<TAB>features
-# Every fact comes from the function the human surfaces call, so the panel and
-# cs -live / cs -msg / cs <base> -features cannot disagree. A name cs's own
-# validators refuse is skipped: cs cannot address it, and those validators
-# admit no tab, newline or byte outside printable ASCII. Unknown is '-'.
-# Reads the clock once. A root find cannot read is an error, never an empty
-# answer, which reads as no sessions.
-_list_porcelain() {  # (no arguments)
-    [ -d "$SESSIONS_ROOT" ] || return 0
-    local now dir name live context unread features listed=""
-    now="$(date +%s)"
-    while IFS= read -r -d '' dir; do
-        case "$dir" in
-            /*) ;;
-            *) listed="$dir"; break ;;
-        esac
-        is_session_dir "$dir" || continue
-        _session_is_archived "$dir" && continue
-        name="${dir##*/}"
-        case "$name" in
-            *@*)
-                ( cs_split_worktree_name "$name" ) >/dev/null 2>&1 || continue
-                features=0
-                ;;
-            *)
-                ( validate_session_name "$name" ) >/dev/null 2>&1 || continue
-                features="$(_feature_count "$name")"
-                ;;
-        esac
-        live=0
-        session_display_live "$dir/.cs" "$now" && live=1
-        context="$(_resume_context_pct "$dir")"
-        unread="$(_mail_unread_count "$dir/.cs")"
-        printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$live" "${context:--}" "$unread" "$features"
-    done < <(_list_session_dirs)
-    [ "$listed" = listed ] || error "cannot list the sessions under $SESSIONS_ROOT: ${listed:-the listing ended early}"
-}
-
-# The paths directly under the sessions root, sorted, each ended by a NUL;
-# then one record that cannot be a path, since the root is absolute: `listed`
-# once find has read the root, else why it could not (find's last complaint,
-# after its own `find: <path>: ` prefix, which BSD and GNU spell differently).
-_list_session_dirs() {  # (no arguments)
-    local why rc=0
-    { why=$( { find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 2>&4 \
-        | LC_ALL=C sort -z >&3; } 4>&1 ); } 3>&1 || rc=$?
-    if [ "$rc" = 0 ]; then
-        printf 'listed\0'
-        return 0
-    fi
-    why="${why##*$'\n'}"
-    why="${why##*: }"
-    printf '%s\0' "${why:-find exited $rc}"
-}
-
 # List all sessions
 list_sessions() {
-    local tag_filter="" archived_only="" porcelain=""
+    local tag_filter="" archived_only=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --porcelain)
-                porcelain="true"
-                shift
-                ;;
             --tag)
                 shift
-                [ -n "${1:-}" ] || error "Usage: cs -list [--archived] [--tag <tag>] | cs -list --porcelain"
+                [ -n "${1:-}" ] || error "Usage: cs -list [--archived] [--tag <tag>]"
                 # Stored tags are always lowercase (cs -tag add lowercases on
                 # write); lowercase the filter too so it matches regardless
                 # of case, mirroring the TUI's parse_tag_query.
@@ -289,16 +228,9 @@ list_sessions() {
                 archived_only="true"
                 shift
                 ;;
-            *) error "Unknown list option: $1. Usage: cs -list [--archived] [--tag <tag>] | cs -list --porcelain" ;;
+            *) error "Unknown list option: $1. Usage: cs -list [--archived] [--tag <tag>]" ;;
         esac
     done
-
-    if [ -n "$porcelain" ]; then
-        [ -z "$tag_filter" ] && [ -z "$archived_only" ] \
-            || error "cs -list --porcelain takes no other option"
-        _list_porcelain
-        return 0
-    fi
 
     if command -v cs-tui >/dev/null 2>&1; then
         info "Hint: run bare 'cs' for the interactive session manager"
