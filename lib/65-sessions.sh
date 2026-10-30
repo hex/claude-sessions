@@ -197,7 +197,7 @@ run_tui() {
     # a light/dark palette; reused by the session we launch next.
     _export_term_theme
     local tui_output
-    tui_output=$(CS_VERSION="$VERSION" CS_BIN="$0" "$tui_bin") || exit $?
+    tui_output=$(CS_TERM_THEME="${CS_TERM_THEME:-}" CS_VERSION="$VERSION" CS_BIN="$0" "$tui_bin") || exit $?
     if [ -n "$tui_output" ]; then
         local selected="${tui_output%%$'\n'*}"
         if [ "$tui_output" != "$selected" ]; then

@@ -467,6 +467,19 @@ CS_TERM_THEME_AUTO=1
 CLAUDE_CODE_ENABLE_TODO_TOOLS=1" "$(cat "$got")" "without the files the measurement and the opt-in go through (sensitivity)" || return 1
 }
 
+# The picker is a child of cs, and a theme the loader filled is unexported:
+# run_tui hands the picker the theme cs resolved, a file's included.
+test_the_picker_gets_the_theme_from_a_file() {
+    local fake="$TEST_TMPDIR/fake-tui" out rc=0
+    mkdir -p "$fake"
+    printf '#!/bin/sh\nprintf "%%s\\n" "${CS_TERM_THEME-<unset>}" > "%s"\n' "$TEST_TMPDIR/tui-theme" > "$fake/cs-tui"
+    chmod +x "$fake/cs-tui"
+    machine_cfg 'CS_TERM_THEME=light'
+    out=$(PATH="$fake:$PATH" "$CS_BIN" -tui 2>&1 < /dev/null) || rc=$?
+    assert_eq "0|" "$rc|$out" "the picker ran and chose nothing" || return 1
+    assert_eq "light" "$(cat "$TEST_TMPDIR/tui-theme")" "the picker got the file's theme" || return 1
+}
+
 # Which scripts must load the settings is derived from the allow-list: every
 # script under hooks/ and bin/ that reads an allowed ${CS_KEY loads them first,
 # at its top level (sourcing cs-config.sh, cs-shared.sh or cs-statusline), or
@@ -590,6 +603,7 @@ run_test test_the_status_line_follows_a_file_edit
 run_test test_scope_prompt_sees_a_session_file_before_its_launch_mark
 run_test test_the_rewriter_and_its_child_read_the_file
 run_test test_the_launch_hands_claude_no_file_value
+run_test test_the_picker_gets_the_theme_from_a_file
 run_test test_every_reader_loads_the_settings_before_its_first_read
 run_test test_doctor_names_skipped_lines_and_hidden_values
 run_test test_uninstall_keeps_the_settings_file

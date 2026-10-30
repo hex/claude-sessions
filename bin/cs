@@ -2866,7 +2866,7 @@ _cs_config_read() {  # file, scope
 # process holds what the process started with, so its value answers.
 cs_config_source() {  # key
     local src="_CS_CFG_SRC_$1"
-    case "$_CS_CFG_SEEN" in
+    case "${_CS_CFG_SEEN-}" in
         *" $1 "*) _CS_CFG_SOURCE=${!src}; return 0 ;;
     esac
     if [ -z "${!1-}" ]; then
@@ -2885,10 +2885,10 @@ cs_config_source() {  # key
 # Decides, once a process, where <key>'s value comes from (cs_config_source),
 # in _CS_CFG_SRC_<KEY>, and lists the key in _CS_CFG_SEEN.
 _cs_config_see() {  # key
-    case "$_CS_CFG_SEEN" in *" $1 "*) return 0 ;; esac
+    case "${_CS_CFG_SEEN-}" in *" $1 "*) return 0 ;; esac
     cs_config_source "$1"
     printf -v "_CS_CFG_SRC_$1" '%s' "$_CS_CFG_SOURCE"
-    _CS_CFG_SEEN="$_CS_CFG_SEEN$1 "
+    _CS_CFG_SEEN="${_CS_CFG_SEEN-}$1 "
 }
 
 # Fills each allowed key the environment does not pin from the session's file
@@ -2931,7 +2931,7 @@ cs_config_load() {  # [session_dir]
     # No file to read and nothing an earlier call filled: the environment
     # stands as it is, at the cost of two tests, every reader's lot on a
     # machine with no settings file.
-    if [ -z "$_CS_CFG_FILLED" ] && [ ! -f "$_CS_CONFIG_MACHINE" ] \
+    if [ -z "${_CS_CFG_FILLED-}" ] && [ ! -f "$_CS_CONFIG_MACHINE" ] \
         && { [ -z "$_CS_CONFIG_SESSION" ] || [ ! -f "$_CS_CONFIG_SESSION" ]; }; then
         return 0
     fi
@@ -2948,7 +2948,7 @@ cs_config_load() {  # [session_dir]
     fi
     _cs_config_read "$_CS_CONFIG_MACHINE" M
     [ -z "$_CS_CONFIG_SESSION" ] || _cs_config_read "$_CS_CONFIG_SESSION" S
-    cand="$_CS_CFG_READ_S$_CS_CFG_READ_M$_CS_CFG_SEEN"
+    cand="$_CS_CFG_READ_S$_CS_CFG_READ_M${_CS_CFG_SEEN-}"
     for rec in "${_CS_CONFIG_SPEC[@]}"; do
         key=${rec%%|*}
         case "$cand" in *" $key "*) ;; *) continue ;; esac
@@ -2989,7 +2989,7 @@ cs_config_load() {  # [session_dir]
     case "$_CS_CFG_SRC_CS_TERM_THEME" in
         session|machine)
             unset CS_TERM_THEME_AUTO
-            if [ "$_CS_CFG_SRC_CS_TERM_BG_RGB" = launch ] && [ "${CS_TERM_THEME:-}" != "$_CS_CFG_MEASURED_THEME" ]; then
+            if [ "$_CS_CFG_SRC_CS_TERM_BG_RGB" = launch ] && [ "${CS_TERM_THEME:-}" != "${_CS_CFG_MEASURED_THEME-}" ]; then
                 unset CS_TERM_BG_RGB
                 _CS_CFG_SRC_CS_TERM_BG_RGB=default
             fi
@@ -3002,7 +3002,7 @@ cs_config_load() {  # [session_dir]
             _CS_CFG_BG_PINNED_BY_FILE=1
             ;;
         *)
-            if [ -n "$_CS_CFG_BG_PINNED_BY_FILE" ]; then
+            if [ -n "${_CS_CFG_BG_PINNED_BY_FILE-}" ]; then
                 unset CS_TERM_BG_RGB_PINNED
                 _CS_CFG_BG_PINNED_BY_FILE=""
             fi
@@ -3269,7 +3269,7 @@ Commands:
   <name> -config list|get|set|unset  The same for <name>'s own .cs/local/config, which outranks this machine's
   -detect-theme       Show the detected terminal theme (light|dark)
   -tui                Open the interactive session manager (bare 'cs' does too)
-  -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived; --porcelain prints tab-separated records for tools)
+  -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived)
   -adopt <name>       Adopt current directory as a cs session (--yes re-adopts orphaned records without asking)
   -adopt --worktrees  Register Claude Code's .claude/worktrees/* here as <repo>.<worktree> sessions (--dry-run previews)
   -whoami             Show the current actor (for shared, multi-person sessions)
@@ -13961,7 +13961,7 @@ run_tui() {
     # a light/dark palette; reused by the session we launch next.
     _export_term_theme
     local tui_output
-    tui_output=$(CS_VERSION="$VERSION" CS_BIN="$0" "$tui_bin") || exit $?
+    tui_output=$(CS_TERM_THEME="${CS_TERM_THEME:-}" CS_VERSION="$VERSION" CS_BIN="$0" "$tui_bin") || exit $?
     if [ -n "$tui_output" ]; then
         local selected="${tui_output%%$'\n'*}"
         if [ "$tui_output" != "$selected" ]; then
