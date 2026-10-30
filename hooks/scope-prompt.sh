@@ -25,6 +25,15 @@ case "${EPOCHREALTIME:-}" in
         ;;
 esac
 
+# cs's settings files fill every CS_* setting the environment does not pin
+# (cs-config.sh, build.sh's copy of lib/03-config.sh), before the first read
+# below. A plain source, with no parse check: the loader forks nothing, so it
+# runs ahead of the launch mark, which must land before anything that can
+# stall, and a copy that fails to parse leaves the hook on its environment.
+case "$0" in */*) _cs_config="${0%/*}/cs-config.sh" ;; *) _cs_config=cs-config.sh ;; esac
+# shellcheck source=cs-config.sh
+[ ! -r "$_cs_config" ] || . "$_cs_config" 2>/dev/null
+
 # Launch mark, written before anything that can stall. The library parse-check,
 # its source and the session resolve below all run before the stage trace opens,
 # and a run the UserPromptSubmit cap kills in there would otherwise leave no line

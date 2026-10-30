@@ -10,6 +10,7 @@ _config_label() {  # file, [session name]
         _CONFIG_LABEL="$2/.cs/local/config"
         return 0
     fi
+    # shellcheck disable=SC2088  # a ~ for the person to read, never expanded
     case "$1" in
         "$HOME"/*) _CONFIG_LABEL="~/${1#"$HOME"/}" ;;
         *) _CONFIG_LABEL=$1 ;;

@@ -1557,6 +1557,15 @@ cs_config_source() {  # key
     fi
 }
 
+# Decides, once a process, where <key>'s value comes from (cs_config_source),
+# in _CS_CFG_SRC_<KEY>, and lists the key in _CS_CFG_SEEN.
+_cs_config_see() {  # key
+    case "$_CS_CFG_SEEN" in *" $1 "*) return 0 ;; esac
+    cs_config_source "$1"
+    printf -v "_CS_CFG_SRC_$1" '%s' "$_CS_CFG_SOURCE"
+    _CS_CFG_SEEN="$_CS_CFG_SEEN$1 "
+}
+
 # Fills each allowed key the environment does not pin from the session's file
 # (<session_dir>/.cs/local/config), else this machine's
 # (${XDG_CONFIG_HOME:-$HOME/.config}/cs/config), in this shell only: every
@@ -1602,10 +1611,14 @@ cs_config_load() {  # [session_dir]
         return 0
     fi
     _cs_config_index
-    # The theme the launch measured, kept across calls: a fill replaces the
-    # value, and the background's fate below compares against it.
-    cs_config_source CS_TERM_THEME
-    if [ "$_CS_CFG_SOURCE" = launch ]; then
+    # The theme and the background are judged together, before any fill: a
+    # theme from a file drops the marker that makes the background a
+    # measurement rather than a pin. The theme the launch measured is kept
+    # across calls: a fill replaces the value, and the background's fate
+    # below compares against it.
+    _cs_config_see CS_TERM_THEME
+    _cs_config_see CS_TERM_BG_RGB
+    if [ "$_CS_CFG_SRC_CS_TERM_THEME" = launch ]; then
         _CS_CFG_MEASURED_THEME=$CS_TERM_THEME
     fi
     _cs_config_read "$_CS_CONFIG_MACHINE" M
@@ -1615,14 +1628,7 @@ cs_config_load() {  # [session_dir]
         key=${rec%%|*}
         case "$cand" in *" $key "*) ;; *) continue ;; esac
         src="_CS_CFG_SRC_$key"
-        case "$_CS_CFG_SEEN" in
-            *" $key "*) ;;
-            *)
-                cs_config_source "$key"
-                printf -v "$src" '%s' "$_CS_CFG_SOURCE"
-                _CS_CFG_SEEN="$_CS_CFG_SEEN$key "
-                ;;
-        esac
+        _cs_config_see "$key"
         [ "${!src}" != shell ] || continue
         if case "$_CS_CFG_READ_S" in *" $key "*) true ;; *) false ;; esac; then
             have="_CS_CFG_S_$key"
@@ -1655,19 +1661,16 @@ cs_config_load() {  # [session_dir]
     # one and the file's theme is not the measured one, as the status line
     # would otherwise tint toward a background of the other theme. A
     # background from a file is a pin too, which CS_TERM_BG_RGB_PINNED says.
-    cs_config_source CS_TERM_THEME
-    case "$_CS_CFG_SOURCE" in
+    case "$_CS_CFG_SRC_CS_TERM_THEME" in
         session|machine)
             unset CS_TERM_THEME_AUTO
-            cs_config_source CS_TERM_BG_RGB
-            if [ "$_CS_CFG_SOURCE" = launch ] && [ "${CS_TERM_THEME:-}" != "$_CS_CFG_MEASURED_THEME" ]; then
+            if [ "$_CS_CFG_SRC_CS_TERM_BG_RGB" = launch ] && [ "${CS_TERM_THEME:-}" != "$_CS_CFG_MEASURED_THEME" ]; then
                 unset CS_TERM_BG_RGB
-                case "$_CS_CFG_SEEN" in *" CS_TERM_BG_RGB "*) _CS_CFG_SRC_CS_TERM_BG_RGB=default ;; esac
+                _CS_CFG_SRC_CS_TERM_BG_RGB=default
             fi
             ;;
     esac
-    cs_config_source CS_TERM_BG_RGB
-    case "$_CS_CFG_SOURCE" in
+    case "$_CS_CFG_SRC_CS_TERM_BG_RGB" in
         session|machine)
             CS_TERM_BG_RGB_PINNED=1
             export -n CS_TERM_BG_RGB_PINNED

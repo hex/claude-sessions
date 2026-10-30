@@ -8,6 +8,13 @@ set -uo pipefail
 
 target="${1:-}"
 
+# cs's settings files fill every CS_* setting the environment does not pin
+# (cs-config.sh, build.sh's copy of lib/03-config.sh), before the first read
+# below. A copy that fails to parse leaves the shim on its environment.
+case "$0" in */*) _cs_config="${0%/*}/cs-config.sh" ;; *) _cs_config=cs-config.sh ;; esac
+# shellcheck source=cs-config.sh
+[ ! -r "$_cs_config" ] || . "$_cs_config" 2>/dev/null
+
 # Every exit path leaves a line in a machine-local trace. This shim is invoked
 # by a keypress and draws onto a screen that is torn down, so when it does
 # nothing there is otherwise no evidence at all of WHICH of its several

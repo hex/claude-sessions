@@ -516,6 +516,13 @@ main() {
 
     local session_dir="$SESSIONS_ROOT/$session_name"
 
+    # The launch's own settings come from the session it opens: its file
+    # outranks the machine's for the update check below, the theme the launch
+    # measures (a file's theme is not measured over) and every launch-only
+    # setting. bin/cs loaded the files for the session it was started in,
+    # which is another one, or none.
+    cs_config_load "$session_dir"
+
     check_dependencies
 
     # Check for updates (non-blocking), then offer one on a terminal before
