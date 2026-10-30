@@ -72,7 +72,7 @@ The [statusline guide](docs/statusline.md) covers the quiet default layout, the 
 | Inline Mermaid | Draws supported flowcharts in replies, and a `show-me` skill answers "show me" with one. | [Mermaid mod](docs/hooks.md#cs-mermaid-not-a-hook-script--a-claude-code-mod)<br><img src="https://raw.githubusercontent.com/hex/claude-sessions/main/assets/mermaid.svg" width="260" alt="Reply prose, then the same prose with a drawn Mermaid chart"> |
 | Release notes | A launch from your terminal offers a pending release once. In the session, `/cs-update` shows its release notes. | [Update mod](docs/hooks.md#cs-update-not-a-hook-script--a-claude-code-mod) |
 | Settings | `cs -config set <KEY> <value>` keeps a cs setting in `~/.config/cs/config`, or in one session's own file, where every cs command, hook and status line repaint reads it. | [Settings file](docs/configuration.md#settings-file) |
-| Session panel | `/cs-panel` lists every cs session with its state, context, mail and features, and opens, mails or retires one from a row. | [Panel mod](docs/hooks.md#cs-panel-not-a-hook-script--a-claude-code-mod) |
+| Settings pane | `/cs` opens a pane of cs's settings, its mods' `/config` rows and its own `CS_*` settings, and changes one with a key: on this machine, or for this session only. | [Panel mod](docs/hooks.md#cs-panel-not-a-hook-script--a-claude-code-mod) |
 | Other front ends | Session hooks also work in desktop and IDE conversations opened in a `.cs/` workspace. | [Session resolution](docs/hooks.md#how-a-hook-finds-its-session-cs-resolvesh) |
 
 ## Uninstall

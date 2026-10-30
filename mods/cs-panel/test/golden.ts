@@ -1,0 +1,44 @@
+// ABOUTME: tests/fixtures/config-porcelain.txt, the golden `cs -config list --porcelain`, as a literal the kit can import (the kit reads no file).
+// ABOUTME: tests/test_mod_panel.sh holds the text between the backticks to that fixture, byte for byte.
+export const GOLDEN = `CS_STATUSLINE_DISABLE	Status line	Hide the status line	flag	-	off	now	applies at the next repaint	-	default	-
+CS_STATUSLINE_LAYOUT	Status line	Layout	choice	quiet,band,capsules	quiet	now	applies at the next repaint	band	machine	-
+CS_STATUSLINE_SEGMENTS	Status line	Segments	text	-	logo,session,notes,mail,git,model,ctx,limits	now	applies at the next repaint	-	default	-
+CS_STATUSLINE_BAND	Status line	Band colour	text	-	session	now	applies at the next repaint	-	default	machine line 4: CS_STATUSLINE_BAND=magenta: not a palette name, brand, periwinkle, session, none or r;g;b
+CS_STATUSLINE_COLS	Status line	Width in columns	text	-	measured	now	applies at the next repaint	-	default	-
+CS_STATUSLINE_FRAME	Status line	Frame columns	text	-	4	now	applies at the next repaint	6	shell	-
+CS_STATUSLINE_CTX_WARN	Status line	Context warn %	text	-	40	now	applies at the next repaint	50	session	-
+CS_STATUSLINE_CTX_CRIT	Status line	Context critical %	text	-	65	now	applies at the next repaint	-	default	-
+CS_USAGE_NO_REFRESH	Status line	Usage from cache only	flag	-	off	now	applies at the next repaint	-	default	-
+CS_SUBAGENT_STATUSLINE_DISABLE	Status line	Hide the subagent rows	flag	-	off	now	applies at the next repaint	-	default	-
+CS_SCOPE_DISABLE	Prompts	No scope grounding	flag	-	off	now	applies at your next prompt	1	session	-
+CS_SCOPE_TRACE_DISABLE	Prompts	No scope trace	flag	-	off	now	applies at your next prompt	-	default	-
+CS_SCOPE_BUDGET_MS	Prompts	Scope scan budget (ms)	text	-	1500	now	applies at your next prompt	-	default	-
+CS_OBJECTIVE_CAPTURE_DISABLE	Prompts	No objective capture	flag	-	off	now	applies at your next prompt	-	default	-
+CS_DATE_REMINDER_DISABLE	Prompts	No date reminder	flag	-	off	now	applies at your next prompt	-	default	-
+CS_CLARIFY_DISABLE	Prompts	No clarifying questions	flag	-	off	now	applies at your next prompt	-	default	-
+CS_CTX_WARN_CTX	Turn end	Context warning %	text	-	40	now	applies when the next turn ends	-	default	-
+CS_ROTATE_NUDGE_CTX	Turn end	Rotation nudge %	text	-	65	now	applies when the next turn ends	-	default	-
+CS_QUEUE_MAX_FAILURES	Turn end	Queue stops after failures	text	-	5	now	applies when the next turn ends	-	default	-
+CS_QUEUE_MAX_CTX	Turn end	Queue stops past context %	text	-	85	now	applies when the next turn ends	-	default	-
+CS_QUEUE_MAX_5H	Turn end	Queue stops past 5h limit %	text	-	85	now	applies when the next turn ends	-	default	-
+CS_MAIL_WAKE_MAX	Turn end	Mail wakes in a row	text	-	5	now	applies when the next turn ends	-	default	-
+CS_NO_MAIL_WAKE	Turn end	No mail wake	flag	-	off	now	applies when the next turn ends	-	session	-
+CS_NARRATIVE_MAX_BYTES	Turn end	Narrative budget (bytes)	text	-	131072	now	applies when the next turn ends	-	default	-
+CS_NARRATIVE_KEEP_BYTES	Turn end	Narrative tail kept (bytes)	text	-	65536	now	applies when the next turn ends	-	default	-
+CS_ROTATE_FORCE_CTX	Rotation	Rotate on its own past %	text	-	80	now	applies by your next prompt	-	default	session line 4: CS_ROTATE_FORCE_CTX=101: not off, 0 or a percentage from 1 to 100
+CS_ROTATE_BUTTON_CTX	Rotation	Rotate button from %	text	-	the warn %	now	applies by your next prompt	-	default	-
+CS_NO_ROTATION_WAKE	Rotation	No wake after /clear	flag	-	off	/clear	applies at the next /clear or launch	-	default	-
+CS_ROTATION_KICK_DELAY	Rotation	Wake delay (s)	text	-	2	now	applies at the next rotation	-	default	-
+CS_REWRITE_PROVIDER	Rewriter (ctrl+g)	Provider	choice	claude,claude-api,openai,openai-api,gemini,gemini-api,grok,xai	claude	now	applies at the next ctrl+g	-	default	-
+CS_REWRITE_MODEL	Rewriter (ctrl+g)	Model	text	-	per provider	now	applies at the next ctrl+g	-	default	-
+CS_REWRITE_TIMEOUT	Rewriter (ctrl+g)	Timeout (s)	text	-	25	now	applies at the next ctrl+g	-	default	-
+CS_REWRITE_PROGRESS	Rewriter (ctrl+g)	Progress	choice	screen,native,line,static	screen	now	applies at the next ctrl+g	-	default	-
+CS_REWRITE_DISABLE	Rewriter (ctrl+g)	No rewrite	flag	-	off	now+launch	on: the next ctrl+g passes through. Off after a launch with it on: the next launch, which installs the ctrl+g shim.	-	default	-
+CS_TERM_THEME	Terminal	Theme	choice	light,dark	detected	now	applies at the next repaint	dark	launch	-
+CS_TERM_BG_RGB	Terminal	Background r;g;b	text	-	detected	now	applies at the next repaint	-	default	-
+CS_NO_ITERM2	Terminal	No iTerm2 features	flag	-	off	now+launch	the tab title, the bell bounce and the iTerm reads of the bar: now. The iTerm tmux path of the launch: the next launch.	-	default	-
+CS_NERD_FONTS	Terminal	Nerd Font glyphs	flag	-	off	now	applies at the next cs command	-	default	-
+CS_NO_TASK_TOOLS	Launch	No task tools	flag	-	off	launch	applies at the next launch	-	default	-
+CS_NO_UPDATE_CHECK	Launch	No update check	flag	-	off	launch	applies at the next launch	-	default	-
+CS_NO_FUNCTION_HOOKS	Launch	No mods	shell	-	off	launch	applies at the next launch; on, it loads no mod, the cs panel included	-	default	-
+`
