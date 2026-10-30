@@ -61,6 +61,9 @@ export const TOASTS = {
   notRetired: (task: string, why: string) => `${task} not retired: ${why}`,
   retireNotLead: (base: string) => `${base}'s features retire from its lead conversation; this one is a teammate`,
   finishFailed: (task: string, err: string) => `/finish ${task} did not run: ${err}`,
+  // A key pressed on a drawing older than the row's state: the row is pending
+  // or the list changed.
+  notOffered: (name: string, action: string) => `${action} ${name} is not offered now`,
 } as const
 
 // Lines the pane draws above the rows when the list is stale or missing.
@@ -255,13 +258,13 @@ function handlers($: EngineInterface): Handlers {
 }
 
 // The one entry for every strip key. The row is looked up afresh and the press
-// refused when the action is no longer offered (a press from a drawing older
-// than the last read). The row is claimed before the first await, so a second
-// press finds nothing offered; whatever happens, it is released and the list
-// read again.
+// refused with a toast when the action is no longer offered (a press from a
+// drawing older than the last read or the row's claim). The row is claimed
+// before the first await, so a second press finds nothing offered; whatever
+// happens, it is released and the list read again.
 async function act($: EngineInterface, action: Action, name: SessionName): Promise<void> {
   const row = sessions && rowsOf(sessions, launch?.self, pending).find(r => r.session.name === name)
-  if (row === undefined || !row.actions.includes(action)) return
+  if (row === undefined || !row.actions.includes(action)) { $.ui.toast(TOASTS.notOffered(name, action)); return }
   pending.set(name, PRESSED[action])
   $.ui.invalidate('ui.render')
   try {

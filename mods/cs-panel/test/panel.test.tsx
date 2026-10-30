@@ -227,6 +227,13 @@ const COMMAND = { command: 'cs-panel', args: '', origin: { kind: 'composer' }, p
 
 type Answer = { exitCode?: number; stdout?: string; stderr?: string }
 
+// A promise the test settles: what a held answer waits on.
+function gate(): { held: Promise<void>; open: () => void } {
+  let open = () => {}
+  const held = new Promise<void>(resolve => { open = resolve })
+  return { held, open }
+}
+
 // What sits beneath the mod: the engine's answers to each call it makes, and
 // a record of what it asked. `answer` gives cs's reply to an argv; a pane is
 // open from its ui.open until a ui.close. While `panesHeld` is set, ui.panes
@@ -345,6 +352,26 @@ test('o spawns the selected idle session and toasts cs\'s own line, or why it di
   spawn = { exitCode: 1, stderr: 'Error: Session beta is already live\n' }
   await pane.press({ key: 'act:open' })
   expect(w.toasts.at(-1)).toBe('beta did not open: exited 1: Error: Session beta is already live')
+})
+
+test('a key pressed on a row that no longer offers it says so and runs nothing: a second o while the first spawn runs', async ($, on) => {
+  const spawned = gate()
+  const { w, clock } = world(on, { answer: async argv => {
+    if (argv[1] === '-list') return { stdout: GOLDEN }
+    await spawned.held
+    return { stdout: 'spawned beta in tmux session cs (window @7). Attach: tmux attach -t cs\n' }
+  } })
+  const pane = await openPane($)
+  await pane.press({ key: 'row:beta' })
+  const first = pane.press({ key: 'act:open' })
+  const second = pane.press({ key: 'act:open' })
+  await clock.settle()
+  expect(w.toasts).toEqual(['open beta is not offered now'])
+  spawned.open()
+  await Promise.all([first, second])
+  await clock.settle()
+  expect(w.runs).toEqual([LIST, { argv: [BIN, '-spawn', 'beta'], stdin: undefined }, LIST])
+  expect(w.toasts).toEqual(['open beta is not offered now', 'spawned beta in tmux session cs (window @7). Attach: tmux attach -t cs'])
 })
 
 test('m asks for a body and sends it on stdin to cs <name> -msg -; Cancel, a dismissed dialog and an empty body send nothing', async ($, on) => {
@@ -475,13 +502,6 @@ const EVERIES = { name: 'everies', register(on: On) {
   on('clock.every', async ($, e, next) => { await $.ui.log('clock.every'); return next(e) })
 } }
 
-// A promise the test settles: what a held ui.panes waits on.
-function gate(): { held: Promise<void>; open: () => void } {
-  let open = () => {}
-  const held = new Promise<void>(resolve => { open = resolve })
-  return { held, open }
-}
-
 test('a render\'s arming and /cs-panel\'s at once arm one clock: one read at the open and one a minute, none after a close', { plugins: [CLOSER, EVERIES] }, async ($, on) => {
   const { w, clock } = world(on)
   const everies = () => w.logs.filter(line => line === 'clock.every').length
@@ -588,6 +608,6 @@ test('no line the mod hands the engine names the plugin first: the engine prefix
     COMMANDS['cs-panel'].description, ...Object.values(REPLIES).map(r => typeof r === 'string' ? r : r('x')),
     ...Object.values(TOASTS).map(t => t('x', 'y')), ...Object.values(PROBLEMS).map(p => p('x')), ...Object.values(LOGS).map(l => l('x')), ASKS.mail('x').question,
   ]
-  expect(lines.length).toBe(18)
+  expect(lines.length).toBe(19)
   expect(lines.filter(line => line.toLowerCase().startsWith('cs-panel'))).toEqual([])
 })
