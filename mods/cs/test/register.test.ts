@@ -46,6 +46,9 @@ let runs: { argv: string[]; init: any }[]
 let runResult: { exitCode: number; stdout: string; stderr: string } | Error
 // Answers for the next runs in order, ahead of runResult; empty means runResult answers.
 let nextRuns: ({ exitCode: number; stdout: string; stderr: string } | Error)[]
+// Each `cs -config list --porcelain` the mod ran, apart from `runs`, and what it answers with (or rejects with).
+let settingsRuns: string[][]
+let settingsResult: { exitCode: number; stdout: string; stderr: string } | Error
 // What `$.prompt.submit` was handed.
 let submitted: any[]
 // How many process runs had happened when `$.session.compact` was called, and what it answers with (or rejects with).
@@ -90,6 +93,11 @@ const $ = {
   process: {
     run: async (argv: string[], init: any) => {
       if (argv[0] === 'kill' && argv[1] === '-0') return { exitCode: livePids.has(argv[2]) ? 0 : 1, stdout: '', stderr: '' }
+      if (argv[1] === '-config') {
+        settingsRuns.push(argv)
+        if (settingsResult instanceof Error) throw settingsResult
+        return settingsResult
+      }
       runs.push({ argv, init })
       const r = nextRuns.length > 0 ? nextRuns.shift()! : runResult
       if (r instanceof Error) throw r
@@ -159,6 +167,7 @@ beforeEach(() => {
   percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
   timers = []; invalidated = []; toasts = []; logs = []; asks = []; answer = WRAP_YES; modeAnswer = QUEUE_HERE; panes = []
   runs = []; runResult = { exitCode: 0, stdout: '', stderr: '' }; nextRuns = []; submitted = []; commands = []
+  settingsRuns = []; settingsResult = { exitCode: 0, stdout: '', stderr: '' }
   compactedAt = []; compactResult = { messages: [] }
   availableCommands = []
   scrolls = []; scrollResult = {}; reads = []; mtimes = {}
@@ -1677,7 +1686,7 @@ test('the mod registers /queue at load, to run at once even mid-turn', async () 
   await startSession()
   expect(commands).toHaveLength(2)
   expect(commands[0]).toMatchObject({ name: 'queue', immediate: true, argumentHint: '[task]' })
-  expect(commands[1]).toMatchObject({ name: 'cs', immediate: true, argumentHint: 'next|prev|first|last|<n>' })
+  expect(commands[1]).toMatchObject({ name: 'cs', immediate: true, argumentHint: '[next|prev|first|last|<n>]' })
 })
 
 test('/queue with a task runs cs -queue add with the task as one argument and says it is queued', async () => {
@@ -2453,6 +2462,19 @@ test('/cs next, prev, first, last and N move along the rail from the prompt bein
   expect(await cs('prev')).toEqual({ text: 'no prompt before this one' })
 })
 
+// Bare /cs is the cs panel's: this hook hands it on, whichever plugin's hook
+// sits below, and answers only a form with an argument.
+test('bare /cs, blank or spaces, goes to the next hook untouched and returns its answer', async () => {
+  for (const args of ['', '   ']) {
+    const answer = { text: 'the next hook' }
+    const handed: any[] = []
+    const got = await hooks['command.run:cs']($, { command: 'cs', args }, async (e: any) => { handed.push(e); return answer })
+    expect(got).toBe(answer)
+    expect(handed).toEqual([{ command: 'cs', args }])
+  }
+  expect(scrolls).toEqual([])
+})
+
 test('rows drawn where the band is not the lead\'s, or under a survey, redraw once at most: the read tick settles even when the rail is not drawn', async () => {
   register(on as any, READING)
   transcript(LINEAR)
@@ -3013,6 +3035,136 @@ test('the queue glyph takes the status line\'s amber, light on a dark terminal a
   delete envVars.CS_TERM_BG_RGB
   files['/work/.cs/local/queue.state'] = 'draining\n'
   expect(queueWordInks(await band())).toEqual([[{ color: 'rgb(251,191,36)' }, '▤'], [{ dimColor: true }, ' queue 2 running']])
+})
+
+// cs's own resolution of its settings, the golden `cs -config list --porcelain`:
+// eleven tab-separated fields a record, the value ninth and its source tenth.
+const PORCELAIN = readFileSync(new URL('../../../tests/fixtures/config-porcelain.txt', import.meta.url), 'utf8')
+const SETTINGS_ARGV = ['/opt/cs/bin/cs', '-config', 'list', '--porcelain']
+// The golden with <key>'s record carrying <value> from <source>, or without the record.
+const porcelainWith = (key: string, value?: string, source?: string) => PORCELAIN.split('\n').flatMap((line: string) => {
+  const fields = line.split('\t')
+  if (fields[0] !== key) return [line]
+  if (value === undefined || source === undefined) return []
+  fields[8] = value; fields[9] = source
+  return [fields.join('\t')]
+}).join('\n')
+const answerSettings = (stdout: string) => { settingsResult = { exitCode: 0, stdout, stderr: '' } }
+const queueAmber = async () => queueKey(await band()).children[0].props.color
+
+test('cs is asked for its settings as the session starts and as each main-loop turn starts and ends; a subagent\'s turn asks nothing', async () => {
+  await sessionStart(); await settle()
+  await turnStart('go'); await settle()
+  await turnComplete(); await settle()
+  await hooks['turn.start']($, { text: 'look', turnId: 'turn-sub', agentId: 'agent-1' }, async (e: any) => ({ turnId: e.turnId })); await settle()
+  await turnComplete({ agentId: 'agent-1' }); await settle()
+  expect(settingsRuns).toEqual([SETTINGS_ARGV, SETTINGS_ARGV, SETTINGS_ARGV])
+  expect(logs).toEqual([])
+})
+
+test('a launch that did not say where cs is (no CS_BIN) asks cs nothing and logs nothing', async () => {
+  delete envVars.CS_BIN
+  await sessionStart(); await settle()
+  await turnStart('go'); await settle()
+  expect(settingsRuns).toEqual([])
+  expect(logs).toEqual([])
+})
+
+test('the golden\'s session CS_STATUSLINE_CTX_WARN=50 moves the band from the 40% default', async () => {
+  answerSettings(PORCELAIN)
+  await sessionStart(); await settle()
+  percent = 49
+  expect(await band()).toBe(DRAWN)
+  percent = 50
+  expect(findButton(await band())).toBeDefined()
+})
+
+test('a settings file\'s CS_ROTATE_BUTTON_CTX moves the band alone', async () => {
+  answerSettings(porcelainWith('CS_ROTATE_BUTTON_CTX', '55', 'machine'))
+  await turnStart('go'); await settle()
+  percent = 54
+  expect(await band()).toBe(DRAWN)
+  percent = 55
+  expect(findButton(await band())).toBeDefined()
+})
+
+test('a settings file\'s CS_ROTATE_FORCE_CTX=off, read as the turn started, stops the rotation its end would force', async () => {
+  answerSettings(porcelainWith('CS_ROTATE_FORCE_CTX', 'off', 'session'))
+  await turnStart('go'); await settle()
+  percent = 100
+  await turnComplete()
+  expect(timers).toEqual([])
+  expect(ran).toEqual([])
+})
+
+// Each record's value differs from the environment's so the ink says which
+// one was read; cs itself prints the environment's value for a shell or
+// launch source.
+test('the theme is a settings file\'s only when cs says a file set it: a launch measurement, a shell pin or no record leave the environment\'s', async () => {
+  queueTasks(2)
+  envVars.CS_TERM_THEME = 'dark'
+  const after = async (stdout: string) => { answerSettings(stdout); await turnStart('go'); await settle(); return queueAmber() }
+  expect(await after(porcelainWith('CS_TERM_THEME', 'light', 'machine'))).toBe('rgb(180,83,9)')
+  expect(await after(porcelainWith('CS_TERM_THEME', 'light', 'launch'))).toBe('rgb(251,191,36)')
+  expect(await after(porcelainWith('CS_TERM_THEME', 'light', 'session'))).toBe('rgb(180,83,9)')
+  expect(await after(porcelainWith('CS_TERM_THEME', 'light', 'shell'))).toBe('rgb(251,191,36)')
+  expect(await after(porcelainWith('CS_TERM_THEME', 'light', 'session'))).toBe('rgb(180,83,9)')
+  expect(await after(porcelainWith('CS_TERM_THEME'))).toBe('rgb(251,191,36)')
+})
+
+test('a background a settings file pins outranks the dark theme the launch measured, on the queue glyph and the count alike', async () => {
+  envVars.CS_TERM_THEME = 'dark'
+  queueTasks(2)
+  answerSettings(porcelainWith('CS_TERM_BG_RGB', '252;247;229', 'machine'))
+  await sessionStart(); await settle()
+  expect(await queueAmber()).toBe('rgb(180,83,9)')
+  await startGrace()
+  await tick(10)
+  expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
+})
+
+test('the count\'s amber takes a settings file\'s theme over the launch\'s', async () => {
+  envVars.CS_TERM_THEME = 'dark'
+  answerSettings(porcelainWith('CS_TERM_THEME', 'light', 'session'))
+  await sessionStart(); await settle()
+  await startGrace()
+  await tick(10)
+  expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
+})
+
+test('an answer that moves a setting redraws the band; the same answer again does not', async () => {
+  answerSettings(porcelainWith('CS_TERM_THEME', 'light', 'machine'))
+  await turnStart(''); await settle()
+  expect(invalidated).toEqual(['ui.render'])
+  await turnStart(''); await settle()
+  expect(invalidated).toEqual(['ui.render'])
+})
+
+test('a failed, unreadable or unanswered read keeps the settings last read, and says so once a kind', async () => {
+  queueTasks(2)
+  envVars.CS_TERM_THEME = 'dark'
+  const refresh = async () => { await turnStart('go'); await settle() }
+  answerSettings(porcelainWith('CS_TERM_THEME', 'light', 'machine'))
+  await refresh()
+  settingsResult = { exitCode: 2, stdout: '', stderr: 'cs: no such command\nUsage: cs [<name>] -config list\n' }
+  await refresh()
+  await refresh()
+  expect(await queueAmber()).toBe('rgb(180,83,9)')
+  answerSettings(`${PORCELAIN}CS_EXTRA\tTerminal\tToo short\n`)
+  await refresh()
+  expect(await queueAmber()).toBe('rgb(180,83,9)')
+  answerSettings(porcelainWith('CS_TERM_THEME', 'light', 'disk'))
+  await refresh()
+  expect(await queueAmber()).toBe('rgb(180,83,9)')
+  settingsResult = new Error('timed out after 10000 ms')
+  await refresh()
+  expect(await queueAmber()).toBe('rgb(180,83,9)')
+  expect(logs).toEqual([
+    'cs -config list exited 2: Usage: cs [<name>] -config list',
+    'cs -config list gave a record the band cannot read: CS_EXTRA\tTerminal\tToo short',
+    'cs -config list gave a record the band cannot read: CS_TERM_THEME\tTerminal\tTheme\tchoice\tlight,dark\tdetected\tnow\tapplies at the next repaint\tlight\tdisk\t-',
+    'cs\'s settings could not be read: timed out after 10000 ms',
+  ])
 })
 
 // cs delivers each mail as one file in the mailbox's new/, where it stays

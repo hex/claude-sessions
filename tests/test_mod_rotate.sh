@@ -117,6 +117,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
         return 77
     fi
     assert_output_contains "$out" "hooks: session.start, command.run{command=queue}, command.run{command=cs}, config.set, turn.complete, skill.prompt{skill=finish}, prompt.submit, command.run{command=clear}, turn.start, ui.render{component=UserMessage}, ui.render{component=AbovePrompt}, ui.focus{component=AbovePrompt, plugin=cs}" "all twelve hooks inventoried, config.set refusing a band value the band cannot draw" || return 1
+    assert_output_contains "$out" "gating hook without .catch: command.run{command=cs}" "/cs is a gate: it answers an argument itself and hands bare /cs to the cs panel's hook" || return 1
     assert_output_not_contains "$out" '$.prompt.fill' "nothing fills the composer any more" || return 1
     assert_output_contains "$out" 'env reads: CLAUDE_CONFIG_DIR, CS_BIN, CS_ROTATE_BUTTON_CTX, CS_ROTATE_FORCE_CTX, CS_SESSIONS_ROOT, CS_STATUSLINE_CTX_WARN, CS_TERM_BG_RGB, CS_TERM_THEME, CS_TRANSCRIPTS_DIR, HOME' "the cs path, the two thresholds, the bar's warn band, the measured background and the theme (the count's amber pivot), where keybindings.json lives, the sessions root and where transcripts live are read from the environment; the caps consent is not" || return 1
     assert_output_contains "$out" '$.process.run, $.prompt.submit (via offerToStart), $.session.compact (via offerToStart), $.session.cwd' "/queue runs cs from its own hook and its start offer, which alone submits a prompt and compacts; the rotation asks cs -vet-session before it arms; the /finish watch runs kill -0 to ask after cs's pid" || return 1
@@ -126,7 +127,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     # The validator cuts its calls line at a fixed length (`… [+N chars]`);
     # every assert on it must name something before the cut. $.ui.log and
     # selected later calls are checked on the source instead.
-    assert_eq "5" "$(grep -c '\$\.ui\.log' "$src")" "five calls log a features word read failure, a features complaint, a transcript read failure, a /color that did not run and a feed read failure" || return 1
+    assert_eq "6" "$(grep -c '\$\.ui\.log' "$src")" "six calls log a features word read failure, a features complaint, a transcript read failure, a /color that did not run, a feed read failure and a settings read complaint" || return 1
     feed_range=$(awk '/^async function pressFeed\(/ { start = NR } start && !end && /^}/ { end = NR } END { print start, end }' "$src")
     set -- $feed_range
     assert_eq "1" "$(awk -v start="$1" -v end="$2" 'NR > start && NR < end && /\$\.fs\.write/ { count++ } END { print count + 0 }' "$src")" "one call inside pressFeed writes the feed file" || return 1
