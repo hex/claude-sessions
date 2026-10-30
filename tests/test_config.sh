@@ -291,6 +291,10 @@ Ignored in alpha/.cs/local/config
         "$(printf '%s\n' "$out" | sed -n '/^Ignored in /,$p')" "the skipped lines, file by file, at the end" || return 1
     assert_eq "Status line|Prompts|Turn end|Rotation|Rewriter (ctrl+g)|Terminal|Launch|Ignored in ~/.config/cs/config|Ignored in alpha/.cs/local/config" \
         "$(printf '%s\n' "$out" | grep '^[A-Z]' | paste -sd '|' -)" "the seven groups in table order, then the two files' skips" || return 1
+    local rc=0
+    out=$(cs_plain -config list) || rc=$?
+    assert_eq "0|Status line|Prompts|Turn end|Rotation|Rewriter (ctrl+g)|Terminal|Launch|Ignored in ~/.config/cs/config" \
+        "$rc|$(printf '%s\n' "$out" | grep '^[A-Z]' | paste -sd '|' -)" "outside any session: the machine's file alone" || return 1
 }
 
 # Two sets of different keys started together both land: the writer takes the
@@ -489,6 +493,51 @@ test_every_reader_loads_the_settings_before_its_first_read() {
     assert_eq "" "$bad" "every reader loads the settings before its first read" || return 1
 }
 
+# --- Doctor and uninstall -----------------------------------------------------------
+
+# Doctor reads the same loader: a skipped line is a warning naming the file,
+# the line and why; a shell value that hides a file's is said; the count row
+# names both files; an Authority row says where its switch comes from.
+test_doctor_names_skipped_lines_and_hidden_values() {
+    local dir out
+    dir=$(create_test_session alpha)
+    machine_cfg 'CS_STATUSLINE_BAND=magenta' 'CS_STATUSLINE_CTX_WARN=45' 'CS_NO_MAIL_WAKE=1'
+    session_cfg "$dir" 'CS_SCOPE_DISABLE=1'
+    out=$(CS_STATUSLINE_CTX_WARN=50 CLAUDE_SESSION_DIR="$dir" CLAUDE_SESSION_META_DIR="$dir/.cs" CLAUDE_SESSION_NAME=alpha \
+        cs_plain -doctor) || true
+    assert_eq "  [ OK ] config: 2 settings in ~/.config/cs/config, 1 in this session's
+  [WARN] config: ~/.config/cs/config line 1: CS_STATUSLINE_BAND=magenta: not a palette name, brand, periwinkle, session, none or r;g;b (skipped)
+  [INFO] config: CS_STATUSLINE_CTX_WARN=50 in your environment hides 45 in ~/.config/cs/config" \
+        "$(printf '%s\n' "$out" | grep -E '^  \[[A-Z ]{4}\] config: ')" "the config rows" || return 1
+    assert_eq "off grounding scope-prompt off: CS_SCOPE_DISABLE=1 (this session's config)" \
+        "$(printf '%s\n' "$out" | awk '$2 == "grounding" {$1=$1; print}')" "the Authority row names the session's file" || return 1
+    assert_eq "on clarify scope-prompt off: CS_CLARIFY_DISABLE=1" \
+        "$(printf '%s\n' "$out" | awk '$2 == "clarify" {$1=$1; print}')" "a default row names no source" || return 1
+    rm "$MCFG" "$dir/.cs/local/config"
+    out=$(cs_plain -doctor) || true
+    assert_eq "  [ OK ] config: no ~/.config/cs/config (cs -config set keeps one)" \
+        "$(printf '%s\n' "$out" | grep -E '^  \[[A-Z ]{4}\] config: ')" "no file, outside a session" || return 1
+}
+
+# Uninstall keeps the settings file, as it keeps statusline-caps: a reinstall
+# should find the person's settings.
+test_uninstall_keeps_the_settings_file() {
+    local stub="$TEST_TMPDIR/mount-stub" out rc=0 f
+    mkdir -p "$HOME/.local/bin" "$HOME/.claude"
+    for f in cs cs-secrets cs-statusline cs-subagent-statusline; do
+        printf '#!/bin/sh\n' > "$HOME/.local/bin/$f"
+        chmod +x "$HOME/.local/bin/$f"
+    done
+    machine_cfg 'CS_STATUSLINE_LAYOUT=band'
+    _stub_mount_table "$stub" "/dev/disk3s5 on /System/Volumes/Data (apfs, local, journaled)" || return 1
+    out=$(printf 'ynnn' | PATH="$stub:$PATH" cs_plain -uninstall) || rc=$?
+    assert_eq "0" "$rc" "uninstall completes: $out" || return 1
+    assert_not_exists "$HOME/.local/bin/cs" "cs is gone" || return 1
+    assert_eq "CS_STATUSLINE_LAYOUT=band" "$(cat "$MCFG")" "the settings file is kept as it was" || return 1
+    assert_eq "Kept ~/.config/cs/config (your cs settings; delete it to forget them)" \
+        "$(printf '%s\n' "$out" | grep '^Kept ~/.config/cs/config')" "and uninstall says so" || return 1
+}
+
 # --- Deliveries -----------------------------------------------------------------
 
 # build.sh delivers lib/03-config.sh into the status line between two marker
@@ -542,6 +591,8 @@ run_test test_scope_prompt_sees_a_session_file_before_its_launch_mark
 run_test test_the_rewriter_and_its_child_read_the_file
 run_test test_the_launch_hands_claude_no_file_value
 run_test test_every_reader_loads_the_settings_before_its_first_read
+run_test test_doctor_names_skipped_lines_and_hidden_values
+run_test test_uninstall_keeps_the_settings_file
 run_test test_build_splices_the_fragment_into_the_status_line
 
 report_results

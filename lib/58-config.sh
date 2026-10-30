@@ -17,6 +17,13 @@ _config_label() {  # file, [session name]
     esac
 }
 
+# The name of the session this cs runs in, for the label of its file: the
+# name it was given, else its directory's; empty outside a session.
+_config_session_name() {
+    local dir="${CLAUDE_SESSION_DIR:-}"
+    printf '%s\n' "${CLAUDE_SESSION_NAME:-${dir##*/}}"
+}
+
 # The fields of <key>'s record, in _CF_GROUP, _CF_LABEL, _CF_EDIT, _CF_CHECK,
 # _CF_CHOICES, _CF_DEFAULT, _CF_WHEN and _CF_WHENTEXT.
 _config_fields() {  # key
@@ -83,7 +90,7 @@ _config_shadowed() {  # key, wrote the machine's file (1 or "")
         printf '%s is also set in your environment (%s), which wins until you unset it there\n' "$1" "${!1//[[:cntrl:]]/?}" >&2
     elif [ -n "$2" ] && _config_listed "$_CS_CFG_READ_S" "$1"; then
         local v="_CS_CFG_S_$1"
-        _config_label "" "${CLAUDE_SESSION_NAME:-${CLAUDE_SESSION_DIR##*/}}"
+        _config_label "" "$(_config_session_name)"
         printf '%s is also set in %s (%s), which wins in that session\n' "$1" "$_CONFIG_LABEL" "${!v}" >&2
     fi
 }
@@ -181,7 +188,7 @@ cmd_config() {  # session name or "", action, args...
     case "$action" in
         list)
             case "$#:${1:-}" in
-                0:) _config_list_human "${name:-${CLAUDE_SESSION_NAME:-${CLAUDE_SESSION_DIR##*/}}}" ;;
+                0:) _config_list_human "${name:-$(_config_session_name)}" ;;
                 1:--porcelain) _config_list_porcelain ;;
                 *) error "$_CONFIG_USAGE" ;;
             esac
