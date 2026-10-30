@@ -27,11 +27,13 @@ _mail_dir() {  # meta_dir
     printf '%s/mail' "$base"
 }
 
-# How many messages wait unread in a session's mailbox, or '-' when its vault
-# is not mounted (nothing can be counted, and _mail_send would refuse). Unread
-# is the count of new/*.json, as the maildir comment above states.
+# How many messages wait unread in a session's mailbox, or '-' when it has no
+# .cs (a pre-.cs/ session: mail is made only inside a .cs) or its vault is not
+# mounted; either way nothing can be counted, and _mail_send would refuse.
+# Unread is the count of new/*.json, as the maildir comment above states.
 _mail_unread_count() {  # meta_dir
     local mb f n=0
+    [ -d "$1" ] || { printf -; return 0; }
     mb="$(_mail_dir "$1")" || { printf -; return 0; }
     for f in "$mb"/new/*.json; do
         [ -f "$f" ] && n=$((n + 1))

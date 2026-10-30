@@ -90,6 +90,9 @@ test_list_includes_a_legacy_session() {
         return 1
     }
     assert_output_contains "$out" "legacy" "cs -list should list a pre-.cs/ session" || return 1
+    # Mail is made only inside a .cs, so cs refuses to send it there: unread
+    # is '-', as behind a vault that is not mounted.
+    assert_eq $'legacy\t0\t-\t-\t0' "$("$CS_BIN" -list --porcelain)" "the porcelain record of a pre-.cs/ session" || return 1
 }
 
 PORCELAIN_GOLDEN="$SCRIPT_DIR/fixtures/list-porcelain.txt"

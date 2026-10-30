@@ -23,8 +23,8 @@ export type Session = {
   live: boolean
   // 0-100.
   context: number | undefined
-  // Unread mails; undefined when the vault is locked, where `cs <name> -msg`
-  // refuses too.
+  // Unread mails; undefined where `cs <name> -msg` refuses too: the vault is
+  // locked, or the session has no .cs.
   unread: number | undefined
   // A base's git-verified features; 0 for a feature.
   features: number

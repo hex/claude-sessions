@@ -1391,7 +1391,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "47c53bf46a539215d30fcfadd40c7466e6c708a8e82b7272f182cfa1852c2a94  bin/cs"
+    "dc9178af5c70e62dc78fa7063f62e640d9b4ad89aae2d6060c32c74eeaeaf6b9  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "68be4cb037652baf60d5dac8c7088eeb606bfa338a92c8d81395c281f210e86b  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
@@ -1438,8 +1438,8 @@ CS_PAYLOAD_SHA256=(
     "c591644117d9a870c4631ecb40c7fc47f7cbab7b74849feb07b318784ba85367  mods/cs-mermaid/skills/show-me/SKILL.md"
     "917c2c8c157a579ea63ada16d76d248927e850daef9dc309b10a3916d445f613  mods/cs-panel/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
-    "882c745ea6d59920a9a11d8cd6d801d592b914ff160f9c8b53b5767fc628dae9  mods/cs-panel/hooks/register.tsx"
-    "5a9a74d7bf5e64dde4ab69e6b38af8499abec22c4f988a4b6284e0a6d33032b5  mods/cs-panel/hooks/sessions.ts"
+    "aca06adb26d306f82dcf77c5a383249b78e725f2f3dc4f150d085bb23e535f0c  mods/cs-panel/hooks/register.tsx"
+    "ec14066f0a8a61e8e1703e9868035eba91c03603e885b75717867ea4166c7dd5  mods/cs-panel/hooks/sessions.ts"
     "d6f8167bf69b20deca049b49cd1b9a8dedbb138c4423140c88bced10c841f6c5  mods/cs-panel/hooks/draw.tsx"
     "d551412bb1e97c8c04f5a6d08105150e202b4ab17e367b9291ce45de6638fb54  completions/cs.bash"
     "f3e93304191339041b207e05ad008277fb1d2e62e5f29be4a36a0167072624a1  completions/_cs"
