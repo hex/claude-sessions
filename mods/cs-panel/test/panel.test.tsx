@@ -5,7 +5,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On, PaneOpenArgs } from 'claude-code'
 
 import { GOLDEN } from './golden'
-import { drawPane, type PanelView } from '../hooks/draw'
+import { drawPane, ringBack, ringOf, type PanelView } from '../hooks/draw'
 import { ASKS, COMMANDS, LOGS, PROBLEMS, REPLIES, STATUS_BODY, TOASTS } from '../hooks/register'
 import { parseList, parseReadiness, retireVerdict, rowsOf, sessionName, type Pending, type Readiness, type Row, type Session, type SessionName } from '../hooks/sessions'
 
@@ -232,6 +232,30 @@ test('a body too short for the margin keeps the selected row, its +N lines count
   expect(await lines('beta', 3)).toEqual(['o: open beta   Esc: close', '+3 above', '› beta          idle            locked'])
 })
 
+test('a drawing that moves the Button the ring was put on sends the ring back to that key, else to the selected row; one that moves nothing sends it nowhere', () => {
+  const view = (selected: string, stdout = GOLDEN, pending = new Map<SessionName, Pending>()) =>
+    ({ ...viewOf(stdout, { selected: nameOf(selected) }), rows: rowsOf(sessionsOf(stdout), undefined, pending) })
+  const put = (v: PanelView, key: string) => ({ key, at: ringOf(v).keys.indexOf(key) })
+  // The ring put on alpha@fix holds the third place, which alpha@fix's strip
+  // of three keys hands to its r.
+  expect(ringOf(view('alpha'))).toEqual({ keys: ['act:mail', 'row:alpha', 'row:alpha@fix', 'row:alpha@stale', 'row:beta'], selected: 'row:alpha' })
+  expect(ringOf(view('alpha@fix')).keys.slice(0, 3)).toEqual(['act:open', 'act:mail', 'act:retire'])
+  expect(ringBack(put(view('alpha'), 'row:alpha@fix'), ringOf(view('alpha@fix')))).toBe('row:alpha@fix')
+  expect(ringBack(put(view('alpha@fix'), 'row:alpha@fix'), ringOf(view('alpha@fix')))).toBe(undefined)
+  // The ring on m; alpha@fix going live leaves m alone, first.
+  const live = GOLDEN.replace('alpha@fix\t0\t12', 'alpha@fix\t1\t12')
+  expect(ringBack(put(view('alpha@fix'), 'act:mail'), ringOf(view('alpha@fix', live)))).toBe('act:mail')
+  // The ring on o; opening, alpha@fix offers no key: back on its row.
+  const opening = new Map<SessionName, Pending>([[nameOf('alpha@fix'), 'opening']])
+  expect(ringBack(put(view('alpha@fix'), 'act:open'), ringOf(view('alpha@fix', GOLDEN, opening)))).toBe('row:alpha@fix')
+  // Thirty rows in twelve lines: s09 is the twelfth place under s00..s09, and
+  // selected it shifts the window to s05..s13, eleven Buttons in all.
+  const thirty = Array.from({ length: 30 }, (_, i) => `s${String(i).padStart(2, '0')}\t0\t-\t0\t0\n`).join('')
+  expect(put(view('s08', thirty), 'row:s09').at).toBe(11)
+  expect(ringOf(view('s09', thirty)).keys.length).toBe(11)
+  expect(ringBack(put(view('s08', thirty), 'row:s09'), ringOf(view('s09', thirty)))).toBe('row:s09')
+})
+
 // ── The hooks, through the engine's own `$` ──────────────────────────────
 
 const BIN = '/opt/cs/bin/cs'
@@ -352,6 +376,26 @@ test('the ring landing on a row selects it, and the strip names that row; a ring
   expect(linesOf(await pane.drawn())[0]).toBe('o: open beta   Esc: close')
   await pane.press({ key: 'row:alpha@fix' })
   expect(linesOf(await pane.drawn())[0]).toBe('o: open   m: mail   r: retire')
+})
+
+// The kit has no core behind a plugin's $.ui.focus: the mod's ask reaches no
+// hook and is refused, and the pane logs the refusal, so the refusals count
+// the asks. The test lands the ring as the engine would, by raising the move.
+test('the pane asks to put the ring back once for a drawing that moved its Button, and not again once it landed', async ($, on) => {
+  const { w, clock } = world(on)
+  const pane = await openPane($)
+  await clock.settle()
+  const asks = () => w.logs.filter(line => line === LOGS.failed('no implementation for ui.focus')).length
+  const move = (element: string, origin: { kind: 'person' } | { kind: 'plugin'; name: string }) =>
+    $.ui.focus({ component: 'Pane', requestId: 'cs-panel', plugin: 'cs-panel', element, origin })
+  await move('row:alpha@fix', { kind: 'person' })
+  await pane.drawn()
+  await clock.settle()
+  expect(asks()).toBe(1)
+  await move('row:alpha@fix', { kind: 'plugin', name: 'cs-panel' })
+  await pane.redraw()
+  await clock.settle()
+  expect([asks(), linesOf(await pane.drawn())[0]]).toEqual([1, 'o: open   m: mail   r: retire'])
 })
 
 test('o spawns the selected idle session and toasts cs\'s own line, or why it did not open; the list is read again after', async ($, on) => {

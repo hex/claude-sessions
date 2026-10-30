@@ -133,6 +133,45 @@ function nameText(row: Row): string {
   return row.depth === 1 && row.session.feature !== undefined ? `└ ${row.session.feature.task}` : row.session.name
 }
 
+// The Buttons' keys: a strip key by its action, a row by its session.
+const actKey = (action: Action) => `act:${action}`
+const rowKey = (name: SessionName) => `row:${name}`
+
+// What a view draws, worked out once for drawPane and ringOf: the rows, the
+// selected one (a name no longer listed falls back to the first), the strip,
+// the notice in place of rows, and the window of rows the room left takes.
+function layoutOf(v: PanelView) {
+  const rows = v.rows ?? []
+  const at = Math.max(0, rows.findIndex(r => r.session.name === v.selected))
+  const selected = rows[at]
+  const strip = stripFor(selected, v.columns, v.hasKeys)
+  const notice = v.rows === undefined ? WORDS.reading : rows.length === 0 ? WORDS.none : undefined
+  const chrome = (strip.stacked ? strip.keys.length : 1) + (v.problem === undefined ? 0 : 1) + (notice === undefined ? 0 : 1)
+  return { rows, selected, strip, notice, ...windowOf(rows.length, at, Math.max(1, v.bodyRows - chrome)) }
+}
+
+// The keys of the Buttons drawPane draws for a view, in the order the focus
+// ring walks them (the strip's, then the window's rows), and the selected
+// row's key, undefined with no rows.
+export function ringOf(v: PanelView): { keys: string[]; selected: string | undefined } {
+  const { rows, selected, strip, from, to } = layoutOf(v)
+  return {
+    keys: [...strip.keys.map(k => actKey(k.action)), ...rows.slice(from, to).map(r => rowKey(r.session.name))],
+    selected: selected === undefined ? undefined : rowKey(selected.session.name),
+  }
+}
+
+// Where the focus ring goes back to after a drawing, or undefined while its
+// place still holds the Button it was put on. The terminal keeps the ring as
+// a place among the Buttons, not a key, so a drawing that moves that Button
+// (a strip of another length, a shifted window, a row added above) hands the
+// place to another, or to none past the last. Back on the same key while it
+// is drawn, else on the selected row.
+export function ringBack(ring: { key: string; at: number }, next: { keys: readonly string[]; selected: string | undefined }): string | undefined {
+  if (next.keys[ring.at] === ring.key) return undefined
+  return next.keys.includes(ring.key) ? ring.key : next.selected
+}
+
 // The pane body, top to bottom: the strip (first, so a long list never pushes
 // the keys off the pane), the problem line, `+N above`, the rows, `+N below`.
 // Each row is one plain Button keyed `row:<name>` whose children are the
@@ -142,20 +181,14 @@ function nameText(row: Row): string {
 // opened with focus starts the ring there and the strip's keys have a target.
 export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['resolve']>, on: Handlers): RenderElement {
   const { Box, Text, Button } = el
-  const rows = v.rows ?? []
-  const at = Math.max(0, rows.findIndex(r => r.session.name === v.selected))
-  const selected = rows[at]
-  const strip = stripFor(selected, v.columns, v.hasKeys)
+  const { rows, selected, strip, notice, from, to, above, below } = layoutOf(v)
   const cols = columnsFor(v.columns)
   const nameCells = Math.max(1, v.columns - MARK_CELLS - cols.reduce((sum, c) => sum + GAP + c.cells, 0))
-  const notice = v.rows === undefined ? WORDS.reading : rows.length === 0 ? WORDS.none : undefined
-  const chrome = (strip.stacked ? strip.keys.length : 1) + (v.problem === undefined ? 0 : 1) + (notice === undefined ? 0 : 1)
-  const { from, to, above, below } = windowOf(rows.length, at, Math.max(1, v.bodyRows - chrome))
   return (
     <Box flexDirection="column">
       <Box flexDirection={strip.stacked ? 'column' : 'row'} columnGap={KEY_GAP}>
         {strip.keys.map(k => (
-          <Button key={`act:${k.action}`} plain hotkey={ACTIONS[k.action].hotkey} label={k.label}
+          <Button key={actKey(k.action)} plain hotkey={ACTIONS[k.action].hotkey} label={k.label}
             onPress={() => { if (selected !== undefined) on.act(k.action, selected.session.name) }} />
         ))}
         {strip.hint !== undefined && <Text dimColor>{strip.hint}</Text>}
@@ -164,7 +197,7 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
       {notice !== undefined && <Text dimColor wrap="truncate-end">{notice}</Text>}
       {above && <Text dimColor>{WORDS.above(from)}</Text>}
       {rows.slice(from, to).map(r => (
-        <Button key={`row:${r.session.name}`} plain label={r.session.name} {...(r === selected ? { autoFocus: true } : {})}
+        <Button key={rowKey(r.session.name)} plain label={r.session.name} {...(r === selected ? { autoFocus: true } : {})}
           onPress={() => on.select(r.session.name)}>
           {r === selected ? '› ' : '  '}
           <Text weight={r.isSelf ? 'bold' : undefined}>{fit(nameText(r), nameCells)}</Text>

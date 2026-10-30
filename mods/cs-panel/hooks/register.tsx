@@ -4,7 +4,7 @@
 // ABOUTME: cs-panel mod: /cs-panel opens a pane listing every cs session from `cs -list --porcelain`, read again while the pane is open and no turn runs.
 // ABOUTME: The only effects of the mod: its hooks, its module state, the cs runs, and the tables of every line it hands the engine.
 import type { EngineInterface, On } from 'claude-code'
-import { drawPane, type Handlers } from './draw'
+import { drawPane, ringBack, ringOf, type Handlers, type PanelView } from './draw'
 import { parseList, parseReadiness, retireVerdict, rowsOf, sessionName, type Action, type Pending, type RetireRoute, type Session, type SessionName } from './sessions'
 
 declare const h: any
@@ -103,11 +103,16 @@ let reading = false
 let readAgain = false
 let poll: Poll = { kind: 'off' }
 let registered = false
+// Where the focus ring is, for ringBack: `drawn` is the last drawing's keys in
+// ring order; `ring` the key the ring was last put on and its place then,
+// undefined while the pane does not hold the keys.
+let drawn: readonly string[] = []
+let ring: { key: string; at: number } | undefined
 
 export function register(on: On) {
   launch = undefined; sessions = undefined; answered = undefined; problem = undefined
   selected = undefined; pending = new Map(); working = false; reading = false; readAgain = false
-  poll = { kind: 'off' }; registered = false
+  poll = { kind: 'off' }; registered = false; drawn = []; ring = undefined
 
   // The command, once per load. Nothing opens here: the panel opens only when
   // asked.
@@ -141,33 +146,45 @@ export function register(on: On) {
   // re-renders an open pane the moment it reloads the module): the poll is
   // armed from a timer, since an invalidate inside a render loops, and
   // startPoll asks $.ui.panes() first so a stray render after a close arms
-  // nothing.
+  // nothing. A drawing that moves the Button the ring is on puts the ring back
+  // on it, or on the selected row once it is gone, from a timer too: asked
+  // from inside the render it would land on the drawing being replaced.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     if (poll.kind === 'off') $.clock.after(0, () => inBackground($, startPoll($)))
     launch ??= await readLaunch($)
     const rows = sessions && rowsOf(sessions, launch?.self, pending)
-    return drawPane({ rows, selected, problem, columns: e.props.bodyColumns, bodyRows: e.props.scroll.bodyRows, hasKeys: e.props.isFocused },
-      $.ui.resolve(e), handlers($))
+    const view: PanelView = { rows, selected, problem, columns: e.props.bodyColumns, bodyRows: e.props.scroll.bodyRows, hasKeys: e.props.isFocused }
+    const next = ringOf(view)
+    drawn = next.keys
+    if (!view.hasKeys) ring = undefined
+    const back = ring && ringBack(ring, next)
+    if (back !== undefined) $.clock.after(0, () => inBackground($, refocus($, back)))
+    return drawPane(view, $.ui.resolve(e), handlers($))
   })
 
   // Selection follows the focus ring: Tab or an arrow landing on a row selects
   // it, so the strip names that row before any key is pressed. The ring moves
-  // first; a ring moved to a strip key keeps the selection.
+  // first; a ring moved to a strip key keeps the selection. Every move, the
+  // mod's own included, records where the ring now is; one put back on the
+  // selected row selects nothing new, so it draws nothing more.
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
     const moved = await next(e)
-    if (moved.deny === undefined && e.element?.startsWith('row:')) {
+    if (moved.deny !== undefined) return moved
+    ring = e.element === undefined ? undefined : { key: e.element, at: drawn.indexOf(e.element) }
+    if (e.element?.startsWith('row:')) {
       const name = sessionName(e.element.slice('row:'.length))
       if (name !== undefined) select($, name)
     }
     return moved
   })
 
-  // Closing the pane (Esc, its mark, a plugin) stops the poll; a close another
-  // hook refused leaves it running. Rows stay, so a reopen draws the last
-  // answer at once and the first read replaces it.
+  // Closing the pane (Esc, its mark, a plugin) stops the poll and forgets the
+  // ring, which closes with it; a close another hook refused leaves both. Rows
+  // stay, so a reopen draws the last answer at once and the first read
+  // replaces it.
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const closed = await next(e)
-    if (closed.deny === undefined) stopPoll()
+    if (closed.deny === undefined) { stopPoll(); ring = undefined }
     return closed
   })
 
@@ -245,6 +262,13 @@ async function refresh($: EngineInterface): Promise<void> {
   } finally {
     reading = false
   }
+}
+
+// Puts the ring back on `key`. A refusal needs nothing more: the pane gave up
+// the keys and the ring went with them, or a later drawing no longer holds the
+// key and puts the ring back itself.
+async function refocus($: EngineInterface, key: string): Promise<void> {
+  await $.ui.focus({ requestId: PANE, key })
 }
 
 function select($: EngineInterface, name: SessionName): void {
