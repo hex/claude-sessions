@@ -1440,7 +1440,7 @@ CS_PAYLOAD_SHA256=(
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
     "aca06adb26d306f82dcf77c5a383249b78e725f2f3dc4f150d085bb23e535f0c  mods/cs-panel/hooks/register.tsx"
     "ec14066f0a8a61e8e1703e9868035eba91c03603e885b75717867ea4166c7dd5  mods/cs-panel/hooks/sessions.ts"
-    "d6f8167bf69b20deca049b49cd1b9a8dedbb138c4423140c88bced10c841f6c5  mods/cs-panel/hooks/draw.tsx"
+    "da8f5d9227a0f4b61684665801bddd9a934d9e4af9b235d3c464be3a1830d287  mods/cs-panel/hooks/draw.tsx"
     "d551412bb1e97c8c04f5a6d08105150e202b4ab17e367b9291ce45de6638fb54  completions/cs.bash"
     "f3e93304191339041b207e05ad008277fb1d2e62e5f29be4a36a0167072624a1  completions/_cs"
 )

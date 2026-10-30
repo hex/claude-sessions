@@ -89,21 +89,24 @@ function fit(text: string, cells: number): string {
   return text.length > cells ? `${text.slice(0, Math.max(0, cells - 1))}…` : text.padEnd(cells)
 }
 
-// The rows a body of `room` lines draws of `count`: all when they fit, else a
-// window that keeps the selected row `at` inside with one row of margin each
-// side where the room allows, so the focus ring always has a drawn row to Tab
-// onto and the window follows it. The `+N above` / `+N below` lines it needs
-// are inside `room`.
-export function windowOf(count: number, at: number, room: number): { from: number; to: number } {
-  if (count <= room) return { from: 0, to: count }
-  if (room < 3) return { from: at, to: at + 1 }
+// The rows a body of `room` lines (at least one) draws of `count`, and which
+// of the `+N above` / `+N below` lines go with them, all inside `room`: every
+// row when they fit, else a window that keeps the selected row `at` inside
+// with one row of margin each side where the room allows, so the focus ring
+// always has a drawn row to Tab onto and the window follows it. One line draws
+// the selected row alone; two, it and the count of the rows below it, or of
+// those above for the last row.
+export function windowOf(count: number, at: number, room: number): { from: number; to: number; above: boolean; below: boolean } {
+  if (count <= room) return { from: 0, to: count, above: false, below: false }
+  if (room === 1) return { from: at, to: at + 1, above: false, below: false }
+  if (room === 2) return { from: at, to: at + 1, above: at === count - 1, below: at < count - 1 }
   // Rows drawn beside one count line: the window touching either end.
   const edge = room - 1
-  if (at <= edge - 2) return { from: 0, to: edge }
-  if (at >= count - edge + 1) return { from: count - edge, to: count }
+  if (at <= edge - 2) return { from: 0, to: edge, above: false, below: true }
+  if (at >= count - edge + 1) return { from: count - edge, to: count, above: true, below: false }
   const shown = room - 2
   const from = at - Math.floor((shown - 1) / 2)
-  return { from, to: from + shown }
+  return { from, to: from + shown, above: true, below: true }
 }
 
 // The strip for the selected row, fitted widest first: `o: open beta   m: mail
@@ -147,7 +150,7 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
   const nameCells = Math.max(1, v.columns - MARK_CELLS - cols.reduce((sum, c) => sum + GAP + c.cells, 0))
   const notice = v.rows === undefined ? WORDS.reading : rows.length === 0 ? WORDS.none : undefined
   const chrome = (strip.stacked ? strip.keys.length : 1) + (v.problem === undefined ? 0 : 1) + (notice === undefined ? 0 : 1)
-  const { from, to } = windowOf(rows.length, at, Math.max(1, v.bodyRows - chrome))
+  const { from, to, above, below } = windowOf(rows.length, at, Math.max(1, v.bodyRows - chrome))
   return (
     <Box flexDirection="column">
       <Box flexDirection={strip.stacked ? 'column' : 'row'} columnGap={KEY_GAP}>
@@ -159,7 +162,7 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
       </Box>
       {v.problem !== undefined && <Text dimColor wrap="truncate-end">{v.problem}</Text>}
       {notice !== undefined && <Text dimColor wrap="truncate-end">{notice}</Text>}
-      {from > 0 && <Text dimColor>{WORDS.above(from)}</Text>}
+      {above && <Text dimColor>{WORDS.above(from)}</Text>}
       {rows.slice(from, to).map(r => (
         <Button key={`row:${r.session.name}`} plain label={r.session.name} {...(r === selected ? { autoFocus: true } : {})}
           onPress={() => on.select(r.session.name)}>
@@ -168,7 +171,7 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
           <Text dimColor>{cols.map(c => `${' '.repeat(GAP)}${fit(c.text(r), c.cells)}`).join('')}</Text>
         </Button>
       ))}
-      {to < rows.length && <Text dimColor>{WORDS.below(rows.length - to)}</Text>}
+      {below && <Text dimColor>{WORDS.below(rows.length - to)}</Text>}
     </Box>
   )
 }

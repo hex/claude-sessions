@@ -219,6 +219,19 @@ test('a list taller than the body draws a window that keeps the selected row ins
   expect((await draw(viewOf(thirty, { columns: 40, bodyRows: 10 }))).length).toBe(10)
 })
 
+test('a body too short for the margin keeps the selected row, its +N lines counted in the room: none in one line, one in two', async ($, on) => {
+  const draw = drawer($, on)
+  const lines = async (selected: string, bodyRows: number, problem?: string) =>
+    (await draw(viewOf(GOLDEN, { selected: nameOf(selected), bodyRows, problem }))).map(line => line.trimEnd())
+  const fix = '› └ fix         idle      12%'
+  expect(await lines('alpha@fix', 2)).toEqual(['o: open   m: mail   r: retire', fix])
+  expect(await lines('alpha@fix', 3)).toEqual(['o: open   m: mail   r: retire', fix, '+2 below'])
+  expect(await lines('alpha@fix', 4)).toEqual(['o: open   m: mail   r: retire', '+1 above', fix, '+2 below'])
+  expect(await lines('alpha@fix', 3, 'cs -list --porcelain exited 1: boom')).toEqual(['o: open   m: mail   r: retire', 'cs -list --porcelain exited 1: boom', fix])
+  expect(await lines('alpha', 3)).toEqual(['m: mail alpha   Esc: close', '› alpha         live      41%   2 mail   1 feat', '+3 below'])
+  expect(await lines('beta', 3)).toEqual(['o: open beta   Esc: close', '+3 above', '› beta          idle            locked'])
+})
+
 // ── The hooks, through the engine's own `$` ──────────────────────────────
 
 const BIN = '/opt/cs/bin/cs'
