@@ -6,7 +6,7 @@ import type { On, PaneOpenArgs } from 'claude-code'
 
 import { GOLDEN } from './golden'
 import { drawPane, type PanelView } from '../hooks/draw'
-import { REPLIES, STATUS_BODY } from '../hooks/register'
+import { ASKS, COMMANDS, LOGS, PROBLEMS, REPLIES, STATUS_BODY, TOASTS } from '../hooks/register'
 import { parseList, parseReadiness, retireVerdict, rowsOf, sessionName, type Pending, type Readiness, type Row, type Session, type SessionName } from '../hooks/sessions'
 
 function nameOf(text: string): SessionName {
@@ -457,4 +457,35 @@ test('a read asked for while one runs runs once more after it, never twice, so t
   expect(lists()).toBe(2)
   const pane = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
   expect(linesOf(await pane.drawn()).map(line => line.trimEnd())).toEqual(['o: open beta   Esc: close', '› beta          idle            locked'])
+})
+
+test('the session start registers /cs-panel once, to run mid-turn too, and opens nothing', async ($, on) => {
+  const { w } = world(on)
+  const specs: unknown[] = []
+  on('command.register', ($, e) => { specs.push({ ...e }); return { value: { command: e.name } } })
+  on('session.start', ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/sessions/alpha', surface: 'terminal', isInteractive: true })
+  await $.session.start({ cwd: '/sessions/alpha', surface: 'terminal', isInteractive: true })
+  expect(specs).toEqual([{ name: 'cs-panel', description: 'The cs sessions: live or idle, context, unread mail, features; open, mail or retire one.', immediate: true }])
+  expect(w.opens).toEqual([])
+})
+
+test('the pane draws on every surface', async ($, on) => {
+  world(on)
+  expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const pane = await $.ui.mount({ plugin: 'cs-panel', surface, component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
+    expect((await pane.find({ key: 'row:alpha@fix' }))?.props.label, surface).toBe('alpha@fix')
+    expect((await pane.find({ key: 'act:mail' }))?.props.hotkey, surface).toBe('m')
+    await pane.unmount()
+  }
+})
+
+test('no line the mod hands the engine names the plugin first: the engine prefixes it', () => {
+  const lines = [
+    COMMANDS['cs-panel'].description, ...Object.values(REPLIES).map(r => typeof r === 'string' ? r : r('x')),
+    ...Object.values(TOASTS).map(t => t('x', 'y')), ...Object.values(PROBLEMS).map(p => p('x')), ...Object.values(LOGS).map(l => l('x')), ASKS.mail('x').question,
+  ]
+  expect(lines.length).toBe(17)
+  expect(lines.filter(line => line.toLowerCase().startsWith('cs-panel'))).toEqual([])
 })
