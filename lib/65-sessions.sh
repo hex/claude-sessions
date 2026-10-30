@@ -210,11 +210,49 @@ run_tui() {
     exit 0
 }
 
+# One record per unarchived session cs can address, for tools (the cs-panel
+# mod), as docs/commands.md describes the five fields:
+#   name<TAB>live<TAB>context<TAB>unread<TAB>features
+# Every fact comes from the function the human surfaces call, so the panel and
+# cs -live / cs -msg / cs <base> -features cannot disagree. A name cs's own
+# validators refuse is skipped: cs cannot address it, and those validators
+# admit no tab, newline or byte outside printable ASCII. Unknown is '-'.
+# Reads the clock once.
+_list_porcelain() {  # (no arguments)
+    [ -d "$SESSIONS_ROOT" ] || return 0
+    local now dir name live context unread features
+    now="$(date +%s)"
+    while IFS= read -r -d '' dir; do
+        is_session_dir "$dir" || continue
+        _session_is_archived "$dir" && continue
+        name="${dir##*/}"
+        case "$name" in
+            *@*)
+                ( cs_split_worktree_name "$name" ) >/dev/null 2>&1 || continue
+                features=0
+                ;;
+            *)
+                ( validate_session_name "$name" ) >/dev/null 2>&1 || continue
+                features="$(_feature_count "$name")"
+                ;;
+        esac
+        live=0
+        session_display_live "$dir/.cs" "$now" && live=1
+        context="$(_resume_context_pct "$dir")"
+        unread="$(_mail_unread_count "$dir/.cs")"
+        printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$live" "${context:--}" "$unread" "$features"
+    done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | LC_ALL=C sort -z)
+}
+
 # List all sessions
 list_sessions() {
-    local tag_filter="" archived_only=""
+    local tag_filter="" archived_only="" porcelain=""
     while [ $# -gt 0 ]; do
         case "$1" in
+            --porcelain)
+                porcelain="true"
+                shift
+                ;;
             --tag)
                 shift
                 [ -n "${1:-}" ] || error "Usage: cs -list [--archived] [--tag <tag>]"
@@ -231,6 +269,15 @@ list_sessions() {
             *) error "Unknown list option: $1. Usage: cs -list [--archived] [--tag <tag>]" ;;
         esac
     done
+
+    if [ -n "$porcelain" ]; then
+        _list_porcelain
+        return 0
+    fi
+
+    if command -v cs-tui >/dev/null 2>&1; then
+        info "Hint: run bare 'cs' for the interactive session manager"
+    fi
 
     if [ ! -d "$SESSIONS_ROOT" ]; then
         info "No sessions found"
