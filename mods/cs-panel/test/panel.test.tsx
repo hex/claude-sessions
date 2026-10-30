@@ -1,11 +1,12 @@
 // ABOUTME: Engine test-kit tests for the cs-panel mod: the porcelain parser, the rows and their keys, the fitted drawing, and the hooks driven through the real engine `$`.
 // ABOUTME: Expected values come from porcelain.md, the golden file (test/golden.ts) and the design's rules, never from the code under test.
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { On, PaneOpenArgs } from 'claude-code'
 
 import { GOLDEN } from './golden'
 import { drawPane, type PanelView } from '../hooks/draw'
+import { REPLIES } from '../hooks/register'
 import { parseList, parseReadiness, retireVerdict, rowsOf, sessionName, type Pending, type Readiness, type Row, type Session, type SessionName } from '../hooks/sessions'
 
 function nameOf(text: string): SessionName {
@@ -212,4 +213,67 @@ test('a list taller than the body draws a window that keeps the selected row ins
   expect(await window('s15')).toEqual(['+12', 's12', 's13', 's14', 's15', 's16', 's17', 's18', '+11'])
   expect(await window('s25')).toEqual(['+22', 's22', 's23', 's24', 's25', 's26', 's27', 's28', 's29'])
   expect((await draw(viewOf(thirty, { columns: 40, bodyRows: 10 }))).length).toBe(10)
+})
+
+// ── The hooks, through the engine's own `$` ──────────────────────────────
+
+const BIN = '/opt/cs/bin/cs'
+const PANE_PROPS = { title: 'Sessions', isFocused: true, bodyColumns: 48, placement: 'inline', scroll: { offset: 0, bodyRows: 12 }, view: {} } as const
+const COMMAND = { command: 'cs-panel', args: '', origin: { kind: 'composer' }, presentation: { columns: 80, isFullscreen: false } } as const
+
+type Answer = { exitCode?: number; stdout?: string; stderr?: string }
+
+// What sits beneath the mod: the engine's answers to each call it makes, and
+// a record of what it asked. `answer` gives cs's reply to an argv; a pane is
+// open from its ui.open until a ui.close.
+function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: readonly string[]) => Answer; sessionId?: string; state?: string } = {}) {
+  const w = { runs: [] as { argv: string[]; stdin: string | undefined }[], toasts: [] as string[], opens: [] as PaneOpenArgs[], finishes: [] as string[], isOpen: false, invalidations: 0 }
+  mock.env(on, opts.env ?? { CS_BIN: BIN })
+  const clock = mock.clock(on)
+  on('process.run', ($, e) => {
+    w.runs.push({ argv: [...e.argv], stdin: e.init?.stdin })
+    const a: Answer = (opts.answer ?? (argv => argv[1] === '-list' ? { stdout: GOLDEN } : {}))(e.argv)
+    return { value: { exitCode: a.exitCode ?? 0, stdout: a.stdout ?? '', stderr: a.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('ui.toast', ($, e) => { w.toasts.push(e.text); return { value: undefined } })
+  on('ui.open', ($, e) => { w.opens.push({ ...e }); w.isOpen = true; return { value: { isPlaced: true } } })
+  on('ui.panes', () => ({ value: w.isOpen ? [{ id: 'cs-panel', title: 'Sessions', isShown: true, isFocused: true, isPlaced: true }] : [] }))
+  on('ui.close', () => { w.isOpen = false; return { value: undefined } })
+  on('ui.focus', () => ({}))
+  on('ui.invalidate', ($, e, next) => { w.invalidations++; return next(e) })
+  on('command.run', { command: 'finish' }, ($, e) => { w.finishes.push(e.args); return { text: '' } })
+  on('session.cwd', () => ({ value: '/sessions/alpha' }))
+  on('session.id', () => ({ value: opts.sessionId ?? 'lead-id' }))
+  on('fs.exists', () => ({ value: false }))
+  on('fs.read', ($, e) => e.path === '/sessions/alpha/.cs/local/state' && opts.state !== undefined ? { value: opts.state } : { deny: `ENOENT: ${e.path}` })
+  return { w, clock }
+}
+
+// Strips what a drawing carries per mount (press handles, the drawing plugin)
+// so two drawings compare by what they show.
+function shown(tree: unknown): unknown {
+  if (Array.isArray(tree)) return tree.map(shown)
+  if (tree === null || typeof tree !== 'object') return tree
+  return Object.fromEntries(Object.entries(tree).filter(([k]) => k !== 'press' && k !== 'part').map(([k, v]) => [k, shown(v)]))
+}
+
+test('/cs-panel without CS_BIN says cs did not launch this conversation and opens nothing', async ($, on) => {
+  const { w } = world(on, { env: {} })
+  expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.noBin })
+  expect(w.opens).toEqual([])
+  expect(w.runs).toEqual([])
+})
+
+test('/cs-panel opens the pane asking for the keys, reads cs at once, and draws what drawPane draws for the same view', async ($, on) => {
+  const { w } = world(on)
+  let fixture: PanelView | undefined
+  on('ui.render', { component: 'Pane', requestId: 'fixture' }, ($, e) => drawPane(fixture ?? viewOf(GOLDEN), $.ui.resolve(e), NOOP))
+  expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
+  expect(w.opens).toEqual([{ id: 'cs-panel', title: 'Sessions', focus: true, closeOnEscape: true, columns: 56 }])
+  expect(w.runs).toEqual([{ argv: [BIN, '-list', '--porcelain'], stdin: undefined }])
+  const pane = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
+  fixture = { ...viewOf(GOLDEN), columns: 48, bodyRows: 12, hasKeys: true }
+  const lab = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'fixture', props: PANE_PROPS })
+  expect(shown(await pane.drawn())).toEqual(shown(await lab.drawn()))
+  expect(linesOf(await pane.drawn())[1]?.trimEnd()).toBe('› alpha         live      41%   2 mail   1 feat')
 })
