@@ -143,6 +143,30 @@ test_list_porcelain_matches_the_golden_file() {
     assert_porcelain_matches_golden "$CS_BIN" || return 1
 }
 
+# A session with no lock is live while its statusline heartbeat (context-pct)
+# is at most 900 s old, as cs -live counts it. Going idle keeps the reading.
+test_list_porcelain_counts_a_heartbeat_as_live() {
+    local dir when stamp
+    dir=$(create_test_session solo)
+    printf '30\n' > "$dir/.cs/local/context-pct"
+    assert_eq $'solo\t1\t30\t0\t0' "$("$CS_BIN" -list --porcelain)" "a heartbeat written now is live" || return 1
+    when=$(( $(date +%s) - 901 ))
+    stamp=$(date -r "$when" +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$when" +%Y%m%d%H%M.%S)
+    touch -t "$stamp" "$dir/.cs/local/context-pct"
+    assert_eq $'solo\t0\t30\t0\t0' "$("$CS_BIN" -list --porcelain)" "a heartbeat 901 s old is idle" || return 1
+}
+
+# The golden case under stock macOS bash 3.2, with /bin first on PATH so every
+# bash cs starts is that one too. Skips where no bash lacks associative arrays.
+test_list_porcelain_runs_under_old_bash() {
+    local old_bash=/bin/bash
+    if [ ! -x "$old_bash" ] || "$old_bash" -c 'declare -A _x' 2>/dev/null; then
+        echo "    SKIP: no bash lacking associative arrays available"
+        return 77
+    fi
+    assert_porcelain_matches_golden env "PATH=/bin:$PATH" "$old_bash" "$CS_BIN" || return 1
+}
+
 # With cs-tui on PATH and every session archived, plain -list prints the hint,
 # `No sessions found` and the archived trailer; --porcelain prints none of
 # them, so an empty stdout means no sessions.
@@ -199,5 +223,7 @@ run_test test_tui_launch_exports_the_cs_binary_path
 run_test test_list_porcelain_matches_the_golden_file
 run_test test_list_porcelain_prints_only_records
 run_test test_list_porcelain_refuses_another_option
+run_test test_list_porcelain_counts_a_heartbeat_as_live
+run_test test_list_porcelain_runs_under_old_bash
 
 report_results
