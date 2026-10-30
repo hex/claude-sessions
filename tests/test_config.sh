@@ -71,6 +71,8 @@ printf '%s|%s|%s|%s\n' "${CS_STATUSLINE_LAYOUT-unset}" "$_CS_CFG_SOURCE" "$_CS_C
 EOF
     out=$(bash "$probe" "$HOOKS/cs-config.sh" 2>&1) || rc=$?
     assert_eq "0|unset|default||0" "$rc|$out" "no file: exit 0, nothing filled, nothing said" || return 1
+    out=$(env -u HOME -u XDG_CONFIG_HOME bash "$probe" "$HOOKS/cs-config.sh" 2>&1) || rc=$?
+    assert_eq "0|unset|default||0" "$rc|$out" "no HOME and no XDG_CONFIG_HOME: no machine file, no exit" || return 1
     mkdir -p "$MCFG"
     out=$(bash "$probe" "$HOOKS/cs-config.sh" 2>&1) || rc=$?
     assert_eq "0|unset|default||0" "$rc|$out" "a directory at the path reads as no file" || return 1

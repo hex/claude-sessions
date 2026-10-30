@@ -10,9 +10,13 @@ _config_label() {  # file, [session name]
         _CONFIG_LABEL="$2/.cs/local/config"
         return 0
     fi
+    if [ -z "$1" ]; then
+        _CONFIG_LABEL="this machine's settings file (neither XDG_CONFIG_HOME nor HOME is set)"
+        return 0
+    fi
     # shellcheck disable=SC2088  # a ~ for the person to read, never expanded
     case "$1" in
-        "$HOME"/*) _CONFIG_LABEL="~/${1#"$HOME"/}" ;;
+        "${HOME:-/nonexistent}"/*) _CONFIG_LABEL="~/${1#"${HOME:-}"/}" ;;
         *) _CONFIG_LABEL=$1 ;;
     esac
 }
@@ -183,6 +187,9 @@ cmd_config() {  # session name or "", action, args...
         file=$_CS_CONFIG_MACHINE
     fi
     _config_label "$file" "$name"
+    case "${1:-}" in
+        set|unset) [ -n "$file" ] || error "$_CONFIG_LABEL: there is no file to write" ;;
+    esac
     action="${1:-}"
     [ $# -eq 0 ] || shift
     case "$action" in

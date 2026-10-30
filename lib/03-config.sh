@@ -351,7 +351,14 @@ _cs_config_see() {  # key
 # _CS_CONFIG_IGNORED.
 cs_config_load() {  # [session_dir]
     local rec key arm src have from cand
-    _CS_CONFIG_MACHINE="${XDG_CONFIG_HOME:-$HOME/.config}/cs/config"
+    # No XDG_CONFIG_HOME and no HOME (a hook Claude Code runs with a bare
+    # environment) names no machine file at all, rather than /.config.
+    _CS_CONFIG_MACHINE=""
+    if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+        _CS_CONFIG_MACHINE="$XDG_CONFIG_HOME/cs/config"
+    elif [ -n "${HOME:-}" ]; then
+        _CS_CONFIG_MACHINE="$HOME/.config/cs/config"
+    fi
     _CS_CONFIG_SESSION=""
     [ -z "${1:-}" ] || _CS_CONFIG_SESSION="$1/.cs/local/config"
     _CS_CONFIG_IGNORED=""
@@ -371,7 +378,7 @@ cs_config_load() {  # [session_dir]
     # No file to read and nothing an earlier call filled: the environment
     # stands as it is, at the cost of two tests, every reader's lot on a
     # machine with no settings file.
-    if [ -z "${_CS_CFG_FILLED-}" ] && [ ! -f "$_CS_CONFIG_MACHINE" ] \
+    if [ -z "${_CS_CFG_FILLED-}" ] && { [ -z "$_CS_CONFIG_MACHINE" ] || [ ! -f "$_CS_CONFIG_MACHINE" ]; } \
         && { [ -z "$_CS_CONFIG_SESSION" ] || [ ! -f "$_CS_CONFIG_SESSION" ]; }; then
         return 0
     fi
@@ -386,7 +393,7 @@ cs_config_load() {  # [session_dir]
     if [ "$_CS_CFG_SRC_CS_TERM_THEME" = launch ]; then
         _CS_CFG_MEASURED_THEME=$CS_TERM_THEME
     fi
-    _cs_config_read "$_CS_CONFIG_MACHINE" M
+    [ -z "$_CS_CONFIG_MACHINE" ] || _cs_config_read "$_CS_CONFIG_MACHINE" M
     [ -z "$_CS_CONFIG_SESSION" ] || _cs_config_read "$_CS_CONFIG_SESSION" S
     cand="$_CS_CFG_READ_S$_CS_CFG_READ_M${_CS_CFG_SEEN-}"
     for rec in "${_CS_CONFIG_SPEC[@]}"; do
