@@ -259,6 +259,11 @@ main() {
             run_statusline_cmd "$@"
             return $?
             ;;
+        -config)
+            shift
+            cmd_config "" "$@"
+            return $?
+            ;;
         -*)
             error "Unknown command: $cmd. Run 'cs -help' for usage."
             ;;
@@ -413,6 +418,11 @@ main() {
                 run_narrative "$@"
                 return 0
                 ;;
+            -config)
+                shift
+                cmd_config "$session_name" "$@"
+                return $?
+                ;;
             -usage)
                 shift
                 export CLAUDE_SESSION_NAME="$session_name"
@@ -480,7 +490,7 @@ main() {
                 shift 2
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -usage, -tag, -features, -finish, --force, --remote, or --permission-mode."
+                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -config, -usage, -tag, -features, -finish, --force, --remote, or --permission-mode."
                 ;;
         esac
     done
