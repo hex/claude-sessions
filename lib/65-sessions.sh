@@ -271,6 +271,8 @@ list_sessions() {
     done
 
     if [ -n "$porcelain" ]; then
+        [ -z "$tag_filter" ] && [ -z "$archived_only" ] \
+            || error "cs -list --porcelain takes no other option"
         _list_porcelain
         return 0
     fi

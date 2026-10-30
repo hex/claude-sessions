@@ -162,6 +162,22 @@ No sessions found
     assert_eq "" "$(cat "$TEST_TMPDIR/err")" "nothing on stderr" || return 1
 }
 
+# --porcelain lists every unarchived session and nothing else; a filter
+# beside it is a usage error, in either order.
+test_list_porcelain_refuses_another_option() {
+    local rc args
+    create_test_session alpha >/dev/null
+    for args in "--porcelain --tag x" "--archived --porcelain"; do
+        rc=0
+        # shellcheck disable=SC2086  # args is two or three words on purpose
+        "$CS_BIN" -list $args > "$TEST_TMPDIR/out" 2> "$TEST_TMPDIR/err" || rc=$?
+        assert_eq "1" "$rc" "cs -list $args exits 1" || return 1
+        assert_eq "Error: cs -list --porcelain takes no other option" \
+            "$(sed "s/$(printf '\033')\[[0-9;]*m//g" "$TEST_TMPDIR/err")" "cs -list $args names the refusal" || return 1
+        assert_eq "" "$(cat "$TEST_TMPDIR/out")" "cs -list $args prints nothing on stdout" || return 1
+    done
+}
+
 test_tui_launch_exports_the_cs_binary_path() {
     # The picker forks cs back for its own subcommands, so cs must hand it its
     # own path. The launch itself needs a tty and a resolved cs-tui, neither of
@@ -182,5 +198,6 @@ run_test test_list_runs_under_old_bash
 run_test test_tui_launch_exports_the_cs_binary_path
 run_test test_list_porcelain_matches_the_golden_file
 run_test test_list_porcelain_prints_only_records
+run_test test_list_porcelain_refuses_another_option
 
 report_results
