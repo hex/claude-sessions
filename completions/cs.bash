@@ -231,7 +231,7 @@ _cs_completions() {
 
     # Context: after -list/-ls, offer the --tag filter
     if $in_list; then
-        COMPREPLY=($(compgen -W "--tag --archived" -- "$cur"))
+        COMPREPLY=($(compgen -W "--tag --archived --porcelain" -- "$cur"))
         return
     fi
 

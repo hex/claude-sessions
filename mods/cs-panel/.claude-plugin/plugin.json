@@ -1,0 +1,6 @@
+{
+  "name": "cs-panel",
+  "version": "0.1.0",
+  "description": "/cs-panel lists every cs session (live or idle, context, unread mail, features) in a pane, and opens, mails or retires the one selected.",
+  "author": { "name": "cs" }
+}

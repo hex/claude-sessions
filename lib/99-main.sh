@@ -99,9 +99,6 @@ main() {
             return 0
             ;;
         -list|-ls)
-            if command -v cs-tui >/dev/null 2>&1; then
-                info "Hint: run bare 'cs' for the interactive session manager"
-            fi
             shift
             list_sessions "$@"
             return 0

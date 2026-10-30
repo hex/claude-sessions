@@ -256,6 +256,11 @@ CS_MOD_FILES=(
     cs-mermaid/hooks/register.tsx
     cs-mermaid/hooks/text.ts
     cs-mermaid/skills/show-me/SKILL.md
+    cs-panel/.claude-plugin/plugin.json
+    cs-panel/hooks/hooks.json
+    cs-panel/hooks/register.tsx
+    cs-panel/hooks/sessions.ts
+    cs-panel/hooks/draw.tsx
 )
 
 # The cs tips file as install.sh names it in settings.json's
@@ -1386,7 +1391,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "8cc86189b19cf6eeeec4ef6f27cd40d8e4ad1e7eb0b7c9e7679ce489a3c551a0  bin/cs"
+    "5b29d9ecf5d4edcb9822d01ff131321b5ec9613f372c6e15d6e41d77db45d43d  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "68be4cb037652baf60d5dac8c7088eeb606bfa338a92c8d81395c281f210e86b  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
@@ -1431,8 +1436,13 @@ CS_PAYLOAD_SHA256=(
     "fba40610714fd7201f496d3e1d7a7a6553b06c0da937710f6da3fcf8f4409054  mods/cs-mermaid/hooks/register.tsx"
     "c9c48de571777b2e2e948770b4e43fce1f4f84f86547496772a5021fc3380757  mods/cs-mermaid/hooks/text.ts"
     "c591644117d9a870c4631ecb40c7fc47f7cbab7b74849feb07b318784ba85367  mods/cs-mermaid/skills/show-me/SKILL.md"
-    "d9adfb82412597f096190d1dfcd36d9ae67adbc5a230c9baa5d8485b010f8e78  completions/cs.bash"
-    "fa1619b5039452a62dafd4e373546dd2606db4e61a76f6c13af8272ec5be7d5e  completions/_cs"
+    "917c2c8c157a579ea63ada16d76d248927e850daef9dc309b10a3916d445f613  mods/cs-panel/.claude-plugin/plugin.json"
+    "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
+    "06f22e3221ca04d9a9394b250a84e1721ef99268f144fd2ef56dde72263fd8bc  mods/cs-panel/hooks/register.tsx"
+    "ec14066f0a8a61e8e1703e9868035eba91c03603e885b75717867ea4166c7dd5  mods/cs-panel/hooks/sessions.ts"
+    "1807d4644b597c565613712c32c25d4e765e2bfa0a85dd080f370e016fa53d03  mods/cs-panel/hooks/draw.tsx"
+    "d551412bb1e97c8c04f5a6d08105150e202b4ab17e367b9291ce45de6638fb54  completions/cs.bash"
+    "f3e93304191339041b207e05ad008277fb1d2e62e5f29be4a36a0167072624a1  completions/_cs"
 )
 
 # Everything that lands in HOOKS_DIR, for the copy and cleanup loops. The

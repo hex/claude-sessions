@@ -631,6 +631,21 @@ worktree $d_real
     done
 }
 
+# How many verified features a base has. The glob runs first, so a base with
+# no <base>@* directory costs no git; one with any pays _worktree_features'
+# git calls.
+_feature_count() {  # base_name
+    local d n=0 task
+    for d in "$SESSIONS_ROOT/$1"@*; do
+        [ -d "$d" ] || continue
+        while IFS= read -r task; do
+            [ -n "$task" ] && n=$((n + 1))
+        done < <(_worktree_features "$1")
+        break
+    done
+    printf '%s' "$n"
+}
+
 # Print one tab-separated readiness record for a base's feature worktree:
 #   task branch ahead merged ff wt_dirty untracked base_dirty lock state
 # Every fact is computed by the function the real gate calls, so the answer can

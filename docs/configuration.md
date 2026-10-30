@@ -21,7 +21,7 @@ The installer deploys these components:
 | Hooks and wrap passes | `~/.claude/hooks/cs/`, including the memory and summary passes that `/wrap` reads. |
 | Commands | `/checkpoint` and `/wrap` in `~/.claude/commands/`. |
 | Skills | `store-secret`, `prose-hygiene`, `rotate`, `finish`, `feature`, and `write-as-me` in `~/.claude/skills/`. |
-| Mods | `cs`, `cs-update`, and `cs-mermaid` in `~/.claude/skills/`. |
+| Mods | `cs`, `cs-update`, `cs-mermaid` and `cs-panel` in `~/.claude/skills/`. |
 | Spinner tip | `~/.claude/skills/cs/tips.json`, named in `settings.json` as `spinnerTipsOverride.tipsFile`. See [band settings](#band-settings). |
 
 See [hook and mod behavior](hooks.md) and [rotate and wrap keys](#rotate-and-wrap-keys).

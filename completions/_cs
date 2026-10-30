@@ -81,6 +81,7 @@ _cs() {
     list_opts=(
         '--tag:List only sessions carrying a tag'
         '--archived:List only archived sessions'
+        '--porcelain:Print one tab-separated line per session, for tools'
     )
 
     # Update subcommands with descriptions

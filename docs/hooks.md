@@ -853,11 +853,12 @@ the conversation it meets next unjudged.
 The mods hand Claude Code every toast, `$.ui.ask` dialog, `$.ui.log` notice,
 slash-command reply and command registration from tables they export: cs and
 cs-update in `register.tsx` (`TOASTS`, `ASKS`, `LOGS`, `REPLIES`, `COMMANDS`),
-cs-feed in `words.ts`. `tests/test_mod_tables.sh` fails when a call site writes
+cs-panel in `register.tsx` and `draw.tsx` (`WORDS`, `ACTIONS` too), cs-feed in
+`words.ts`. `tests/test_mod_tables.sh` fails when a call site writes
 such a line inline. Claude Code leads a toast, a notice and a command reply with
 the plugin's name, so no line starts with it. Exported functions draw the
-band, the cs-update pane and the cs-mermaid fence (`drawBand`, `drawPane`,
-`Drawing`, `drawFence`) from a view, so a tool outside cs can draw them from a
+band, the cs-update and cs-panel panes and the cs-mermaid fence (`drawBand`,
+`drawPane`, `Drawing`, `drawFence`) from a view, so a tool outside cs can draw them from a
 fixture.
 
 The mod also registers `/queue`, marked immediate so it runs while a turn is
@@ -1096,6 +1097,48 @@ the hook inventory check skips when validation cannot list function hooks.
 The shell suite always checks the manifest, its `/config` field and that the
 installer names the mod. `tests/test_mermaid_section.sh` checks the session
 instruction and tombstone, and `tests/test_migrate_claude_md.sh` covers migration.
+
+## cs-panel (not a hook script — a Claude Code mod)
+
+`mods/cs-panel/` is a Claude Code function-hooks plugin, deployed and gated like
+the `cs` mod. It registers `/cs-panel`, which opens a pane, `Sessions`, and
+nothing opens it unasked. The pane sits inline above the prompt on the main
+screen (tmux) and docks beside the transcript in fullscreen from 110 columns.
+
+Every fact in a row comes from `cs -list --porcelain` (`CS_BIN`, the path the
+launch exported; no shell), so the panel cannot disagree with `cs -live`,
+`cs <name> -msg` or `cs <base> -features`: the name, `live`/`idle`, the last
+context reading, unread mail (`locked` behind a vault that is not mounted) and
+the base's feature count. Features are drawn under their base. The mod reads
+again every 60 s while the pane is open and no main-loop turn runs
+(`turn.start`/`turn.complete`), after each turn, and after each press; it
+redraws only when the answer changed, keeps the last rows over a failed or
+unreadable answer and names the line it could not read above them.
+
+Rows are plain Buttons; Tab, the arrows or a click select one (`ui.focus`),
+and a strip above the rows holds the keys that row admits, each one Button with
+its own hotkey: `o` opens an idle session (`cs -spawn <name>`, the toast is
+cs's own line with the tmux window), `m` mails it (one `$.ui.ask` dialog: a
+canned status question, or the body typed under Other, sent on stdin to
+`cs <name> -msg -`), `r` retires an idle feature after reading that base's
+`-features --porcelain`: `/finish <task>` through `$.command.run` when this
+conversation is the base's lead (the `claude_session_id` in `.cs/local/state`
+is this conversation's, KEEP IN SYNC with cs-update's `isLead`), else task mail
+`--kind task` with body `/finish <task>` to the base, which its user accepts
+with `cs -queue accept`. A live session has no `o` (raising another session's
+terminal is out of bounds), this session has no `o`, `m` or `r`, a locked vault has
+no `m`, a live feature no `r` (it holds its worktree lock). Every row is cut to
+`bodyColumns` before it is drawn, columns dropping from the right until the
+name keeps eight cells, and a list longer than the pane shows `+N above` /
+`+N below` around a window that follows the selection.
+
+The mod writes nothing under `.cs/`, so it has no heartbeat and no doctor row;
+doctor's drift scan covers its deployed files. Its words live in exported
+tables (`COMMANDS`, `REPLIES`, `ASKS`, `TOASTS`, `PROBLEMS` in `register.tsx`,
+`WORDS` and `ACTIONS` in `draw.tsx`), and `drawPane(view, el, handlers)` is
+pure over a view. `tests/test_mod_panel.sh` runs the kit test and pins the
+manifest and the validate inventory; `tests/test_list.sh` holds the porcelain
+to `tests/fixtures/list-porcelain.txt`.
 
 ## cs-feed (not a hook script — a Claude Code mod)
 
