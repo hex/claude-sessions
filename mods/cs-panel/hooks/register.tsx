@@ -149,6 +149,28 @@ export function register(on: On) {
     }
     return moved
   })
+
+  // Closing the pane (Esc, its mark, a plugin) stops the poll. Rows stay, so a
+  // reopen draws the last answer at once and the first read replaces it.
+  on('ui.close', { id: PANE }, async ($, e, next) => {
+    stopPoll()
+    return next(e)
+  })
+
+  // The idle source: the main loop's turn events (a subagent's carry
+  // agentId). A turn's end may have spawned, mailed or finished something, so
+  // an open pane reads at once, without holding the turn's end for it.
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) working = true
+    return next(e)
+  })
+  on('turn.complete', async ($, e, next) => {
+    if (e.agentId === undefined) {
+      working = false
+      if (poll.kind === 'on') inBackground($, refresh($))
+    }
+    return next(e)
+  })
 }
 
 // CS_BIN and CLAUDE_SESSION_NAME; undefined without CS_BIN. A name that is not

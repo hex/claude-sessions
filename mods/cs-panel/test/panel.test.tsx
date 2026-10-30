@@ -226,13 +226,13 @@ type Answer = { exitCode?: number; stdout?: string; stderr?: string }
 // What sits beneath the mod: the engine's answers to each call it makes, and
 // a record of what it asked. `answer` gives cs's reply to an argv; a pane is
 // open from its ui.open until a ui.close.
-function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: readonly string[]) => Answer; sessionId?: () => string; state?: string } = {}) {
+function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: readonly string[]) => Answer | Promise<Answer>; sessionId?: () => string; state?: string } = {}) {
   const w = { runs: [] as { argv: string[]; stdin: string | undefined }[], toasts: [] as string[], opens: [] as PaneOpenArgs[], finishes: [] as string[], isOpen: false, invalidations: 0 }
   mock.env(on, opts.env ?? { CS_BIN: BIN })
   const clock = mock.clock(on)
-  on('process.run', ($, e) => {
+  on('process.run', async ($, e) => {
     w.runs.push({ argv: [...e.argv], stdin: e.init?.stdin })
-    const a: Answer = (opts.answer ?? (argv => argv[1] === '-list' ? { stdout: GOLDEN } : {}))(e.argv)
+    const a: Answer = await (opts.answer ?? (argv => argv[1] === '-list' ? { stdout: GOLDEN } : {}))(e.argv)
     return { value: { exitCode: a.exitCode ?? 0, stdout: a.stdout ?? '', stderr: a.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('ui.toast', ($, e) => { w.toasts.push(e.text); return { value: undefined } })
@@ -240,6 +240,8 @@ function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: rea
   on('ui.panes', () => ({ value: w.isOpen ? [{ id: 'cs-panel', title: 'Sessions', isShown: true, isFocused: true, isPlaced: true }] : [] }))
   on('ui.close', () => { w.isOpen = false; return { value: undefined } })
   on('ui.focus', () => ({}))
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
   on('ui.invalidate', ($, e, next) => { w.invalidations++; return next(e) })
   on('command.run', { command: 'finish' }, ($, e) => { w.finishes.push(e.args); return { text: '' } })
   on('session.cwd', () => ({ value: '/sessions/alpha' }))
@@ -378,4 +380,81 @@ test('r in the base\'s lead conversation runs /finish <task> here; in a teammate
   expect(w.toasts).toEqual(["alpha's features retire from its lead conversation; this one is a teammate"])
   expect(w.runs.slice(asked).map(r => r.argv[1])).toEqual(['-list'])
   expect(w.finishes).toEqual(['fix'])
+})
+
+const TURN = { text: '', turnId: 't1' }
+const DONE = { answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
+
+// The kit raises no person's close; a plugin's close of the id is the same
+// ui.close the mod hooks (its origin aside, which the mod does not read).
+const CLOSER = { name: 'closer', register(on: On) {
+  on('command.run', { command: 'close-panel' }, async $ => { await $.ui.close({ id: 'cs-panel' }); return { text: '' } })
+} }
+
+test('an open pane reads cs every minute while no turn runs and at each turn\'s end; a subagent\'s turns change nothing; a close stops the reads', { plugins: [CLOSER] }, async ($, on) => {
+  const { w, clock } = world(on)
+  const lists = () => w.runs.filter(r => r.argv[1] === '-list').length
+  const pane = await openPane($)
+  expect(lists()).toBe(1)
+  await clock.advance(60000)
+  expect(lists()).toBe(2)
+  const drawn = w.invalidations
+  expect(drawn).toBeGreaterThan(0)
+  await clock.advance(60000)
+  expect([lists(), w.invalidations]).toEqual([3, drawn])
+  await $.turn.start(TURN)
+  await $.turn.complete({ ...DONE, agentId: 'a1' })
+  await clock.advance(120000)
+  expect(lists()).toBe(3)
+  await $.turn.start({ ...TURN, agentId: 'a1' })
+  await $.turn.complete(DONE)
+  await clock.settle()
+  expect(lists()).toBe(4)
+  await $.command.run({ ...COMMAND, command: 'close-panel' })
+  expect(w.isOpen).toBe(false)
+  await clock.advance(180000)
+  expect(lists()).toBe(4)
+  await pane.redraw()
+  await clock.settle()
+  expect(lists()).toBe(4)
+  w.isOpen = true
+  await pane.redraw()
+  await clock.settle()
+  expect(lists()).toBe(5)
+  await clock.advance(60000)
+  expect(lists()).toBe(6)
+})
+
+test('a failed or unreadable answer keeps the rows and draws why above them; the next good answer clears it', async ($, on) => {
+  let list: Answer = { stdout: GOLDEN }
+  const { clock } = world(on, { answer: () => list })
+  const pane = await openPane($)
+  const read = async (next: Answer) => { list = next; await $.turn.complete(DONE); await clock.settle(); return (await linesOf(await pane.drawn())).map(line => line.trimEnd()) }
+  expect(await read({ exitCode: 1, stderr: 'warming up\nError: boom\n' })).toEqual(['m: mail alpha   Esc: close', 'cs -list --porcelain exited 1: Error: boom',
+    '› alpha         live      41%   2 mail   1 feat', '  └ fix         idle      12%', '  └ stale       idle', '  beta          idle            locked'])
+  expect((await read({ stdout: 'oops\n' }))[1]).toBe('cs -list --porcelain gave a line the panel cannot read: oops')
+  expect((await read({ stdout: GOLDEN }))[1]).toBe('› alpha         live      41%   2 mail   1 feat')
+})
+
+test('a read asked for while one runs runs once more after it, never twice, so the newest answer is the one drawn', async ($, on) => {
+  let release: (() => void) | undefined
+  let list: Answer = { stdout: GOLDEN }
+  const { w, clock } = world(on, { answer: async () => {
+    if (release !== undefined) return list
+    await new Promise<void>(resolve => { release = resolve })
+    return list
+  } })
+  const lists = () => w.runs.filter(r => r.argv[1] === '-list').length
+  const opening = $.command.run(COMMAND)
+  await clock.settle()
+  expect(lists()).toBe(1)
+  await $.turn.complete(DONE)
+  await $.turn.complete(DONE)
+  list = { stdout: 'beta\t0\t-\t-\t0\n' }
+  release?.()
+  expect(await opening).toEqual({ text: REPLIES.opened })
+  await clock.settle()
+  expect(lists()).toBe(2)
+  const pane = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
+  expect(linesOf(await pane.drawn()).map(line => line.trimEnd())).toEqual(['o: open beta   Esc: close', '› beta          idle            locked'])
 })
