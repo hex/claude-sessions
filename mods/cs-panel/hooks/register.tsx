@@ -43,6 +43,7 @@ export const REPLIES = {
   noBin: 'The launch did not say where cs is (CS_BIN); open this conversation with cs to list its sessions.',
   opened: 'The sessions are in the panel: Tab moves, o opens, m mails, r retires, Esc closes.',
   notPlaced: (reason: string) => `The panel is open but not drawn yet: ${reason}`,
+  failed: (reason: string) => `The panel did not start: ${reason}`,
 } as const
 
 export const ASKS = {
@@ -119,14 +120,18 @@ export function register(on: On) {
   // now, else the poll is armed afresh, superseding an arming that asked for
   // the panes before this open. `immediate`, so it opens mid-turn too: the
   // first read runs at once whatever the turn does; only the clock's reads
-  // wait for idle.
+  // wait for idle. A refused open or arming is the command's answer.
   on('command.run', { command: 'cs-panel' }, async ($) => {
-    launch ??= await readLaunch($)
-    if (launch === undefined) return { text: REPLIES.noBin }
-    const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true, closeOnEscape: true, columns: DOCK_COLUMNS })
-    if (poll.kind === 'on') await refresh($)
-    else { stopPoll(); await startPoll($) }
-    return { text: opened.isPlaced ? REPLIES.opened : REPLIES.notPlaced(opened.reason) }
+    try {
+      launch ??= await readLaunch($)
+      if (launch === undefined) return { text: REPLIES.noBin }
+      const opened = await $.ui.open({ id: PANE, title: TITLE, focus: true, closeOnEscape: true, columns: DOCK_COLUMNS })
+      if (poll.kind === 'on') await refresh($)
+      else { stopPoll(); await startPoll($) }
+      return { text: opened.isPlaced ? REPLIES.opened : REPLIES.notPlaced(opened.reason) }
+    } catch (err) {
+      return { text: REPLIES.failed(message(err)) }
+    }
   })
 
   // A render with the poll off is a pane that outlived a reload (the engine
@@ -188,17 +193,21 @@ async function readLaunch($: EngineInterface): Promise<Launch | undefined> {
 
 // Arms the clock if the pane is open, cs is known and nothing is armed, then
 // reads at once. A second call while arming or on does nothing, and so does
-// one whose claim was superseded during its awaits.
+// one whose claim was superseded during its awaits. A claim that did not arm
+// (no pane, no cs, a refused call) is released, so the next draw arms again.
 async function startPoll($: EngineInterface): Promise<void> {
   if (poll.kind !== 'off') return
   const claim: Poll = { kind: 'arming' }
   poll = claim
-  launch ??= await readLaunch($)
-  const isOpen = launch !== undefined && (await $.ui.panes()).some(p => p.id === PANE)
-  if (poll !== claim) return
-  if (!isOpen) { poll = { kind: 'off' }; return }
-  const timer = $.clock.every(POLL_MS, () => { if (!working) inBackground($, refresh($)) })
-  poll = { kind: 'on', cancel: timer.cancel }
+  try {
+    launch ??= await readLaunch($)
+    const isOpen = launch !== undefined && (await $.ui.panes()).some(p => p.id === PANE)
+    if (poll !== claim || !isOpen) return
+    const timer = $.clock.every(POLL_MS, () => { if (!working) inBackground($, refresh($)) })
+    poll = { kind: 'on', cancel: timer.cancel }
+  } finally {
+    if (poll === claim) poll = { kind: 'off' }
+  }
   await refresh($)
 }
 

@@ -230,11 +230,12 @@ type Answer = { exitCode?: number; stdout?: string; stderr?: string }
 // What sits beneath the mod: the engine's answers to each call it makes, and
 // a record of what it asked. `answer` gives cs's reply to an argv; a pane is
 // open from its ui.open until a ui.close. While `panesHeld` is set, ui.panes
-// answers once it settles, with the panes open when it was asked. `logs` holds
+// answers once it settles, with the panes open when it was asked. While
+// `refusal` names a call, that call is refused with its text. `logs` holds
 // each line a plugin logged.
 function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: readonly string[]) => Answer | Promise<Answer>; sessionId?: () => string; state?: string } = {}) {
   const w = { runs: [] as { argv: string[]; stdin: string | undefined }[], toasts: [] as string[], opens: [] as PaneOpenArgs[], finishes: [] as string[], isOpen: false, invalidations: 0,
-    panesHeld: undefined as Promise<void> | undefined, logs: [] as string[] }
+    panesHeld: undefined as Promise<void> | undefined, refusal: undefined as { call: 'ui.open' | 'ui.panes'; text: string } | undefined, logs: [] as string[] }
   mock.env(on, opts.env ?? { CS_BIN: BIN })
   const clock = mock.clock(on)
   on('process.run', async ($, e) => {
@@ -244,8 +245,12 @@ function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: rea
   })
   on('ui.toast', ($, e) => { w.toasts.push(e.text); return { value: undefined } })
   on('ui.log', ($, e) => { w.logs.push(e.text); return { value: undefined } })
-  on('ui.open', ($, e) => { w.opens.push({ ...e }); w.isOpen = true; return { value: { isPlaced: true } } })
+  on('ui.open', ($, e) => {
+    if (w.refusal?.call === 'ui.open') return { deny: w.refusal.text }
+    w.opens.push({ ...e }); w.isOpen = true; return { value: { isPlaced: true } }
+  })
   on('ui.panes', async () => {
+    if (w.refusal?.call === 'ui.panes') return { deny: w.refusal.text }
     const panes = w.isOpen ? [{ id: 'cs-panel', title: 'Sessions', isShown: true, isFocused: true, isPlaced: true }] : []
     if (w.panesHeld !== undefined) await w.panesHeld
     return { value: panes }
@@ -291,6 +296,20 @@ test('/cs-panel opens the pane asking for the keys, reads cs at once, and draws 
   const lab = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'fixture', props })
   expect(shown(await pane.drawn())).toEqual(shown(await lab.drawn()))
   expect(linesOf(await pane.drawn()).slice(0, 2).map(line => line.trimEnd())).toEqual(['m: mail alpha   ctrl+x tab: keys', '› alpha          live      41%   2 mail'])
+})
+
+test('/cs-panel answers why when the pane does not open or its poll does not arm, and a later draw arms the poll', async ($, on) => {
+  const { w, clock } = world(on)
+  w.refusal = { call: 'ui.open', text: 'no room for a pane' }
+  expect(await $.command.run(COMMAND)).toEqual({ text: 'The panel did not start: cs-panel: $.ui.open: no room for a pane' })
+  expect(w.runs).toEqual([])
+  w.refusal = { call: 'ui.panes', text: 'panes are not listed' }
+  expect(await $.command.run(COMMAND)).toEqual({ text: 'The panel did not start: cs-panel: $.ui.panes: panes are not listed' })
+  expect(w.runs).toEqual([])
+  w.refusal = undefined
+  await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
+  await clock.settle()
+  expect(w.runs).toEqual([LIST])
 })
 
 async function openPane($: Engine) {
@@ -558,6 +577,6 @@ test('no line the mod hands the engine names the plugin first: the engine prefix
     COMMANDS['cs-panel'].description, ...Object.values(REPLIES).map(r => typeof r === 'string' ? r : r('x')),
     ...Object.values(TOASTS).map(t => t('x', 'y')), ...Object.values(PROBLEMS).map(p => p('x')), ...Object.values(LOGS).map(l => l('x')), ASKS.mail('x').question,
   ]
-  expect(lines.length).toBe(17)
+  expect(lines.length).toBe(18)
   expect(lines.filter(line => line.toLowerCase().startsWith('cs-panel'))).toEqual([])
 })
