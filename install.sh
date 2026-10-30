@@ -256,6 +256,11 @@ CS_MOD_FILES=(
     cs-mermaid/hooks/register.tsx
     cs-mermaid/hooks/text.ts
     cs-mermaid/skills/show-me/SKILL.md
+    cs-panel/.claude-plugin/plugin.json
+    cs-panel/hooks/hooks.json
+    cs-panel/hooks/register.tsx
+    cs-panel/hooks/sessions.ts
+    cs-panel/hooks/draw.tsx
 )
 
 # The cs tips file as install.sh names it in settings.json's
@@ -1386,7 +1391,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "4ff02a7782e403fefcf1ea12bfae1152caa9a39d20f49f71a60725c042795e77  bin/cs"
+    "47c53bf46a539215d30fcfadd40c7466e6c708a8e82b7272f182cfa1852c2a94  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "68be4cb037652baf60d5dac8c7088eeb606bfa338a92c8d81395c281f210e86b  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
@@ -1431,6 +1436,11 @@ CS_PAYLOAD_SHA256=(
     "fba40610714fd7201f496d3e1d7a7a6553b06c0da937710f6da3fcf8f4409054  mods/cs-mermaid/hooks/register.tsx"
     "c9c48de571777b2e2e948770b4e43fce1f4f84f86547496772a5021fc3380757  mods/cs-mermaid/hooks/text.ts"
     "c591644117d9a870c4631ecb40c7fc47f7cbab7b74849feb07b318784ba85367  mods/cs-mermaid/skills/show-me/SKILL.md"
+    "917c2c8c157a579ea63ada16d76d248927e850daef9dc309b10a3916d445f613  mods/cs-panel/.claude-plugin/plugin.json"
+    "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
+    "882c745ea6d59920a9a11d8cd6d801d592b914ff160f9c8b53b5767fc628dae9  mods/cs-panel/hooks/register.tsx"
+    "5a9a74d7bf5e64dde4ab69e6b38af8499abec22c4f988a4b6284e0a6d33032b5  mods/cs-panel/hooks/sessions.ts"
+    "d6f8167bf69b20deca049b49cd1b9a8dedbb138c4423140c88bced10c841f6c5  mods/cs-panel/hooks/draw.tsx"
     "d551412bb1e97c8c04f5a6d08105150e202b4ab17e367b9291ce45de6638fb54  completions/cs.bash"
     "f3e93304191339041b207e05ad008277fb1d2e62e5f29be4a36a0167072624a1  completions/_cs"
 )

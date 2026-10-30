@@ -71,6 +71,7 @@ The [statusline guide](docs/statusline.md) covers the quiet default layout, the 
 | Session wrap | `/wrap` saves memory, summarizes the narrative, and archives completed tasks without committing. Its memory pass also finds references to paths, `cs` verbs and identifiers that no longer exist, and updates them or marks them gone. | [Memory checks](docs/hooks.md#memory-index-guardsh-not-a-hook--run-by-wraps-memory-pass) |
 | Inline Mermaid | Draws supported flowcharts in replies, and a `show-me` skill answers "show me" with one. | [Mermaid mod](docs/hooks.md#cs-mermaid-not-a-hook-script--a-claude-code-mod)<br><img src="https://raw.githubusercontent.com/hex/claude-sessions/main/assets/mermaid.svg" width="260" alt="Reply prose, then the same prose with a drawn Mermaid chart"> |
 | Release notes | A launch from your terminal offers a pending release once. In the session, `/cs-update` shows its release notes. | [Update mod](docs/hooks.md#cs-update-not-a-hook-script--a-claude-code-mod) |
+| Session panel | `/cs-panel` lists every cs session with its state, context, mail and features, and opens, mails or retires one from a row. | [Panel mod](docs/hooks.md#cs-panel-not-a-hook-script--a-claude-code-mod) |
 | Other front ends | Session hooks also work in desktop and IDE conversations opened in a `.cs/` workspace. | [Session resolution](docs/hooks.md#how-a-hook-finds-its-session-cs-resolvesh) |
 
 ## Uninstall
