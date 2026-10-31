@@ -78,7 +78,7 @@ type RowLine = Extract<Line, { kind: 'row' }>
 // rust-to-gold, one colour a letter (lib/05-term.sh's muted pair when light).
 type Rgb = readonly [number, number, number]
 const rgb = (channels: readonly number[]) => `rgb(${channels.join(',')})`
-type Palette = Record<'ink' | 'mut' | 'faint' | 'soft' | 'wash' | 'teal' | 'green' | 'amber', string> & { hero: readonly Rgb[]; rail: readonly string[]; wordmark: readonly string[] }
+type Palette = Record<'ink' | 'mut' | 'faint' | 'soft' | 'teal' | 'green' | 'amber', string> & { hero: readonly Rgb[]; rail: readonly string[]; wordmark: readonly string[] }
 
 // The TUI's ramp: cell `i` of `n` along the stops, linear between the two it
 // falls between, each channel truncated; one cell takes the first stop.
@@ -90,11 +90,11 @@ function ramp(stops: readonly Rgb[], n: number, i: number): string {
 }
 
 const PALETTES = {
-  dark: { ink: rgb([245, 230, 211]), mut: rgb([161, 136, 127]), faint: rgb([120, 104, 96]), soft: rgb([56, 50, 46]), wash: rgb([60, 46, 36]), teal: rgb([45, 212, 191]),
+  dark: { ink: rgb([245, 230, 211]), mut: rgb([161, 136, 127]), faint: rgb([120, 104, 96]), soft: rgb([56, 50, 46]), teal: rgb([45, 212, 191]),
     green: rgb([139, 195, 74]), amber: rgb([246, 154, 0]), hero: [[221, 80, 20], [237, 128, 0], [246, 154, 0], [214, 162, 30]], rail: [[221, 80, 20], [246, 154, 0], [250, 180, 60]].map(rgb),
     wordmark: [[230, 74, 25], [232, 83, 24], [234, 91, 22], [235, 100, 21], [237, 108, 20], [239, 117, 19], [241, 125, 17], [243, 134, 16], [245, 142, 15], [246, 151, 14],
       [248, 159, 12], [250, 168, 11], [252, 176, 10], [254, 185, 9], [255, 193, 7]].map(rgb) },
-  light: { ink: rgb([43, 33, 24]), mut: rgb([122, 106, 88]), faint: rgb([168, 151, 130]), soft: rgb([226, 213, 196]), wash: rgb([255, 240, 218]), teal: rgb([15, 118, 110]),
+  light: { ink: rgb([43, 33, 24]), mut: rgb([122, 106, 88]), faint: rgb([168, 151, 130]), soft: rgb([226, 213, 196]), teal: rgb([15, 118, 110]),
     green: rgb([92, 140, 84]), amber: rgb([242, 167, 53]), hero: [[143, 50, 28], [216, 90, 36], [242, 167, 53], [214, 162, 30]], rail: [[193, 58, 29], [228, 91, 34], [232, 167, 46]].map(rgb),
     wordmark: Array.from(WORDS.brand, (_, i) => ramp([[166, 86, 60], [156, 118, 56]], WORDS.brand.length, i)) },
 } satisfies Record<'dark' | 'light', Palette>
@@ -303,18 +303,21 @@ function sentenceOf(s: Setting): string {
 
 // The masthead's first line, as the cs TUI's: `▌ `, the wordmark (cut by a
 // narrower body), `  settings`, `  ·  <rows> settings`, `  ·  <M> changed`
-// (teal unless 0) and `  ·  <session>`, dropped from the right to fit. M
-// counts settings a file or the shell sets: a /config row tells no default.
+// (teal unless 0) and `  ·  <session>`, each `·` muted, dropped from the
+// right to fit. M counts settings a file or the shell sets: a /config row
+// tells no default.
 function mastheadOf(v: PanelView, p: Palette): Run[] {
   const brand: Run[] = [{ text: `${WORDS.marks.selected} `, color: p.rail[0] }, ...[...WORDS.brand].slice(0, Math.max(0, v.columns - MARK_CELLS)).map((text, i) => ({ text, color: p.wordmark[i] }))]
   const rows = (v.lines ?? []).flatMap(l => l.kind === 'row' ? [l.row] : [])
   const changed = rows.filter(row => row.kind === 'setting' && CHANGED.has(row.setting.source)).length
-  const tail: Run[] = [{ text: `  ${WORDS.title}`, color: p.ink, weight: 'bold' },
-    ...(v.lines === undefined ? [] : [{ text: `${DOT}${WORDS.settings(rows.length)}`, color: p.ink }, { text: `${DOT}${WORDS.changed(changed)}`, color: changed > 0 ? p.teal : p.mut }]),
-    ...(v.session === undefined ? [] : [{ text: `${DOT}${v.session}`, color: p.mut }])]
-  const room = v.columns - brand.reduce((sum, run) => sum + run.text.length, 0)
-  const ends = tail.map((_, i) => tail.slice(0, i + 1).reduce((sum, run) => sum + run.text.length, 0))
-  return [...brand, ...tail.slice(0, ends.filter(end => end <= room).length)]
+  const dot: Run = { text: DOT, color: p.mut }
+  const parts: Run[][] = [[{ text: `  ${WORDS.title}`, color: p.ink, weight: 'bold' }],
+    ...(v.lines === undefined ? [] : [[dot, { text: WORDS.settings(rows.length), color: p.ink }], [dot, { text: WORDS.changed(changed), color: changed > 0 ? p.teal : p.mut }]]),
+    ...(v.session === undefined ? [] : [[dot, { text: v.session, color: p.mut }]])]
+  const cells = (runs: readonly Run[]) => runs.reduce((sum, run) => sum + run.text.length, 0)
+  const room = v.columns - cells(brand)
+  const ends = parts.map((_, i) => cells(parts.slice(0, i + 1).flat()))
+  return [...brand, ...parts.slice(0, ends.filter(end => end <= room).length).flat()]
 }
 
 // The Buttons' keys: a strip key by its action, a row by its RowId.
@@ -340,8 +343,8 @@ function layoutOf(v: PanelView) {
   const strip = stripFor(selected, v.columns, v.hasKeys)
   const detail = detailOf(selected, v.columns)
   const notice = v.lines === undefined && v.problems.length === 0 ? WORDS.reading : undefined
-  // The masthead, its rule and a gap; with lines, a gap, the header, its rule.
-  const chrome = 3 + (strip.stacked ? strip.keys.length : 1) + detail.length + v.problems.length + (notice === undefined ? 0 : 1) + (lines.length > 0 ? 3 : 0)
+  // The masthead and its rule; with lines, a gap, the header, its rule.
+  const chrome = 2 +(strip.stacked ? strip.keys.length : 1) + detail.length + v.problems.length + (notice === undefined ? 0 : 1) + (lines.length > 0 ? 3 : 0)
   const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - chrome))
   const isEmptyAbove = shown.above && rowsIn(lines.slice(0, shown.from)) === 0
   return { lines, selected, strip, detail, notice, ...shown, ...(isEmptyAbove ? { from: 0, above: false } : {}) }
@@ -369,14 +372,14 @@ export function ringBack(ring: { key: string; at: number }, next: { keys: readon
   return next.keys.includes(ring.key) ? ring.key : next.selected
 }
 
-// The pane body: the masthead and its hero rule, an empty line, the strip
-// (above the rows, so a long list never pushes the keys off), the detail, the
-// problems, an empty line, the column header and its rule, `+N above`, the
+// The pane body: the masthead and its hero rule, the strip (above the rows, so
+// a long list never pushes the keys off), the detail, the problems, an empty
+// line, the column header and its rule, `+N above`, the
 // window and `+N below` (`+N` counts rows). A row is a row Box of the marker's
 // Text, a plain Button keyed by its RowId holding only the label (the focus
 // marks it alone) and the padded columns' Text: a Button never shrinks, so
 // every line is measured to `columns`. A press changes the row, or selects it
-// when it offers no change; the selected row, on the wash, takes autoFocus.
+// when it offers no change; the selected row takes autoFocus.
 export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['resolve']>, on: Handlers): RenderElement {
   const { Box, Text, Button } = el
   const { lines, selected, strip, detail, notice, from, to, above, below } = layoutOf(v)
@@ -390,7 +393,6 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
     <Box flexDirection="column">
       <Text>{runs(mastheadOf(v, p))}</Text>
       <Text>{runs(Array.from({ length: v.columns }, (_, i) => ({ text: WORDS.marks.hero, color: ramp(p.hero, v.columns, i) })))}</Text>
-      <Text>{' '}</Text>
       <Box flexDirection={strip.stacked ? 'column' : 'row'} columnGap={KEY_GAP}>{keys}</Box>
       {detail.map(text => <Text color={p.faint}>{text}</Text>)}
       {v.problems.map(problem => <Text color={p.mut}>{cut(problem, v.columns)}</Text>)}
@@ -403,7 +405,7 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
       {lines.slice(from, to).map(l => l.kind === 'gap' ? <Text>{' '}</Text> : l.kind !== 'row'
         ? <Text color={p.mut} weight="bold">{`${' '.repeat(MARK_CELLS)}${cut(l.kind === 'mods' ? WORDS.modsGroup : l.title, Math.max(1, v.columns - MARK_CELLS))}`}</Text>
         : (
-          <Box flexDirection="row" {...(l === selected ? { backgroundColor: p.wash } : {})}>
+          <Box flexDirection="row">
             {runs([l === selected ? { text: `${WORDS.marks.selected} `, color: p.rail[1] } : { text: ' '.repeat(MARK_CELLS) }])}
             <Button key={l.row.id} plain label={labelOf(l.row)} {...(l === selected ? { autoFocus: true } : {})}
               onPress={() => l.actions.includes('change') ? on.act('change', l.row.id) : on.select(l.row.id)}>
