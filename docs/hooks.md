@@ -1128,6 +1128,19 @@ value comes from (`shell`, `launch`, `session`, `machine` or `default`; `mod` or
 `locked` for a `/config` row) and when a change applies (`now`, `/clear`,
 `launch` or `now+launch`).
 
+The pane draws in cs's own colours: the vivid set on a dark terminal, the
+muted set when `CS_TERM_THEME` is `light`. Its first line is the
+`claude-sessions` wordmark in the installer's rust-to-gold gradient, then
+`▍ settings` and the session name. The name shows from 40 columns, and
+`settings` only where it fits. Each group's heading is a rule across the pane.
+A toggle reads `● on` or `○ off`. A percent setting draws a ten-cell gauge
+before its number where the value column has room for both. The source word
+takes the colour of where the value lives: `session` in Claude's colour,
+`machine` green, `shell` amber (the environment overrides both files), and
+`launch` and `default` dim. The selected row has an amber `▌` and a bold
+label. Each strip key is a chip on a grey background; Claude Code draws its
+letter in its own accent colour.
+
 Tab, the arrows or a click select a row (`ui.focus`). The line under the strip
 says what the selected row is and when a change takes hold. The strip holds the
 keys that row admits, each one Button with its own hotkey:
