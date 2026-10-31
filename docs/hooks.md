@@ -1132,13 +1132,14 @@ that applies at once (`now`) leaves the last one empty.
 The pane draws in the cs TUI's look and palette (`tui/src/theme.rs`): the dark
 palette, or the light one when `CS_TERM_THEME` is `light`. Its masthead is two
 lines, as in the TUI. The first is `▌`, the `claude-sessions` wordmark in the
-installer's rust-to-gold gradient, `settings`, the number of rows, the number
-of settings a file or the shell sets (`3 changed`, teal, or muted at 0) and the
-session name. Where the pane is too narrow, these parts drop from the right,
-down to the wordmark alone. A `/config` row never counts as changed, since the
-panel cannot see its default. The second line is a `━` rule across the pane in
-the TUI's hero gradient. Under it, between empty lines, come the strip and the
-detail line. The strip's keys are plain and three cells apart, with muted
+installer's rust-to-gold gradient, `settings` in bold ink, the number of rows
+in ink, the number of settings a file or the shell sets (`3 changed`, teal, or
+muted at 0) and the session name, muted, with a muted `·` between the parts.
+Where the pane is too narrow, these parts drop from the right, down to the
+wordmark alone. A `/config` row never counts as changed, since the panel cannot
+see its default. The second line is a `━` rule across the pane in the TUI's
+hero gradient. Right under it come the strip and the detail line, then one
+empty line. The strip's keys are plain and three cells apart, with muted
 labels; Claude Code draws each key's letter in its own accent colour. The
 detail line reads `<KEY> · <when a change applies>` in the faint colour. The
 rows sit under a muted bold column header (`setting`, `value`, `from`,
@@ -1153,8 +1154,9 @@ its source word in the colour of where the value lives: `session` teal,
 `launch` faint. Its when word is muted. A toggle reads `● on`, the dot green,
 or `○ off`. A percent setting draws a ten-cell gauge before its number where
 the value column has room for both: filled in amber when set, all faint at the
-default. The selected row lies on the TUI's selection wash, with `▌` in the
-rail's second colour and its label bold, and the focus marks the label alone.
+default. The selected row has `▌` in the rail's second colour and its label
+bold, on no background, and the focus marks the label alone. Every row's label
+is in ink, selected or not, at its default or set.
 
 Tab, the arrows or a click select a row (`ui.focus`). The line under the strip
 says what the selected row is and when a change takes hold. The strip holds the
