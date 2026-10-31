@@ -55,6 +55,15 @@ session-start.sh names the actor `unknown` and says the library is missing and t
 against a budget it does not have. The state writers are missing too, so session-start.sh
 records no `claude_session_id` or `last_resumed` and says so. An armed queue does not drain.
 
+The same build appends `lib/03-config.sh`, the [settings file](configuration.md#settings-file)
+loader, to `hooks/cs-shared.sh`, writes it alone to `hooks/cs-config.sh`, and splices it
+into `bin/cs-statusline` between two marker lines; CI's build-sync job diffs all three. At
+its source it fills every `CS_*` setting the environment does not pin from the session's
+`.cs/local/config`, else `~/.config/cs/config`, in that shell only. `scope-prompt.sh`,
+`prompt-rewriter.sh` and its two rewriters read a setting before they source
+`cs-shared.sh`, so each sources `cs-config.sh` first; without it they run on the
+environment alone.
+
 `cs_resolve_session` resolves in
 two ways and declines when neither applies, leaving each hook to take its own decline
 path (a silent exit, or the approval payload the blocking hooks owe Claude Code):
@@ -853,7 +862,8 @@ the conversation it meets next unjudged.
 The mods hand Claude Code every toast, `$.ui.ask` dialog, `$.ui.log` notice,
 slash-command reply and command registration from tables they export: cs and
 cs-update in `register.tsx` (`TOASTS`, `ASKS`, `LOGS`, `REPLIES`, `COMMANDS`),
-cs-panel in `register.tsx` and `draw.tsx` (`WORDS`, `ACTIONS` too), cs-feed in
+cs-panel in `register.tsx`, `draw.tsx` (`WORDS`, `KEYS`) and `settings.ts`
+(`LABELS`), cs-feed in
 `words.ts`. `tests/test_mod_tables.sh` fails when a call site writes
 such a line inline. Claude Code leads a toast, a notice and a command reply with
 the plugin's name, so no line starts with it. Exported functions draw the
@@ -1101,44 +1111,80 @@ instruction and tombstone, and `tests/test_migrate_claude_md.sh` covers migratio
 ## cs-panel (not a hook script — a Claude Code mod)
 
 `mods/cs-panel/` is a Claude Code function-hooks plugin, deployed and gated like
-the `cs` mod. It registers `/cs-panel`, which opens a pane, `Sessions`, and
-nothing opens it unasked. The pane sits inline above the prompt on the main
-screen (tmux) and docks beside the transcript in fullscreen from 110 columns.
+the `cs` mod. Bare `/cs` opens its pane, `cs`, and so does `/cs-panel`, which it
+registers as a second name; nothing opens it unasked. Both run mid-turn too. The
+pane sits inline above the prompt on the main screen (tmux) and docks beside the
+transcript, 60 columns wide, in fullscreen from 110 columns.
 
-Every fact in a row comes from `cs -list --porcelain` (`CS_BIN`, the path the
-launch exported; no shell), so the panel cannot disagree with `cs -live`,
-`cs <name> -msg` or `cs <base> -features`: the name, `live`/`idle`, the last
-context reading, unread mail (`locked` behind a vault that is not mounted) and
-the base's feature count. Features are drawn under their base. The mod reads
-again every 60 s while the pane is open and no main-loop turn runs
-(`turn.start`/`turn.complete`), after each turn, and after each press; it
-redraws only when the answer changed, keeps the last rows over a failed or
-unreadable answer and names the line it could not read above them.
+The rows come from two places. `Mods` lists the `/config` rows of `cs`,
+`cs-update` and `cs-mermaid` (`$.config.list()`, those three plugins by name, so
+another `cs-*` plugin's rows are not drawn). Under it, cs's own settings come in
+cs's groups and order from `cs -config list --porcelain`, run through `CS_BIN`
+(the path the launch exported) with no shell. The panel holds no list of
+settings and no copy of their checks: labels, choices, defaults, when a change
+applies and where each value comes from all arrive in that record. A row shows
+its label, its value (cs's name for the default when nothing sets it), where the
+value comes from (`shell`, `launch`, `session`, `machine` or `default`; `mod` or
+`locked` for a `/config` row) and when a change applies (`now`, `/clear`,
+`launch` or `now+launch`).
 
-Rows are plain Buttons; Tab, the arrows or a click select one (`ui.focus`),
-and a strip above the rows holds the keys that row admits, each one Button with
-its own hotkey: `o` opens an idle session (`cs -spawn <name>`, the toast is
-cs's own line with the tmux window), `m` mails it (one `$.ui.ask` dialog: a
-canned status question, or the body typed under Other, sent on stdin to
-`cs <name> -msg -`), `r` retires an idle feature after reading that base's
-`-features --porcelain`: `/finish <task>` through `$.command.run` when this
-conversation is the base's lead (the `claude_session_id` in `.cs/local/state`
-is this conversation's, KEEP IN SYNC with cs-update's `isLead`), else task mail
-`--kind task` with body `/finish <task>` to the base, which its user accepts
-with `cs -queue accept`. A live session has no `o` (raising another session's
-terminal is out of bounds), this session has no `o`, `m` or `r`, a locked vault has
-no `m`, a live feature no `r` (it holds its worktree lock). Every row is cut to
-`bodyColumns` before it is drawn, columns dropping from the right until the
-name keeps eight cells, and a list longer than the pane shows `+N above` /
-`+N below` around a window that follows the selection.
+Tab, the arrows or a click select a row (`ui.focus`). The line under the strip
+says what the selected row is and when a change takes hold. The strip holds the
+keys that row admits, each one Button with its own hotkey:
 
-The mod writes nothing under `.cs/`, so it has no heartbeat and no doctor row;
-doctor's drift scan covers its deployed files. Its words live in exported
-tables (`COMMANDS`, `REPLIES`, `ASKS`, `TOASTS`, `PROBLEMS` in `register.tsx`,
-`WORDS` and `ACTIONS` in `draw.tsx`), and `drawPane(view, el, handlers)` is
-pure over a view. `tests/test_mod_panel.sh` runs the kit test and pins the
-manifest and the validate inventory; `tests/test_list.sh` holds the porcelain
-to `tests/fixtures/list-porcelain.txt`.
+- `c`, Enter or a click changes the row. An on/off setting flips at once. A
+  setting with a few values asks with them as choices in one `$.ui.ask`
+  dialog, with `Default (<default>)` beside them while the dialog has room
+  for it (four choices fill it); any other asks with `Keep <value>` and
+  `Default`, and you type the value under Other. The write is `cs -config set` where the
+  value lives: cs changes a value from this session's file there and anything
+  else in this machine's file, so a change always moves what the row shows.
+- `u` puts back the default: `cs -config unset` in the file that holds the
+  value, so a session value falls back to the machine's and the machine's to
+  the default.
+- `p` writes this session's own file only: `cs <name> -config set`, `<name>`
+  being `CLAUDE_SESSION_NAME`. Without a session name the panel offers no `p`,
+  and a setting this session's file sets offers nothing.
+
+The toast is cs's own reply: the line naming the file and when the change
+applies, or the line refusing the value (`not changed: exited 1: Error: …`).
+A `/config` row changes through `$.config.set`, which runs the owning plugin's
+own `config.set` guard: a toggle flips at once, a choice asks with its options,
+a number or text asks with `Keep <value>` and `Cancel`, and the panel refuses
+an answer a number row cannot read before it writes anything. The owner reloads with
+the new value, which for a `cs.*` row starts an armed rotation countdown over;
+the detail line says so. A `/config` row has no `u`, since the panel cannot see
+a `userConfig` default.
+
+Some rows offer no key, and the detail line says why. A setting your
+environment pins reads `CS_X=v in your environment wins; unset it there to
+change it here`. `CS_NO_FUNCTION_HOOKS` offers no key either: you change it
+from a terminal, `cs -config set CS_NO_FUNCTION_HOOKS 1`, since on it unloads
+every mod at the next launch, this panel included. A `/config` row a
+managed setting owns reads `a managed setting owns it`.
+
+Bare `/cs` is a cooperative pair with the `cs` mod's rail: the `cs` mod passes
+the bare form on with `next(e)`, and this mod passes any argument on, so
+`/cs next` and the bare form answer the same whichever plugin's hook runs first.
+`claude plugin validate` lists both hooks as gates.
+
+The mod reads both sources when the pane opens, after each press, at the end of
+each main-loop turn while the pane is open, and after a `/config` menu change of
+one of those three plugins' rows (a pass-through `config.set` hook whose own
+failure never refuses the row). It runs no clock. It redraws only when an answer
+changed, keeps the last rows over a failed or unreadable answer and names the
+reason above them. The pane draws no Input and no Select, so every surface gets
+the same pane.
+
+The mod writes nothing itself: cs writes the settings files and the `/config`
+writer the rows. It has no heartbeat and no doctor row; doctor's drift scan
+covers its deployed files. Its words live in exported tables (`COMMANDS`,
+`REPLIES`, `ASKS`, `TOASTS`, `PROBLEMS`, `LOGS` in `register.tsx`, `WORDS` and
+`KEYS` in `draw.tsx`, `LABELS` in `settings.ts`), and `drawPane(view, el,
+handlers)` is pure over a view. `tests/test_mod_panel.sh` runs the kit test and
+pins the manifest, the installer listing and the validate inventory;
+`tests/test_config.sh` holds the porcelain to
+`tests/fixtures/config-porcelain.txt`, which the kit reads as `test/golden.ts`.
 
 ## cs-feed (not a hook script — a Claude Code mod)
 

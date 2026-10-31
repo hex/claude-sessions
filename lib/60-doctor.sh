@@ -4,6 +4,7 @@
 _doctor_ok()   { printf "  ${GREEN}[ OK ]${NC} %s\n" "$1"; }
 _doctor_warn() { printf "  ${YELLOW}[WARN]${NC} %s\n" "$1"; DOCTOR_WARN=$((DOCTOR_WARN+1)); }
 _doctor_fail() { printf "  ${RED}[FAIL]${NC} %s\n" "$1"; DOCTOR_FAIL=$((DOCTOR_FAIL+1)); }
+_doctor_info() { printf "  ${DIM}[INFO]${NC} %s\n" "$1"; }
 
 # True when the settings file parses as JSON. Every settings check below reads
 # it through jq with stderr discarded, where a parse failure is indistinguishable
@@ -899,6 +900,44 @@ _doctor_check_narrative_size() {
 # resolved its own session ID. The recorded UUID is the source of truth for
 # cs and hooks; doctor surfaces the divergence so the user can decide whether
 # to relaunch via cs or accept the drift.
+# cs's settings files, as the loader bin/cs ran when it started read them
+# (with this session's file when CLAUDE_SESSION_DIR names one): how many
+# settings each holds, every line the readers skip and why, and every value
+# the environment hides, which no edit of the file can change.
+_doctor_check_config() {
+    local mlabel slabel row rec key scope n text why v
+    _config_label "$_CS_CONFIG_MACHINE"
+    mlabel=$_CONFIG_LABEL
+    _config_label "" "$(_config_session_name)"
+    slabel=$_CONFIG_LABEL
+    if [ ! -f "$_CS_CONFIG_MACHINE" ]; then
+        row="no $mlabel (cs -config set keeps one)"
+    elif [ "$_CS_CONFIG_COUNT_M" = 1 ]; then
+        row="1 setting in $mlabel"
+    else
+        row="$_CS_CONFIG_COUNT_M settings in $mlabel"
+    fi
+    [ -z "$_CS_CONFIG_SESSION" ] || row="$row, $_CS_CONFIG_COUNT_S in this session's"
+    _doctor_ok "config: $row"
+    while IFS=$'\t' read -r scope n text why; do
+        [ -n "$scope" ] || continue
+        if [ "$scope" = M ]; then v=$mlabel; else v=$slabel; fi
+        _doctor_warn "config: $v line $n: $text: $why (skipped)"
+    done <<< "$_CS_CONFIG_IGNORED"
+    for rec in "${_CS_CONFIG_SPEC[@]}"; do
+        key=${rec%%|*}
+        cs_config_source "$key"
+        [ "$_CS_CFG_SOURCE" = shell ] || continue
+        if _config_listed "$_CS_CFG_READ_S" "$key"; then
+            v="_CS_CFG_S_$key"
+            _doctor_info "config: $key=${!key//[[:cntrl:]]/?} in your environment hides ${!v} in $slabel"
+        elif _config_listed "$_CS_CFG_READ_M" "$key"; then
+            v="_CS_CFG_M_$key"
+            _doctor_info "config: $key=${!key//[[:cntrl:]]/?} in your environment hides ${!v} in $mlabel"
+        fi
+    done
+}
+
 # Every place cs changes what the model sees, with the switch that turns
 # it off. The consent rule covers what the user looks at — status line, titles —
 # but a hook that injects context installs silently, so this is where that
@@ -912,17 +951,26 @@ _doctor_check_hook_authority() {
         disabled_all=1
     fi
     # The hooks read their switch as `= "1"`, so the row must too: an exported
-    # 0 leaves the injection on and has to read as on here.
-    _doctor_authority_row() {  # label hook switch value
-        local state="on"
+    # 0 leaves the injection on and has to read as on here. A row whose switch
+    # is a setting names where its value comes from, when something sets it.
+    _doctor_authority_row() {  # label hook switch value [setting]
+        local state="on" from=""
         if [ -n "$disabled_all" ] || [ "$4" = "1" ]; then state="off"; fi
-        printf "    %-4s %-22s %-20s off: %s\n" "$state" "$1" "$2" "$3"
+        if [ -n "${5:-}" ]; then
+            cs_config_source "$5"
+            case "$_CS_CFG_SOURCE" in
+                shell) from=" (your environment)" ;;
+                session) from=" (this session's config)" ;;
+                machine) from=" (this machine's config)" ;;
+            esac
+        fi
+        printf "    %-4s %-22s %-20s off: %s%s\n" "$state" "$1" "$2" "$3" "$from"
     }
-    _doctor_authority_row "grounding"     "scope-prompt"       'CS_SCOPE_DISABLE=1'             "${CS_SCOPE_DISABLE:-}"
-    _doctor_authority_row "clarify"       "scope-prompt"       'CS_CLARIFY_DISABLE=1'           "${CS_CLARIFY_DISABLE:-}"
-    _doctor_authority_row "date reminder" "scope-prompt"       'CS_DATE_REMINDER_DISABLE=1'     "${CS_DATE_REMINDER_DISABLE:-}"
-    _doctor_authority_row "objective"     "scope-prompt"       'CS_OBJECTIVE_CAPTURE_DISABLE=1' "${CS_OBJECTIVE_CAPTURE_DISABLE:-}"
-    _doctor_authority_row "rewrite"       "prompt-rewriter"    'CS_REWRITE_DISABLE=1'           "${CS_REWRITE_DISABLE:-}"
+    _doctor_authority_row "grounding"     "scope-prompt"       'CS_SCOPE_DISABLE=1'             "${CS_SCOPE_DISABLE:-}" CS_SCOPE_DISABLE
+    _doctor_authority_row "clarify"       "scope-prompt"       'CS_CLARIFY_DISABLE=1'           "${CS_CLARIFY_DISABLE:-}" CS_CLARIFY_DISABLE
+    _doctor_authority_row "date reminder" "scope-prompt"       'CS_DATE_REMINDER_DISABLE=1'     "${CS_DATE_REMINDER_DISABLE:-}" CS_DATE_REMINDER_DISABLE
+    _doctor_authority_row "objective"     "scope-prompt"       'CS_OBJECTIVE_CAPTURE_DISABLE=1' "${CS_OBJECTIVE_CAPTURE_DISABLE:-}" CS_OBJECTIVE_CAPTURE_DISABLE
+    _doctor_authority_row "rewrite"       "prompt-rewriter"    'CS_REWRITE_DISABLE=1'           "${CS_REWRITE_DISABLE:-}" CS_REWRITE_DISABLE
     _doctor_authority_row "narrative"     "narrative-reminder" '.cs/local/disabled'             ""
     _doctor_authority_row "council nudge" "narrative-reminder" '.cs/local/disabled or uninstall the plugin' ""
     _doctor_authority_row "ctx warning"   "narrative-reminder" 'CS_CTX_WARN_CTX=101'            ""
@@ -1123,6 +1171,7 @@ run_doctor() {
     _doctor_check_iterm2
     _doctor_check_spawn
     _doctor_check_remote
+    _doctor_check_config
     _doctor_check_hook_authority
 
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then

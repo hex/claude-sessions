@@ -806,6 +806,7 @@ test_build_refuses_a_template_without_the_marker() {
     mkdir -p "$repo/bin" "$repo/hooks"
     cp -R "$real/lib" "$repo/lib"
     cp "$real/build.sh" "$repo/"
+    cp -p "$real/bin/cs-statusline" "$repo/bin/"
     grep -v '^# @@CS_MANIFESTS@@$' "$real/install.sh.in" > "$repo/install.sh.in"
     local out
     if out=$(cd "$repo" && bash build.sh 2>&1); then
@@ -823,6 +824,7 @@ test_build_refuses_a_missing_manifests_source() {
     mkdir -p "$repo/bin" "$repo/hooks"
     cp -R "$real/lib" "$repo/lib"
     cp "$real/build.sh" "$real/install.sh.in" "$repo/"
+    cp -p "$real/bin/cs-statusline" "$repo/bin/"
     rm "$repo/lib/01-manifests.sh"
     local out
     if out=$(cd "$repo" && bash build.sh 2>&1); then

@@ -81,7 +81,6 @@ _cs() {
     list_opts=(
         '--tag:List only sessions carrying a tag'
         '--archived:List only archived sessions'
-        '--porcelain:Print one tab-separated line per session, for tools'
     )
 
     # Update subcommands with descriptions
@@ -121,6 +120,7 @@ _cs() {
         '-vet-session:Check that git tracks no file in a session'\''s control directories'
         '-search:Search across all sessions'
         '-statusline:Manage the cs status line (enable|disable|caps)'
+        '-config:List, read, keep or remove cs settings'
         '-detect-theme:Detect terminal background theme'
         '-doctor:Run health checks'
         '-diag:Run health checks (alias)'
@@ -156,6 +156,37 @@ _cs() {
                 fi
                 ;;
         esac
+    done
+
+    # Context: after -config, global or after a session name: its action,
+    # then for get, set and unset a setting's name, which cs itself lists.
+    local ci
+    for ((ci=2; ci < CURRENT; ci++)); do
+        [[ "${words[ci]}" == "-config" ]] || continue
+        if (( CURRENT == ci + 1 )); then
+            local -a config_cmds
+            config_cmds=(
+                'list:Every setting with its value, source and when a change applies'
+                'get:The value readers see now'
+                'set:Keep a setting in the file'
+                'unset:Remove a setting from the file'
+            )
+            _describe 'config action' config_cmds
+        elif (( CURRENT == ci + 2 )); then
+            case "${words[ci+1]}" in
+                list)
+                    local -a config_list_opts
+                    config_list_opts=('--porcelain:Tab-separated records for tools')
+                    _describe 'option' config_list_opts
+                    ;;
+                get|set|unset)
+                    local -a config_keys
+                    config_keys=(${(f)"$(cs -config list --porcelain 2>/dev/null | cut -f1)"})
+                    compadd -a config_keys
+                    ;;
+            esac
+        fi
+        return
     done
 
     # Context: global `cs -msg <session>` / `cs -spawn <session>` — the first arg
@@ -280,6 +311,7 @@ _cs() {
             '-msg:Send a message to another session'
             '-narrative:Rotate this session'\''s narrative into its archive'
             '-conversations:Show the session'\''s conversation chain'
+            '-config:List, read, keep or remove this session'\''s own settings'
             '-usage:Show per-conversation token usage for this session'
             '-tag:Manage session tags'
             '-features:List this base session'\''s feature worktrees'

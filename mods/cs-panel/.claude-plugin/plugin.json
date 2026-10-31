@@ -1,6 +1,6 @@
 {
   "name": "cs-panel",
   "version": "0.1.0",
-  "description": "/cs-panel lists every cs session (live or idle, context, unread mail, features) in a pane, and opens, mails or retires the one selected.",
+  "description": "/cs opens a pane of cs's settings, its mods' /config rows and its own CS_* settings, and changes one per machine or for this session only.",
   "author": { "name": "cs" }
 }

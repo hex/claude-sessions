@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ABOUTME: Tests for the cs-panel mod under mods/cs-panel (a Claude Code function-hooks plugin that lists every cs session in a pane).
+# ABOUTME: Tests for the cs-panel mod under mods/cs-panel (a Claude Code function-hooks plugin: bare /cs opens a pane of cs's settings).
 # ABOUTME: Pins the manifest, the installer listing and the kit's copy of the golden porcelain; runs the engine test kit, tsc and plugin validate when claude is present.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -9,9 +9,10 @@ MOD="$SCRIPT_DIR/../mods/cs-panel"
 setup() { :; }
 teardown() { :; }
 
-# What the mod hooks, as `claude plugin validate` prints it: the command, its
-# own pane's render and focus ring, its close, and the main loop's turn edges.
-HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=cs-panel}, ui.render{component=Pane, requestId=cs-panel}, ui.focus{requestId=cs-panel}, ui.close{id=cs-panel}, turn.start, turn.complete'
+# What the mod hooks, as `claude plugin validate` prints it: the bare /cs and
+# /cs-panel, its own pane's render, focus ring and close, the main loop's turn
+# end, and the /config writes it follows.
+HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=cs}, command.run{command=cs-panel}, ui.render{component=Pane, requestId=cs-panel}, ui.focus{requestId=cs-panel}, ui.close{id=cs-panel}, turn.complete, config.set'
 
 test_mod_manifest_names_the_plugin_and_its_module() {
     local manifest="$MOD/.claude-plugin/plugin.json"
@@ -21,21 +22,22 @@ test_mod_manifest_names_the_plugin_and_its_module() {
     module="$(jq -r '.modules[0]' "$MOD/hooks/hooks.json")"
     assert_eq "./register.tsx" "$module" "hooks.json names the register module" || return 1
     assert_file_exists "$MOD/hooks/$module" "the named module exists" || return 1
-    # Opened only by /cs-panel: no /config row turns an unasked open on.
+    # Opened only by /cs and /cs-panel: no /config row turns an unasked open on.
     assert_eq "false" "$(jq 'has("userConfig")' "$manifest")" "no userConfig" || return 1
 }
 
 test_mod_is_deployed_by_the_installer() {
     local file
-    for file in .claude-plugin/plugin.json hooks/hooks.json hooks/register.tsx hooks/draw.tsx hooks/sessions.ts; do
+    for file in .claude-plugin/plugin.json hooks/hooks.json hooks/register.tsx hooks/draw.tsx hooks/settings.ts; do
         assert_file_exists "$MOD/$file" "the mod has $file" || return 1
         assert_file_contains "$SCRIPT_DIR/../install.sh" "cs-panel/$file" "install.sh lists $file" || return 1
     done
+    assert_file_not_contains "$SCRIPT_DIR/../install.sh" "cs-panel/hooks/sessions.ts" "install.sh lists no sessions.ts, which the mod no longer has" || return 1
 }
 
 # The kit reads no file, so its tests import the golden answer from
-# test/golden.ts; the text between its backticks is the fixture tests/test_list.sh
-# holds `cs -list --porcelain` to, byte for byte.
+# test/golden.ts; the text between its backticks is the fixture
+# tests/test_config.sh holds `cs -config list --porcelain` to, byte for byte.
 test_mod_kit_golden_is_the_porcelain_fixture() {
     local literal
     literal="$(mktemp "${TMPDIR:-/tmp}/cs-panel-golden.XXXXXX")" || { echo "  FAIL: could not make a temp file"; return 1; }
@@ -44,10 +46,10 @@ test_mod_kit_golden_is_the_porcelain_fixture() {
          END { if (found != 2) exit 1 }' "$MOD/test/golden.ts" > "$literal"
     local status=$?
     if [ "$status" -ne 0 ]; then rm -f "$literal"; echo "  FAIL: test/golden.ts holds no GOLDEN literal closed by a lone backtick"; return 1; fi
-    if ! cmp -s "$literal" "$SCRIPT_DIR/fixtures/list-porcelain.txt"; then
-        diff "$SCRIPT_DIR/fixtures/list-porcelain.txt" "$literal" | head -10
+    if ! cmp -s "$literal" "$SCRIPT_DIR/fixtures/config-porcelain.txt"; then
+        diff "$SCRIPT_DIR/fixtures/config-porcelain.txt" "$literal" | head -10
         rm -f "$literal"
-        echo "  FAIL: test/golden.ts differs from tests/fixtures/list-porcelain.txt"
+        echo "  FAIL: test/golden.ts differs from tests/fixtures/config-porcelain.txt"
         return 1
     fi
     rm -f "$literal"
@@ -95,6 +97,10 @@ test_mod_typechecks_against_the_engine_contract() {
     assert_eq "0" "$status" "tsc exits 0" || { echo "$out"; return 1; }
 }
 
+# The bare /cs and the /config observer are gates, the observer with a catch
+# so its own failure never refuses a row; cs's settings are written only by
+# cs, the mods' rows only through $.config.set; the mod touches no file, sets
+# no environment variable and reaches no network.
 test_mod_validate_inventories_the_hooks_and_calls() {
     require_tool claude || return $?
     local out raw="${TMPDIR:-/tmp}/cs-mod-panel-validate.$$"
@@ -110,9 +116,15 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     local line
     line="$(grep -F './register.tsx hooks:' <<< "$out" | sed 's/^[^.]*//')"
     assert_eq "$HOOKS_LINE" "$line" "the exact hooks inventory" || return 1
+    assert_output_contains "$out" 'gating hook without .catch: command.run{command=cs}$' "bare /cs is a gate" || return 1
+    assert_output_contains "$out" 'gating hook with .catch: config.set$' "the /config observer is a gate with a catch" || return 1
+    assert_output_contains "$out" '$.config.list (via refreshMods)' "the mod rows come from \$.config.list" || return 1
+    assert_output_contains "$out" '$.config.set (via changeMod)' "a mod row is written through \$.config.set" || return 1
     assert_output_contains "$out" '$.process.run (via runCs)' "every cs run goes through runCs" || return 1
-    assert_output_contains "$out" 'env reads: CLAUDE_SESSION_NAME, CS_BIN' "the launch's two exports, nothing else" || return 1
-    assert_output_not_contains "$out" '$.fs.write' "the mod writes no file" || return 1
+    assert_output_contains "$out" 'env reads: CLAUDE_SESSION_NAME, CS_BIN$' "the launch's two exports, nothing else" || return 1
+    assert_output_contains "$out" 'env writes: nothing$' "the mod sets no environment variable" || return 1
+    assert_output_not_contains "$out" '$.env.set' "no \$.env.set" || return 1
+    assert_output_not_contains "$out" '$.fs.' "the mod reads and writes no file: cs owns the settings files" || return 1
     assert_output_not_contains "$out" '$.http.fetch' "the mod reaches no network" || return 1
 }
 

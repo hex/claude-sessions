@@ -4,6 +4,13 @@
 
 set -uo pipefail
 
+# cs's settings files (cs-config.sh, build.sh's copy of lib/03-config.sh):
+# the shim's loader fills its own shell only, so this child reads them itself.
+# A copy that fails to parse leaves it on its environment.
+case "$0" in */*) _cs_config="${0%/*}/cs-config.sh" ;; *) _cs_config=cs-config.sh ;; esac
+# shellcheck source=cs-config.sh
+[ ! -r "$_cs_config" ] || . "$_cs_config" 2>/dev/null
+
 # Which engine will answer, and on which model, decided once. The shim paints
 # its header before the rewrite starts and asks this script rather than
 # repeating the test, so the header can never name an engine other than the one

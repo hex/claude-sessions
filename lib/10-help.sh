@@ -42,9 +42,14 @@ Commands:
   -conversations      Show the session's conversation chain (rotations, lineage)
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
   -statusline <cmd>   enable|disable the cs status line; caps on|off|ask records whether your font has the rounded caps
+  -config list        Every cs setting: its value, where it comes from and when a change applies, then the lines the files skip (--porcelain prints tab-separated records for tools)
+  -config get <KEY>   The value readers see now; empty when nothing sets it
+  -config set <KEY> <value>  Keep a setting in this machine's ~/.config/cs/config (your environment still wins)
+  -config unset <KEY>  Remove a setting from this machine's file
+  <name> -config list|get|set|unset  The same for <name>'s own .cs/local/config, which outranks this machine's
   -detect-theme       Show the detected terminal theme (light|dark)
   -tui                Open the interactive session manager (bare 'cs' does too)
-  -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived; --porcelain prints tab-separated records for tools)
+  -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived)
   -adopt <name>       Adopt current directory as a cs session (--yes re-adopts orphaned records without asking)
   -adopt --worktrees  Register Claude Code's .claude/worktrees/* here as <repo>.<worktree> sessions (--dry-run previews)
   -whoami             Show the current actor (for shared, multi-person sessions)

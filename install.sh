@@ -142,6 +142,7 @@ CS_HOOKS=(
 CS_HOOK_LIBS=(
     cs-resolve.sh
     cs-shared.sh
+    cs-config.sh
     cs-iterm-tab.py
     memory-index-guard.sh
     prompt-rewriter.sh
@@ -259,7 +260,7 @@ CS_MOD_FILES=(
     cs-panel/.claude-plugin/plugin.json
     cs-panel/hooks/hooks.json
     cs-panel/hooks/register.tsx
-    cs-panel/hooks/sessions.ts
+    cs-panel/hooks/settings.ts
     cs-panel/hooks/draw.tsx
 )
 
@@ -1391,17 +1392,18 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "5b29d9ecf5d4edcb9822d01ff131321b5ec9613f372c6e15d6e41d77db45d43d  bin/cs"
+    "a7f947af6070bb7c51d92bd88f50ac574aeae9015c9ffa7b38a12c9598545f69  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
-    "68be4cb037652baf60d5dac8c7088eeb606bfa338a92c8d81395c281f210e86b  bin/cs-statusline"
+    "d8c282be6bf96631ec6e458c0389cedefdf58fb60a96f4fac49778f051d5e801  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
-    "85a1e25d7953943ec6fbd53b65765a928b06a59595abaf71e2d86e7888c8dd8c  hooks/cs-shared.sh"
+    "2be241e564a23555e1c5fc41b78ca39693df4d7eecc14eabb86a07a706610a8b  hooks/cs-shared.sh"
+    "b22f5419c173048e26fb8bc548037e7e13bf9a546f99de91366cf0c96e598c0d  hooks/cs-config.sh"
     "50d63ce0995e68fddd8503700c15f9585d11938c9cd3872a883146de7707c765  hooks/cs-iterm-tab.py"
     "21988bf58bb6fea15c6435445f4abc3a38f4c4a9a7db78c4ff4797650709ba3f  hooks/memory-index-guard.sh"
-    "42e81979965715204eb41428c1a227f170a14ab3919f2a6122cddd688425377f  hooks/prompt-rewriter.sh"
-    "8e4c93e404bcc99dc8a2651ac1dd5d064779216e44a40c1250e88c7a52d9d81d  hooks/prompt-rewriter-model.sh"
-    "2b0d7ce6873d4b62ca3ed52d5f6c7ffa98bdeda7e9bb5d393e70ab516b943cd7  hooks/prompt-rewriter-vendor.sh"
+    "0202455687b8c8a584cfc1ecf0439de03e8f70fcb0062e479484fdfeb4b83147  hooks/prompt-rewriter.sh"
+    "e6a9a79ff1b7342171f69c406d601d1bbd8dc631293e368ab8deaafef2d9d27a  hooks/prompt-rewriter-model.sh"
+    "8be7cf198e9e950cb11eeb5d02231bb3e168aa078018495a1a8832186334bbc2  hooks/prompt-rewriter-vendor.sh"
     "1fa475982564ec70f12bf5295b874989dd95f89224f27bb6be4854cc5b8674e3  hooks/wrap-sweep.md"
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
     "a4486c60d3db91c0a466fb154602eec888ffeb5a9942d74d2c8aac92b8dd7c32  hooks/session-start.sh"
@@ -1411,7 +1413,7 @@ CS_PAYLOAD_SHA256=(
     "81a13835a65f4b4b35bb87493da0df9848de68375ca7ab1525d2d5079cf52bf1  hooks/subagent-context.sh"
     "53b16016dd6d087c3cc3db7e4acf8de6629e149e3b7f326f0731b36809574156  hooks/tool-failure-logger.sh"
     "2736fd914673827102dd9e1ec60b1c385d8cfef56bac3b8579fde953d22fdbcb  hooks/session-auto-approve.sh"
-    "e3a3063740a947db9a681ef0e5c0f90c3965dbc02345eb10312bb69273a1e54a  hooks/scope-prompt.sh"
+    "b1bfb9ddbf99a3afdb56bfb744eda51e70aa4afc5d10f7f656c2d20d36a7f034  hooks/scope-prompt.sh"
     "9e06eaa16960dff49881234c8a479c2f8d2dd8d672283056e1591c4528e755ab  commands/checkpoint.md"
     "a0e341d4bdc60072b25354256e751b320733cdcc31b91ac3d4a4f661c73b611e  commands/wrap.md"
     "2520a6d54d75e3e9f1768160826a8b9f21e38e2234538cc62e3ec6337008fc28  skills/store-secret/SKILL.md"
@@ -1424,7 +1426,7 @@ CS_PAYLOAD_SHA256=(
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
     "8ffa3249cadb8017e5e0809326fc22f3ec0e2c1f9e3dd70c049782888190727f  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
-    "57b11a23b9eaba0c4487db3e4e294f1b7e1c339fdec2551163c0a9b9f5e55dd5  mods/cs/hooks/register.tsx"
+    "f07f0796befaa40356d318833ed46be921101f3c122869790f20ffecab0c2fb2  mods/cs/hooks/register.tsx"
     "f841609ed354ab29bf0076a2c1e86c7179c9de47301f5732a7c690d6e809303e  mods/cs/tips.json"
     "7a97c18b6ae755d8ec7862532eb15bbf627170a1fab8cc90dd2f8f77a57164be  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
@@ -1436,13 +1438,13 @@ CS_PAYLOAD_SHA256=(
     "fba40610714fd7201f496d3e1d7a7a6553b06c0da937710f6da3fcf8f4409054  mods/cs-mermaid/hooks/register.tsx"
     "c9c48de571777b2e2e948770b4e43fce1f4f84f86547496772a5021fc3380757  mods/cs-mermaid/hooks/text.ts"
     "c591644117d9a870c4631ecb40c7fc47f7cbab7b74849feb07b318784ba85367  mods/cs-mermaid/skills/show-me/SKILL.md"
-    "917c2c8c157a579ea63ada16d76d248927e850daef9dc309b10a3916d445f613  mods/cs-panel/.claude-plugin/plugin.json"
+    "8aaadea0975e0ccbeadb995515245a9b3a2651f84626c9ba6806a57da3b5ac53  mods/cs-panel/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
-    "06f22e3221ca04d9a9394b250a84e1721ef99268f144fd2ef56dde72263fd8bc  mods/cs-panel/hooks/register.tsx"
-    "ec14066f0a8a61e8e1703e9868035eba91c03603e885b75717867ea4166c7dd5  mods/cs-panel/hooks/sessions.ts"
-    "1807d4644b597c565613712c32c25d4e765e2bfa0a85dd080f370e016fa53d03  mods/cs-panel/hooks/draw.tsx"
-    "d551412bb1e97c8c04f5a6d08105150e202b4ab17e367b9291ce45de6638fb54  completions/cs.bash"
-    "f3e93304191339041b207e05ad008277fb1d2e62e5f29be4a36a0167072624a1  completions/_cs"
+    "a8dd92f9bdb5961719ee5b10f783addbaa6efb8b5eff007d8a92682009243362  mods/cs-panel/hooks/register.tsx"
+    "4e911e8cbcce08679ee1824cab04d17a72bbbc77663453c21ceecec8961bdedc  mods/cs-panel/hooks/settings.ts"
+    "11e67e00b3719ad3b4706fef30e855eb1073e1295c10dd66883d7cd4ee3e2db5  mods/cs-panel/hooks/draw.tsx"
+    "62251a79bfd7c81b444fc7d1ba83e97fcafa8e64abdba8d2f5eded930ac500c2  completions/cs.bash"
+    "41076b2d6e97163497974dc7c109f8a0053d8846cb52676dfa821319bea17eb2  completions/_cs"
 )
 
 # Everything that lands in HOOKS_DIR, for the copy and cleanup loops. The

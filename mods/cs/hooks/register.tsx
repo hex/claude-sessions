@@ -4,7 +4,7 @@
 // ABOUTME: cs mod: keys above the prompt: rotate past the threshold, wrap up, /clear once a handoff is armed, or start a queue nothing runs.
 // ABOUTME: A turn ending past CS_ROTATE_FORCE_CTX (default 80, off disables) runs /rotate itself, then counts down to the /clear (session colour, amber, crit); session.start writes a heartbeat for doctor.
 // ABOUTME: /queue adds a task to the session's walk-away queue through `cs -queue add`, at once even mid-turn; bare, it prints `cs -queue list`. /finish toasts its start and outcome and, while its gate runs, the band carries the elapsed time.
-// ABOUTME: The band carries a rail: one tick per prompt on the transcript's live branch (read after each turn), the one being read thick; a press or /cs next|prev|first|last|N scrolls the transcript to that prompt.
+// ABOUTME: The band carries a rail: one tick per prompt on the transcript's live branch (read after each turn), the one being read thick; a press or /cs next|prev|first|last|N scrolls the transcript to that prompt; bare /cs goes on to the cs panel.
 import type { On, EngineInterface, PluginOptions, RenderElement, RenderSurface } from 'claude-code'
 
 declare const h: any
@@ -12,9 +12,10 @@ declare const Fragment: any
 
 // KEEP IN SYNC with the ctx warn and crit defaults in bin/cs-statusline
 // (_seg_ctx): by default the band appears where the status bar turns amber and
-// the Stop hook gives its headroom notice. CS_STATUSLINE_CTX_WARN in the
-// process environment moves it, as it moves the bar; CS_ROTATE_BUTTON_CTX moves
-// the band alone. A value that is not a number is ignored.
+// the Stop hook gives its headroom notice. CS_STATUSLINE_CTX_WARN, from the
+// process environment or a cs settings file, moves it, as it moves the bar;
+// CS_ROTATE_BUTTON_CTX moves the band alone. A value that is not a number is
+// ignored.
 export const DEFAULT_PERCENT = 40
 
 // The count's colour ramp, in the status bar's inks. KEEP IN SYNC with _sgr in
@@ -108,6 +109,8 @@ const VET_TIMEOUT_MS = 10000
 // answer may take: the readiness walks git and the tree for every feature.
 const FEATURES_POLL_MS = 30000
 const FEATURES_TIMEOUT_MS = 20000
+// How long cs may take to list its settings before the read counts as failed.
+const SETTINGS_TIMEOUT_MS = 10000
 
 
 // The wrap key's question, and the answer that runs /wrap. `$.ui.ask` opens
@@ -204,6 +207,9 @@ export const LOGS = {
   transcriptUnread: (err: string) => `the transcript could not be read: ${err}`,
   colorFailed: (color: string, err: string) => `/color ${color} did not run: ${err}`,
   feedUnread: (message: string) => `the feed setting could not be read: ${message}`,
+  settingsExited: (code: number, line: string) => `cs -config list exited ${code}: ${line}`,
+  settingsUnreadable: (record: string) => `cs -config list gave a record the band cannot read: ${record}`,
+  settingsUnread: (err: string) => `cs's settings could not be read: ${err}`,
 } as const
 
 // `what` is the cs command a reply is about: `cs -queue add` or `cs -queue list`.
@@ -221,7 +227,7 @@ export const REPLIES = {
 
 export const COMMANDS = {
   queue: { name: 'queue', description: "Add a task to this cs session's walk-away queue, or list it.", argumentHint: '[task]', immediate: true },
-  cs: { name: 'cs', description: "Scroll the transcript along the band's rail of prompts.", argumentHint: 'next|prev|first|last|<n>', immediate: true },
+  cs: { name: 'cs', description: "Bare: cs's settings panel. next|prev|first|last|<n>: scroll the transcript along the band's rail of prompts.", argumentHint: '[next|prev|first|last|<n>]', immediate: true },
 } as const
 
 // The countdown: seconds left, its ticker, and what the band last saw. Module
@@ -342,6 +348,15 @@ let featuresReading = false
 let featuresClock: { cancel: () => void } | undefined
 let featuresComplaint: string | undefined
 
+// cs's settings as cs resolves them (`cs -config list --porcelain`): each
+// key's value, for the records a settings file gave (the session's or this
+// machine's). A key the shell pins, or whose value the launch measured, has
+// none, so its $.env.get answers: cs puts the environment above the files,
+// except a measured theme and background, which a file's pin outranks.
+let fileSettings = new Map<string, FileSetting>()
+let settingsInFlight: Promise<void> | undefined
+let settingsComplaint: string | undefined
+
 // The rail. A prompt is a row of the transcript's live branch; its requestId
 // is the id the engine drew its UserMessage row under, once seen.
 export type Prompt = { uuid: string; text: string }
@@ -410,6 +425,7 @@ export function register(on: On, options: PluginOptions) {
   lastRefusal = undefined
   feedVetRefused = false
   featuresWord = undefined; featuresReading = false; featuresClock = undefined; featuresComplaint = undefined
+  fileSettings = new Map(); settingsInFlight = undefined; settingsComplaint = undefined
   railFile = undefined; prompts = []; drawnRows = new Map(); shown = new Map(); denied = new Set(); denySaid = false; notYetSaid = false; tailSaid = false; drawnRead = -1; redrawPending = false
   on('session.start', async ($, e, next) => {
     if (!registered) {
@@ -419,6 +435,7 @@ export function register(on: On, options: PluginOptions) {
     }
     await refreshRail($)
     readFeaturesLater($)
+    readSettingsLater($)
     // Only in a cs session; anywhere else the mod stays silent. Nor while git
     // tracks the session's control files: the heartbeat would change them.
     if ((await $.fs.exists(`${e.cwd}/.cs/local`)) && (await isCsSession($, e.cwd)) && (await sessionVetted($, e.cwd))) {
@@ -466,8 +483,11 @@ export function register(on: On, options: PluginOptions) {
   // the person's own input, which is when the engine lets a plugin move a
   // transcript row, mid-turn too. A move answers with no text: a transcript
   // row of its own would grow the transcript under the view it just moved.
-  on('command.run', { command: 'cs' }, async ($, e) => {
+  // Bare /cs is the cs panel's and goes on to the next hook; the panel's own
+  // hook hands an argument on, so the two answer alike in either order.
+  on('command.run', { command: 'cs' }, async ($, e, next) => {
     const asked = e.args.trim()
+    if (asked === '') return next(e)
     const count = prompts.length
     const current = readIndex()
     let target: number
@@ -504,6 +524,9 @@ export function register(on: On, options: PluginOptions) {
       await clearPressed($)
       await refreshRail($)
       readFeaturesLater($)
+      // The rotation below is decided from cs's current answer, so this
+      // read is waited for; the turn is over, nothing paints meanwhile.
+      await readSettings($)
     }
     if (e.reason === 'answer' && e.agentId === undefined) await forceRotation($)
     return next(e)
@@ -554,7 +577,10 @@ export function register(on: On, options: PluginOptions) {
   // A turn that starts from a prompt is work after any wrap that finished: the
   // marker that wrap left no longer describes the conversation. A continuation
   // (no prompt, as a Stop hook's feedback starts one) is the wrap's own turn.
+  // A main-loop turn rereads cs's settings, so one changed while idle counts
+  // from the next prompt, the rotation its end may force included.
   on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) readSettingsLater($)
     if (e.text !== '') await clearWrapped($)
     return next(e)
   })
@@ -641,11 +667,12 @@ export function register(on: On, options: PluginOptions) {
     const { Box, Text, Button } = await $.ui.resolve(e)
     const wrapping = rotating && !armed && !wrapped
     const finish = featured?.finish
+    const { bg, theme } = await themeAndBackground($)
     const entries = buildBandEntries({
       featured: featured === undefined ? undefined : { label: featured.label, onPress: finish === undefined || !bandIdle ? undefined : () => pressFinish($, finish) },
       countdown: armed && left !== undefined ? { seconds: left, ink: await rampColor($, left) } : undefined,
       rotating, armed, wrapping, waiting, gate, queued, queueRunning: queueStarted, mail,
-      queueInk: amberColor(await $.env.get("CS_TERM_BG_RGB"), await $.env.get("CS_TERM_THEME")),
+      queueInk: amberColor(bg, theme),
       feed: feeding ? { on: !feedVetRefused && await readFeed($), color: own, onPress: () => pressFeed($) } : undefined,
       rotate: armed ? () => pressClear($) : () => pressRotate($),
       wrap: () => askToWrap($),
@@ -1113,6 +1140,94 @@ async function readFeatures($: EngineInterface): Promise<FeaturesWord | undefine
   return word
 }
 
+// The hooks that paint do not wait on a cs fork for its settings: the answer
+// lands in fileSettings, and the band redraws when a value moved.
+function readSettingsLater($: EngineInterface) {
+  void readSettings($)
+}
+
+// One read at a time: a caller that needs the answer waits on the read in
+// flight rather than starting a second.
+function readSettings($: EngineInterface): Promise<void> {
+  if (settingsInFlight === undefined) settingsInFlight = refreshFileSettings($).finally(() => { settingsInFlight = undefined })
+  return settingsInFlight
+}
+
+// Asks cs for its settings, by the path the launch exported; the child
+// inherits claude's environment, so cs judges the same pins this process has.
+// A failed or unreadable answer keeps the settings last read and is logged
+// once until the complaint changes; a read still running is not doubled.
+async function refreshFileSettings($: EngineInterface) {
+  let complaint: string | undefined
+  try {
+    const bin = await $.env.get("CS_BIN")
+    if (!bin) return
+    const result = await $.process.run([bin, '-config', 'list', '--porcelain'], { timeoutMs: SETTINGS_TIMEOUT_MS })
+    const read = result.exitCode === 0 ? parseFileSettings(result.stdout) : undefined
+    if (read === undefined) {
+      complaint = LOGS.settingsExited(result.exitCode, result.stderr.split('\n').filter(l => l.trim() !== '').slice(-1)[0] ?? '')
+    } else if ('unreadable' in read) {
+      complaint = LOGS.settingsUnreadable(read.unreadable)
+    } else if (!sameSettings(read, fileSettings)) {
+      fileSettings = read
+      $.ui.invalidate('ui.render')
+    }
+  } catch (err) {
+    complaint = LOGS.settingsUnread(String(err instanceof Error ? err.message : err))
+  }
+  if (complaint !== undefined && complaint !== settingsComplaint) $.ui.log(complaint)
+  settingsComplaint = complaint
+}
+
+const SETTING_SOURCES = new Set(['default', 'machine', 'session', 'shell', 'launch'])
+
+// One record of cs's resolution: the value a reader sees (none for `-`) and
+// where cs says it comes from.
+type FileSetting = { value: string | undefined; source: string }
+
+// The porcelain's records: eleven tab-separated fields, the key first, the
+// value ninth (`-` for none) and its source tenth. Each value a settings file
+// gave (source session or machine) is kept; a record of any other shape makes
+// the whole answer unreadable.
+function parseFileSettings(text: string): Map<string, FileSetting> | { unreadable: string } {
+  const settings = new Map<string, FileSetting>()
+  for (const line of text.split('\n')) {
+    if (line === '') continue
+    const fields = line.split('\t')
+    const [key, , , , , , , , value, source] = fields
+    if (fields.length !== 11 || key === undefined || value === undefined || source === undefined || !SETTING_SOURCES.has(source)) return { unreadable: line }
+    settings.set(key, { value: value === '-' ? undefined : value, source })
+  }
+  return settings
+}
+
+function sameSettings(a: Map<string, FileSetting>, b: Map<string, FileSetting>): boolean {
+  return a.size === b.size && [...a].every(([key, s]) => b.get(key)?.value === s.value && b.get(key)?.source === s.source)
+}
+
+// A value a settings file gave (source session or machine); any other source
+// leaves the environment's value to its reader.
+function fileValue(key: string): string | undefined {
+  const s = fileSettings.get(key)
+  return s !== undefined && (s.source === 'session' || s.source === 'machine') ? s.value : undefined
+}
+
+// The theme and the background a reader draws with. The background follows
+// its own record: a file's value, the environment's for a shell pin or the
+// launch's measurement, and none when cs reports it as default, as the
+// environment may still hold a measurement cs dropped for a file theme of
+// the other polarity. Before cs has answered, the environment's.
+async function themeAndBackground($: EngineInterface): Promise<{ theme: string | undefined; bg: string | undefined }> {
+  const bg = fileSettings.get('CS_TERM_BG_RGB')
+  return {
+    theme: fileValue('CS_TERM_THEME') ?? await $.env.get("CS_TERM_THEME"),
+    bg: bg === undefined ? await $.env.get("CS_TERM_BG_RGB")
+      : bg.source === 'session' || bg.source === 'machine' ? bg.value
+      : bg.source === 'default' ? undefined
+      : await $.env.get("CS_TERM_BG_RGB"),
+  }
+}
+
 // Whether the sessions root holds a feature of `base`: cs names each one's
 // directory `<base>@<task>` there.
 async function hasFeatureDirs($: EngineInterface, base: string): Promise<boolean> {
@@ -1389,11 +1504,11 @@ function numberOr(raw: string | undefined, fallback: number): number {
 // case) and `0` turn the forcing off, a percentage from 1 to 100 moves it, and
 // anything else — a typo, or a number past 100 no turn can reach — is the
 // default rather than silence, because a value nobody can read must not
-// quietly disable a rotation the person is relying on.
-// `claude plugin validate` lists what a module reads, and a name it does not
-// spell is refused.
+// quietly disable a rotation the person is relying on. A settings file's value
+// comes first (fileSettings). `claude plugin validate` lists what a module
+// reads, and a name it does not spell is refused.
 async function forceThreshold($: EngineInterface): Promise<number | undefined> {
-  const raw = (await $.env.get("CS_ROTATE_FORCE_CTX"))?.trim()
+  const raw = (fileValue('CS_ROTATE_FORCE_CTX') ?? await $.env.get("CS_ROTATE_FORCE_CTX"))?.trim()
   if (raw === undefined || raw === '') return FORCE_DEFAULT
   if (raw.toLowerCase() === 'off' || /^0+$/.test(raw)) return undefined
   const n = /^\d+$/.test(raw) ? Number(raw) : NaN
@@ -1534,12 +1649,13 @@ export function nextStepLine(text: string): string | undefined {
 }
 
 // The band's own threshold; without one it is the bar's warn band, read the way
-// the bar reads it. Each variable's name is a literal: `claude plugin validate`
-// lists what a module reads, and a name it does not spell is refused.
+// the bar reads it. A settings file's value comes first (fileSettings). Each
+// variable's name is a literal: `claude plugin validate` lists what a module
+// reads, and a name it does not spell is refused.
 async function threshold($: EngineInterface): Promise<number> {
   return numberOr(
-    await $.env.get("CS_ROTATE_BUTTON_CTX"),
-    numberOr(await $.env.get("CS_STATUSLINE_CTX_WARN"), DEFAULT_PERCENT),
+    fileValue('CS_ROTATE_BUTTON_CTX') ?? await $.env.get("CS_ROTATE_BUTTON_CTX"),
+    numberOr(fileValue('CS_STATUSLINE_CTX_WARN') ?? await $.env.get("CS_STATUSLINE_CTX_WARN"), DEFAULT_PERCENT),
   )
 }
 
@@ -1636,10 +1752,12 @@ export function isUnconsumed(text: string): boolean {
   return false
 }
 
-// The count's colour for this session and terminal. Each name is a literal:
-// `claude plugin validate` lists what a module reads.
+// The count's colour for this session and terminal, a settings file's
+// background and theme first. Each name is a literal: `claude plugin validate`
+// lists what a module reads.
 async function rampColor($: EngineInterface, secs: number): Promise<string | undefined> {
-  return countdownColor(secs, await sessionColor($), await $.env.get("CS_TERM_BG_RGB"), await $.env.get("CS_TERM_THEME"))
+  const { bg, theme } = await themeAndBackground($)
+  return countdownColor(secs, await sessionColor($), bg, theme)
 }
 
 // The session's colour name as cs recorded it in state, or undefined.

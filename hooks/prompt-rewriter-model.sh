@@ -4,6 +4,13 @@
 
 set -uo pipefail
 
+# cs's settings files (cs-config.sh, build.sh's copy of lib/03-config.sh):
+# the shim's loader fills its own shell only, so this child reads them itself.
+# A copy that fails to parse leaves it on its environment.
+case "$0" in */*) _cs_config="${0%/*}/cs-config.sh" ;; *) _cs_config=cs-config.sh ;; esac
+# shellcheck source=cs-config.sh
+[ ! -r "$_cs_config" ] || . "$_cs_config" 2>/dev/null
+
 prompt=$(cat 2>/dev/null) || exit 1
 [ -n "${prompt//[[:space:]]/}" ] || exit 1
 

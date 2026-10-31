@@ -1046,6 +1046,13 @@ run_uninstall() {
         fi
     fi
 
+    # The settings file holds the person's choices, which a reinstall should
+    # find, so it stays, as statusline-caps does.
+    if [ -f "$_CS_CONFIG_MACHINE" ]; then
+        _config_label "$_CS_CONFIG_MACHINE"
+        info "Kept $_CONFIG_LABEL (your cs settings; delete it to forget them)"
+    fi
+
     echo ""
     info "Uninstall complete!"
 }

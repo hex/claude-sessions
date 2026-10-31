@@ -259,6 +259,11 @@ main() {
             run_statusline_cmd "$@"
             return $?
             ;;
+        -config)
+            shift
+            cmd_config "" "$@"
+            return $?
+            ;;
         -*)
             error "Unknown command: $cmd. Run 'cs -help' for usage."
             ;;
@@ -320,6 +325,7 @@ main() {
                 export CS_SECRETS_SESSION="${wt_base:-$session_name}"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_secrets "$@"
                 return 0
                 ;;
@@ -352,6 +358,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_queue "$@"
                 return 0
                 ;;
@@ -385,6 +392,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_conversations "$@"
                 return 0
                 ;;
@@ -410,14 +418,21 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_narrative "$@"
                 return 0
+                ;;
+            -config)
+                shift
+                cmd_config "$session_name" "$@"
+                return $?
                 ;;
             -usage)
                 shift
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_usage "$session_name" "$@"
                 return 0
                 ;;
@@ -426,6 +441,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_tag "$@"
                 return 0
                 ;;
@@ -480,7 +496,7 @@ main() {
                 shift 2
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -usage, -tag, -features, -finish, --force, --remote, or --permission-mode."
+                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -config, -usage, -tag, -features, -finish, --force, --remote, or --permission-mode."
                 ;;
         esac
     done
@@ -505,6 +521,13 @@ main() {
     fi
 
     local session_dir="$SESSIONS_ROOT/$session_name"
+
+    # The launch's own settings come from the session it opens: its file
+    # outranks the machine's for the update check below, the theme the launch
+    # measures (a file's theme is not measured over) and every launch-only
+    # setting. bin/cs loaded the files for the session it was started in,
+    # which is another one, or none.
+    cs_config_load "$session_dir"
 
     check_dependencies
 

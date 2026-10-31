@@ -89,6 +89,7 @@ CS_HOOKS=(
 CS_HOOK_LIBS=(
     cs-resolve.sh
     cs-shared.sh
+    cs-config.sh
     cs-iterm-tab.py
     memory-index-guard.sh
     prompt-rewriter.sh
@@ -206,7 +207,7 @@ CS_MOD_FILES=(
     cs-panel/.claude-plugin/plugin.json
     cs-panel/hooks/hooks.json
     cs-panel/hooks/register.tsx
-    cs-panel/hooks/sessions.ts
+    cs-panel/hooks/settings.ts
     cs-panel/hooks/draw.tsx
 )
 
@@ -2560,6 +2561,482 @@ _cs_prune_settings_backups() {  # file, [backup just written]
             rm -f -- "$1.cs-bak.$suffix" || true
         done
 }
+# The allow-list, one record per key, in the order `cs -config list` prints:
+#   KEY|group|label|edit|check|choices|default|when|whenText
+# edit is what the panel offers (flag toggles, choice asks with choices, text
+# asks for free text, shell is changed from a shell only); check names the
+# arm of _cs_config_check that accepts what the key's readers accept; when is
+# now, /clear, launch or now+launch. Walked with parameter expansion only, so
+# loading forks nothing.
+_CS_CONFIG_SPEC=(
+    'CS_STATUSLINE_DISABLE|Status line|Hide the status line|flag|flag|-|off|now|applies at the next repaint'
+    'CS_STATUSLINE_LAYOUT|Status line|Layout|choice|enum|quiet,band,capsules|quiet|now|applies at the next repaint'
+    'CS_STATUSLINE_SEGMENTS|Status line|Segments|text|segments|-|logo,session,notes,mail,git,model,ctx,limits|now|applies at the next repaint'
+    'CS_STATUSLINE_BAND|Status line|Band colour|text|band|-|session|now|applies at the next repaint'
+    'CS_STATUSLINE_COLS|Status line|Width in columns|text|cols|-|measured|now|applies at the next repaint'
+    'CS_STATUSLINE_FRAME|Status line|Frame columns|text|num|-|4|now|applies at the next repaint'
+    'CS_STATUSLINE_CTX_WARN|Status line|Context warn %|text|num|-|40|now|applies at the next repaint'
+    'CS_STATUSLINE_CTX_CRIT|Status line|Context critical %|text|num|-|65|now|applies at the next repaint'
+    'CS_USAGE_NO_REFRESH|Status line|Usage from cache only|flag|flag|-|off|now|applies at the next repaint'
+    'CS_SUBAGENT_STATUSLINE_DISABLE|Status line|Hide the subagent rows|flag|flag|-|off|now|applies at the next repaint'
+    'CS_SCOPE_DISABLE|Prompts|No scope grounding|flag|flag|-|off|now|applies at your next prompt'
+    'CS_SCOPE_TRACE_DISABLE|Prompts|No scope trace|flag|flag|-|off|now|applies at your next prompt'
+    'CS_SCOPE_BUDGET_MS|Prompts|Scope scan budget (ms)|text|ms|-|1500|now|applies at your next prompt'
+    'CS_OBJECTIVE_CAPTURE_DISABLE|Prompts|No objective capture|flag|flag|-|off|now|applies at your next prompt'
+    'CS_DATE_REMINDER_DISABLE|Prompts|No date reminder|flag|flag|-|off|now|applies at your next prompt'
+    'CS_CLARIFY_DISABLE|Prompts|No clarifying questions|flag|flag|-|off|now|applies at your next prompt'
+    'CS_CTX_WARN_CTX|Turn end|Context warning %|text|num|-|40|now|applies when the next turn ends'
+    'CS_ROTATE_NUDGE_CTX|Turn end|Rotation nudge %|text|num|-|65|now|applies when the next turn ends'
+    'CS_QUEUE_MAX_FAILURES|Turn end|Queue stops after failures|text|num|-|5|now|applies when the next turn ends'
+    'CS_QUEUE_MAX_CTX|Turn end|Queue stops past context %|text|num|-|85|now|applies when the next turn ends'
+    'CS_QUEUE_MAX_5H|Turn end|Queue stops past 5h limit %|text|num|-|85|now|applies when the next turn ends'
+    'CS_MAIL_WAKE_MAX|Turn end|Mail wakes in a row|text|num|-|5|now|applies when the next turn ends'
+    'CS_NO_MAIL_WAKE|Turn end|No mail wake|flag|flag|-|off|now|applies when the next turn ends'
+    'CS_NARRATIVE_MAX_BYTES|Turn end|Narrative budget (bytes)|text|bytes|-|131072|now|applies when the next turn ends'
+    'CS_NARRATIVE_KEEP_BYTES|Turn end|Narrative tail kept (bytes)|text|bytes|-|65536|now|applies when the next turn ends'
+    'CS_ROTATE_FORCE_CTX|Rotation|Rotate on its own past %|text|force|-|80|now|applies by your next prompt'
+    'CS_ROTATE_BUTTON_CTX|Rotation|Rotate button from %|text|num|-|the warn %|now|applies by your next prompt'
+    'CS_NO_ROTATION_WAKE|Rotation|No wake after /clear|flag|flag|-|off|/clear|applies at the next /clear or launch'
+    'CS_ROTATION_KICK_DELAY|Rotation|Wake delay (s)|text|secs|-|2|now|applies at the next rotation'
+    'CS_REWRITE_PROVIDER|Rewriter (ctrl+g)|Provider|choice|enum|claude,claude-api,openai,openai-api,gemini,gemini-api,grok,xai|claude|now|applies at the next ctrl+g'
+    'CS_REWRITE_MODEL|Rewriter (ctrl+g)|Model|text|model|-|per provider|now|applies at the next ctrl+g'
+    'CS_REWRITE_TIMEOUT|Rewriter (ctrl+g)|Timeout (s)|text|secs|-|25|now|applies at the next ctrl+g'
+    'CS_REWRITE_PROGRESS|Rewriter (ctrl+g)|Progress|choice|enum|screen,native,line,static|screen|now|applies at the next ctrl+g'
+    'CS_REWRITE_DISABLE|Rewriter (ctrl+g)|No rewrite|flag|flag|-|off|now+launch|on: the next ctrl+g passes through. Off after a launch with it on: the next launch, which installs the ctrl+g shim.'
+    'CS_TERM_THEME|Terminal|Theme|choice|enum|light,dark|detected|now|applies at the next repaint'
+    'CS_TERM_BG_RGB|Terminal|Background r;g;b|text|rgb|-|detected|now|applies at the next repaint'
+    'CS_NO_ITERM2|Terminal|No iTerm2 features|flag|flag|-|off|now+launch|the tab title, the bell bounce and the iTerm reads of the bar: now. The iTerm tmux path of the launch: the next launch.'
+    'CS_NERD_FONTS|Terminal|Nerd Font glyphs|flag|flag|-|off|now|applies at the next cs command'
+    'CS_NO_TASK_TOOLS|Launch|No task tools|flag|flag|-|off|launch|applies at the next launch'
+    'CS_NO_UPDATE_CHECK|Launch|No update check|flag|flag|-|off|launch|applies at the next launch'
+    'CS_NO_FUNCTION_HOOKS|Launch|No mods|shell|flag|-|off|launch|applies at the next launch; on, it loads no mod, the cs panel included'
+)
+
+# Keys a file never sets, each with the reason the writer gives. Each names a
+# secret, a program cs runs, a path, where secrets live, or a setting with a
+# record of its own: a file a plugin can write must choose none of them.
+_CS_CONFIG_EXCLUDED=(
+    'CS_SECRETS_PASSWORD|it is a secret, and the file is plain text'
+    'CLAUDE_CODE_BIN|it names a program cs runs, which a file a plugin can write must not choose'
+    'CS_TMUX_BIN|it names a program cs runs, which a file a plugin can write must not choose'
+    'CS_REWRITE_CMD|it names a program cs runs, which a file a plugin can write must not choose'
+    'CS_REAL_EDITOR|it names a program cs runs, which a file a plugin can write must not choose'
+    'CS_SESSIONS_ROOT|it names where every session lives, and each process keys on it'
+    'CS_SECRETS_BACKEND|it moves where cs-secrets looks, and every stored secret would vanish from view until it moved back'
+    'CS_PLATFORM_OVERRIDE|it moves where cs-secrets looks, and every stored secret would vanish from view until it moved back'
+    'CS_USAGE_DIR|it names a directory the status line writes to'
+    'CS_ACTOR|identity has its own per-session file, .cs/local/identity, which outranks a machine-wide name'
+    'CS_STATUSLINE_CAPS|it has its own record, which cs -statusline caps on|off|ask writes'
+)
+
+# Each key's check arm and choices, as "<arm>|<choices>" in _CS_CFG_R_<KEY>,
+# so a line's key is looked up without a walk of the table. Built once a
+# process, the first time a file or a value is checked: a reader on a machine
+# with no settings file never pays for it.
+_cs_config_index() {
+    local rec key
+    [ "${_CS_CFG_INDEXED:-}" != "$$" ] || return 0
+    for rec in "${_CS_CONFIG_SPEC[@]}"; do
+        key=${rec%%|*}
+        rec=${rec#*|*|*|*|}
+        printf -v "_CS_CFG_R_$key" '%s' "${rec%|*|*|*}"
+    done
+    _CS_CFG_INDEXED=$$
+}
+
+# <key>'s check arm in _CS_CFG_ARM and its choices in _CS_CFG_CHOICES; status
+# 1, nothing set, for a key outside the allow-list. Runs after
+# _cs_config_index.
+_cs_config_record() {  # key
+    # Indirect expansion evaluates an array subscript in the name: a key that
+    # is not a name is no setting, and never reaches it.
+    case "$1" in ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) return 1 ;; esac
+    local r="_CS_CFG_R_$1"
+    [ -n "${!r-}" ] || return 1
+    _CS_CFG_ARM=${!r%%|*}
+    _CS_CFG_CHOICES=${!r#*|}
+}
+
+# "a, b or c" from "a,b,c", in _CS_CONFIG_WHY.
+_cs_config_or_list() {  # csv
+    local rest="$1" out=""
+    while :; do
+        case "$rest" in
+            *,*) out="${out:+$out, }${rest%%,*}"; rest=${rest#*,} ;;
+            *) out="${out:+$out or }$rest"; break ;;
+        esac
+    done
+    _CS_CONFIG_WHY=$out
+}
+
+# Whether <value> is an r;g;b triplet, each part 0 to 255 in one to three
+# digits: what the status line's _parse_rgb_triplet takes.
+_cs_config_rgb() {  # value
+    local v="$1" part n=0
+    case "$v" in ''|*[!0-9\;]*) return 1 ;; esac
+    while :; do
+        part=${v%%;*}
+        case "$part" in ''|????*) return 1 ;; esac
+        [ "$((10#$part))" -le 255 ] || return 1
+        n=$((n + 1))
+        case "$v" in *\;*) v=${v#*;} ;; *) break ;; esac
+    done
+    [ "$n" -eq 3 ]
+}
+
+# Whether <value> passes check arm <arm> (choices for enum), 0 or 1; on a
+# refusal, what the arm accepts in _CS_CONFIG_WHY, phrased to follow "is" or
+# "not". Each arm takes what its readers take today; none takes an empty value
+# or a control character. A value that passes sets nothing: the readers check
+# every line of a file on every repaint.
+_cs_config_check() {  # arm, choices, value
+    case "$1" in
+        flag) case "$3" in 0|1) return 0 ;; esac ;;
+        enum) case "$3" in ''|*,*) ;; *) case ",$2," in *",$3,"*) return 0 ;; esac ;; esac ;;
+        num) case "$3" in ''|*[!0-9]*|????*) ;; *) return 0 ;; esac ;;
+        ms|secs) case "$3" in ''|*[!0-9]*|????????*) ;; *) return 0 ;; esac ;;
+        cols) case "$3" in ''|0*|*[!0-9]*|?????*) ;; *) return 0 ;; esac ;;
+        bytes)
+            case "$3" in
+                ''|*[!0-9]*|????????????????*) ;;
+                *) [ "$((10#$3))" -eq 0 ] || return 0 ;;
+            esac
+            ;;
+        force)
+            case "$3" in
+                [oO][fF][fF]) return 0 ;;
+                ''|*[!0-9]*|????*) ;;
+                *) [ "$((10#$3))" -gt 100 ] || return 0 ;;
+            esac
+            ;;
+        band)
+            case "$3" in red|blue|green|yellow|purple|orange|pink|cyan|brand|periwinkle|session|none) return 0 ;; esac
+            ! _cs_config_rgb "$3" || return 0
+            ;;
+        rgb) ! _cs_config_rgb "$3" || return 0 ;;
+        segments) ! _cs_config_segments "$3" || return 0 ;;
+        model)
+            case "$3" in
+                [A-Za-z0-9]*) case "$3" in *[!A-Za-z0-9._:/-]*) ;; *) [ "${#3}" -gt 128 ] || return 0 ;; esac ;;
+            esac
+            ;;
+    esac
+    _cs_config_why "$1" "$2"
+    return 1
+}
+
+# Whether <value> is a comma-separated list of status line segments, each at
+# most once: the names bin/cs-statusline draws.
+_cs_config_segments() {  # value
+    local rest="$1" item seen=","
+    while :; do
+        item=${rest%%,*}
+        case "$item" in
+            logo|session|notes|mail|pane|git|model|ctx|limits|fable|cost) ;;
+            *) return 1 ;;
+        esac
+        case "$seen" in *",$item,"*) return 1 ;; esac
+        seen="$seen$item,"
+        case "$rest" in *,*) rest=${rest#*,} ;; *) return 0 ;; esac
+    done
+}
+
+# What check arm <arm> accepts, in _CS_CONFIG_WHY.
+_cs_config_why() {  # arm, choices
+    case "$1" in
+        flag) _CS_CONFIG_WHY="1 (on) or 0 (off)" ;;
+        enum) _cs_config_or_list "$2" ;;
+        num) _CS_CONFIG_WHY="a whole number of 1 to 3 digits" ;;
+        ms) _CS_CONFIG_WHY="a whole number of milliseconds of 1 to 7 digits (0 skips the scan)" ;;
+        secs) _CS_CONFIG_WHY="a whole number of seconds of 1 to 7 digits" ;;
+        cols) _CS_CONFIG_WHY="a column count from 1 to 9999" ;;
+        bytes) _CS_CONFIG_WHY="a byte count above 0 of at most 15 digits" ;;
+        force) _CS_CONFIG_WHY="off, 0 or a percentage from 1 to 100" ;;
+        band) _CS_CONFIG_WHY="a palette name, brand, periwinkle, session, none or r;g;b" ;;
+        rgb) _CS_CONFIG_WHY="r;g;b, each 0 to 255" ;;
+        segments) _CS_CONFIG_WHY="a comma-separated list of logo, session, notes, mail, pane, git, model, ctx, limits, fable and cost, each at most once" ;;
+        model) _CS_CONFIG_WHY="a model name of letters, digits and . _ : / -, starting with a letter or digit, at most 128 characters" ;;
+        *)
+            _CS_CONFIG_WHY="a value of check arm '$1', which cs does not have"
+            echo "cs: _cs_config_check has no arm named '$1'" >&2
+            ;;
+    esac
+}
+
+# Whether <value> is one an allowed <key> takes; what it takes in
+# _CS_CONFIG_WHY. The key must be in the allow-list: an unknown one is a
+# caller's bug, said on stderr, status 2.
+cs_config_valid() {  # key, value
+    _cs_config_index
+    if ! _cs_config_record "$1"; then
+        echo "cs: cs_config_valid: $1 is not in the allow-list" >&2
+        return 2
+    fi
+    _cs_config_check "$_CS_CFG_ARM" "$_CS_CFG_CHOICES" "$2"
+}
+
+# Whether <key> is one a file never sets; the reason in _CS_CONFIG_WHY.
+_cs_config_excluded() {  # key
+    local rec
+    for rec in "${_CS_CONFIG_EXCLUDED[@]}"; do
+        if [ "${rec%%|*}" = "$1" ]; then
+            _CS_CONFIG_WHY=${rec#*|}
+            return 0
+        fi
+    done
+    return 1
+}
+
+# One skipped line, appended to _CS_CONFIG_IGNORED as
+# "<scope>\t<line no>\t<line>\t<why>\n", its control characters shown as ?.
+_cs_config_skip() {  # scope, line no, line, why
+    _CS_CONFIG_IGNORED+="$1"$'\t'"$2"$'\t'"${3//[[:cntrl:]]/?}"$'\t'"$4"$'\n'
+}
+
+# Reads one settings file, scope M (this machine's) or S (the session's),
+# line by line with read -r: never sourced, nothing expanded. A good line
+# sets _CS_CFG_<scope>_<KEY> and names the key in _CS_CFG_READ_<scope>
+# (" KEY KEY "); any other is skipped and named in _CS_CONFIG_IGNORED. A
+# value its key refuses is also kept in _CS_CFG_<scope>BAD_<KEY> as
+# "line <n>: <line>: <why>", the key named in _CS_CFG_BAD_<scope>, the value
+# that would otherwise apply, until a later good line of the key in the same
+# file replaces it. A per-key variable counts only while its list names the
+# key, so one the environment carried in is never read as a file's. A missing file, a
+# directory at the path or an unreadable file reads as empty, status 0, so a
+# reader under set -e goes on with the environment alone. The loop body is
+# written out rather than called per line: the status line reads every line
+# on every repaint.
+_cs_config_read() {  # file, scope
+    local line n=0 key value list
+    [ -f "$1" ] && [ -r "$1" ] || return 0
+    {
+        while IFS= read -r line || [ -n "$line" ]; do
+            n=$((n + 1))
+            case "$line" in *[![:space:]]*) ;; *) continue ;; esac
+            case "$line" in
+                '#'*) continue ;;
+                *=*) key=${line%%=*}; value=${line#*=} ;;
+                *) _cs_config_skip "$2" "$n" "$line" "not KEY=value"; continue ;;
+            esac
+            case "$key" in
+                ''|[!A-Za-z_]*|*[!A-Za-z0-9_]*) _cs_config_skip "$2" "$n" "$line" "not KEY=value"; continue ;;
+            esac
+            list="_CS_CFG_R_$key"
+            list=${!list-}
+            if [ -z "$list" ]; then
+                if _cs_config_excluded "$key"; then
+                    # One such key is a secret: the listing and doctor name
+                    # the key, never the value.
+                    _cs_config_skip "$2" "$n" "$key=(hidden)" "not kept in cs's config"
+                else
+                    _cs_config_skip "$2" "$n" "$line" "not a cs setting"
+                fi
+                continue
+            fi
+            if ! _cs_config_check "${list%%|*}" "${list#*|}" "$value"; then
+                _cs_config_skip "$2" "$n" "$line" "not $_CS_CONFIG_WHY"
+                printf -v "_CS_CFG_${2}BAD_$key" '%s' "line $n: ${line//[[:cntrl:]]/?}: not $_CS_CONFIG_WHY"
+                list="_CS_CFG_BAD_$2"
+                case "${!list}" in *" $key "*) ;; *) printf -v "$list" '%s' "${!list}$key " ;; esac
+                continue
+            fi
+            printf -v "_CS_CFG_${2}_$key" '%s' "$value"
+            list="_CS_CFG_READ_$2"
+            case "${!list}" in
+                *" $key "*) ;;
+                *)
+                    printf -v "$list" '%s' "${!list}$key "
+                    if [ "$2" = M ]; then
+                        _CS_CONFIG_COUNT_M=$((_CS_CONFIG_COUNT_M + 1))
+                    else
+                        _CS_CONFIG_COUNT_S=$((_CS_CONFIG_COUNT_S + 1))
+                    fi
+                    ;;
+            esac
+            list="_CS_CFG_BAD_$2"
+            if [ "${!list}" != " " ]; then
+                value=${!list}
+                printf -v "$list" '%s' "${value/ $key / }"
+            fi
+        done < "$1"
+    } 2>/dev/null || true
+    return 0
+}
+
+# Where <key>'s value comes from, in _CS_CFG_SOURCE: shell (the environment
+# pins it), launch (the launch measured it: CS_TERM_THEME beside
+# CS_TERM_THEME_AUTO, and CS_TERM_BG_RGB under that marker without
+# CS_TERM_BG_RGB_PINNED, the rule the status line's _sl_bg_pinned states),
+# session, machine or default. A key the loader has not looked at in this
+# process holds what the process started with, so its value answers.
+cs_config_source() {  # key
+    local src="_CS_CFG_SRC_$1"
+    case "${_CS_CFG_SEEN-}" in
+        *" $1 "*) _CS_CFG_SOURCE=${!src}; return 0 ;;
+    esac
+    if [ -z "${!1-}" ]; then
+        _CS_CFG_SOURCE=default
+    elif [ -z "${CS_TERM_THEME_AUTO:-}" ]; then
+        _CS_CFG_SOURCE=shell
+    else
+        case "$1" in
+            CS_TERM_THEME) _CS_CFG_SOURCE=launch ;;
+            CS_TERM_BG_RGB) if [ -n "${CS_TERM_BG_RGB_PINNED:-}" ]; then _CS_CFG_SOURCE=shell; else _CS_CFG_SOURCE=launch; fi ;;
+            *) _CS_CFG_SOURCE=shell ;;
+        esac
+    fi
+}
+
+# Decides, once a process, where <key>'s value comes from (cs_config_source),
+# in _CS_CFG_SRC_<KEY>, and lists the key in _CS_CFG_SEEN.
+_cs_config_see() {  # key
+    case "${_CS_CFG_SEEN-}" in *" $1 "*) return 0 ;; esac
+    cs_config_source "$1"
+    printf -v "_CS_CFG_SRC_$1" '%s' "$_CS_CFG_SOURCE"
+    _CS_CFG_SEEN="${_CS_CFG_SEEN-}$1 "
+}
+
+# Fills each allowed key the environment does not pin from the session's file
+# (<session_dir>/.cs/local/config), else this machine's
+# (${XDG_CONFIG_HOME:-$HOME/.config}/cs/config), in this shell only: every
+# fill is unexported, so a child reads the files itself and an edit reaches
+# the next repaint and the next hook, and nothing a launch hands claude can
+# pose as a pin. A flag's 0 fills as unset, so readers testing = "1" and
+# readers testing -n both see off. A key no file sets is unset only when an
+# earlier call filled it; a value the environment supplied is never touched.
+#
+# Whether the environment pins a key is decided the first time a file names
+# it in this process, before its first fill, so the value it has then is the
+# one the process started with (_CS_CFG_SEEN lists the keys decided, and
+# _CS_CFG_SRC_<KEY> says where each value came from). Keyed on $$, which a
+# subshell shares and a child does not: a copy sourced again in the same
+# process keeps those answers, and a child takes its own. Only the keys a file
+# names, or an earlier call filled, are walked: a status line repaint with a
+# short file pays for its lines, not for the table. Skipped lines:
+# _CS_CONFIG_IGNORED.
+cs_config_load() {  # [session_dir]
+    local rec key arm src have from cand
+    # No XDG_CONFIG_HOME and no HOME (a hook Claude Code runs with a bare
+    # environment) names no machine file at all, rather than /.config.
+    _CS_CONFIG_MACHINE=""
+    if [ -n "${XDG_CONFIG_HOME:-}" ]; then
+        _CS_CONFIG_MACHINE="$XDG_CONFIG_HOME/cs/config"
+    elif [ -n "${HOME:-}" ]; then
+        _CS_CONFIG_MACHINE="$HOME/.config/cs/config"
+    fi
+    _CS_CONFIG_SESSION=""
+    [ -z "${1:-}" ] || _CS_CONFIG_SESSION="$1/.cs/local/config"
+    _CS_CONFIG_IGNORED=""
+    _CS_CONFIG_COUNT_M=0
+    _CS_CONFIG_COUNT_S=0
+    _CS_CFG_READ_M=" "
+    _CS_CFG_READ_S=" "
+    _CS_CFG_BAD_M=" "
+    _CS_CFG_BAD_S=" "
+    if [ "${_CS_CFG_PID:-}" != "$$" ]; then
+        _CS_CFG_PID=$$
+        _CS_CFG_SEEN=" "
+        _CS_CFG_FILLED=""
+        _CS_CFG_MEASURED_THEME=""
+        _CS_CFG_BG_PINNED_BY_FILE=""
+    fi
+    # No file to read and nothing an earlier call filled: the environment
+    # stands as it is, at the cost of two tests, every reader's lot on a
+    # machine with no settings file.
+    if [ -z "${_CS_CFG_FILLED-}" ] && { [ -z "$_CS_CONFIG_MACHINE" ] || [ ! -f "$_CS_CONFIG_MACHINE" ]; } \
+        && { [ -z "$_CS_CONFIG_SESSION" ] || [ ! -f "$_CS_CONFIG_SESSION" ]; }; then
+        return 0
+    fi
+    _cs_config_index
+    # The theme and the background are judged together, before any fill: a
+    # theme from a file drops the marker that makes the background a
+    # measurement rather than a pin. The theme the launch measured is kept
+    # across calls: a fill replaces the value, and the background's fate
+    # below compares against it.
+    _cs_config_see CS_TERM_THEME
+    _cs_config_see CS_TERM_BG_RGB
+    if [ "$_CS_CFG_SRC_CS_TERM_THEME" = launch ]; then
+        _CS_CFG_MEASURED_THEME=$CS_TERM_THEME
+    fi
+    [ -z "$_CS_CONFIG_MACHINE" ] || _cs_config_read "$_CS_CONFIG_MACHINE" M
+    [ -z "$_CS_CONFIG_SESSION" ] || _cs_config_read "$_CS_CONFIG_SESSION" S
+    cand="$_CS_CFG_READ_S$_CS_CFG_READ_M${_CS_CFG_SEEN-}"
+    for rec in "${_CS_CONFIG_SPEC[@]}"; do
+        key=${rec%%|*}
+        case "$cand" in *" $key "*) ;; *) continue ;; esac
+        src="_CS_CFG_SRC_$key"
+        _cs_config_see "$key"
+        [ "${!src}" != shell ] || continue
+        if case "$_CS_CFG_READ_S" in *" $key "*) true ;; *) false ;; esac; then
+            have="_CS_CFG_S_$key"
+            from=session
+        elif case "$_CS_CFG_READ_M" in *" $key "*) true ;; *) false ;; esac; then
+            have="_CS_CFG_M_$key"
+            from=machine
+        else
+            case "${!src}" in
+                session|machine)
+                    unset "$key"
+                    printf -v "$src" '%s' default
+                    ;;
+            esac
+            continue
+        fi
+        arm=${rec#*|*|*|*|}
+        if [ "${arm%%|*}" = flag ] && [ "${!have}" = 0 ]; then
+            unset "$key"
+        else
+            printf -v "$key" '%s' "${!have}"
+            # shellcheck disable=SC2163  # the variable named by $key, unexported
+            export -n "$key"
+        fi
+        printf -v "$src" '%s' "$from"
+        _CS_CFG_FILLED=1
+    done
+    # A theme from a file that is not the measured one is a pin: the marker
+    # that called the variable a measurement goes, and so does the measured
+    # background when no file sets one, as the status line would otherwise
+    # tint toward a background of the other theme. A file theme equal to the
+    # measured one leaves the measurement whole, the theme exported under its
+    # marker (put back when an earlier load for another file dropped it), so
+    # a child of this process reads the three as the launch's and not as a
+    # pin nobody exported. A background from a file is a pin too, which
+    # CS_TERM_BG_RGB_PINNED says.
+    case "$_CS_CFG_SRC_CS_TERM_THEME" in
+        session|machine)
+            if [ "${CS_TERM_THEME:-}" != "${_CS_CFG_MEASURED_THEME-}" ]; then
+                unset CS_TERM_THEME_AUTO
+                if [ "$_CS_CFG_SRC_CS_TERM_BG_RGB" = launch ]; then
+                    unset CS_TERM_BG_RGB
+                    _CS_CFG_SRC_CS_TERM_BG_RGB=default
+                fi
+            else
+                export CS_TERM_THEME
+                CS_TERM_THEME_AUTO=1
+                export CS_TERM_THEME_AUTO
+            fi
+            ;;
+    esac
+    case "$_CS_CFG_SRC_CS_TERM_BG_RGB" in
+        session|machine)
+            CS_TERM_BG_RGB_PINNED=1
+            export -n CS_TERM_BG_RGB_PINNED
+            _CS_CFG_BG_PINNED_BY_FILE=1
+            ;;
+        *)
+            if [ -n "${_CS_CFG_BG_PINNED_BY_FILE-}" ]; then
+                unset CS_TERM_BG_RGB_PINNED
+                _CS_CFG_BG_PINNED_BY_FILE=""
+            fi
+            ;;
+    esac
+    return 0
+}
+
+# At source time, so bin/cs's own top-level reads (CS_NERD_FONTS while it
+# loads), every hook that sources a delivery and the status line see the
+# files before their first read.
+cs_config_load "${CLAUDE_SESSION_DIR:-}"
 _claude_encode_path() {
     local p="$1"
     p="${p//[^A-Za-z0-9]/-}"
@@ -2807,9 +3284,14 @@ Commands:
   -conversations      Show the session's conversation chain (rotations, lineage)
   -doctor, -diag      Run health checks (Keychain, hooks, memory, audit, tokens)
   -statusline <cmd>   enable|disable the cs status line; caps on|off|ask records whether your font has the rounded caps
+  -config list        Every cs setting: its value, where it comes from and when a change applies, then the lines the files skip (--porcelain prints tab-separated records for tools)
+  -config get <KEY>   The value readers see now; empty when nothing sets it
+  -config set <KEY> <value>  Keep a setting in this machine's ~/.config/cs/config (your environment still wins)
+  -config unset <KEY>  Remove a setting from this machine's file
+  <name> -config list|get|set|unset  The same for <name>'s own .cs/local/config, which outranks this machine's
   -detect-theme       Show the detected terminal theme (light|dark)
   -tui                Open the interactive session manager (bare 'cs' does too)
-  -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived; --porcelain prints tab-separated records for tools)
+  -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived)
   -adopt <name>       Adopt current directory as a cs session (--yes re-adopts orphaned records without asking)
   -adopt --worktrees  Register Claude Code's .claude/worktrees/* here as <repo>.<worktree> sessions (--dry-run previews)
   -whoami             Show the current actor (for shared, multi-person sessions)
@@ -4616,21 +5098,6 @@ worktree $d_real
 "*) printf '%s\n' "$task" ;;
         esac
     done
-}
-
-# How many verified features a base has. The glob runs first, so a base with
-# no <base>@* directory costs no git; one with any pays _worktree_features'
-# git calls.
-_feature_count() {  # base_name
-    local d n=0 task
-    for d in "$SESSIONS_ROOT/$1"@*; do
-        [ -d "$d" ] || continue
-        while IFS= read -r task; do
-            [ -n "$task" ] && n=$((n + 1))
-        done < <(_worktree_features "$1")
-        break
-    done
-    printf '%s' "$n"
 }
 
 # Print one tab-separated readiness record for a base's feature worktree:
@@ -9549,20 +10016,6 @@ _mail_dir() {  # meta_dir
     printf '%s/mail' "$base"
 }
 
-# How many messages wait unread in a session's mailbox, or '-' when it has no
-# .cs (a pre-.cs/ session: mail is made only inside a .cs) or its vault is not
-# mounted; either way nothing can be counted, and _mail_send would refuse.
-# Unread is the count of new/*.json, as the maildir comment above states.
-_mail_unread_count() {  # meta_dir
-    local mb f n=0
-    [ -d "$1" ] || { printf -; return 0; }
-    mb="$(_mail_dir "$1")" || { printf -; return 0; }
-    for f in "$mb"/new/*.json; do
-        [ -f "$f" ] && n=$((n + 1))
-    done
-    printf '%s' "$n"
-}
-
 # The current session's own mailbox, or the error that its vault is locked.
 # Callers capture it, so error only ends their subshell: each one exits after.
 _mail_own_dir() {
@@ -10969,6 +11422,237 @@ EOF
     fi
     printf '%s\n' "$rows" | sort -t"$(printf '\t')" -k1,1rn -k2,2rn | cut -f3-
 }
+_CONFIG_USAGE="Usage: cs [<name>] -config list [--porcelain] | get <KEY> | set <KEY> <value> | unset <KEY>"
+
+# A settings file as messages name it: a session's as <name>/.cs/local/config,
+# any other with ~ for $HOME. In _CONFIG_LABEL.
+_config_label() {  # file, [session name]
+    if [ -n "${2:-}" ]; then
+        _CONFIG_LABEL="$2/.cs/local/config"
+        return 0
+    fi
+    if [ -z "$1" ]; then
+        _CONFIG_LABEL="this machine's settings file (neither XDG_CONFIG_HOME nor HOME is set)"
+        return 0
+    fi
+    # shellcheck disable=SC2088  # a ~ for the person to read, never expanded
+    case "$1" in
+        "${HOME:-/nonexistent}"/*) _CONFIG_LABEL="~/${1#"${HOME:-}"/}" ;;
+        *) _CONFIG_LABEL=$1 ;;
+    esac
+}
+
+# The name of the session this cs runs in, for the label of its file: the
+# name it was given, else its directory's; empty outside a session.
+_config_session_name() {
+    local dir="${CLAUDE_SESSION_DIR:-}"
+    printf '%s\n' "${CLAUDE_SESSION_NAME:-${dir##*/}}"
+}
+
+# The fields of <key>'s record, in _CF_GROUP, _CF_LABEL, _CF_EDIT, _CF_CHECK,
+# _CF_CHOICES, _CF_DEFAULT, _CF_WHEN and _CF_WHENTEXT.
+_config_fields() {  # key
+    local rec
+    for rec in "${_CS_CONFIG_SPEC[@]}"; do
+        [ "${rec%%|*}" = "$1" ] || continue
+        IFS='|' read -r _ _CF_GROUP _CF_LABEL _CF_EDIT _CF_CHECK _CF_CHOICES _CF_DEFAULT _CF_WHEN _CF_WHENTEXT <<< "$rec"
+        return 0
+    done
+    error "_config_fields: $1 is not in the allow-list"
+}
+
+# Refuses, by name, a key the files never hold and a key that is no setting.
+_config_known_key() {  # key
+    _cs_config_index
+    _cs_config_record "$1" && return 0
+    if _cs_config_excluded "$1"; then
+        error "$1 is not kept in cs's config: $_CS_CONFIG_WHY. Export it in your shell."
+    fi
+    error "$1 is not a cs setting; cs -config list names every one"
+}
+
+# Whether a file's list (_CS_CFG_READ_M, _CS_CFG_BAD_S and their kin) names <key>.
+_config_listed() {  # list, key
+    case "$1" in *" $2 "*) return 0 ;; esac
+    return 1
+}
+
+# <file>'s new contents: every line but <key>'s, then "<key>=<value>" when a
+# value is given (three args set, two unset). Every other line stays as typed,
+# in order, comments, blanks and lines readers skip included. A failed read
+# fails the render, so cs_write_atomic keeps the old file.
+_config_render() {  # file, key, [value]
+    if [ -f "$1" ]; then
+        awk -v key="$2" 'index($0, key "=") != 1' "$1" || return 1
+    fi
+    if [ $# -ge 3 ]; then
+        printf '%s=%s\n' "$2" "$3" || return 1
+    fi
+}
+
+# Writes <key> (or drops it, with no value) in <file>, under the lock beside
+# the file, through cs_write_atomic, which refuses a link that leads out of a
+# session. The directory is made first: a session's .cs/local through
+# cs_mkdir_inside, this machine's ~/.config/cs with mkdir -p, its error shown.
+_config_write() {  # file, session dir or "", key, [value]
+    local file="$1" sdir="$2" err
+    shift 2
+    if [ -n "$sdir" ]; then
+        cs_mkdir_inside "$sdir/.cs/local" || error "$1 not changed: cs could not make $sdir/.cs/local"
+    else
+        err=$(mkdir -p -- "${file%/*}" 2>&1) || error "$1 not changed: cs could not make ${file%/*}: $err"
+    fi
+    _cs_with_state_lock "$file" cs_write_atomic "$file" _config_render "$file" "$@" \
+        || error "$1 not changed: $_CONFIG_LABEL could not be written"
+}
+
+# What `set` adds on stderr when <key>'s new value is not the one readers
+# will see: the environment pins it, or (a machine write from inside a
+# session) the session's own file sets it.
+_config_shadowed() {  # key, wrote the machine's file (1 or "")
+    cs_config_source "$1"
+    if [ "$_CS_CFG_SOURCE" = shell ]; then
+        printf '%s is also set in your environment (%s), which wins until you unset it there\n' "$1" "${!1//[[:cntrl:]]/?}" >&2
+    elif [ -n "$2" ] && _config_listed "$_CS_CFG_READ_S" "$1"; then
+        local v="_CS_CFG_S_$1"
+        _config_label "" "$(_config_session_name)"
+        printf '%s is also set in %s (%s), which wins in that session\n' "$1" "$_CONFIG_LABEL" "${!v}" >&2
+    fi
+}
+
+# The skipped file value that would otherwise apply to <key>, as the
+# porcelain's last field: the session's, else (when the session sets no good
+# value) the machine's; - for none.
+_config_ignored_field() {  # key
+    local v
+    if _config_listed "$_CS_CFG_BAD_S" "$1"; then
+        v="_CS_CFG_SBAD_$1"
+        _CONFIG_IGNORED_FIELD="session ${!v}"
+    elif ! _config_listed "$_CS_CFG_READ_S" "$1" && _config_listed "$_CS_CFG_BAD_M" "$1"; then
+        v="_CS_CFG_MBAD_$1"
+        _CONFIG_IGNORED_FIELD="machine ${!v}"
+    else
+        _CONFIG_IGNORED_FIELD=-
+    fi
+}
+
+# One record per allowed key, in table order, eleven tab-separated fields:
+# key group label edit choices default when whenText value source ignored,
+# - for none. The cs-panel and cs mods parse it; tests/fixtures/
+# config-porcelain.txt pins it.
+_config_list_porcelain() {
+    local rec key value
+    for rec in "${_CS_CONFIG_SPEC[@]}"; do
+        key=${rec%%|*}
+        _config_fields "$key"
+        value=${!key-}
+        value=${value//[[:cntrl:]]/?}
+        cs_config_source "$key"
+        _config_ignored_field "$key"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$key" "$_CF_GROUP" "$_CF_LABEL" "$_CF_EDIT" \
+            "$_CF_CHOICES" "$_CF_DEFAULT" "$_CF_WHEN" "$_CF_WHENTEXT" "${value:--}" "$_CS_CFG_SOURCE" "$_CONFIG_IGNORED_FIELD"
+    done
+}
+
+# Every setting under its group: value (the default when none is set), where
+# it comes from, when a change applies, and a note where the environment
+# hides a file's value; then each file's skipped lines.
+_config_list_human() {  # session name or ""
+    local rec key value last="" line v scope n text why prev="" mlabel slabel
+    _config_label "$_CS_CONFIG_MACHINE"
+    mlabel=$_CONFIG_LABEL
+    _config_label "" "$1"
+    slabel=$_CONFIG_LABEL
+    for rec in "${_CS_CONFIG_SPEC[@]}"; do
+        key=${rec%%|*}
+        _config_fields "$key"
+        if [ "$_CF_GROUP" != "$last" ]; then
+            printf '%s\n' "$_CF_GROUP"
+            last=$_CF_GROUP
+        fi
+        value=${!key-}
+        value=${value//[[:cntrl:]]/?}
+        cs_config_source "$key"
+        printf -v line '  %-31s %-13s %-8s %-10s' "$key" "${value:-$_CF_DEFAULT}" "$_CS_CFG_SOURCE" "$_CF_WHEN"
+        line=${line%"${line##*[! ]}"}
+        if [ "$_CS_CFG_SOURCE" = shell ]; then
+            if _config_listed "$_CS_CFG_READ_S" "$key"; then
+                v="_CS_CFG_S_$key"
+                printf -v line '%-67s (%s has %s; your environment wins)' "$line" "$slabel" "${!v}"
+            elif _config_listed "$_CS_CFG_READ_M" "$key"; then
+                v="_CS_CFG_M_$key"
+                printf -v line '%-67s (%s has %s; your environment wins)' "$line" "$mlabel" "${!v}"
+            fi
+        fi
+        printf '%s\n' "$line"
+    done
+    while IFS=$'\t' read -r scope n text why; do
+        [ -n "$scope" ] || continue
+        if [ "$scope" != "$prev" ]; then
+            if [ "$scope" = M ]; then printf 'Ignored in %s\n' "$mlabel"; else printf 'Ignored in %s\n' "$slabel"; fi
+            prev=$scope
+        fi
+        printf '  line %s: %s: %s\n' "$n" "$text" "$why"
+    done <<< "$_CS_CONFIG_IGNORED"
+}
+
+cmd_config() {  # session name or "", action, args...
+    local name="$1" sdir="" file action
+    shift
+    if [ -n "$name" ]; then
+        sdir="$SESSIONS_ROOT/$name"
+        is_session_dir "$sdir" || error "No such session: $name"
+        cs_config_load "$sdir"
+        file="$sdir/.cs/local/config"
+    else
+        file=$_CS_CONFIG_MACHINE
+    fi
+    _config_label "$file" "$name"
+    case "${1:-}" in
+        set|unset) [ -n "$file" ] || error "$_CONFIG_LABEL: there is no file to write" ;;
+    esac
+    action="${1:-}"
+    [ $# -eq 0 ] || shift
+    case "$action" in
+        list)
+            case "$#:${1:-}" in
+                0:) _config_list_human "${name:-$(_config_session_name)}" ;;
+                1:--porcelain) _config_list_porcelain ;;
+                *) error "$_CONFIG_USAGE" ;;
+            esac
+            ;;
+        get)
+            [ $# -eq 1 ] || error "$_CONFIG_USAGE"
+            _config_known_key "$1"
+            [ -z "${!1-}" ] || printf '%s\n' "${!1}"
+            ;;
+        set)
+            [ $# -eq 2 ] || error "$_CONFIG_USAGE"
+            _config_known_key "$1"
+            [ -n "$2" ] || error "$1 takes a value; cs -config unset $1 removes it"
+            cs_config_valid "$1" "$2" || error "$1 is $_CS_CONFIG_WHY; got ${2//[[:cntrl:]]/?}"
+            [ -z "$sdir" ] || _vet_named_session "$sdir"
+            _config_write "$file" "$sdir" "$1" "$2"
+            _config_fields "$1"
+            printf '%s=%s in %s: %s\n' "$1" "$2" "$_CONFIG_LABEL" "$_CF_WHENTEXT"
+            if [ -n "$sdir" ]; then _config_shadowed "$1" ""; else _config_shadowed "$1" 1; fi
+            ;;
+        unset)
+            [ $# -eq 1 ] || error "$_CONFIG_USAGE"
+            _config_known_key "$1"
+            [ -z "$sdir" ] || _vet_named_session "$sdir"
+            if [ ! -f "$file" ] || ! grep -q "^$1=" "$file"; then
+                printf '%s is not in %s; nothing changed\n' "$1" "$_CONFIG_LABEL"
+                return 0
+            fi
+            _config_write "$file" "$sdir" "$1"
+            printf '%s removed from %s\n' "$1" "$_CONFIG_LABEL"
+            ;;
+        *)
+            error "$_CONFIG_USAGE"
+            ;;
+    esac
+}
 # Print one tag per line from the README's frontmatter tags line. Tolerates
 # arbitrary spacing and double-quoted entries; block-style lists and files
 # without frontmatter read as empty. Never errors.
@@ -11273,6 +11957,7 @@ _list_archived_trailer() {  # count
 _doctor_ok()   { printf "  ${GREEN}[ OK ]${NC} %s\n" "$1"; }
 _doctor_warn() { printf "  ${YELLOW}[WARN]${NC} %s\n" "$1"; DOCTOR_WARN=$((DOCTOR_WARN+1)); }
 _doctor_fail() { printf "  ${RED}[FAIL]${NC} %s\n" "$1"; DOCTOR_FAIL=$((DOCTOR_FAIL+1)); }
+_doctor_info() { printf "  ${DIM}[INFO]${NC} %s\n" "$1"; }
 
 # True when the settings file parses as JSON. Every settings check below reads
 # it through jq with stderr discarded, where a parse failure is indistinguishable
@@ -12168,6 +12853,44 @@ _doctor_check_narrative_size() {
 # resolved its own session ID. The recorded UUID is the source of truth for
 # cs and hooks; doctor surfaces the divergence so the user can decide whether
 # to relaunch via cs or accept the drift.
+# cs's settings files, as the loader bin/cs ran when it started read them
+# (with this session's file when CLAUDE_SESSION_DIR names one): how many
+# settings each holds, every line the readers skip and why, and every value
+# the environment hides, which no edit of the file can change.
+_doctor_check_config() {
+    local mlabel slabel row rec key scope n text why v
+    _config_label "$_CS_CONFIG_MACHINE"
+    mlabel=$_CONFIG_LABEL
+    _config_label "" "$(_config_session_name)"
+    slabel=$_CONFIG_LABEL
+    if [ ! -f "$_CS_CONFIG_MACHINE" ]; then
+        row="no $mlabel (cs -config set keeps one)"
+    elif [ "$_CS_CONFIG_COUNT_M" = 1 ]; then
+        row="1 setting in $mlabel"
+    else
+        row="$_CS_CONFIG_COUNT_M settings in $mlabel"
+    fi
+    [ -z "$_CS_CONFIG_SESSION" ] || row="$row, $_CS_CONFIG_COUNT_S in this session's"
+    _doctor_ok "config: $row"
+    while IFS=$'\t' read -r scope n text why; do
+        [ -n "$scope" ] || continue
+        if [ "$scope" = M ]; then v=$mlabel; else v=$slabel; fi
+        _doctor_warn "config: $v line $n: $text: $why (skipped)"
+    done <<< "$_CS_CONFIG_IGNORED"
+    for rec in "${_CS_CONFIG_SPEC[@]}"; do
+        key=${rec%%|*}
+        cs_config_source "$key"
+        [ "$_CS_CFG_SOURCE" = shell ] || continue
+        if _config_listed "$_CS_CFG_READ_S" "$key"; then
+            v="_CS_CFG_S_$key"
+            _doctor_info "config: $key=${!key//[[:cntrl:]]/?} in your environment hides ${!v} in $slabel"
+        elif _config_listed "$_CS_CFG_READ_M" "$key"; then
+            v="_CS_CFG_M_$key"
+            _doctor_info "config: $key=${!key//[[:cntrl:]]/?} in your environment hides ${!v} in $mlabel"
+        fi
+    done
+}
+
 # Every place cs changes what the model sees, with the switch that turns
 # it off. The consent rule covers what the user looks at — status line, titles —
 # but a hook that injects context installs silently, so this is where that
@@ -12181,17 +12904,26 @@ _doctor_check_hook_authority() {
         disabled_all=1
     fi
     # The hooks read their switch as `= "1"`, so the row must too: an exported
-    # 0 leaves the injection on and has to read as on here.
-    _doctor_authority_row() {  # label hook switch value
-        local state="on"
+    # 0 leaves the injection on and has to read as on here. A row whose switch
+    # is a setting names where its value comes from, when something sets it.
+    _doctor_authority_row() {  # label hook switch value [setting]
+        local state="on" from=""
         if [ -n "$disabled_all" ] || [ "$4" = "1" ]; then state="off"; fi
-        printf "    %-4s %-22s %-20s off: %s\n" "$state" "$1" "$2" "$3"
+        if [ -n "${5:-}" ]; then
+            cs_config_source "$5"
+            case "$_CS_CFG_SOURCE" in
+                shell) from=" (your environment)" ;;
+                session) from=" (this session's config)" ;;
+                machine) from=" (this machine's config)" ;;
+            esac
+        fi
+        printf "    %-4s %-22s %-20s off: %s%s\n" "$state" "$1" "$2" "$3" "$from"
     }
-    _doctor_authority_row "grounding"     "scope-prompt"       'CS_SCOPE_DISABLE=1'             "${CS_SCOPE_DISABLE:-}"
-    _doctor_authority_row "clarify"       "scope-prompt"       'CS_CLARIFY_DISABLE=1'           "${CS_CLARIFY_DISABLE:-}"
-    _doctor_authority_row "date reminder" "scope-prompt"       'CS_DATE_REMINDER_DISABLE=1'     "${CS_DATE_REMINDER_DISABLE:-}"
-    _doctor_authority_row "objective"     "scope-prompt"       'CS_OBJECTIVE_CAPTURE_DISABLE=1' "${CS_OBJECTIVE_CAPTURE_DISABLE:-}"
-    _doctor_authority_row "rewrite"       "prompt-rewriter"    'CS_REWRITE_DISABLE=1'           "${CS_REWRITE_DISABLE:-}"
+    _doctor_authority_row "grounding"     "scope-prompt"       'CS_SCOPE_DISABLE=1'             "${CS_SCOPE_DISABLE:-}" CS_SCOPE_DISABLE
+    _doctor_authority_row "clarify"       "scope-prompt"       'CS_CLARIFY_DISABLE=1'           "${CS_CLARIFY_DISABLE:-}" CS_CLARIFY_DISABLE
+    _doctor_authority_row "date reminder" "scope-prompt"       'CS_DATE_REMINDER_DISABLE=1'     "${CS_DATE_REMINDER_DISABLE:-}" CS_DATE_REMINDER_DISABLE
+    _doctor_authority_row "objective"     "scope-prompt"       'CS_OBJECTIVE_CAPTURE_DISABLE=1' "${CS_OBJECTIVE_CAPTURE_DISABLE:-}" CS_OBJECTIVE_CAPTURE_DISABLE
+    _doctor_authority_row "rewrite"       "prompt-rewriter"    'CS_REWRITE_DISABLE=1'           "${CS_REWRITE_DISABLE:-}" CS_REWRITE_DISABLE
     _doctor_authority_row "narrative"     "narrative-reminder" '.cs/local/disabled'             ""
     _doctor_authority_row "council nudge" "narrative-reminder" '.cs/local/disabled or uninstall the plugin' ""
     _doctor_authority_row "ctx warning"   "narrative-reminder" 'CS_CTX_WARN_CTX=101'            ""
@@ -12392,6 +13124,7 @@ run_doctor() {
     _doctor_check_iterm2
     _doctor_check_spawn
     _doctor_check_remote
+    _doctor_check_config
     _doctor_check_hook_authority
 
     if [ -n "${CLAUDE_SESSION_META_DIR:-}" ] && [ -d "${CLAUDE_SESSION_META_DIR:-}" ]; then
@@ -13257,7 +13990,7 @@ run_tui() {
     # a light/dark palette; reused by the session we launch next.
     _export_term_theme
     local tui_output
-    tui_output=$(CS_VERSION="$VERSION" CS_BIN="$0" "$tui_bin") || exit $?
+    tui_output=$(CS_TERM_THEME="${CS_TERM_THEME:-}" CS_VERSION="$VERSION" CS_BIN="$0" "$tui_bin") || exit $?
     if [ -n "$tui_output" ]; then
         local selected="${tui_output%%$'\n'*}"
         if [ "$tui_output" != "$selected" ]; then
@@ -13270,75 +14003,14 @@ run_tui() {
     exit 0
 }
 
-# One record per unarchived session cs can address, for tools (the cs-panel
-# mod), as docs/commands.md describes the five fields:
-#   name<TAB>live<TAB>context<TAB>unread<TAB>features
-# Every fact comes from the function the human surfaces call, so the panel and
-# cs -live / cs -msg / cs <base> -features cannot disagree. A name cs's own
-# validators refuse is skipped: cs cannot address it, and those validators
-# admit no tab, newline or byte outside printable ASCII. Unknown is '-'.
-# Reads the clock once. A root find cannot read is an error, never an empty
-# answer, which reads as no sessions.
-_list_porcelain() {  # (no arguments)
-    [ -d "$SESSIONS_ROOT" ] || return 0
-    local now dir name live context unread features listed=""
-    now="$(date +%s)"
-    while IFS= read -r -d '' dir; do
-        case "$dir" in
-            /*) ;;
-            *) listed="$dir"; break ;;
-        esac
-        is_session_dir "$dir" || continue
-        _session_is_archived "$dir" && continue
-        name="${dir##*/}"
-        case "$name" in
-            *@*)
-                ( cs_split_worktree_name "$name" ) >/dev/null 2>&1 || continue
-                features=0
-                ;;
-            *)
-                ( validate_session_name "$name" ) >/dev/null 2>&1 || continue
-                features="$(_feature_count "$name")"
-                ;;
-        esac
-        live=0
-        session_display_live "$dir/.cs" "$now" && live=1
-        context="$(_resume_context_pct "$dir")"
-        unread="$(_mail_unread_count "$dir/.cs")"
-        printf '%s\t%s\t%s\t%s\t%s\n' "$name" "$live" "${context:--}" "$unread" "$features"
-    done < <(_list_session_dirs)
-    [ "$listed" = listed ] || error "cannot list the sessions under $SESSIONS_ROOT: ${listed:-the listing ended early}"
-}
-
-# The paths directly under the sessions root, sorted, each ended by a NUL;
-# then one record that cannot be a path, since the root is absolute: `listed`
-# once find has read the root, else why it could not (find's last complaint,
-# after its own `find: <path>: ` prefix, which BSD and GNU spell differently).
-_list_session_dirs() {  # (no arguments)
-    local why rc=0
-    { why=$( { find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 2>&4 \
-        | LC_ALL=C sort -z >&3; } 4>&1 ); } 3>&1 || rc=$?
-    if [ "$rc" = 0 ]; then
-        printf 'listed\0'
-        return 0
-    fi
-    why="${why##*$'\n'}"
-    why="${why##*: }"
-    printf '%s\0' "${why:-find exited $rc}"
-}
-
 # List all sessions
 list_sessions() {
-    local tag_filter="" archived_only="" porcelain=""
+    local tag_filter="" archived_only=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --porcelain)
-                porcelain="true"
-                shift
-                ;;
             --tag)
                 shift
-                [ -n "${1:-}" ] || error "Usage: cs -list [--archived] [--tag <tag>] | cs -list --porcelain"
+                [ -n "${1:-}" ] || error "Usage: cs -list [--archived] [--tag <tag>]"
                 # Stored tags are always lowercase (cs -tag add lowercases on
                 # write); lowercase the filter too so it matches regardless
                 # of case, mirroring the TUI's parse_tag_query.
@@ -13349,16 +14021,9 @@ list_sessions() {
                 archived_only="true"
                 shift
                 ;;
-            *) error "Unknown list option: $1. Usage: cs -list [--archived] [--tag <tag>] | cs -list --porcelain" ;;
+            *) error "Unknown list option: $1. Usage: cs -list [--archived] [--tag <tag>]" ;;
         esac
     done
-
-    if [ -n "$porcelain" ]; then
-        [ -z "$tag_filter" ] && [ -z "$archived_only" ] \
-            || error "cs -list --porcelain takes no other option"
-        _list_porcelain
-        return 0
-    fi
 
     if command -v cs-tui >/dev/null 2>&1; then
         info "Hint: run bare 'cs' for the interactive session manager"
@@ -16773,6 +17438,13 @@ run_uninstall() {
         fi
     fi
 
+    # The settings file holds the person's choices, which a reinstall should
+    # find, so it stays, as statusline-caps does.
+    if [ -f "$_CS_CONFIG_MACHINE" ]; then
+        _config_label "$_CS_CONFIG_MACHINE"
+        info "Kept $_CONFIG_LABEL (your cs settings; delete it to forget them)"
+    fi
+
     echo ""
     info "Uninstall complete!"
 }
@@ -17036,6 +17708,11 @@ main() {
             run_statusline_cmd "$@"
             return $?
             ;;
+        -config)
+            shift
+            cmd_config "" "$@"
+            return $?
+            ;;
         -*)
             error "Unknown command: $cmd. Run 'cs -help' for usage."
             ;;
@@ -17097,6 +17774,7 @@ main() {
                 export CS_SECRETS_SESSION="${wt_base:-$session_name}"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_secrets "$@"
                 return 0
                 ;;
@@ -17129,6 +17807,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_queue "$@"
                 return 0
                 ;;
@@ -17162,6 +17841,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_conversations "$@"
                 return 0
                 ;;
@@ -17187,14 +17867,21 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_narrative "$@"
                 return 0
+                ;;
+            -config)
+                shift
+                cmd_config "$session_name" "$@"
+                return $?
                 ;;
             -usage)
                 shift
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_usage "$session_name" "$@"
                 return 0
                 ;;
@@ -17203,6 +17890,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_tag "$@"
                 return 0
                 ;;
@@ -17257,7 +17945,7 @@ main() {
                 shift 2
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -usage, -tag, -features, -finish, --force, --remote, or --permission-mode."
+                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -config, -usage, -tag, -features, -finish, --force, --remote, or --permission-mode."
                 ;;
         esac
     done
@@ -17282,6 +17970,13 @@ main() {
     fi
 
     local session_dir="$SESSIONS_ROOT/$session_name"
+
+    # The launch's own settings come from the session it opens: its file
+    # outranks the machine's for the update check below, the theme the launch
+    # measures (a file's theme is not measured over) and every launch-only
+    # setting. bin/cs loaded the files for the session it was started in,
+    # which is another one, or none.
+    cs_config_load "$session_dir"
 
     check_dependencies
 

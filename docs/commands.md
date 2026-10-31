@@ -10,7 +10,6 @@ Aliases include `-help`, `-version`, `-ls`, `-diag`, and `-remove`.
 | `cs -- <name>` | Ends option parsing before creating or resuming a session. |
 | `cs -tui` | Opens the picker from any directory. |
 | `cs -list [--tag <tag>] [--archived]` | Lists sessions, filters a tag, or lists only archived sessions. |
-| `cs -list --porcelain` | Prints one line per unarchived session for tools, in byte order of the names, with five tab-separated fields: `name`, `live` (`1` or `0`, as `cs -live` decides), `context` (`0` to `100`, or `-` with no reading), `unread` (the unread mail count, or `-` when cs cannot reach the mailbox: the session's vault is not mounted, or it has no `.cs`) and `features` (the verified features `cs <base> -features` lists; `0` on a feature). Skips a name cs cannot address. Prints nothing else, and takes no other option. A sessions root it cannot read exits 1 with one line, `Error: cannot list the sessions under <root>: <the OS error>`, never an empty answer. |
 | `cs -search <query> [--include-archived]` | Searches session narratives, memory, and README files. |
 | `cs -whoami`, `cs -who` | Shows your actor name or contributors from git history. |
 | `cs -checkpoint "<label>"` | Saves narrative, changes, and the current git revision. Use `list` or `show <name>` to inspect snapshots. |
@@ -29,6 +28,7 @@ Aliases include `-help`, `-version`, `-ls`, `-diag`, and `-remove`.
 | `cs -encrypt <name>` | Moves a closed session's private files into a vault on macOS. Asks for a password at each open. |
 | `cs -statusline enable\|disable` | Registers or removes the statusline and agent rows. Restart Claude Code after enabling. |
 | `cs -statusline caps on\|off\|ask` | Records whether your font displays rounded capsule ends. |
+| `cs -config list\|get\|set\|unset` | Lists every cs setting with its value, source and when a change applies, reads one, or keeps or removes one in `~/.config/cs/config`. `cs <name> -config ...` uses that session's own file. `list --porcelain` prints one tab-separated record per setting for tools. See [Settings file](configuration.md#settings-file). |
 | `cs -detect-theme` | Reports terminal theme detection. |
 | `cs -rm <name>...` | Confirms each removal and names user files, including untracked worktree files. |
 | `cs -update [--check\|--force]` | Updates cs after SSH verification of `SHA256SUMS` and the installer's digest. `--check` checks without installing, and `--force` reinstalls the latest release with the same verification. |
@@ -183,7 +183,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 
 - Adding from another session sends task mail requiring acceptance.
 - See [queue controls](hooks.md#cs-not-a-hook-script--a-claude-code-mod) for mid-turn `/queue`, Start/Not yet/Compact, and conversation/subagent/workflow execution. Choosing workflows authorizes that tool.
-- `/cs next|prev|first|last|<n>` scrolls the transcript along the band's rail of prompts (one tick per prompt the person sent), mid-turn too; see [the rail](hooks.md#cs-not-a-hook-script--a-claude-code-mod).
+- Bare `/cs` opens the settings pane; see [the panel mod](hooks.md#cs-panel-not-a-hook-script--a-claude-code-mod). `/cs next|prev|first|last|<n>` scrolls the transcript along the band's rail of prompts (one tick per prompt the person sent), mid-turn too; see [the rail](hooks.md#cs-not-a-hook-script--a-claude-code-mod).
 - See [queue drain and breakers](hooks.md#narrative-remindersh-stop-filechanged-cwdchanged) for listed-order turn boundaries, native-task mirroring, the default five-failure/85%-context/85%-quota limits, rearming, and the return digest.
 - Mail uses `--kind notify|task|text|result`. Task mail enters the queue only after acceptance.
 - Bodies are at most 65,536 bytes. A lone `-` reads stdin.

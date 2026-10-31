@@ -50,6 +50,7 @@ CS_HOOKS=(
 CS_HOOK_LIBS=(
     cs-resolve.sh
     cs-shared.sh
+    cs-config.sh
     cs-iterm-tab.py
     memory-index-guard.sh
     prompt-rewriter.sh
@@ -167,7 +168,7 @@ CS_MOD_FILES=(
     cs-panel/.claude-plugin/plugin.json
     cs-panel/hooks/hooks.json
     cs-panel/hooks/register.tsx
-    cs-panel/hooks/sessions.ts
+    cs-panel/hooks/settings.ts
     cs-panel/hooks/draw.tsx
 )
 

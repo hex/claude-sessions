@@ -1,113 +1,83 @@
-// ABOUTME: Engine test-kit tests for the cs-panel mod: the porcelain parser, the rows and their keys, the fitted drawing, and the hooks driven through the real engine `$`.
-// ABOUTME: Expected values come from porcelain.md, the golden file (test/golden.ts) and the design's rules, never from the code under test.
+// ABOUTME: Engine test-kit tests for the cs-panel mod: cs's porcelain and the /config rows as settings rows, the fitted drawing, and the hooks driven through the real engine `$`.
+// ABOUTME: Expected values come from design.md's rules, config-verb.md's reply shapes and the golden porcelain (test/golden.ts), never from the code under test.
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On, PaneOpenArgs } from 'claude-code'
+import type { ConfigRow, On, PaneOpenArgs } from 'claude-code'
 
 import { GOLDEN } from './golden'
 import { drawPane, ringBack, ringOf, type PanelView } from '../hooks/draw'
-import { ASKS, COMMANDS, LOGS, PROBLEMS, REPLIES, STATUS_BODY, TOASTS } from '../hooks/register'
-import { parseList, parseReadiness, retireVerdict, rowsOf, sessionName, type Pending, type Readiness, type Row, type Session, type SessionName } from '../hooks/sessions'
+import { ASKS, COMMANDS, LOGS, PROBLEMS, REPLIES, TOASTS } from '../hooks/register'
+import { linesOf, modRowsOf, parseSettings, type RowId, type Setting } from '../hooks/settings'
 
-function nameOf(text: string): SessionName {
-  const name = sessionName(text)
-  if (name === undefined) throw new Error(`not a session name: ${text}`)
-  return name
-}
+// What `$.config.list()` answers in these tests: the five rows cs's mods
+// declare, an engine row and a row of a cs-* plugin that is not one of them.
+const CS = { plugin: 'cs', tier: 'user' } as const
+const MOD_ROWS: ConfigRow[] = [
+  { key: 'theme', label: 'Theme', kind: 'choice', value: 'dark', options: ['dark', 'light'], provider: { plugin: 'engine', tier: 'core' }, isLocked: false },
+  { key: 'cs.bandPrompts', label: 'Band: prompt bars', kind: 'boolean', value: false, provider: CS, isLocked: false },
+  { key: 'cs.bandPrompt', label: 'Band: named prompt', kind: 'choice', value: 'latest', options: ['latest', 'read'], provider: CS, isLocked: false },
+  { key: 'cs.bandBars', label: 'Band: most bars', kind: 'number', value: 10, provider: CS, isLocked: false },
+  { key: 'cs-feed.digest', label: 'Feed digest', kind: 'boolean', value: true, provider: { plugin: 'cs-feed', tier: 'user' }, isLocked: false },
+  { key: 'cs-update.showReleaseNotes', label: 'Release notes pane', kind: 'boolean', value: true, provider: { plugin: 'cs-update', tier: 'user' }, isLocked: false },
+  { key: 'cs-mermaid.drawDiagrams', label: 'Draw mermaid diagrams', kind: 'boolean', value: true, provider: { plugin: 'cs-mermaid', tier: 'user' }, isLocked: false },
+]
+const LOCKED: ConfigRow[] = MOD_ROWS.map(r => r.key === 'cs-mermaid.drawDiagrams' ? { ...r, isLocked: true } : r)
 
-// What a reader sees of each row: its name, depth and keys.
-function shapeOf(rows: readonly Row[]): [string, number, string[]][] {
-  return rows.map(r => [r.session.name, r.depth, [...r.actions]])
-}
-
-function sessionsOf(stdout: string): Session[] {
-  const parsed = parseList(stdout)
+function settingsOf(stdout: string): Setting[] {
+  const parsed = parseSettings(stdout)
   if ('unreadable' in parsed) throw new Error(`the fixture is unreadable: ${parsed.unreadable}`)
   return parsed
 }
 
-test('the golden answer parses to its four sessions, unknowns kept unknown', () => {
-  expect(sessionsOf(GOLDEN)).toEqual([
-    { name: 'alpha', feature: undefined, live: true, context: 41, unread: 2, features: 1 },
-    { name: 'alpha@fix', feature: { base: 'alpha', task: 'fix' }, live: false, context: 12, unread: 0, features: 0 },
-    { name: 'alpha@stale', feature: { base: 'alpha', task: 'stale' }, live: false, context: undefined, unread: 0, features: 0 },
-    { name: 'beta', feature: undefined, live: false, context: undefined, unread: undefined, features: 0 },
-  ])
+test('the golden porcelain parses to its 41 settings in cs\'s order, cs\'s words kept and `-` read as none', () => {
+  const settings = settingsOf(GOLDEN)
+  expect(settings.length).toBe(41)
+  expect(settings[0]?.key).toBe('CS_STATUSLINE_DISABLE')
+  expect(settings[40]?.key).toBe('CS_NO_FUNCTION_HOOKS')
+  expect(settings[1]).toEqual({ key: 'CS_STATUSLINE_LAYOUT', group: 'Status line', label: 'Layout', edit: 'choice', choices: ['quiet', 'band', 'capsules'],
+    fallback: 'quiet', when: 'now', whenText: 'applies at the next repaint', value: 'band', source: 'machine', ignored: undefined })
+  expect(settings[3]).toEqual({ key: 'CS_STATUSLINE_BAND', group: 'Status line', label: 'Band colour', edit: 'text', choices: [], fallback: 'session', when: 'now',
+    whenText: 'applies at the next repaint', value: undefined, source: 'default', ignored: 'machine line 4: CS_STATUSLINE_BAND=magenta: not a palette name, brand, periwinkle, session, none or r;g;b' })
+  expect(settings.find(s => s.key === 'CS_NO_MAIL_WAKE')).toEqual({ key: 'CS_NO_MAIL_WAKE', group: 'Turn end', label: 'No mail wake', edit: 'flag', choices: [],
+    fallback: 'off', when: 'now', whenText: 'applies when the next turn ends', value: undefined, source: 'session', ignored: undefined })
 })
 
-test('one line outside the record refuses the whole answer, naming that line; an empty answer is no sessions', () => {
-  const good = 'beta\t0\t-\t-\t0'
-  for (const bad of ['alpha\t1\t41\t2', 'alpha\t1\t41\t2\t1\t0', 'alpha\t2\t41\t2\t1', 'alpha\t1\t101\t2\t1', 'alpha\t1\t4x\t2\t1', 'alpha\t1\t41\tx\t1', 'alpha\t1\t41\t2\t-', 'bad name\t0\t-\t0\t0', 'alpha@\t0\t-\t0\t0', '@fix\t0\t-\t0\t0']) {
-    expect(parseList(`${good}\n${bad}\n`)).toEqual({ unreadable: bad })
-  }
-  expect(parseList('')).toEqual([])
+// cs's readers take any word for a flag the shell exports (`-n` tests), and
+// cs prints that word with source shell: the pane draws it as it is and offers
+// no key, and keeps every other row.
+test('a flag the shell pins to a word other than 1 parses, draws that word and offers no key', async ($, on) => {
+  const row = 'CS_NERD_FONTS\tTerminal\tNerd Font glyphs\tflag\t-\toff\tnow\tapplies at the next cs command\t'
+  const pinned = GOLDEN.replace(`${row}-\tdefault\t-`, `${row}0\tshell\t-`)
+  expect(pinned).not.toBe(GOLDEN)
+  const settings = settingsOf(pinned)
+  expect(settings.length).toBe(41)
+  expect(settings.find(s => s.key === 'CS_NERD_FONTS')).toMatchObject({ value: '0', source: 'shell' })
+  const { lines } = await drawer($, on)(viewOf({ selected: 'cs:CS_NERD_FONTS', lines: linesOf(modRowsOf(MOD_ROWS), settings, new Map(), true) }))
+  expect(lines.slice(0, lines.indexOf('Mods')).join(' ')).toBe('Esc: close CS_NERD_FONTS=0 in your environment wins; unset it there to change it here')
+  expect(lines.map(line => line.trimEnd())).toContain('› Nerd Font glyphs        0            shell    now')
 })
 
-test('features sit under their base in the porcelain order, and one whose base is not listed closes the list at depth 0', () => {
-  const answer = 'gamma\t0\t-\t-\t0\ngone@x\t0\t-\t0\t0\n' + GOLDEN
-  expect(shapeOf(rowsOf(sessionsOf(answer), undefined, new Map())).map(([name, depth]) => [name, depth])).toEqual([
-    ['gamma', 0], ['alpha', 0], ['alpha@fix', 1], ['alpha@stale', 1], ['beta', 0], ['gone@x', 0],
-  ])
+test('one line outside the record refuses the whole answer, naming that line; an empty answer is refused too', () => {
+  const good = 'CS_NO_TASK_TOOLS\tLaunch\tNo task tools\tflag\t-\toff\tlaunch\tapplies at the next launch\t-\tdefault\t-'
+  const bad = [
+    good.split('\t').slice(0, 10).join('\t'),
+    `${good}\t-`,
+    good.replace('CS_NO_TASK_TOOLS', 'cs_no_task_tools'),
+    good.replace('\tflag\t', '\ttoggle\t'),
+    good.replace('\tdefault\t', '\tenv\t'),
+    good.replace('\tNo task tools\t', '\t\t'),
+    good.replace('\tflag\t-\t', '\tchoice\t-\t'),
+    good.replace('\tflag\t-\t', '\ttext\ta,b\t'),
+  ]
+  for (const line of bad) expect(parseSettings(`${good}\n${line}\n`)).toEqual({ unreadable: line })
+  expect(parseSettings('')).toEqual({ unreadable: '' })
 })
 
-test('each row offers the keys its session allows: open when idle, mail when reachable, retire on an idle feature, none on this session or while pending', () => {
-  expect(shapeOf(rowsOf(sessionsOf(GOLDEN), undefined, new Map()))).toEqual([
-    ['alpha', 0, ['mail']],
-    ['alpha@fix', 1, ['open', 'mail', 'retire']],
-    ['alpha@stale', 1, ['open', 'mail', 'retire']],
-    ['beta', 0, ['open']],
+test('the mod rows are the rows of cs, cs-update and cs-mermaid only: an engine row and another cs-* plugin\'s row are left out', () => {
+  expect(modRowsOf(MOD_ROWS).map(m => [m.key, m.plugin, m.kind])).toEqual([
+    ['cs.bandPrompts', 'cs', 'boolean'], ['cs.bandPrompt', 'cs', 'choice'], ['cs.bandBars', 'cs', 'number'],
+    ['cs-update.showReleaseNotes', 'cs-update', 'boolean'], ['cs-mermaid.drawDiagrams', 'cs-mermaid', 'boolean'],
   ])
-  const asSelf = rowsOf(sessionsOf(GOLDEN), nameOf('alpha'), new Map())
-  expect(asSelf.map(r => [r.session.name, r.isSelf, [...r.actions]])).toEqual([
-    ['alpha', true, []], ['alpha@fix', false, ['open', 'mail', 'retire']], ['alpha@stale', false, ['open', 'mail', 'retire']], ['beta', false, ['open']],
-  ])
-  const asFeature = rowsOf(sessionsOf(GOLDEN), nameOf('alpha@fix'), new Map())
-  expect(asFeature.map(r => [r.session.name, r.isSelf, [...r.actions]])).toEqual([
-    ['alpha', false, ['mail']], ['alpha@fix', true, []], ['alpha@stale', false, ['open', 'mail', 'retire']], ['beta', false, ['open']],
-  ])
-  const liveFeature = sessionsOf('alpha\t1\t41\t2\t1\nalpha@fix\t1\t12\t0\t0\n')
-  expect(shapeOf(rowsOf(liveFeature, undefined, new Map()))).toEqual([['alpha', 0, ['mail']], ['alpha@fix', 1, ['mail']]])
-  const pending = new Map<SessionName, Pending>([[nameOf('beta'), 'opening']])
-  const rows = rowsOf(sessionsOf(GOLDEN), undefined, pending)
-  expect(rows.map(r => [r.session.name, r.pending, [...r.actions]])).toEqual([
-    ['alpha', undefined, ['mail']], ['alpha@fix', undefined, ['open', 'mail', 'retire']], ['alpha@stale', undefined, ['open', 'mail', 'retire']], ['beta', 'opening', []],
-  ])
-})
-
-// One `cs <base> -features --porcelain` line, as _feature_readiness prints it:
-// task branch ahead merged ff wt_dirty untracked base_dirty lock state.
-function readinessLine(f: { ahead?: number; merged?: 0 | 1; wtDirty?: 0 | 1; untracked?: number; lock?: string; state: string }): string {
-  return ['fix', 'cs/fix', f.ahead ?? 0, f.merged ?? 0, 1, f.wtDirty ?? 0, f.untracked ?? 0, 0, f.lock ?? 'none', f.state].join('\t')
-}
-
-function readinessOf(line: string): Readiness {
-  const parsed = parseReadiness(`${line}\n`)
-  if ('unreadable' in parsed || parsed[0] === undefined) throw new Error(`the readiness fixture is unreadable: ${line}`)
-  return parsed[0]
-}
-
-test('a readiness record parses strictly: ten fields, the three lock words, a lowercase state', () => {
-  expect(parseReadiness(`${readinessLine({ ahead: 3, state: 'ready' })}\n`)).toEqual([{ task: 'fix', ahead: 3, merged: false, wtDirty: false, untracked: 0, lock: 'none', state: 'ready' }])
-  for (const bad of [readinessLine({ state: 'ready' }).split('\t').slice(0, 9).join('\t'), readinessLine({ lock: 'both', state: 'locked' }), readinessLine({ state: 'Ready' }), readinessLine({ state: 'ready' }).replace('cs/fix\t0', 'cs/fix\tx')]) {
-    expect(parseReadiness(`${bad}\n`)).toEqual({ unreadable: bad })
-  }
-})
-
-test('a feature retires when ready with commits; the base\'s own lock does not stop the mail route, but what it hides in front of the merge does', () => {
-  const verdict = (f: Parameters<typeof readinessLine>[0], route: 'here' | 'mail') => retireVerdict(readinessOf(readinessLine(f)), route)
-  expect(retireVerdict(undefined, 'mail')).toEqual({ go: false, why: 'not a feature git lists' })
-  expect(verdict({ ahead: 3, state: 'ready' }, 'here')).toEqual({ go: true })
-  expect(verdict({ ahead: 3, state: 'ready' }, 'mail')).toEqual({ go: true })
-  expect(verdict({ ahead: 0, state: 'ready' }, 'here')).toEqual({ go: false, why: 'no commits' })
-  expect(verdict({ ahead: 3, wtDirty: 1, state: 'dirty' }, 'mail')).toEqual({ go: false, why: 'dirty' })
-  expect(verdict({ ahead: 0, merged: 1, state: 'merged' }, 'mail')).toEqual({ go: false, why: 'merged' })
-  expect(verdict({ ahead: 2, lock: 'base', state: 'locked' }, 'mail')).toEqual({ go: true })
-  expect(verdict({ ahead: 2, lock: 'base', state: 'locked' }, 'here')).toEqual({ go: false, why: 'locked' })
-  expect(verdict({ ahead: 2, lock: 'worktree', state: 'locked' }, 'mail')).toEqual({ go: false, why: 'locked' })
-  expect(verdict({ ahead: 2, wtDirty: 1, lock: 'base', state: 'locked' }, 'mail')).toEqual({ go: false, why: 'dirty' })
-  expect(verdict({ ahead: 2, untracked: 2, lock: 'base', state: 'locked' }, 'mail')).toEqual({ go: false, why: 'untracked' })
-  expect(verdict({ ahead: 0, merged: 1, lock: 'base', state: 'locked' }, 'mail')).toEqual({ go: false, why: 'merged' })
-  expect(verdict({ ahead: 0, lock: 'base', state: 'locked' }, 'mail')).toEqual({ go: false, why: 'no commits' })
 })
 
 // ── Drawing ──────────────────────────────────────────────────────────────
@@ -128,7 +98,7 @@ function textOf(node: unknown): string {
 
 // The body's lines top to bottom: a column Box (the stacked strip) gives one
 // line per child.
-function linesOf(tree: unknown): string[] {
+function bodyLines(tree: unknown): string[] {
   const root = tree as { children?: unknown[] }
   return (root.children ?? []).flatMap(child => {
     const c = child as { type: string; props: Record<string, unknown>; children?: unknown[] }
@@ -136,131 +106,214 @@ function linesOf(tree: unknown): string[] {
   })
 }
 
-// Draws views through the test's own render hook, as the design lab does.
-function drawer($: Engine, on: On): (view: PanelView) => Promise<string[]> {
+function fixtureProps(v: PanelView) {
+  return { title: 'cs', isFocused: v.hasKeys, bodyColumns: v.columns, placement: 'inline', scroll: { offset: 0, bodyRows: v.bodyRows }, view: {} } as const
+}
+
+// Draws views through the test's own render hook, as the design lab does; with
+// `key`, also the label of the Button drawn under that key.
+function drawer($: Engine, on: On): (view: PanelView, key?: string) => Promise<{ lines: string[]; label: unknown }> {
   let view: PanelView | undefined
   on('ui.render', { component: 'Pane', requestId: 'fixture' }, ($, e) => {
     if (view === undefined) throw new Error('no view to draw')
     return drawPane(view, $.ui.resolve(e), NOOP)
   })
-  return async next => {
+  return async (next, key) => {
     view = next
-    const ui = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'fixture',
-      props: { title: 'Sessions', isFocused: next.hasKeys, bodyColumns: next.columns, placement: 'inline', scroll: { offset: 0, bodyRows: next.bodyRows }, view: {} } })
-    const lines = linesOf(await ui.drawn())
+    const ui = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'fixture', props: fixtureProps(next) })
+    const lines = bodyLines(await ui.drawn())
+    const label = key === undefined ? undefined : (await ui.find({ key }))?.props.label
     await ui.unmount()
-    return lines
+    return { lines, label }
   }
 }
 
-function viewOf(stdout: string, over: Partial<PanelView> & { self?: string } = {}): PanelView {
-  const { self, ...rest } = over
-  return { rows: rowsOf(sessionsOf(stdout), self === undefined ? undefined : nameOf(self), new Map()), selected: undefined, problem: undefined, columns: 48, bodyRows: 12, hasKeys: true, ...rest }
+function viewOf(over: Partial<PanelView> & { hasSelf?: boolean; rows?: ConfigRow[] } = {}): PanelView {
+  const { hasSelf = true, rows = MOD_ROWS, ...rest } = over
+  return { lines: linesOf(modRowsOf(rows), settingsOf(GOLDEN), new Map(), hasSelf), selected: undefined, problems: [], columns: 58, bodyRows: 70, hasKeys: true, ...rest }
 }
 
-test('the golden answer draws its rows under the strip, features under their base, each row exactly the body wide', async ($, on) => {
+// design.md's columns at the dock's 58-column body: the name in 22 cells, then
+// value 11, from 7 and when 10, each after a gap of 2; the golden's fields
+// through them, worked out apart from the mod.
+const GOLDEN_AT_58 = [
+  'Mods',
+  '› Band: prompt bars       off          mod      now',
+  '  Band: named prompt      latest       mod      now',
+  '  Band: most bars         10           mod      now',
+  '  Release notes pane      on           mod      now',
+  '  Draw mermaid diagrams   on           mod      now',
+  'Status line',
+  '  Hide the status line    off          default  now',
+  '  Layout                  band         machine  now',
+  '  Segments                logo,sessi…  default  now',
+  '  Band colour             session      default  now',
+  '  Width in columns        measured     default  now',
+  '  Frame columns           6            shell    now',
+  '  Context warn %          50           session  now',
+  '  Context critical %      65           default  now',
+  '  Usage from cache only   off          default  now',
+  '  Hide the subagent rows  off          default  now',
+  'Prompts',
+  '  No scope grounding      on           session  now',
+  '  No scope trace          off          default  now',
+  '  Scope scan budget (ms)  1500         default  now',
+  '  No objective capture    off          default  now',
+  '  No date reminder        off          default  now',
+  '  No clarifying questio…  off          default  now',
+  'Turn end',
+  '  Context warning %       40           default  now',
+  '  Rotation nudge %        65           default  now',
+  '  Queue stops after fai…  5            default  now',
+  '  Queue stops past cont…  85           default  now',
+  '  Queue stops past 5h l…  85           default  now',
+  '  Mail wakes in a row     5            default  now',
+  '  No mail wake            off          session  now',
+  '  Narrative budget (byt…  131072       default  now',
+  '  Narrative tail kept (…  65536        default  now',
+  'Rotation',
+  '  Rotate on its own pas…  80           default  now',
+  '  Rotate button from %    the warn %   default  now',
+  '  No wake after /clear    off          default  /clear',
+  '  Wake delay (s)          2            default  now',
+  'Rewriter (ctrl+g)',
+  '  Provider                claude       default  now',
+  '  Model                   per provid…  default  now',
+  '  Timeout (s)             25           default  now',
+  '  Progress                screen       default  now',
+  '  No rewrite              off          default  now+launch',
+  'Terminal',
+  '  Theme                   dark         launch   now',
+  '  Background r;g;b        detected     default  now',
+  '  No iTerm2 features      off          default  now+launch',
+  '  Nerd Font glyphs        off          default  now',
+  'Launch',
+  '  No task tools           off          default  launch',
+  '  No update check         off          default  launch',
+  '  No mods                 off          default  launch',
+]
+
+test('the golden porcelain and the mod rows draw under their groups, Mods first, each row exactly the body wide, under the first row\'s strip and detail', async ($, on) => {
   const draw = drawer($, on)
-  const lines = await draw(viewOf(GOLDEN))
+  const { lines } = await draw(viewOf())
   expect(lines.map(line => line.trimEnd())).toEqual([
-    'm: mail alpha   Esc: close',
-    '› alpha         live      41%   2 mail   1 feat',
-    '  └ fix         idle      12%',
-    '  └ stale       idle',
-    '  beta          idle            locked',
+    'c: change   Esc: close',
+    'cs.bandPrompts: changing it reloads cs (an armed rotation',
+    'countdown starts over)',
+    ...GOLDEN_AT_58,
   ])
-  expect(lines.slice(1).map(line => line.length)).toEqual([48, 48, 48, 48])
-  expect(await draw({ ...viewOf(GOLDEN), rows: undefined })).toEqual(['Esc: close', 'asking cs for the sessions…'])
-  expect(await draw(viewOf(''))).toEqual(['Esc: close', 'no sessions under the sessions root'])
-  expect(await draw({ ...viewOf(GOLDEN), problem: 'cs -list --porcelain exited 1: boom' })).toContain('cs -list --porcelain exited 1: boom')
+  const rows = lines.filter(line => line.startsWith('› ') || line.startsWith('  '))
+  expect(rows.length).toBe(46)
+  expect(rows.filter(line => line.length !== 58)).toEqual([])
+  expect((await draw({ ...viewOf(), lines: undefined })).lines).toEqual(['Esc: close', 'asking cs for its settings…'])
 })
 
-test('the strip names the selected row\'s keys, widest form that fits: targets and hint, targets, verbs, then one key per line', async ($, on) => {
+test('a row offers c, u where a file sets it and p under a session name; a shell row, CS_NO_FUNCTION_HOOKS and a locked row offer no key and say why', async ($, on) => {
   const draw = drawer($, on)
-  const strip = async (over: Partial<PanelView> & { self?: string }) => {
-    const lines = await draw(viewOf(GOLDEN, over))
-    return lines.slice(0, lines.findIndex(line => line.startsWith('› ') || line.startsWith('  ')))
+  const head = async (selected: RowId, over: Partial<PanelView> & { hasSelf?: boolean; rows?: ConfigRow[] } = {}) => {
+    const { lines } = await draw(viewOf({ selected, ...over }))
+    return lines.slice(0, lines.indexOf('Mods'))
   }
-  const fix = nameOf('alpha@fix')
-  expect(await strip({ selected: fix, columns: 72 })).toEqual(['o: open alpha@fix   m: mail alpha@fix   r: retire fix   Esc: close'])
-  expect(await strip({ selected: fix, columns: 60 })).toEqual(['o: open alpha@fix   m: mail alpha@fix   r: retire fix'])
-  expect(await strip({ selected: fix, columns: 48 })).toEqual(['o: open   m: mail   r: retire'])
-  expect(await strip({ selected: fix, columns: 24 })).toEqual(['o: open', 'm: mail', 'r: retire'])
-  expect(await strip({ selected: nameOf('beta') })).toEqual(['o: open beta   Esc: close'])
-  expect(await strip({ selected: nameOf('alpha') })).toEqual(['m: mail alpha   Esc: close'])
-  expect(await strip({ self: 'alpha' })).toEqual(['Esc: close'])
-  expect(await strip({ selected: nameOf('beta'), hasKeys: false })).toEqual(['o: open beta   ctrl+x tab: keys'])
+  expect(await head('cs:CS_STATUSLINE_LAYOUT')).toEqual(['c: change   u: default   p: this session only   Esc: close', 'CS_STATUSLINE_LAYOUT: applies at the next repaint'])
+  expect(await head('cs:CS_STATUSLINE_DISABLE')).toEqual(['c: change   p: this session only   Esc: close', 'CS_STATUSLINE_DISABLE: applies at the next repaint'])
+  expect(await head('cs:CS_STATUSLINE_LAYOUT', { hasSelf: false })).toEqual(['c: change   u: default   Esc: close', 'CS_STATUSLINE_LAYOUT: applies at the next repaint'])
+  expect((await head('cs:CS_STATUSLINE_CTX_WARN', { hasSelf: false }))[0]).toBe('Esc: close')
+  expect(await head('cs:CS_STATUSLINE_BAND')).toEqual(['c: change   p: this session only   Esc: close',
+    'CS_STATUSLINE_BAND: machine line 4:', 'CS_STATUSLINE_BAND=magenta: not a palette name, brand,…'])
+  expect(await head('cs:CS_STATUSLINE_FRAME')).toEqual(['Esc: close', 'CS_STATUSLINE_FRAME=6 in your environment wins; unset it', 'there to change it here'])
+  expect(await head('cs:CS_NO_FUNCTION_HOOKS')).toEqual(['Esc: close', 'change it from a shell: cs -config set', 'CS_NO_FUNCTION_HOOKS 1 (on, it unloads every mod at the…'])
+  expect(await head('cs:CS_NO_FUNCTION_HOOKS', { columns: 130 })).toEqual(['Esc: close',
+    'change it from a shell: cs -config set CS_NO_FUNCTION_HOOKS 1 (on, it unloads every mod at the next launch, this panel too)'])
+  expect(await head('mod:cs-mermaid.drawDiagrams', { rows: LOCKED })).toEqual(['Esc: close', 'cs-mermaid.drawDiagrams: a managed setting owns it'])
+  const { lines } = await draw(viewOf({ rows: LOCKED }))
+  expect(lines.map(line => line.trimEnd())).toContain('  Draw mermaid diagrams   on           locked   now')
+  expect(ringOf(viewOf({ selected: 'cs:CS_STATUSLINE_FRAME' })).keys.filter(k => k.startsWith('act:'))).toEqual([])
+  expect(await head('cs:CS_STATUSLINE_LAYOUT', { hasKeys: false })).toEqual(['c: change   u: default   p: this session only', 'CS_STATUSLINE_LAYOUT: applies at the next repaint'])
+  expect((await head('cs:CS_STATUSLINE_FRAME', { hasKeys: false }))[0]).toBe('ctrl+x tab: keys')
 })
 
-test('every row and the strip fit 24, 40 and 80 columns, long names and counts cut to their cells', async ($, on) => {
+test('every row, the strip and the detail fit 24, 40, 60 and 80 columns, and 46 rows in 12 lines keep the selected row drawn', async ($, on) => {
   const draw = drawer($, on)
-  const wide = GOLDEN + 'a-session-whose-name-is-long@and-so-is-its-task\t0\t100\t100\t0\nzeta\t1\t7\t3\t123\n'
-  for (const columns of [24, 40, 80]) {
-    for (const selected of ['alpha', 'alpha@fix', 'beta', 'a-session-whose-name-is-long@and-so-is-its-task', 'zeta']) {
-      const lines = await draw(viewOf(wide, { columns, selected: nameOf(selected) }))
+  const ids: RowId[] = [...modRowsOf(MOD_ROWS).map(m => `mod:${m.key}` as const), ...settingsOf(GOLDEN).map(s => `cs:${s.key}` as const)]
+  expect(ids.length).toBe(46)
+  for (const columns of [24, 40, 60, 80]) {
+    for (const selected of ids) {
+      const { lines, label } = await draw(viewOf({ columns, bodyRows: 12, selected }), selected)
       const rows = lines.filter(line => line.startsWith('› ') || line.startsWith('  '))
-      expect(rows.map(row => row.length), `rows at ${columns} with ${selected}`).toEqual(rows.map(() => columns))
+      expect(rows.filter(row => row.length !== columns), `rows at ${columns} with ${selected}`).toEqual([])
       expect(lines.filter(line => line.length > columns), `lines past ${columns} with ${selected}`).toEqual([])
+      expect(lines.length <= 12, `${lines.length} lines in 12 at ${columns} with ${selected}`).toBe(true)
+      expect(rows.filter(row => row.startsWith('› ')).length, `the selected row at ${columns} with ${selected}`).toBe(1)
+      expect(label, `${selected} drawn at ${columns}`).not.toBe(undefined)
     }
   }
-  const at40 = await draw(viewOf(wide, { columns: 40 }))
-  expect(at40.map(line => line.trimEnd())).toContain('  a-session-wh…  idle      100%  100 ma…')
-})
-
-test('a list taller than the body draws a window that keeps the selected row inside it, with a row of margin, and counts the rest', async ($, on) => {
-  const draw = drawer($, on)
-  const thirty = Array.from({ length: 30 }, (_, i) => `s${String(i).padStart(2, '0')}\t0\t-\t0\t0\n`).join('')
-  const window = async (selected: string) => (await draw(viewOf(thirty, { columns: 40, bodyRows: 10, selected: nameOf(selected) })))
-    .slice(1).map(line => line.trim().split(/\s+/)[line.startsWith('› ') ? 1 : 0])
-  expect(await window('s00')).toEqual(['s00', 's01', 's02', 's03', 's04', 's05', 's06', 's07', '+22'])
-  expect(await window('s06')).toEqual(['s00', 's01', 's02', 's03', 's04', 's05', 's06', 's07', '+22'])
-  expect(await window('s07')).toEqual(['+4', 's04', 's05', 's06', 's07', 's08', 's09', 's10', '+19'])
-  expect(await window('s15')).toEqual(['+12', 's12', 's13', 's14', 's15', 's16', 's17', 's18', '+11'])
-  expect(await window('s25')).toEqual(['+22', 's22', 's23', 's24', 's25', 's26', 's27', 's28', 's29'])
-  expect((await draw(viewOf(thirty, { columns: 40, bodyRows: 10 }))).length).toBe(10)
-})
-
-test('a body too short for the margin keeps the selected row, its +N lines counted in the room: none in one line, one in two', async ($, on) => {
-  const draw = drawer($, on)
-  const lines = async (selected: string, bodyRows: number, problem?: string) =>
-    (await draw(viewOf(GOLDEN, { selected: nameOf(selected), bodyRows, problem }))).map(line => line.trimEnd())
-  const fix = '› └ fix         idle      12%'
-  expect(await lines('alpha@fix', 2)).toEqual(['o: open   m: mail   r: retire', fix])
-  expect(await lines('alpha@fix', 3)).toEqual(['o: open   m: mail   r: retire', fix, '+2 below'])
-  expect(await lines('alpha@fix', 4)).toEqual(['o: open   m: mail   r: retire', '+1 above', fix, '+2 below'])
-  expect(await lines('alpha@fix', 3, 'cs -list --porcelain exited 1: boom')).toEqual(['o: open   m: mail   r: retire', 'cs -list --porcelain exited 1: boom', fix])
-  expect(await lines('alpha', 3)).toEqual(['m: mail alpha   Esc: close', '› alpha         live      41%   2 mail   1 feat', '+3 below'])
-  expect(await lines('beta', 3)).toEqual(['o: open beta   Esc: close', '+3 above', '› beta          idle            locked'])
+  expect((await draw(viewOf({ columns: 24, selected: 'cs:CS_STATUSLINE_LAYOUT' }))).lines.slice(0, 3)).toEqual(['c: change', 'u: default', 'p: session'])
+  expect((await draw(viewOf({ columns: 40, selected: 'cs:CS_STATUSLINE_LAYOUT' }))).lines[0]).toBe('c: change   u: default   p: session')
+  // 54 lines (46 rows, 8 headings) in the 10 the strip and detail leave: the
+  // window holds the selected row a line from either edge, and +N counts the
+  // rows it leaves out.
+  const at = async (selected: RowId) => (await draw(viewOf({ columns: 58, bodyRows: 12, selected }))).lines.map(line => line.trimEnd())
+  expect(await at('cs:CS_STATUSLINE_LAYOUT')).toEqual([
+    'c: change   u: default   p: this session only   Esc: close', 'CS_STATUSLINE_LAYOUT: applies at the next repaint',
+    '+4 above',
+    '  Draw mermaid diagrams   on           mod      now',
+    'Status line',
+    '  Hide the status line    off          default  now',
+    '› Layout                  band         machine  now',
+    '  Segments                logo,sessi…  default  now',
+    '  Band colour             session      default  now',
+    '  Width in columns        measured     default  now',
+    '  Frame columns           6            shell    now',
+    '+35 below',
+  ])
+  expect(await at('cs:CS_NO_UPDATE_CHECK')).toEqual([
+    'c: change   p: this session only   Esc: close', 'CS_NO_UPDATE_CHECK: applies at the next launch',
+    '+39 above',
+    'Terminal',
+    '  Theme                   dark         launch   now',
+    '  Background r;g;b        detected     default  now',
+    '  No iTerm2 features      off          default  now+launch',
+    '  Nerd Font glyphs        off          default  now',
+    'Launch',
+    '  No task tools           off          default  launch',
+    '› No update check         off          default  launch',
+    '  No mods                 off          default  launch',
+  ])
+  expect(await at('cs:CS_NO_FUNCTION_HOOKS')).toEqual([
+    'Esc: close', 'change it from a shell: cs -config set', 'CS_NO_FUNCTION_HOOKS 1 (on, it unloads every mod at the…',
+    '+39 above',
+    '  Theme                   dark         launch   now',
+    '  Background r;g;b        detected     default  now',
+    '  No iTerm2 features      off          default  now+launch',
+    '  Nerd Font glyphs        off          default  now',
+    'Launch',
+    '  No task tools           off          default  launch',
+    '  No update check         off          default  launch',
+    '› No mods                 off          default  launch',
+  ])
 })
 
 test('a drawing that moves the Button the ring was put on sends the ring back to that key, else to the selected row; one that moves nothing sends it nowhere', () => {
-  const view = (selected: string, stdout = GOLDEN, pending = new Map<SessionName, Pending>()) =>
-    ({ ...viewOf(stdout, { selected: nameOf(selected) }), rows: rowsOf(sessionsOf(stdout), undefined, pending) })
-  const put = (v: PanelView, key: string) => ({ key, at: ringOf(v).keys.indexOf(key) })
-  // The ring put on alpha@fix holds the third place, which alpha@fix's strip
-  // of three keys hands to its r.
-  expect(ringOf(view('alpha'))).toEqual({ keys: ['act:mail', 'row:alpha', 'row:alpha@fix', 'row:alpha@stale', 'row:beta'], selected: 'row:alpha' })
-  expect(ringOf(view('alpha@fix')).keys.slice(0, 3)).toEqual(['act:open', 'act:mail', 'act:retire'])
-  expect(ringBack(put(view('alpha'), 'row:alpha@fix'), ringOf(view('alpha@fix')))).toBe('row:alpha@fix')
-  expect(ringBack(put(view('alpha@fix'), 'row:alpha@fix'), ringOf(view('alpha@fix')))).toBe(undefined)
-  // The ring on m; alpha@fix going live leaves m alone, first.
-  const live = GOLDEN.replace('alpha@fix\t0\t12', 'alpha@fix\t1\t12')
-  expect(ringBack(put(view('alpha@fix'), 'act:mail'), ringOf(view('alpha@fix', live)))).toBe('act:mail')
-  // The ring on o; opening, alpha@fix offers no key: back on its row.
-  const opening = new Map<SessionName, Pending>([[nameOf('alpha@fix'), 'opening']])
-  expect(ringBack(put(view('alpha@fix'), 'act:open'), ringOf(view('alpha@fix', GOLDEN, opening)))).toBe('row:alpha@fix')
-  // Thirty rows in twelve lines: s09 is the twelfth place under s00..s09, and
-  // selected it shifts the window to s05..s13, eleven Buttons in all.
-  const thirty = Array.from({ length: 30 }, (_, i) => `s${String(i).padStart(2, '0')}\t0\t-\t0\t0\n`).join('')
-  expect(put(view('s08', thirty), 'row:s09').at).toBe(11)
-  expect(ringOf(view('s09', thirty)).keys.length).toBe(11)
-  expect(ringBack(put(view('s08', thirty), 'row:s09'), ringOf(view('s09', thirty)))).toBe('row:s09')
+  const layout = viewOf({ selected: 'cs:CS_STATUSLINE_LAYOUT' })
+  const disable = viewOf({ selected: 'cs:CS_STATUSLINE_DISABLE' })
+  expect(ringOf(layout).keys.slice(0, 4)).toEqual(['act:change', 'act:unset', 'act:session', 'mod:cs.bandPrompts'])
+  expect(ringOf(layout).selected).toBe('cs:CS_STATUSLINE_LAYOUT')
+  expect(ringOf(disable).keys.slice(0, 3)).toEqual(['act:change', 'act:session', 'mod:cs.bandPrompts'])
+  expect(ringOf(layout).keys.filter(k => !/^(act|mod|cs):/.test(k))).toEqual([])
+  // p held the third place under LAYOUT's three keys; DISABLE's two hand it
+  // to the first row, so the ring goes back to p, still drawn.
+  expect(ringBack({ key: 'act:session', at: 2 }, ringOf(disable))).toBe('act:session')
+  // DISABLE offers no u: the ring goes to the selected row.
+  expect(ringBack({ key: 'act:unset', at: 1 }, ringOf(disable))).toBe('cs:CS_STATUSLINE_DISABLE')
+  expect(ringBack({ key: 'act:change', at: 0 }, ringOf(disable))).toBe(undefined)
 })
 
 // ── The hooks, through the engine's own `$` ──────────────────────────────
 
 const BIN = '/opt/cs/bin/cs'
-const PANE_PROPS = { title: 'Sessions', isFocused: true, bodyColumns: 48, placement: 'inline', scroll: { offset: 0, bodyRows: 12 }, view: {} } as const
-const COMMAND = { command: 'cs-panel', args: '', origin: { kind: 'composer' }, presentation: { columns: 80, isFullscreen: false } } as const
+const PANE_PROPS = { title: 'cs', isFocused: true, bodyColumns: 80, placement: 'inline', scroll: { offset: 0, bodyRows: 70 }, view: {} } as const
+const COMMAND = { command: 'cs', args: '', origin: { kind: 'composer' }, presentation: { columns: 80, isFullscreen: false } } as const
+const LIST = [BIN, '-config', 'list', '--porcelain']
 
 type Answer = { exitCode?: number; stdout?: string; stderr?: string }
 
@@ -271,371 +324,337 @@ function gate(): { held: Promise<void>; open: () => void } {
   return { held, open }
 }
 
-// What sits beneath the mod: the engine's answers to each call it makes, and
-// a record of what it asked. `answer` gives cs's reply to an argv; a pane is
-// open from its ui.open until a ui.close. While `panesHeld` is set, ui.panes
-// answers once it settles, with the panes open when it was asked. While
-// `refusal` names a call, that call is refused with its text. `logs` holds
-// each line a plugin logged.
-function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: readonly string[]) => Answer | Promise<Answer>; sessionId?: () => string; state?: string } = {}) {
-  const w = { runs: [] as { argv: string[]; stdin: string | undefined }[], toasts: [] as string[], opens: [] as PaneOpenArgs[], finishes: [] as string[], isOpen: false, invalidations: 0,
-    panesHeld: undefined as Promise<void> | undefined, refusal: undefined as { call: 'ui.open' | 'ui.panes' | 'ui.close'; text: string } | undefined, logs: [] as string[] }
-  mock.env(on, opts.env ?? { CS_BIN: BIN })
+// What sits beneath the mod: cs's answer to each argv (the golden for the
+// listing, nothing for a write unless `answer` says), the /config rows and
+// their writer, the AskUserQuestion dialog (`reply` is the answer, undefined a
+// dismissal), and a record of each call. A pane is open from its ui.open until
+// a ui.close.
+function world(on: On, opts: { env?: Record<string, string>; answer?: (argv: readonly string[]) => Answer | Promise<Answer>; rows?: ConfigRow[] } = {}) {
+  const w = {
+    runs: [] as string[][], toasts: [] as string[], logs: [] as string[], opens: [] as PaneOpenArgs[], sets: [] as { key: string; value: unknown }[],
+    asked: [] as unknown[], reply: undefined as string | undefined, rows: opts.rows ?? MOD_ROWS, rowsDeny: undefined as string | undefined,
+    setDeny: undefined as string | undefined, openDeny: undefined as string | undefined, lists: 0, isOpen: false,
+  }
+  mock.env(on, opts.env ?? { CS_BIN: BIN, CLAUDE_SESSION_NAME: 'alpha' })
   const clock = mock.clock(on)
   on('process.run', async ($, e) => {
-    w.runs.push({ argv: [...e.argv], stdin: e.init?.stdin })
-    const a: Answer = await (opts.answer ?? (argv => argv[1] === '-list' ? { stdout: GOLDEN } : {}))(e.argv)
+    w.runs.push([...e.argv])
+    const a: Answer = await (opts.answer ?? (argv => argv[2] === 'list' ? { stdout: GOLDEN } : {}))(e.argv)
     return { value: { exitCode: a.exitCode ?? 0, stdout: a.stdout ?? '', stderr: a.stderr ?? '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  on('config.list', () => { w.lists++; return w.rowsDeny === undefined ? { value: w.rows } : { deny: w.rowsDeny } })
+  on('config.set', ($, e) => { w.sets.push({ key: e.key, value: e.value }); return w.setDeny === undefined ? { value: e.value } : { deny: w.setDeny } })
+  on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => {
+    w.asked.push(e.questions)
+    const question = e.questions[0]?.question ?? ''
+    return (w.reply === undefined ? { deny: 'dismissed' } : { result: { questions: [], answers: { [question]: w.reply } } }) as never
   })
   on('ui.toast', ($, e) => { w.toasts.push(e.text); return { value: undefined } })
   on('ui.log', ($, e) => { w.logs.push(e.text); return { value: undefined } })
   on('ui.open', ($, e) => {
-    if (w.refusal?.call === 'ui.open') return { deny: w.refusal.text }
+    if (w.openDeny !== undefined) return { deny: w.openDeny }
     w.opens.push({ ...e }); w.isOpen = true; return { value: { isPlaced: true } }
   })
-  on('ui.panes', async () => {
-    if (w.refusal?.call === 'ui.panes') return { deny: w.refusal.text }
-    const panes = w.isOpen ? [{ id: 'cs-panel', title: 'Sessions', isShown: true, isFocused: true, isPlaced: true }] : []
-    if (w.panesHeld !== undefined) await w.panesHeld
-    return { value: panes }
-  })
-  on('ui.close', () => {
-    if (w.refusal?.call === 'ui.close') return { deny: w.refusal.text }
-    w.isOpen = false; return { value: undefined }
-  })
+  on('ui.panes', () => ({ value: w.isOpen ? [{ id: 'cs-panel', title: 'cs', isShown: true, isFocused: true, isPlaced: true }] : [] }))
+  on('ui.close', () => { w.isOpen = false; return { value: undefined } })
   on('ui.focus', () => ({}))
-  on('turn.start', ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
-  on('ui.invalidate', ($, e, next) => { w.invalidations++; return next(e) })
-  on('command.run', { command: 'finish' }, ($, e) => { w.finishes.push(e.args); return { text: '' } })
-  on('session.cwd', () => ({ value: '/sessions/alpha' }))
-  on('session.id', () => ({ value: opts.sessionId?.() ?? 'lead-id' }))
-  on('fs.exists', () => ({ value: false }))
-  on('fs.read', ($, e) => e.path === '/sessions/alpha/.cs/local/state' && opts.state !== undefined ? { value: opts.state } : { deny: `ENOENT: ${e.path}` })
   return { w, clock }
 }
 
-// Strips what a drawing carries per mount (press handles, the drawing plugin)
-// so two drawings compare by what they show.
-function shown(tree: unknown): unknown {
-  if (Array.isArray(tree)) return tree.map(shown)
-  if (tree === null || typeof tree !== 'object') return tree
-  return Object.fromEntries(Object.entries(tree).filter(([k]) => k !== 'press' && k !== 'part').map(([k, v]) => [k, shown(v)]))
+// cs's writes: every run but the listing.
+function writes(w: { runs: string[][] }): string[][] {
+  return w.runs.filter(argv => argv.join(' ') !== LIST.join(' '))
 }
-
-test('/cs-panel without CS_BIN says cs did not launch this conversation and opens nothing', async ($, on) => {
-  const { w } = world(on, { env: {} })
-  expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.noBin })
-  expect(w.opens).toEqual([])
-  expect(w.runs).toEqual([])
-})
-
-test('/cs-panel opens the pane asking for the keys, reads cs at once, and draws what drawPane draws for the same view', async ($, on) => {
-  const { w } = world(on)
-  let fixture: PanelView | undefined
-  on('ui.render', { component: 'Pane', requestId: 'fixture' }, ($, e) => drawPane(fixture ?? viewOf(GOLDEN), $.ui.resolve(e), NOOP))
-  expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
-  expect(w.opens).toEqual([{ id: 'cs-panel', title: 'Sessions', focus: true, closeOnEscape: true, columns: 56 }])
-  expect(w.runs).toEqual([{ argv: [BIN, '-list', '--porcelain'], stdin: undefined }])
-  const props = { ...PANE_PROPS, bodyColumns: 40, isFocused: false, scroll: { offset: 0, bodyRows: 8 } }
-  const pane = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props })
-  fixture = { ...viewOf(GOLDEN), columns: 40, bodyRows: 8, hasKeys: false }
-  const lab = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'fixture', props })
-  expect(shown(await pane.drawn())).toEqual(shown(await lab.drawn()))
-  expect(linesOf(await pane.drawn()).slice(0, 2).map(line => line.trimEnd())).toEqual(['m: mail alpha   ctrl+x tab: keys', '› alpha          live      41%   2 mail'])
-})
-
-test('/cs-panel answers why when the pane does not open or its poll does not arm, and a later draw arms the poll', async ($, on) => {
-  const { w, clock } = world(on)
-  w.refusal = { call: 'ui.open', text: 'no room for a pane' }
-  expect(await $.command.run(COMMAND)).toEqual({ text: 'The panel did not start: cs-panel: $.ui.open: no room for a pane' })
-  expect(w.runs).toEqual([])
-  w.refusal = { call: 'ui.panes', text: 'panes are not listed' }
-  expect(await $.command.run(COMMAND)).toEqual({ text: 'The panel did not start: cs-panel: $.ui.panes: panes are not listed' })
-  expect(w.runs).toEqual([])
-  w.refusal = undefined
-  await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
-  await clock.settle()
-  expect(w.runs).toEqual([LIST])
-})
 
 async function openPane($: Engine) {
   expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
   return $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
 }
 
-const LIST = { argv: [BIN, '-list', '--porcelain'], stdin: undefined }
+// The ring landing on a row, as Tab or an arrow lands it.
+function focus($: Engine, element: string) {
+  return $.ui.focus({ component: 'Pane', requestId: 'cs-panel', plugin: 'cs-panel', element, origin: { kind: 'person' } })
+}
 
-test('the ring landing on a row selects it, and the strip names that row; a ring on a strip key keeps the selection', async ($, on) => {
-  world(on)
-  const pane = await openPane($)
-  expect(linesOf(await pane.drawn())[0]).toBe('m: mail alpha   Esc: close')
-  await $.ui.focus({ component: 'Pane', requestId: 'cs-panel', plugin: 'cs-panel', element: 'row:beta', origin: { kind: 'person' } })
-  expect(linesOf(await pane.drawn())[0]).toBe('o: open beta   Esc: close')
-  await $.ui.focus({ component: 'Pane', requestId: 'cs-panel', plugin: 'cs-panel', element: 'act:open', origin: { kind: 'person' } })
-  expect(linesOf(await pane.drawn())[0]).toBe('o: open beta   Esc: close')
-  await pane.press({ key: 'row:alpha@fix' })
-  expect(linesOf(await pane.drawn())[0]).toBe('o: open   m: mail   r: retire')
-})
-
-// The kit has no core behind a plugin's $.ui.focus: the mod's ask reaches no
-// hook and is refused, and the pane logs the refusal, so the refusals count
-// the asks. The test lands the ring as the engine would, by raising the move.
-test('the pane asks to put the ring back once for a drawing that moved its Button, and not again once it landed', async ($, on) => {
-  const { w, clock } = world(on)
-  const pane = await openPane($)
-  await clock.settle()
-  const asks = () => w.logs.filter(line => line === LOGS.failed('no implementation for ui.focus')).length
-  const move = (element: string, origin: { kind: 'person' } | { kind: 'plugin'; name: string }) =>
-    $.ui.focus({ component: 'Pane', requestId: 'cs-panel', plugin: 'cs-panel', element, origin })
-  await move('row:alpha@fix', { kind: 'person' })
-  await pane.drawn()
-  await clock.settle()
-  expect(asks()).toBe(1)
-  await move('row:alpha@fix', { kind: 'plugin', name: 'cs-panel' })
-  await pane.redraw()
-  await clock.settle()
-  expect([asks(), linesOf(await pane.drawn())[0]]).toEqual([1, 'o: open   m: mail   r: retire'])
-})
-
-test('o spawns the selected idle session and toasts cs\'s own line, or why it did not open; the list is read again after', async ($, on) => {
-  let spawn: Answer = { stdout: 'spawned beta in tmux session cs (window @7). Attach: tmux attach -t cs\n' }
-  const { w } = world(on, { answer: argv => argv[1] === '-list' ? { stdout: GOLDEN } : spawn })
-  const pane = await openPane($)
-  await pane.press({ key: 'row:beta' })
-  await pane.press({ key: 'act:open' })
-  expect(w.runs).toEqual([LIST, { argv: [BIN, '-spawn', 'beta'], stdin: undefined }, LIST])
-  expect(w.toasts).toEqual(['spawned beta in tmux session cs (window @7). Attach: tmux attach -t cs'])
-  spawn = { exitCode: 1, stderr: 'Error: Session beta is already live\n' }
-  await pane.press({ key: 'act:open' })
-  expect(w.toasts.at(-1)).toBe('beta did not open: exited 1: Error: Session beta is already live')
-})
-
-test('a key pressed on a row that no longer offers it says so and runs nothing: a second o while the first spawn runs', async ($, on) => {
-  const spawned = gate()
-  const { w, clock } = world(on, { answer: async argv => {
-    if (argv[1] === '-list') return { stdout: GOLDEN }
-    await spawned.held
-    return { stdout: 'spawned beta in tmux session cs (window @7). Attach: tmux attach -t cs\n' }
-  } })
-  const pane = await openPane($)
-  await pane.press({ key: 'row:beta' })
-  const first = pane.press({ key: 'act:open' })
-  const second = pane.press({ key: 'act:open' })
-  await clock.settle()
-  expect(w.toasts).toEqual(['open beta is not offered now'])
-  spawned.open()
-  await Promise.all([first, second])
-  await clock.settle()
-  expect(w.runs).toEqual([LIST, { argv: [BIN, '-spawn', 'beta'], stdin: undefined }, LIST])
-  expect(w.toasts).toEqual(['open beta is not offered now', 'spawned beta in tmux session cs (window @7). Attach: tmux attach -t cs'])
-})
-
-test('m asks for a body and sends it on stdin to cs <name> -msg -; Cancel, a dismissed dialog and an empty body send nothing', async ($, on) => {
-  let reply: (question: string) => { result: unknown } | { deny: string } = () => ({ deny: 'dismissed' })
-  const asked: unknown[] = []
-  const { w } = world(on, { answer: argv => argv[1] === '-list' ? { stdout: GOLDEN } : argv[2] === '-msg' && w.toasts.length === 2 ? { exitCode: 1, stderr: 'Error: no such session\n' } : {} })
-  on('tool.call', { tool: 'AskUserQuestion' }, ($, e) => { asked.push(e.questions); return reply(e.questions[0]?.question ?? '') as never })
-  const pane = await openPane($)
-  const answer = (text: string) => { reply = question => ({ result: { questions: [], answers: { [question]: text } } }) }
-  answer('ship it')
-  await pane.press({ key: 'act:mail' })
-  expect(asked[0]).toEqual([{ question: 'What should alpha read? Type it under Other.', header: 'Mail', multiSelect: false,
-    options: [{ label: 'Ask for a status line', description: '' }, { label: 'Cancel', description: '' }] }])
-  answer('Ask for a status line')
-  await pane.press({ key: 'act:mail' })
-  expect(STATUS_BODY).toBe('What are you on right now, and is anything blocked?')
-  for (const nothing of ['Cancel', '   ']) { answer(nothing); await pane.press({ key: 'act:mail' }) }
-  reply = () => ({ deny: 'dismissed' })
-  await pane.press({ key: 'act:mail' })
-  expect(w.runs.filter(r => r.argv[2] === '-msg')).toEqual([
-    { argv: [BIN, 'alpha', '-msg', '-'], stdin: 'ship it' },
-    { argv: [BIN, 'alpha', '-msg', '-'], stdin: STATUS_BODY },
-  ])
-  expect(w.toasts).toEqual(['mail sent to alpha', 'mail sent to alpha'])
-  answer('again')
-  await pane.press({ key: 'act:mail' })
-  expect(w.toasts.at(-1)).toBe('mail to alpha not sent: exited 1: Error: no such session')
-})
-
-test('r from another session checks readiness, then mails the base /finish <task> as a task; what stops the merge is toasted instead', async ($, on) => {
-  let features: Answer = { stdout: `${readinessLine({ ahead: 2, lock: 'base', state: 'locked' })}\n` }
-  let msg: Answer = {}
-  const { w } = world(on, { answer: argv => argv[1] === '-list' ? { stdout: GOLDEN } : argv[2] === '-features' ? features : msg })
-  const pane = await openPane($)
-  await pane.press({ key: 'row:alpha@fix' })
-  await pane.press({ key: 'act:retire' })
-  expect(w.runs).toEqual([LIST, { argv: [BIN, 'alpha', '-features', '--porcelain'], stdin: undefined },
-    { argv: [BIN, 'alpha', '-msg', '--kind', 'task', '-'], stdin: '/finish fix' }, LIST])
-  expect(w.toasts).toEqual(['asked alpha to /finish fix; it runs once alpha accepts the task'])
-  features = { stdout: `${readinessLine({ ahead: 2, wtDirty: 1, lock: 'base', state: 'locked' })}\n` }
-  await pane.press({ key: 'act:retire' })
-  features = { exitCode: 1, stderr: 'Error: Session not found: alpha\n' }
-  await pane.press({ key: 'act:retire' })
-  features = { stdout: `${readinessLine({ ahead: 2, state: 'ready' })}\n` }
-  msg = { exitCode: 1, stderr: 'Error: alpha\'s vault is locked\n' }
-  await pane.press({ key: 'act:retire' })
-  await pane.press({ key: 'row:alpha@stale' })
-  await pane.press({ key: 'act:retire' })
-  expect(w.toasts.slice(1)).toEqual(['fix not retired: dirty', 'fix not retired: exited 1: Error: Session not found: alpha',
-    'alpha was not asked to retire: exited 1: Error: alpha\'s vault is locked', 'stale not retired: not a feature git lists'])
-  expect(w.runs.filter(r => r.argv[2] === '-msg')).toHaveLength(2)
-})
-
-test('r in the base\'s lead conversation runs /finish <task> here; in a teammate of the base it is refused before cs is asked', async ($, on) => {
-  const lead = { env: { CS_BIN: BIN, CLAUDE_SESSION_NAME: 'alpha' }, state: 'session_name: alpha\nclaude_session_id: "lead-id"\n',
-    answer: (argv: readonly string[]) => argv[1] === '-list' ? { stdout: GOLDEN } : { stdout: `${readinessLine({ ahead: 2, state: 'ready' })}\n` } }
-  let sessionId = 'lead-id'
-  const { w } = world(on, { ...lead, sessionId: () => sessionId })
-  const pane = await openPane($)
-  await pane.press({ key: 'row:alpha@fix' })
-  await pane.press({ key: 'act:retire' })
-  expect(w.finishes).toEqual(['fix'])
-  expect(w.runs.filter(r => r.argv[2] === '-msg')).toEqual([])
-  expect(w.toasts).toEqual([])
-  sessionId = 'mate-id'
-  const asked = w.runs.length
-  await pane.press({ key: 'act:retire' })
-  expect(w.toasts).toEqual(["alpha's features retire from its lead conversation; this one is a teammate"])
-  expect(w.runs.slice(asked).map(r => r.argv[1])).toEqual(['-list'])
-  expect(w.finishes).toEqual(['fix'])
-})
-
-const TURN = { text: '', turnId: 't1' }
 const DONE = { answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as const
 
-// The kit raises no person's close; a plugin's close of the id is the same
-// ui.close the mod hooks (its origin aside, which the mod does not read). The
-// command answers the refusal when the close is refused.
-const CLOSER = { name: 'closer', register(on: On) {
-  on('command.run', { command: 'close-panel' }, async $ => $.ui.close({ id: 'cs-panel' })
-    .then(() => ({ text: '' }), (err: unknown) => ({ text: err instanceof Error ? err.message : String(err) })))
-} }
+test('/cs and /cs-panel without CS_BIN say cs did not launch this conversation and open nothing', async ($, on) => {
+  const { w } = world(on, { env: {} })
+  expect(await $.command.run(COMMAND)).toEqual({ text: 'The launch did not say where cs is (CS_BIN); open this conversation with cs to change its settings.' })
+  expect(await $.command.run({ ...COMMAND, command: 'cs-panel' })).toEqual({ text: REPLIES.noBin })
+  expect([w.opens, w.runs, w.lists]).toEqual([[], [], 0])
+})
 
-test('an open pane reads cs every minute while no turn runs and at each turn\'s end; a subagent\'s turns change nothing; a refused close keeps the reads, a close stops them', { plugins: [CLOSER] }, async ($, on) => {
+test('bare /cs opens the pane and reads cs and /config at once; /cs with an argument is passed on to the hook beneath', async ($, on) => {
+  const { w } = world(on)
+  // The cs mod's rail, beneath this plugin.
+  on('command.run', { command: 'cs' }, ($, e) => ({ text: `rail ${e.args}` }))
+  expect(await $.command.run({ ...COMMAND, args: 'next' })).toEqual({ text: 'rail next' })
+  expect([w.opens, w.runs, w.lists]).toEqual([[], [], 0])
+  expect(await $.command.run(COMMAND)).toEqual({ text: 'cs settings are in the panel: Tab moves, c or Enter changes, u puts back the default, p changes it for this session only, Esc closes.' })
+  expect(w.opens).toEqual([{ id: 'cs-panel', title: 'cs', focus: true, closeOnEscape: true, columns: 60 }])
+  expect([w.runs, w.lists]).toEqual([[LIST], 1])
+  expect(await $.command.run({ ...COMMAND, command: 'cs-panel' })).toEqual({ text: REPLIES.opened })
+  expect(w.opens.length).toBe(2)
+})
+
+test('/cs answers why when the pane does not open, and reads nothing', async ($, on) => {
+  const { w } = world(on)
+  w.openDeny = 'no room for a pane'
+  expect(await $.command.run(COMMAND)).toEqual({ text: 'The panel did not start: cs-panel: $.ui.open: no room for a pane' })
+  expect([w.runs, w.lists]).toEqual([[], 0])
+})
+
+test('a pane drawn after a reload reads both sources once $.ui.panes lists it open; one drawn after a close reads nothing', async ($, on) => {
   const { w, clock } = world(on)
-  const lists = () => w.runs.filter(r => r.argv[1] === '-list').length
-  const pane = await openPane($)
-  expect(lists()).toBe(1)
-  await clock.advance(60000)
-  expect(lists()).toBe(2)
-  const drawn = w.invalidations
-  expect(drawn).toBeGreaterThan(0)
-  await clock.advance(60000)
-  expect([lists(), w.invalidations]).toEqual([3, drawn])
-  await $.turn.start(TURN)
-  await $.turn.complete({ ...DONE, agentId: 'a1' })
-  await clock.advance(120000)
-  expect(lists()).toBe(3)
-  await $.turn.start({ ...TURN, agentId: 'a1' })
-  await $.turn.complete(DONE)
-  await clock.settle()
-  expect(lists()).toBe(4)
-  w.refusal = { call: 'ui.close', text: 'kept open' }
-  expect(await $.command.run({ ...COMMAND, command: 'close-panel' })).toEqual({ text: 'closer: $.ui.close: kept open' })
-  expect(w.isOpen).toBe(true)
-  await clock.advance(60000)
-  expect(lists()).toBe(5)
-  w.refusal = undefined
-  await $.command.run({ ...COMMAND, command: 'close-panel' })
-  expect(w.isOpen).toBe(false)
-  await clock.advance(180000)
-  expect(lists()).toBe(5)
-  await pane.redraw()
-  await clock.settle()
-  expect(lists()).toBe(5)
-  w.isOpen = true
-  await pane.redraw()
-  await clock.settle()
-  expect(lists()).toBe(6)
-  await clock.advance(60000)
-  expect(lists()).toBe(7)
-})
-
-// Logs each clock.every dispatch the plugins make: one when a timer is armed,
-// then one per period it runs. A plugin's hooks run from their own source,
-// sharing no binding with the test, so the count comes back through ui.log.
-const EVERIES = { name: 'everies', register(on: On) {
-  on('clock.every', async ($, e, next) => { await $.ui.log('clock.every'); return next(e) })
-} }
-
-test('a render\'s arming and /cs-panel\'s at once arm one clock: one read at the open and one a minute, none after a close', { plugins: [CLOSER, EVERIES] }, async ($, on) => {
-  const { w, clock } = world(on)
-  const everies = () => w.logs.filter(line => line === 'clock.every').length
-  const lists = () => w.runs.filter(r => r.argv[1] === '-list').length
-  const panes = gate()
-  w.panesHeld = panes.held
-  // The engine draws an opening pane before $.ui.open resolves: that render
-  // arms the poll from a timer, whose arming is still asking for the panes
-  // when /cs-panel arms its own.
-  w.isOpen = true
-  await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
-  await clock.settle()
-  const opening = $.command.run(COMMAND)
-  await clock.settle()
-  w.panesHeld = undefined
-  panes.open()
-  expect(await opening).toEqual({ text: REPLIES.opened })
-  await clock.settle()
-  expect([everies(), lists()]).toEqual([1, 1])
-  await clock.advance(60000)
-  expect(lists()).toBe(2)
-  await $.command.run({ ...COMMAND, command: 'close-panel' })
-  await clock.advance(180000)
-  expect(lists()).toBe(2)
-})
-
-test('a close while the poll is being armed leaves no clock, even when a render after the close starts arming again', { plugins: [CLOSER, EVERIES] }, async ($, on) => {
-  const { w, clock } = world(on)
-  const everies = () => w.logs.filter(line => line === 'clock.every').length
-  const lists = () => w.runs.filter(r => r.argv[1] === '-list').length
-  const panes = gate()
-  w.panesHeld = panes.held
-  const opening = $.command.run(COMMAND)
-  await clock.settle()
-  await $.command.run({ ...COMMAND, command: 'close-panel' })
-  expect(w.isOpen).toBe(false)
-  await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
-  await clock.settle()
-  w.panesHeld = undefined
-  panes.open()
-  expect(await opening).toEqual({ text: REPLIES.opened })
-  await clock.advance(180000)
-  expect([everies(), lists()]).toEqual([0, 0])
-})
-
-test('a failed or unreadable answer keeps the rows and draws why above them; the next good answer clears it', async ($, on) => {
-  let list: Answer = { stdout: GOLDEN }
-  const { clock } = world(on, { answer: () => list })
-  const pane = await openPane($)
-  const read = async (next: Answer) => { list = next; await $.turn.complete(DONE); await clock.settle(); return (await linesOf(await pane.drawn())).map(line => line.trimEnd()) }
-  expect(await read({ exitCode: 1, stderr: 'warming up\nError: boom\n' })).toEqual(['m: mail alpha   Esc: close', 'cs -list --porcelain exited 1: Error: boom',
-    '› alpha         live      41%   2 mail   1 feat', '  └ fix         idle      12%', '  └ stale       idle', '  beta          idle            locked'])
-  expect((await read({ stdout: 'oops\n' }))[1]).toBe('cs -list --porcelain gave a line the panel cannot read: oops')
-  expect((await read({ stdout: GOLDEN }))[1]).toBe('› alpha         live      41%   2 mail   1 feat')
-})
-
-test('a read asked for while one runs runs once more after it, never twice, so the newest answer is the one drawn', async ($, on) => {
-  let release: (() => void) | undefined
-  let list: Answer = { stdout: GOLDEN }
-  const { w, clock } = world(on, { answer: async () => {
-    if (release !== undefined) return list
-    await new Promise<void>(resolve => { release = resolve })
-    return list
-  } })
-  const lists = () => w.runs.filter(r => r.argv[1] === '-list').length
-  const opening = $.command.run(COMMAND)
-  await clock.settle()
-  expect(lists()).toBe(1)
-  await $.turn.complete(DONE)
-  await $.turn.complete(DONE)
-  list = { stdout: 'beta\t0\t-\t-\t0\n' }
-  release?.()
-  expect(await opening).toEqual({ text: REPLIES.opened })
-  await clock.settle()
-  expect(lists()).toBe(2)
   const pane = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
-  expect(linesOf(await pane.drawn()).map(line => line.trimEnd())).toEqual(['o: open beta   Esc: close', '› beta          idle            locked'])
+  await clock.settle()
+  expect([w.runs, w.lists]).toEqual([[], 0])
+  w.isOpen = true
+  await pane.redraw()
+  await clock.settle()
+  expect([w.runs, w.lists]).toEqual([[LIST], 1])
+  expect(bodyLines(await pane.drawn())[0]).toBe('c: change   Esc: close')
+  await $.turn.complete(DONE)
+  await clock.settle()
+  expect(w.lists).toBe(2)
+})
+
+test('the pane\'s drawing is what drawPane draws for the same view', async ($, on) => {
+  world(on)
+  let fixture: PanelView | undefined
+  on('ui.render', { component: 'Pane', requestId: 'fixture' }, ($, e) => drawPane(fixture ?? viewOf(), $.ui.resolve(e), NOOP))
+  expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
+  const props = { ...PANE_PROPS, bodyColumns: 40, isFocused: false, scroll: { offset: 0, bodyRows: 12 } }
+  const pane = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props })
+  fixture = { ...viewOf(), columns: 40, bodyRows: 12, hasKeys: false }
+  const lab = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'fixture', props })
+  expect(bodyLines(await pane.drawn())).toEqual(bodyLines(await lab.drawn()))
+  expect(JSON.stringify(await pane.drawn(), (k, v) => k === 'press' || k === 'part' ? undefined : v))
+    .toBe(JSON.stringify(await lab.drawn(), (k, v) => k === 'press' || k === 'part' ? undefined : v))
+  expect(bodyLines(await pane.drawn())[0]).toBe('c: change   ctrl+x tab: keys')
+})
+
+test('the ring landing on a row selects it, and the strip and detail name that row; a ring on a strip key keeps the selection', async ($, on) => {
+  world(on)
+  const pane = await openPane($)
+  const head = async () => bodyLines(await pane.drawn()).slice(0, 2)
+  expect(await head()).toEqual(['c: change   Esc: close', 'cs.bandPrompts: changing it reloads cs (an armed rotation countdown starts over)'])
+  await focus($, 'cs:CS_STATUSLINE_LAYOUT')
+  expect(await head()).toEqual(['c: change   u: default   p: this session only   Esc: close', 'CS_STATUSLINE_LAYOUT: applies at the next repaint'])
+  await focus($, 'act:unset')
+  expect((await head())[1]).toBe('CS_STATUSLINE_LAYOUT: applies at the next repaint')
+  await focus($, 'cs:CS_NOT_A_ROW')
+  expect((await head())[1]).toBe('CS_STATUSLINE_LAYOUT: applies at the next repaint')
+})
+
+test('each edit writes cs\'s exact argv: a flag toggles, a choice is picked, a value typed, Default unsets, p writes the session, u unsets where the value lives', async ($, on) => {
+  const { w } = world(on)
+  const pane = await openPane($)
+  const press = async (row: string, key: string, reply?: string) => { await focus($, row); w.reply = reply; await pane.press({ key }) }
+  await press('cs:CS_STATUSLINE_DISABLE', 'act:change')
+  await press('cs:CS_SCOPE_DISABLE', 'act:change')
+  await press('cs:CS_STATUSLINE_LAYOUT', 'act:change', 'capsules')
+  await press('cs:CS_STATUSLINE_LAYOUT', 'act:change', 'Default (quiet)')
+  await press('cs:CS_STATUSLINE_CTX_WARN', 'act:change', '45')
+  await press('cs:CS_STATUSLINE_CTX_WARN', 'act:unset')
+  await press('cs:CS_STATUSLINE_LAYOUT', 'act:unset')
+  await press('cs:CS_STATUSLINE_DISABLE', 'act:session')
+  await press('cs:CS_TERM_THEME', 'act:session', 'light')
+  w.reply = 'xai'
+  await pane.press({ key: 'cs:CS_REWRITE_PROVIDER' })
+  await press('cs:CS_REWRITE_PROGRESS', 'act:change', 'line')
+  expect(writes(w)).toEqual([
+    [BIN, '-config', 'set', 'CS_STATUSLINE_DISABLE', '1'],
+    [BIN, 'alpha', '-config', 'set', 'CS_SCOPE_DISABLE', '0'],
+    [BIN, '-config', 'set', 'CS_STATUSLINE_LAYOUT', 'capsules'],
+    [BIN, '-config', 'unset', 'CS_STATUSLINE_LAYOUT'],
+    [BIN, 'alpha', '-config', 'set', 'CS_STATUSLINE_CTX_WARN', '45'],
+    [BIN, 'alpha', '-config', 'unset', 'CS_STATUSLINE_CTX_WARN'],
+    [BIN, '-config', 'unset', 'CS_STATUSLINE_LAYOUT'],
+    [BIN, 'alpha', '-config', 'set', 'CS_STATUSLINE_DISABLE', '1'],
+    [BIN, 'alpha', '-config', 'set', 'CS_TERM_THEME', 'light'],
+    [BIN, '-config', 'set', 'CS_REWRITE_PROVIDER', 'xai'],
+    [BIN, '-config', 'set', 'CS_REWRITE_PROGRESS', 'line'],
+  ])
+  const option = (label: string) => ({ label, description: '' })
+  expect(w.asked).toEqual([
+    [{ question: 'What should Layout (CS_STATUSLINE_LAYOUT) be? Pick one, or type a value under Other.', header: 'cs', multiSelect: false,
+      options: ['quiet', 'band', 'capsules', 'Default (quiet)'].map(option) }],
+    [{ question: 'What should Layout (CS_STATUSLINE_LAYOUT) be? Pick one, or type a value under Other.', header: 'cs', multiSelect: false,
+      options: ['quiet', 'band', 'capsules', 'Default (quiet)'].map(option) }],
+    [{ question: 'What should Context warn % (CS_STATUSLINE_CTX_WARN) be? Pick one, or type a value under Other.', header: 'cs', multiSelect: false,
+      options: ['Keep 50', 'Default (40)'].map(option) }],
+    [{ question: 'What should Theme (CS_TERM_THEME) be? Pick one, or type a value under Other.', header: 'cs', multiSelect: false,
+      options: ['light', 'dark', 'Default (detected)'].map(option) }],
+    [{ question: 'What should Provider (CS_REWRITE_PROVIDER) be? It takes claude, claude-api, openai, openai-api, gemini, gemini-api, grok, xai. Pick one, or type a value under Other.',
+      header: 'cs', multiSelect: false, options: ['claude', 'claude-api', 'openai', 'Default (claude)'].map(option) }],
+    [{ question: 'What should Progress (CS_REWRITE_PROGRESS) be? Pick one, or type a value under Other.', header: 'cs', multiSelect: false,
+      options: ['screen', 'native', 'line', 'static'].map(option) }],
+  ])
+  expect(w.runs.filter(argv => argv.join(' ') === LIST.join(' ')).length).toBe(1 + 11)
+})
+
+test('a dismissed dialog or Keep writes nothing and says nothing', async ($, on) => {
+  const { w } = world(on)
+  const pane = await openPane($)
+  await focus($, 'cs:CS_STATUSLINE_CTX_WARN')
+  w.reply = undefined
+  await pane.press({ key: 'act:change' })
+  w.reply = 'Keep 50'
+  await pane.press({ key: 'act:change' })
+  await focus($, 'mod:cs.bandBars')
+  w.reply = undefined
+  await pane.press({ key: 'act:change' })
+  w.reply = 'Keep 10'
+  await pane.press({ key: 'act:change' })
+  w.reply = 'Cancel'
+  await pane.press({ key: 'act:change' })
+  expect([writes(w), w.sets, w.toasts]).toEqual([[], [], []])
+  expect(w.asked.length).toBe(5)
+})
+
+test('cs\'s reply is the toast: its line when the write lands, and when cs refuses, its own refusal', async ($, on) => {
+  let write: Answer = { stdout: 'CS_STATUSLINE_LAYOUT=capsules in ~/.config/cs/config: applies at the next repaint\n' }
+  const { w } = world(on, { answer: argv => argv[2] === 'list' ? { stdout: GOLDEN } : write })
+  const pane = await openPane($)
+  await focus($, 'cs:CS_STATUSLINE_LAYOUT')
+  w.reply = 'capsules'
+  await pane.press({ key: 'act:change' })
+  write = { exitCode: 1, stderr: 'Error: CS_STATUSLINE_LAYOUT is quiet, band or capsules; got bands\n' }
+  w.reply = 'bands'
+  await pane.press({ key: 'act:change' })
+  expect(w.toasts).toEqual([
+    'CS_STATUSLINE_LAYOUT=capsules in ~/.config/cs/config: applies at the next repaint',
+    'CS_STATUSLINE_LAYOUT not changed: exited 1: Error: CS_STATUSLINE_LAYOUT is quiet, band or capsules; got bands',
+  ])
+})
+
+test('a /config row changes through $.config.set: a boolean toggles to its negation, a choice and a number ask, abc is refused unwritten, a deny is toasted, a locked row offers nothing', async ($, on) => {
+  const { w } = world(on)
+  const pane = await openPane($)
+  await pane.press({ key: 'act:change' })
+  await focus($, 'mod:cs.bandPrompt')
+  w.reply = 'read'
+  await pane.press({ key: 'act:change' })
+  await focus($, 'mod:cs.bandBars')
+  w.reply = 'abc'
+  await pane.press({ key: 'act:change' })
+  w.reply = '12'
+  await pane.press({ key: 'act:change' })
+  w.setDeny = 'Band: most bars takes a whole number of 1 or more'
+  w.reply = '0'
+  await pane.press({ key: 'act:change' })
+  expect(w.sets).toEqual([{ key: 'cs.bandPrompts', value: true }, { key: 'cs.bandPrompt', value: 'read' }, { key: 'cs.bandBars', value: 12 }, { key: 'cs.bandBars', value: 0 }])
+  expect(w.toasts).toEqual([
+    'cs.bandPrompts=true in /config: cs reloads with it',
+    'cs.bandPrompt=read in /config: cs reloads with it',
+    'Band: most bars takes a number; got abc',
+    'cs.bandBars=12 in /config: cs reloads with it',
+    'cs.bandBars not changed: Band: most bars takes a whole number of 1 or more',
+  ])
+  const option = (label: string) => ({ label, description: '' })
+  expect(w.asked.slice(0, 2)).toEqual([
+    [{ question: 'What should Band: named prompt (cs.bandPrompt) be? Pick one, or type a value under Other.', header: 'cs', multiSelect: false, options: ['latest', 'read'].map(option) }],
+    [{ question: 'What should Band: most bars (cs.bandBars) be? Pick one, or type a value under Other.', header: 'cs', multiSelect: false, options: ['Keep 10', 'Cancel'].map(option) }],
+  ])
+  expect(writes(w)).toEqual([])
+})
+
+test('a locked /config row draws no key and a press on it changes nothing', async ($, on) => {
+  const { w } = world(on, { rows: LOCKED })
+  const pane = await openPane($)
+  await focus($, 'mod:cs-mermaid.drawDiagrams')
+  expect(bodyLines(await pane.drawn()).slice(0, 2)).toEqual(['Esc: close', 'cs-mermaid.drawDiagrams: a managed setting owns it'])
+  await pane.press({ key: 'mod:cs-mermaid.drawDiagrams' })
+  expect([w.sets, w.toasts, w.asked]).toEqual([[], [], []])
+})
+
+test('a key pressed on a row that no longer offers it says so and writes nothing: a second c while the first write runs', async ($, on) => {
+  const written = gate()
+  const { w, clock } = world(on, { answer: async argv => {
+    if (argv[2] === 'list') return { stdout: GOLDEN }
+    await written.held
+    return { stdout: 'CS_STATUSLINE_DISABLE=1 in ~/.config/cs/config: applies at the next repaint\n' }
+  } })
+  const pane = await openPane($)
+  await focus($, 'cs:CS_STATUSLINE_DISABLE')
+  // Both presses land on the drawing that names the row, as two quick c's do.
+  expect(bodyLines(await pane.drawn())[1]).toBe('CS_STATUSLINE_DISABLE: applies at the next repaint')
+  const first = pane.press({ key: 'act:change' })
+  const second = pane.press({ key: 'act:change' })
+  await clock.settle()
+  expect(w.toasts).toEqual(['change is not offered for CS_STATUSLINE_DISABLE now'])
+  written.open()
+  await Promise.all([first, second])
+  await clock.settle()
+  expect(writes(w)).toEqual([[BIN, '-config', 'set', 'CS_STATUSLINE_DISABLE', '1']])
+  expect(w.toasts).toEqual(['change is not offered for CS_STATUSLINE_DISABLE now', 'CS_STATUSLINE_DISABLE=1 in ~/.config/cs/config: applies at the next repaint'])
+})
+
+test('a /config menu change of a cs mod\'s row reads the mod rows again and redraws; an engine row\'s change and a refused one do not', async ($, on) => {
+  const { w, clock } = world(on)
+  const pane = await openPane($)
+  const bars = async () => bodyLines(await pane.drawn()).find(line => line.includes('Band: most bars'))?.trimEnd()
+  expect(await bars()).toBe('  Band: most bars                               10           mod      now')
+  const read = w.lists
+  w.rows = MOD_ROWS.map(r => r.key === 'cs.bandBars' ? { ...r, value: 12 } : r)
+  await $.config.set({ key: 'cs.bandBars', value: 12, previous: 10, provider: CS, origin: { kind: 'composer' } })
+  await clock.settle()
+  expect(w.lists).toBe(read + 1)
+  expect(await bars()).toBe('  Band: most bars                               12           mod      now')
+  await $.config.set({ key: 'theme', value: 'light', previous: 'dark', provider: { plugin: 'engine', tier: 'core' }, origin: { kind: 'composer' } })
+  w.setDeny = 'no'
+  await $.config.set({ key: 'cs.bandBars', value: 0, previous: 12, provider: CS, origin: { kind: 'composer' } })
+  await clock.settle()
+  expect(w.lists).toBe(read + 1)
+})
+
+const CLOSER = { name: 'closer', register(on: On) {
+  on('command.run', { command: 'close-panel' }, async $ => { await $.ui.close({ id: 'cs-panel' }); return { text: '' } })
+} }
+
+test('a failed or unreadable porcelain and unreadable /config rows keep the rows and draw why above them; the next good answer clears it; only an open pane reads at a main-loop turn\'s end', { plugins: [CLOSER] }, async ($, on) => {
+  let list: Answer = { stdout: GOLDEN }
+  const { w, clock } = world(on, { answer: () => list })
+  const pane = await openPane($)
+  const read = async (next: Answer) => {
+    list = next
+    await $.turn.complete(DONE)
+    await clock.settle()
+    return bodyLines(await pane.drawn()).map(line => line.trimEnd())
+  }
+  const rowsIn = (lines: string[]) => lines.filter(line => line.startsWith('› ') || line.startsWith('  ')).length
+  let lines = await read({ exitCode: 1, stderr: 'warming up\nError: boom\n' })
+  expect(lines.slice(0, 4)).toEqual(['c: change   Esc: close', 'cs.bandPrompts: changing it reloads cs (an armed rotation countdown starts over)', 'cs -config list exited 1: Error: boom', 'Mods'])
+  expect(rowsIn(lines)).toBe(46)
+  lines = await read({ stdout: 'oops\n' })
+  expect([lines[2], rowsIn(lines)]).toEqual(['cs -config list gave a line the panel cannot read: oops', 46])
+  lines = await read({ stdout: '' })
+  expect([lines[2], rowsIn(lines)]).toEqual(['cs -config list printed no settings', 46])
+  w.rowsDeny = 'the menu is busy'
+  lines = await read({ stdout: GOLDEN })
+  expect([lines[2], lines[3], rowsIn(lines)]).toEqual(['the /config rows could not be read: cs-panel: $.config.list: the menu is busy', 'Mods', 46])
+  w.rowsDeny = undefined
+  lines = await read({ stdout: GOLDEN })
+  expect(lines[2]).toBe('Mods')
+  const runs = w.runs.length
+  await $.turn.complete({ ...DONE, agentId: 'a1' })
+  await clock.settle()
+  expect(w.runs.length).toBe(runs)
+  await $.command.run({ ...COMMAND, command: 'close-panel' })
+  await $.turn.complete(DONE)
+  await clock.settle()
+  expect(w.runs.length).toBe(runs)
+})
+
+test('the first porcelain failing draws the mod rows and why, with no settings rows', async ($, on) => {
+  world(on, { answer: () => ({ exitCode: 127, stderr: 'cs: command not found\n' }) })
+  const pane = await openPane($)
+  const lines = bodyLines(await pane.drawn()).map(line => line.trimEnd())
+  expect(lines.slice(2, 4)).toEqual(['cs -config list exited 127: cs: command not found', 'Mods'])
+  expect(lines.filter(line => line.startsWith('› ') || line.startsWith('  ')).length).toBe(5)
 })
 
 test('the session start registers /cs-panel once, to run mid-turn too, and opens nothing', async ($, on) => {
@@ -645,26 +664,27 @@ test('the session start registers /cs-panel once, to run mid-turn too, and opens
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/sessions/alpha', surface: 'terminal', isInteractive: true })
   await $.session.start({ cwd: '/sessions/alpha', surface: 'terminal', isInteractive: true })
-  expect(specs).toEqual([{ name: 'cs-panel', description: 'The cs sessions: live or idle, context, unread mail, features; open, mail or retire one.', immediate: true }])
+  expect(specs).toEqual([{ name: 'cs-panel', description: "cs's settings: its mods' /config rows and its own CS_* settings, per machine or per session.", immediate: true }])
   expect(w.opens).toEqual([])
 })
 
-test('the pane draws on every surface', async ($, on) => {
+test('the pane draws on every surface, its rows and keys as Buttons', async ($, on) => {
   world(on)
   expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const pane = await $.ui.mount({ plugin: 'cs-panel', surface, component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
-    expect((await pane.find({ key: 'row:alpha@fix' }))?.props.label, surface).toBe('alpha@fix')
-    expect((await pane.find({ key: 'act:mail' }))?.props.hotkey, surface).toBe('m')
+    expect((await pane.find({ key: 'cs:CS_STATUSLINE_LAYOUT' }))?.props.label, surface).toBe('Layout')
+    expect((await pane.find({ key: 'act:change' }))?.props.hotkey, surface).toBe('c')
     await pane.unmount()
   }
 })
 
 test('no line the mod hands the engine names the plugin first: the engine prefixes it', () => {
+  const call = (f: unknown) => typeof f === 'string' ? f : (f as (...args: string[]) => string)('x', 'y', 'z')
   const lines = [
-    COMMANDS['cs-panel'].description, ...Object.values(REPLIES).map(r => typeof r === 'string' ? r : r('x')),
-    ...Object.values(TOASTS).map(t => t('x', 'y')), ...Object.values(PROBLEMS).map(p => p('x')), ...Object.values(LOGS).map(l => l('x')), ASKS.mail('x').question,
+    COMMANDS['cs-panel'].description, ...Object.values(REPLIES).map(call), ASKS.setting('x', 'y', []), ASKS.setting('x', 'y', ['a', 'b']), ASKS.mod('x', 'y', []),
+    ...Object.values(TOASTS).map(call), ...Object.values(PROBLEMS).map(call), ...Object.values(LOGS).map(call),
   ]
-  expect(lines.length).toBe(19)
+  expect(lines.length).toBe(18)
   expect(lines.filter(line => line.toLowerCase().startsWith('cs-panel'))).toEqual([])
 })

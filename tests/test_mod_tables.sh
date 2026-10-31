@@ -21,6 +21,7 @@ mods/cs-feed/hooks/register.tsx
 mods/cs-feed/hooks/session.ts
 mods/cs-panel/hooks/register.tsx
 mods/cs-panel/hooks/draw.tsx
+mods/cs-panel/hooks/settings.ts
 "
 test_mods_hand_the_engine_their_lines_from_their_tables() {
     local f inline=""
