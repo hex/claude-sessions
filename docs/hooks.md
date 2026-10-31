@@ -1138,8 +1138,8 @@ muted at 0) and the session name, muted, with a muted `·` between the parts.
 Where the pane is too narrow, these parts drop from the right, down to the
 wordmark alone. A `/config` row never counts as changed, since the panel cannot
 see its default. The second line is a `━` rule across the pane in the TUI's
-hero gradient. Right under it comes the selected row's card, then one empty
-line. Each line of the card opens with `▍` in the rail's second colour. The
+hero gradient. Right under it comes the selected row's card, then the filter
+field. Each line of the card opens with `▍` in the rail's second colour. The
 first line names the row: its label in bold ink, then its key, muted (a
 `/config` row's `<plugin>.<field>`). The second line holds the whole value as
 the row draws it, a toggle, a gauge with its number, or the default's word
@@ -1148,14 +1148,10 @@ muted) and when a change applies, muted. Where the pane is too narrow, it
 wraps by words onto more lines, as many as leave the selected row drawn. With
 no row to select, the reading or problem words stand in its place. The
 rows sit under a muted bold column header (`setting`, `value`, `from`,
-`when`) and a soft rule. Each group is its name in muted bold, with an empty
-line above every group but the first. A name takes up to 26 cells, and the
-last column takes what a wider pane leaves. The keys sit on the last line of
-the pane, under the rows and `+N below`, with one empty line above them when
-the window still keeps the selected row, a row and a count either side. They
-are plain and three cells apart, with muted labels; Claude Code draws each
-key's letter in its own accent colour. Where they do not fit, they stack one a
-line.
+`when`) and a soft rule. Each group's headline is its name in bold ink, one
+space and a soft `─` rule to the pane's edge, with an empty line above every
+group but the first. A name takes up to 26 cells, and the last column takes
+what a wider pane leaves. The pane draws no key row.
 
 Only what something sets stands out. A row at its default draws its value
 muted. A row a file, the shell or the launch sets draws its value in ink, and
@@ -1168,26 +1164,49 @@ default. The selected row has `▌` in the rail's second colour and its label
 bold, on no background, and the focus marks the label alone. Every row's label
 is in ink, selected or not, at its default or set.
 
-Tab or a click selects a row (`ui.focus`). The arrows, the wheel, the page
-keys, Home and End move the selection by the rows they ask for, held at the
-first and the last row (`ui.scroll`). The pane draws its own window of rows,
-so the engine's window stays put while the window and the focus ring follow
-the selection. The card says what the selected row is and when a change takes
-hold. The keys are those the row admits, each one Button with its own hotkey:
+The pane opens with the focus ring in the filter field: `filter`, muted, then
+a one-line Input that reads `type to filter` while empty. As you type,
+the pane shows only the rows whose label, key or group holds the text, in any
+case. A group with no row left goes, and `no setting matches <text>` stands in
+for an empty list. The masthead keeps its counts, and `+N above` and `+N
+below` count the rows shown. An empty field shows every row again, and
+closing the pane forgets the text. Enter in the field selects the first row
+shown and moves the ring there. The mobile app draws no Input, so there an
+empty line stands in the field's place and the pane shows every row.
 
-- `c`, Enter or a click changes the row. An on/off setting flips at once. A
-  setting with a few values asks with them as choices in one `$.ui.ask`
-  dialog, with `Default (<default>)` beside them while the dialog has room
-  for it (four choices fill it); any other asks with `Keep <value>` and
-  `Default`, and you type the value under Other. The write is `cs -config set` where the
-  value lives: cs changes a value from this session's file there and anything
-  else in this machine's file, so a change always moves what the row shows.
-- `u` puts back the default: `cs -config unset` in the file that holds the
-  value, so a session value falls back to the machine's and the machine's to
-  the default.
-- `p` writes this session's own file only: `cs <name> -config set`, `<name>`
-  being `CLAUDE_SESSION_NAME`. Without a session name the panel offers no `p`,
-  and a setting this session's file sets offers nothing.
+Tab or a click selects a row (`ui.focus`). The arrows, the wheel, the page
+keys, Home and End move the selection by the rows they ask for among the rows
+shown (`ui.scroll`). The selection stops at the last row and at the first,
+where Up moves the ring back to the field. The pane draws its own window of
+rows, so the engine's window stays put while the window and the focus ring
+follow the selection. The card says what the selected row is and when a
+change takes hold.
+
+Enter or a click on a row opens one `$.ui.ask` dialog with every change the
+row takes. A change goes where the value lives: cs writes a value from this
+session's file there and anything else to this machine's file, so a change
+always moves what the row shows. No dialog offers the value the row already
+has. An answer you type under Other is the new value, and cs's own checker
+judges it.
+
+- An on/off setting offers `Turn on` or `Turn off`, then `Default (<default>)`
+  while a file holds the value, `This session only: on` or `off`, and `Keep`.
+- A setting with choices offers the other choices that fit beside `Default`
+  (while a file holds the value) and `Keep`, four labels at most. When some
+  choices do not fit, the question names every value, and you type one under
+  Other.
+- Any other setting offers `Keep <value>` and `Default (<default>)`, and you
+  type the new value under Other.
+
+`Default` is `cs -config unset` in the file that holds the value, so a session
+value falls back to the machine's and the machine's to the default. `This
+session only` writes this session's own file: `cs <name> -config set`,
+`<name>` being `CLAUDE_SESSION_NAME`. Under a session name, a choice or a
+typed value for a setting this session's file does not set opens a second
+dialog that asks where it goes: `This machine` or `This session only`. An
+on/off setting this session's file already sets offers no `This session
+only`, since `Turn on` or `Turn off` already writes there. Without a session
+name, no dialog offers this session and none asks where.
 
 The toast is cs's own reply: the line naming the file and when the change
 applies, or the line refusing the value (`not changed: exited 1: Error: …`).
@@ -1196,34 +1215,36 @@ own `config.set` guard: a toggle flips at once, a choice asks with its options,
 a number or text asks with `Keep <value>` and `Cancel`, and the panel refuses
 an answer a number row cannot read before it writes anything. The owner reloads with
 the new value, which for a `cs.*` row starts an armed rotation countdown over;
-the card says so. A `/config` row has no `u`, since the panel cannot see
-a `userConfig` default.
+the card says so. A `/config` row's dialog has no `Default`, since the panel
+cannot see a `userConfig` default.
 
-Some rows offer no key, and the card says why. A setting your
-environment pins reads `CS_X=v in your environment wins; unset it there to
-change it here`. `CS_NO_FUNCTION_HOOKS` offers no key either: you change it
-from a terminal, `cs -config set CS_NO_FUNCTION_HOOKS 1`, since on it unloads
-every mod at the next launch, this panel included. A `/config` row a
-managed setting owns reads `a managed setting owns it`.
+On some rows Enter opens no dialog. It toasts the row's label and the reason,
+which the card also shows. A setting your environment pins reads `CS_X=v in
+your environment wins; unset it there to change it here`.
+`CS_NO_FUNCTION_HOOKS` opens no dialog either: you change it from a terminal,
+`cs -config set CS_NO_FUNCTION_HOOKS 1`, since on it unloads every mod at the
+next launch, this panel included. A `/config` row a managed setting owns reads
+`a managed setting owns it`. A setting this session's file sets, seen with no
+session name, reads `this session's file sets it, and this conversation has no
+cs session name to write it with`.
 
 Bare `/cs` is a cooperative pair with the `cs` mod's rail: the `cs` mod passes
 the bare form on with `next(e)`, and this mod passes any argument on, so
 `/cs next` and the bare form answer the same whichever plugin's hook runs first.
 `claude plugin validate` lists both hooks as gates.
 
-The mod reads both sources when the pane opens, after each press, at the end of
+The mod reads both sources when the pane opens, after each change, at the end of
 each main-loop turn while the pane is open, and after a `/config` menu change of
 one of those three plugins' rows (a pass-through `config.set` hook whose own
 failure never refuses the row). It runs no clock. It redraws only when an answer
 changed, keeps the last rows over a failed or unreadable answer and names the
-reason above them. The pane draws no Input and no Select, so every surface gets
-the same pane.
+reason above them.
 
 The mod writes nothing itself: cs writes the settings files and the `/config`
 writer the rows. It has no heartbeat and no doctor row; doctor's drift scan
 covers its deployed files. Its words live in exported tables (`COMMANDS`,
-`REPLIES`, `ASKS`, `TOASTS`, `PROBLEMS`, `LOGS` in `register.tsx`, `WORDS` and
-`KEYS` in `draw.tsx`, `LABELS` in `settings.ts`), and `drawPane(view, el,
+`REPLIES`, `ASKS`, `TOASTS`, `PROBLEMS`, `LOGS` in `register.tsx`, `WORDS` in
+`draw.tsx`, `LABELS` in `settings.ts`), and `drawPane(view, el,
 handlers)` is pure over a view. `tests/test_mod_panel.sh` runs the kit test and
 pins the manifest, the installer listing and the validate inventory;
 `tests/test_config.sh` holds the porcelain to

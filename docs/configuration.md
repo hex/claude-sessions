@@ -583,9 +583,10 @@ alone. To get cs's tip back, delete `~/.config/cs/tips-file` and run
 
 Bare `/cs` (or `/cs-panel`) opens a pane of these switches and of cs's settings
 together: the `/config` rows of `cs`, `cs-update` and `cs-mermaid`, then every
-setting `cs -config list` names. `c` changes the selected row, `u` removes a
-setting from the file that holds it, and `p` changes it for this session only;
-a setting your environment pins is read-only there. See
+setting `cs -config list` names. Type to filter the rows, then press Enter on
+one for a dialog of its changes: a new value, `Default` (which removes it from
+the file that holds it), or this session only. A setting your environment pins
+is read-only there. See
 [the panel mod](hooks.md#cs-panel-not-a-hook-script--a-claude-code-mod).
 
 The release-notes pane is a Claude Code `/config` row, `cs-update.showReleaseNotes`
