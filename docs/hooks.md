@@ -1133,9 +1133,10 @@ says what the selected row is and when a change takes hold. The strip holds the
 keys that row admits, each one Button with its own hotkey:
 
 - `c`, Enter or a click changes the row. An on/off setting flips at once. A
-  setting with a few values asks with them as choices and `Default (<default>)`
-  in one `$.ui.ask` dialog; any other asks with `Keep <value>` and `Default`,
-  and you type the value under Other. The write is `cs -config set` where the
+  setting with a few values asks with them as choices in one `$.ui.ask`
+  dialog, with `Default (<default>)` beside them while the dialog has room
+  for it (four choices fill it); any other asks with `Keep <value>` and
+  `Default`, and you type the value under Other. The write is `cs -config set` where the
   value lives: cs changes a value from this session's file there and anything
   else in this machine's file, so a change always moves what the row shows.
 - `u` puts back the default: `cs -config unset` in the file that holds the
@@ -1157,8 +1158,9 @@ a `userConfig` default.
 
 Some rows offer no key, and the detail line says why. A setting your
 environment pins reads `CS_X=v in your environment wins; unset it there to
-change it here`. You change `CS_NO_FUNCTION_HOOKS` from a shell only, since on
-it unloads every mod at the next launch, this panel included. A `/config` row a
+change it here`. `CS_NO_FUNCTION_HOOKS` offers no key either: you change it
+from a terminal, `cs -config set CS_NO_FUNCTION_HOOKS 1`, since on it unloads
+every mod at the next launch, this panel included. A `/config` row a
 managed setting owns reads `a managed setting owns it`.
 
 Bare `/cs` is a cooperative pair with the `cs` mod's rail: the `cs` mod passes

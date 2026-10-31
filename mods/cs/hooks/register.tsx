@@ -353,7 +353,7 @@ let featuresComplaint: string | undefined
 // machine's). A key the shell pins, or whose value the launch measured, has
 // none, so its $.env.get answers: cs puts the environment above the files,
 // except a measured theme and background, which a file's pin outranks.
-let fileSettings = new Map<string, string>()
+let fileSettings = new Map<string, FileSetting>()
 let settingsReading = false
 let settingsComplaint: string | undefined
 
@@ -665,11 +665,12 @@ export function register(on: On, options: PluginOptions) {
     const { Box, Text, Button } = await $.ui.resolve(e)
     const wrapping = rotating && !armed && !wrapped
     const finish = featured?.finish
+    const { bg, theme } = await themeAndBackground($)
     const entries = buildBandEntries({
       featured: featured === undefined ? undefined : { label: featured.label, onPress: finish === undefined || !bandIdle ? undefined : () => pressFinish($, finish) },
       countdown: armed && left !== undefined ? { seconds: left, ink: await rampColor($, left) } : undefined,
       rotating, armed, wrapping, waiting, gate, queued, queueRunning: queueStarted, mail,
-      queueInk: amberColor(fileSettings.get('CS_TERM_BG_RGB') ?? await $.env.get("CS_TERM_BG_RGB"), fileSettings.get('CS_TERM_THEME') ?? await $.env.get("CS_TERM_THEME")),
+      queueInk: amberColor(bg, theme),
       feed: feeding ? { on: !feedVetRefused && await readFeed($), color: own, onPress: () => pressFeed($) } : undefined,
       rotate: armed ? () => pressClear($) : () => pressRotate($),
       wrap: () => askToWrap($),
@@ -1175,24 +1176,50 @@ async function refreshFileSettings($: EngineInterface) {
 
 const SETTING_SOURCES = new Set(['default', 'machine', 'session', 'shell', 'launch'])
 
+// One record of cs's resolution: the value a reader sees and where cs says it
+// comes from.
+type FileSetting = { value: string; source: string }
+
 // The porcelain's records: eleven tab-separated fields, the key first, the
 // value ninth (`-` for none) and its source tenth. Each value a settings file
 // gave (source session or machine) is kept; a record of any other shape makes
 // the whole answer unreadable.
-function parseFileSettings(text: string): Map<string, string> | { unreadable: string } {
-  const settings = new Map<string, string>()
+function parseFileSettings(text: string): Map<string, FileSetting> | { unreadable: string } {
+  const settings = new Map<string, FileSetting>()
   for (const line of text.split('\n')) {
     if (line === '') continue
     const fields = line.split('\t')
     const [key, , , , , , , , value, source] = fields
     if (fields.length !== 11 || key === undefined || value === undefined || source === undefined || !SETTING_SOURCES.has(source)) return { unreadable: line }
-    if ((source === 'session' || source === 'machine') && value !== '-') settings.set(key, value)
+    if (value !== '-') settings.set(key, { value, source })
   }
   return settings
 }
 
-function sameSettings(a: Map<string, string>, b: Map<string, string>): boolean {
-  return a.size === b.size && [...a].every(([key, value]) => b.get(key) === value)
+function sameSettings(a: Map<string, FileSetting>, b: Map<string, FileSetting>): boolean {
+  return a.size === b.size && [...a].every(([key, s]) => b.get(key)?.value === s.value && b.get(key)?.source === s.source)
+}
+
+// A value a settings file gave (source session or machine); any other source
+// leaves the environment's value to its reader.
+function fileValue(key: string): string | undefined {
+  const s = fileSettings.get(key)
+  return s !== undefined && (s.source === 'session' || s.source === 'machine') ? s.value : undefined
+}
+
+// The theme and the background a reader draws with. A file's background is a
+// pin. Otherwise the environment's background is the launch's measurement,
+// which counts only while cs still calls it that: a file theme of the other
+// polarity made cs drop it, and cs then reports the background as default,
+// so the environment's value is that dropped measurement, not a pin.
+async function themeAndBackground($: EngineInterface): Promise<{ theme: string | undefined; bg: string | undefined }> {
+  const fileTheme = fileValue('CS_TERM_THEME')
+  const fileBg = fileValue('CS_TERM_BG_RGB')
+  const measured = fileTheme === undefined || fileSettings.get('CS_TERM_BG_RGB')?.source === 'launch'
+  return {
+    theme: fileTheme ?? await $.env.get("CS_TERM_THEME"),
+    bg: fileBg ?? (measured ? await $.env.get("CS_TERM_BG_RGB") : undefined),
+  }
 }
 
 // Whether the sessions root holds a feature of `base`: cs names each one's
@@ -1475,7 +1502,7 @@ function numberOr(raw: string | undefined, fallback: number): number {
 // comes first (fileSettings). `claude plugin validate` lists what a module
 // reads, and a name it does not spell is refused.
 async function forceThreshold($: EngineInterface): Promise<number | undefined> {
-  const raw = (fileSettings.get('CS_ROTATE_FORCE_CTX') ?? await $.env.get("CS_ROTATE_FORCE_CTX"))?.trim()
+  const raw = (fileValue('CS_ROTATE_FORCE_CTX') ?? await $.env.get("CS_ROTATE_FORCE_CTX"))?.trim()
   if (raw === undefined || raw === '') return FORCE_DEFAULT
   if (raw.toLowerCase() === 'off' || /^0+$/.test(raw)) return undefined
   const n = /^\d+$/.test(raw) ? Number(raw) : NaN
@@ -1621,8 +1648,8 @@ export function nextStepLine(text: string): string | undefined {
 // reads, and a name it does not spell is refused.
 async function threshold($: EngineInterface): Promise<number> {
   return numberOr(
-    fileSettings.get('CS_ROTATE_BUTTON_CTX') ?? await $.env.get("CS_ROTATE_BUTTON_CTX"),
-    numberOr(fileSettings.get('CS_STATUSLINE_CTX_WARN') ?? await $.env.get("CS_STATUSLINE_CTX_WARN"), DEFAULT_PERCENT),
+    fileValue('CS_ROTATE_BUTTON_CTX') ?? await $.env.get("CS_ROTATE_BUTTON_CTX"),
+    numberOr(fileValue('CS_STATUSLINE_CTX_WARN') ?? await $.env.get("CS_STATUSLINE_CTX_WARN"), DEFAULT_PERCENT),
   )
 }
 
@@ -1723,7 +1750,8 @@ export function isUnconsumed(text: string): boolean {
 // background and theme first. Each name is a literal: `claude plugin validate`
 // lists what a module reads.
 async function rampColor($: EngineInterface, secs: number): Promise<string | undefined> {
-  return countdownColor(secs, await sessionColor($), fileSettings.get('CS_TERM_BG_RGB') ?? await $.env.get("CS_TERM_BG_RGB"), fileSettings.get('CS_TERM_THEME') ?? await $.env.get("CS_TERM_THEME"))
+  const { bg, theme } = await themeAndBackground($)
+  return countdownColor(secs, await sessionColor($), bg, theme)
 }
 
 // The session's colour name as cs recorded it in state, or undefined.

@@ -3123,6 +3123,26 @@ test('a background a settings file pins outranks the dark theme the launch measu
   expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
 })
 
+// The loader drops the launch's measured background when a file pins the
+// theme of the other polarity, and cs then reports the background as default:
+// the environment's value is that dropped measurement, not a pin.
+test('a file theme of the other polarity leaves the launch\'s measured background behind; one of the same polarity keeps it', async () => {
+  queueTasks(2)
+  envVars.CS_TERM_THEME = 'light'
+  envVars.CS_TERM_BG_RGB = '252;247;229'
+  const after = async (stdout: string) => { answerSettings(stdout); await turnStart('go'); await settle(); return queueAmber() }
+  const darkFile = (bgValue?: string, bgSource?: string) => porcelainWith('CS_TERM_BG_RGB', bgValue, bgSource).split('\n').map((line: string) => {
+    const fields = line.split('\t')
+    if (fields[0] !== 'CS_TERM_THEME') return line
+    fields[8] = 'dark'; fields[9] = 'machine'
+    return fields.join('\t')
+  }).join('\n')
+  expect(await after(darkFile('-', 'default'))).toBe('rgb(251,191,36)')
+  expect(await after(darkFile('252;247;229', 'launch'))).toBe('rgb(180,83,9)')
+  expect(await after(darkFile('30;30;30', 'session'))).toBe('rgb(251,191,36)')
+  delete envVars.CS_TERM_BG_RGB
+})
+
 test('the count\'s amber takes a settings file\'s theme over the launch\'s', async () => {
   envVars.CS_TERM_THEME = 'dark'
   answerSettings(porcelainWith('CS_TERM_THEME', 'light', 'session'))

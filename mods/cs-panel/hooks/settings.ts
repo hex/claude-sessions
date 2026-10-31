@@ -76,7 +76,6 @@ function settingOf(line: string): Setting | undefined {
   if (!KEY.test(key) || !EDITS.includes(edit) || !SOURCES.includes(source)) return undefined
   if ([group, label, when, whenText].some(field => field === '' || field === NONE)) return undefined
   if ((edit === 'choice') !== (choices !== NONE)) return undefined
-  if (edit === 'flag' && value !== '1' && value !== NONE) return undefined
   return {
     key: key as SettingKey, group, label, edit: edit as Edit, choices: choices === NONE ? [] : choices.split(','), fallback: noneOf(fallback),
     when, whenText, value: noneOf(value), source: source as Source, ignored: noneOf(ignored),

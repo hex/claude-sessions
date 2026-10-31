@@ -42,6 +42,21 @@ test('the golden porcelain parses to its 41 settings in cs\'s order, cs\'s words
     fallback: 'off', when: 'now', whenText: 'applies when the next turn ends', value: undefined, source: 'session', ignored: undefined })
 })
 
+// cs's readers take any word for a flag the shell exports (`-n` tests), and
+// cs prints that word with source shell: the pane draws it as it is and offers
+// no key, and keeps every other row.
+test('a flag the shell pins to a word other than 1 parses, draws that word and offers no key', async ($, on) => {
+  const row = 'CS_NERD_FONTS\tTerminal\tNerd Font glyphs\tflag\t-\toff\tnow\tapplies at the next cs command\t'
+  const pinned = GOLDEN.replace(`${row}-\tdefault\t-`, `${row}0\tshell\t-`)
+  expect(pinned).not.toBe(GOLDEN)
+  const settings = settingsOf(pinned)
+  expect(settings.length).toBe(41)
+  expect(settings.find(s => s.key === 'CS_NERD_FONTS')).toMatchObject({ value: '0', source: 'shell' })
+  const { lines } = await drawer($, on)(viewOf({ selected: 'cs:CS_NERD_FONTS', lines: linesOf(modRowsOf(MOD_ROWS), settings, new Map(), true) }))
+  expect(lines.slice(0, lines.indexOf('Mods')).join(' ')).toBe('Esc: close CS_NERD_FONTS=0 in your environment wins; unset it there to change it here')
+  expect(lines.map(line => line.trimEnd())).toContain('› Nerd Font glyphs        0            shell    now')
+})
+
 test('one line outside the record refuses the whole answer, naming that line; an empty answer is refused too', () => {
   const good = 'CS_NO_TASK_TOOLS\tLaunch\tNo task tools\tflag\t-\toff\tlaunch\tapplies at the next launch\t-\tdefault\t-'
   const bad = [
@@ -53,7 +68,6 @@ test('one line outside the record refuses the whole answer, naming that line; an
     good.replace('\tNo task tools\t', '\t\t'),
     good.replace('\tflag\t-\t', '\tchoice\t-\t'),
     good.replace('\tflag\t-\t', '\ttext\ta,b\t'),
-    good.replace('launch\t-\tdefault', 'launch\t2\tdefault'),
   ]
   for (const line of bad) expect(parseSettings(`${good}\n${line}\n`)).toEqual({ unreadable: line })
   expect(parseSettings('')).toEqual({ unreadable: '' })

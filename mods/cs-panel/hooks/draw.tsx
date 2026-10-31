@@ -83,12 +83,13 @@ const COLUMNS: readonly Column[] = [
   { cells: 10, text: l => l.row.kind === 'mod' ? WORDS.modWhen : l.row.setting.when },
 ]
 
-// What a row's value cell says: a flag or a toggle on or off, else the value,
-// else cs's name for the default.
+// What a row's value cell says: a flag or a toggle on or off (a flag the shell
+// pins to another word, as its readers take, that word), else the value, else
+// cs's name for the default.
 function valueOf(row: Row): string {
   if (row.kind === 'mod') return typeof row.mod.value === 'boolean' ? (row.mod.value ? WORDS.on : WORDS.off) : shownOf(row.mod.value)
   const s = row.setting
-  if (s.edit === 'flag') return s.value === '1' ? WORDS.on : WORDS.off
+  if (s.edit === 'flag') return s.value === undefined ? WORDS.off : s.value === '1' ? WORDS.on : s.value
   return s.value ?? s.fallback ?? WORDS.none
 }
 
