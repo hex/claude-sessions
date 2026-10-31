@@ -48,7 +48,7 @@ let runResult: { exitCode: number; stdout: string; stderr: string } | Error
 let nextRuns: ({ exitCode: number; stdout: string; stderr: string } | Error)[]
 // Each `cs -config list --porcelain` the mod ran, apart from `runs`, and what it answers with (or rejects with).
 let settingsRuns: string[][]
-let settingsResult: { exitCode: number; stdout: string; stderr: string } | Error
+let settingsResult: { exitCode: number; stdout: string; stderr: string } | Promise<{ exitCode: number; stdout: string; stderr: string }> | Error
 // What `$.prompt.submit` was handed.
 let submitted: any[]
 // How many process runs had happened when `$.session.compact` was called, and what it answers with (or rejects with).
@@ -3110,6 +3110,19 @@ test('the theme is a settings file\'s only when cs says a file set it: a launch 
   expect(await after(porcelainWith('CS_TERM_THEME', 'light', 'shell'))).toBe('rgb(251,191,36)')
   expect(await after(porcelainWith('CS_TERM_THEME', 'light', 'session'))).toBe('rgb(180,83,9)')
   expect(await after(porcelainWith('CS_TERM_THEME'))).toBe('rgb(251,191,36)')
+})
+
+// A forced rotation is decided from cs's current answer, not the one before
+// it: the turn's end waits for the read it starts.
+test('a turn\'s end waits for cs\'s settings before it forces a rotation: a session FORCE_CTX=off that cs is still answering stops it', async () => {
+  percent = 100
+  settingsResult = new Promise(resolve => setTimeout(() => resolve({ exitCode: 0, stdout: porcelainWith('CS_ROTATE_FORCE_CTX', 'off', 'session'), stderr: '' }), 20))
+  await turnComplete()
+  expect(timers).toEqual([])
+  expect(ran).toEqual([])
+  settingsResult = new Promise(resolve => setTimeout(() => resolve({ exitCode: 0, stdout: porcelainWith('CS_ROTATE_FORCE_CTX'), stderr: '' }), 20))
+  await turnComplete()
+  expect(timers.map(t => t.kind)).toEqual(['after'])
 })
 
 test('a background a settings file pins outranks the dark theme the launch measured, on the queue glyph and the count alike', async () => {

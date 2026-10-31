@@ -1392,13 +1392,13 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "b10cf18fd8cd90c41f7d9c9669b977aeb26f3a58a4d7bc6f03e2083e2da55248  bin/cs"
+    "a7f947af6070bb7c51d92bd88f50ac574aeae9015c9ffa7b38a12c9598545f69  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
-    "e3b73893fcdaec028b560a93f27c83111df584ba1f7e38f357d73376d4c3d59d  bin/cs-statusline"
+    "d8c282be6bf96631ec6e458c0389cedefdf58fb60a96f4fac49778f051d5e801  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
-    "f9cbe37300bdc689f4cbaf3c70d82f04cb1499b8d3ba7de613b0328b59ab4192  hooks/cs-shared.sh"
-    "b4402919f9567deebe18b9da04727fc59d8e6f540724895c1b26a1069e955b20  hooks/cs-config.sh"
+    "2be241e564a23555e1c5fc41b78ca39693df4d7eecc14eabb86a07a706610a8b  hooks/cs-shared.sh"
+    "b22f5419c173048e26fb8bc548037e7e13bf9a546f99de91366cf0c96e598c0d  hooks/cs-config.sh"
     "50d63ce0995e68fddd8503700c15f9585d11938c9cd3872a883146de7707c765  hooks/cs-iterm-tab.py"
     "21988bf58bb6fea15c6435445f4abc3a38f4c4a9a7db78c4ff4797650709ba3f  hooks/memory-index-guard.sh"
     "0202455687b8c8a584cfc1ecf0439de03e8f70fcb0062e479484fdfeb4b83147  hooks/prompt-rewriter.sh"
@@ -1426,7 +1426,7 @@ CS_PAYLOAD_SHA256=(
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
     "8ffa3249cadb8017e5e0809326fc22f3ec0e2c1f9e3dd70c049782888190727f  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
-    "2d4dddad8deeada3d6452f180d17b2986c778f6edc2aa5b7256f3ee354af373c  mods/cs/hooks/register.tsx"
+    "f07f0796befaa40356d318833ed46be921101f3c122869790f20ffecab0c2fb2  mods/cs/hooks/register.tsx"
     "f841609ed354ab29bf0076a2c1e86c7179c9de47301f5732a7c690d6e809303e  mods/cs/tips.json"
     "7a97c18b6ae755d8ec7862532eb15bbf627170a1fab8cc90dd2f8f77a57164be  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"

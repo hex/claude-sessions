@@ -267,7 +267,9 @@ _cs_config_read() {  # file, scope
             list=${!list-}
             if [ -z "$list" ]; then
                 if _cs_config_excluded "$key"; then
-                    _cs_config_skip "$2" "$n" "$line" "not kept in cs's config"
+                    # One such key is a secret: the listing and doctor name
+                    # the key, never the value.
+                    _cs_config_skip "$2" "$n" "$key=(hidden)" "not kept in cs's config"
                 else
                     _cs_config_skip "$2" "$n" "$line" "not a cs setting"
                 fi
@@ -438,9 +440,10 @@ cs_config_load() {  # [session_dir]
     # background when no file sets one, as the status line would otherwise
     # tint toward a background of the other theme. A file theme equal to the
     # measured one leaves the measurement whole, the theme exported under its
-    # marker beside the background, so a child of this process reads the
-    # three as the launch's and not as a pin nobody exported. A background
-    # from a file is a pin too, which CS_TERM_BG_RGB_PINNED says.
+    # marker (put back when an earlier load for another file dropped it), so
+    # a child of this process reads the three as the launch's and not as a
+    # pin nobody exported. A background from a file is a pin too, which
+    # CS_TERM_BG_RGB_PINNED says.
     case "$_CS_CFG_SRC_CS_TERM_THEME" in
         session|machine)
             if [ "${CS_TERM_THEME:-}" != "${_CS_CFG_MEASURED_THEME-}" ]; then
@@ -451,6 +454,8 @@ cs_config_load() {  # [session_dir]
                 fi
             else
                 export CS_TERM_THEME
+                CS_TERM_THEME_AUTO=1
+                export CS_TERM_THEME_AUTO
             fi
             ;;
     esac

@@ -325,6 +325,7 @@ main() {
                 export CS_SECRETS_SESSION="${wt_base:-$session_name}"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_secrets "$@"
                 return 0
                 ;;
@@ -357,6 +358,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_queue "$@"
                 return 0
                 ;;
@@ -390,6 +392,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_conversations "$@"
                 return 0
                 ;;
@@ -415,6 +418,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_narrative "$@"
                 return 0
                 ;;
@@ -428,6 +432,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_usage "$session_name" "$@"
                 return 0
                 ;;
@@ -436,6 +441,7 @@ main() {
                 export CLAUDE_SESSION_NAME="$session_name"
                 export CLAUDE_SESSION_DIR="$SESSIONS_ROOT/$session_name"
                 export CLAUDE_SESSION_META_DIR="$SESSIONS_ROOT/$session_name/.cs"
+                cs_config_load "$SESSIONS_ROOT/$session_name"
                 run_tag "$@"
                 return 0
                 ;;

@@ -354,7 +354,7 @@ let featuresComplaint: string | undefined
 // none, so its $.env.get answers: cs puts the environment above the files,
 // except a measured theme and background, which a file's pin outranks.
 let fileSettings = new Map<string, FileSetting>()
-let settingsReading = false
+let settingsInFlight: Promise<void> | undefined
 let settingsComplaint: string | undefined
 
 // The rail. A prompt is a row of the transcript's live branch; its requestId
@@ -425,7 +425,7 @@ export function register(on: On, options: PluginOptions) {
   lastRefusal = undefined
   feedVetRefused = false
   featuresWord = undefined; featuresReading = false; featuresClock = undefined; featuresComplaint = undefined
-  fileSettings = new Map(); settingsReading = false; settingsComplaint = undefined
+  fileSettings = new Map(); settingsInFlight = undefined; settingsComplaint = undefined
   railFile = undefined; prompts = []; drawnRows = new Map(); shown = new Map(); denied = new Set(); denySaid = false; notYetSaid = false; tailSaid = false; drawnRead = -1; redrawPending = false
   on('session.start', async ($, e, next) => {
     if (!registered) {
@@ -524,7 +524,9 @@ export function register(on: On, options: PluginOptions) {
       await clearPressed($)
       await refreshRail($)
       readFeaturesLater($)
-      readSettingsLater($)
+      // The rotation below is decided from cs's current answer, so this
+      // read is waited for; the turn is over, nothing paints meanwhile.
+      await readSettings($)
     }
     if (e.reason === 'answer' && e.agentId === undefined) await forceRotation($)
     return next(e)
@@ -1138,10 +1140,17 @@ async function readFeatures($: EngineInterface): Promise<FeaturesWord | undefine
   return word
 }
 
-// The hooks do not wait on a cs fork for its settings: the answer lands in
-// fileSettings, and the band redraws when a value moved.
+// The hooks that paint do not wait on a cs fork for its settings: the answer
+// lands in fileSettings, and the band redraws when a value moved.
 function readSettingsLater($: EngineInterface) {
-  void refreshFileSettings($)
+  void readSettings($)
+}
+
+// One read at a time: a caller that needs the answer waits on the read in
+// flight rather than starting a second.
+function readSettings($: EngineInterface): Promise<void> {
+  if (settingsInFlight === undefined) settingsInFlight = refreshFileSettings($).finally(() => { settingsInFlight = undefined })
+  return settingsInFlight
 }
 
 // Asks cs for its settings, by the path the launch exported; the child
@@ -1149,8 +1158,6 @@ function readSettingsLater($: EngineInterface) {
 // A failed or unreadable answer keeps the settings last read and is logged
 // once until the complaint changes; a read still running is not doubled.
 async function refreshFileSettings($: EngineInterface) {
-  if (settingsReading) return
-  settingsReading = true
   let complaint: string | undefined
   try {
     const bin = await $.env.get("CS_BIN")
@@ -1167,8 +1174,6 @@ async function refreshFileSettings($: EngineInterface) {
     }
   } catch (err) {
     complaint = LOGS.settingsUnread(String(err instanceof Error ? err.message : err))
-  } finally {
-    settingsReading = false
   }
   if (complaint !== undefined && complaint !== settingsComplaint) $.ui.log(complaint)
   settingsComplaint = complaint

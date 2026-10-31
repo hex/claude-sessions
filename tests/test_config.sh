@@ -269,6 +269,38 @@ test_a_key_that_is_not_a_name_runs_nothing() {
     done
 }
 
+# A named verb runs for the session it names: its settings file decides,
+# not the caller's or the machine's alone. The budget line names the file's.
+test_a_named_verb_reads_the_target_sessions_file() {
+    local dir out rc=0 live
+    dir=$(create_test_session_with_git alpha)
+    out=$(cs_plain alpha -narrative rotate) || rc=$?
+    [ "$rc" -eq 1 ] || { echo "  FAIL: expected the missing-narrative refusal, got $rc: $out"; return 1; }
+    live=$(printf '%s\n' "$out" | sed -n 's/^Error: No narrative for actor [^ ]* at //p')
+    [ -n "$live" ] || { echo "  FAIL: the refusal names no path: $out"; return 1; }
+    mkdir -p "$(dirname "$live")"
+    printf '## one\n\nnote\n' > "$live"
+    session_cfg "$dir" 'CS_NARRATIVE_MAX_BYTES=204800'
+    out=$(cs_plain alpha -narrative rotate) || { echo "  FAIL: rotate exited non-zero: $out"; return 1; }
+    assert_eq "(budget 200 KB)" "$(printf '%s\n' "$out" | grep -o '(budget [0-9]* KB)')" "the session's own budget" || return 1
+    rm "$dir/.cs/local/config"
+    out=$(cs_plain alpha -narrative rotate) || { echo "  FAIL: rotate exited non-zero: $out"; return 1; }
+    assert_eq "(budget 128 KB)" "$(printf '%s\n' "$out" | grep -o '(budget [0-9]* KB)')" "without the file the default (sensitivity)" || return 1
+}
+
+# A key no file keeps is skipped by name, its value never shown: the one
+# such key that is a secret would otherwise reach the listing and doctor.
+test_list_hides_the_value_of_a_key_no_file_keeps() {
+    local out
+    machine_cfg 'CS_SECRETS_PASSWORD=hunter2' 'CS_FOO=1'
+    out=$(cs_plain -config list) || { echo "  FAIL: list exited non-zero: $out"; return 1; }
+    case "$out" in *hunter2*) echo "  FAIL: the listing shows the secret"; return 1 ;; esac
+    assert_eq "  line 1: CS_SECRETS_PASSWORD=(hidden): not kept in cs's config
+  line 2: CS_FOO=1: not a cs setting" "$(printf '%s\n' "$out" | sed -n '/^Ignored in /,$p' | sed 1d)" "the key is named, the value is not" || return 1
+    out=$(cs_plain -doctor 2>&1) || true
+    case "$out" in *hunter2*) echo "  FAIL: doctor shows the secret"; return 1 ;; esac
+}
+
 # The porcelain is the one record the panel and the cs mod parse: one line per
 # allowed key, table order, eleven tab-separated fields, nothing else.
 _porcelain_world() {
@@ -494,6 +526,19 @@ CS_TERM_THEME_AUTO=1
 CS_TERM_BG_RGB=30;30;30
 CLAUDE_CODE_ENABLE_TODO_TOOLS=1
 bg source=launch" "$(cat "$got")" "a file theme equal to the measured one keeps the measurement a measurement" || return 1
+    # The machine's light theme made cs's first load (outside the session)
+    # drop the marker and the measured background; the session's dark theme,
+    # the measured one, puts the marker back for claude.
+    machine_cfg 'CS_TERM_THEME=light'
+    CLAUDE_CODE_BIN="$stub" CS_NO_UPDATE_CHECK=1 CS_NO_ITERM2=1 CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_BG_RGB='30;30;30' \
+        "$CS_BIN" alpha <<< "" > "$TEST_TMPDIR/launch.out" 2>&1 || { echo "  FAIL: the two-file launch failed"; cat "$TEST_TMPDIR/launch.out"; return 1; }
+    assert_eq "CS_NO_TASK_TOOLS=<unset>
+CS_STATUSLINE_LAYOUT=<unset>
+CS_TERM_THEME=dark
+CS_TERM_THEME_AUTO=1
+CS_TERM_BG_RGB=<unset>
+CLAUDE_CODE_ENABLE_TODO_TOOLS=1
+bg source=default" "$(cat "$got")" "a session theme equal to the measurement restores the marker a machine theme dropped" || return 1
     rm "$dir/.cs/local/config" "$MCFG"
     CLAUDE_CODE_BIN="$stub" CS_NO_UPDATE_CHECK=1 CS_NO_ITERM2=1 CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 \
         "$CS_BIN" alpha <<< "" > "$TEST_TMPDIR/launch.out" 2>&1 || { echo "  FAIL: the second launch failed"; cat "$TEST_TMPDIR/launch.out"; return 1; }
@@ -633,6 +678,8 @@ run_test test_set_refuses_what_no_reader_takes
 run_test test_named_set_writes_the_session_file
 run_test test_get_follows_the_precedence
 run_test test_a_key_that_is_not_a_name_runs_nothing
+run_test test_a_named_verb_reads_the_target_sessions_file
+run_test test_list_hides_the_value_of_a_key_no_file_keeps
 run_test test_list_porcelain_equals_the_golden_record
 run_test test_list_prints_the_table_and_the_skipped_lines
 run_test test_concurrent_sets_both_land
