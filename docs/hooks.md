@@ -1138,14 +1138,24 @@ muted at 0) and the session name, muted, with a muted `·` between the parts.
 Where the pane is too narrow, these parts drop from the right, down to the
 wordmark alone. A `/config` row never counts as changed, since the panel cannot
 see its default. The second line is a `━` rule across the pane in the TUI's
-hero gradient. Right under it come the strip and the detail line, then one
-empty line. The strip's keys are plain and three cells apart, with muted
-labels; Claude Code draws each key's letter in its own accent colour. The
-detail line reads `<KEY> · <when a change applies>` in the faint colour. The
+hero gradient. Right under it comes the selected row's card, then one empty
+line. Each line of the card opens with `▍` in the rail's second colour. The
+first line names the row: its label in bold ink, then its key, muted (a
+`/config` row's `<plugin>.<field>`). The second line holds the whole value as
+the row draws it, a toggle, a gauge with its number, or the default's word
+muted, then where the value comes from in that source's colour (`default`
+muted) and when a change applies, muted. Where the pane is too narrow, it
+wraps by words onto more lines, as many as leave the selected row drawn. With
+no row to select, the reading or problem words stand in its place. The
 rows sit under a muted bold column header (`setting`, `value`, `from`,
 `when`) and a soft rule. Each group is its name in muted bold, with an empty
 line above every group but the first. A name takes up to 26 cells, and the
-last column takes what a wider pane leaves.
+last column takes what a wider pane leaves. The keys sit on the last line of
+the pane, under the rows and `+N below`, with one empty line above them when
+the window still keeps the selected row, a row and a count either side. They
+are plain and three cells apart, with muted labels; Claude Code draws each
+key's letter in its own accent colour. Where they do not fit, they stack one a
+line.
 
 Only what something sets stands out. A row at its default draws its value
 muted. A row a file, the shell or the launch sets draws its value in ink, and
@@ -1158,9 +1168,12 @@ default. The selected row has `▌` in the rail's second colour and its label
 bold, on no background, and the focus marks the label alone. Every row's label
 is in ink, selected or not, at its default or set.
 
-Tab, the arrows or a click select a row (`ui.focus`). The line under the strip
-says what the selected row is and when a change takes hold. The strip holds the
-keys that row admits, each one Button with its own hotkey:
+Tab or a click selects a row (`ui.focus`). The arrows, the wheel, the page
+keys, Home and End move the selection by the rows they ask for, held at the
+first and the last row (`ui.scroll`). The pane draws its own window of rows,
+so the engine's window stays put while the window and the focus ring follow
+the selection. The card says what the selected row is and when a change takes
+hold. The keys are those the row admits, each one Button with its own hotkey:
 
 - `c`, Enter or a click changes the row. An on/off setting flips at once. A
   setting with a few values asks with them as choices in one `$.ui.ask`
@@ -1183,10 +1196,10 @@ own `config.set` guard: a toggle flips at once, a choice asks with its options,
 a number or text asks with `Keep <value>` and `Cancel`, and the panel refuses
 an answer a number row cannot read before it writes anything. The owner reloads with
 the new value, which for a `cs.*` row starts an armed rotation countdown over;
-the detail line says so. A `/config` row has no `u`, since the panel cannot see
+the card says so. A `/config` row has no `u`, since the panel cannot see
 a `userConfig` default.
 
-Some rows offer no key, and the detail line says why. A setting your
+Some rows offer no key, and the card says why. A setting your
 environment pins reads `CS_X=v in your environment wins; unset it there to
 change it here`. `CS_NO_FUNCTION_HOOKS` offers no key either: you change it
 from a terminal, `cs -config set CS_NO_FUNCTION_HOOKS 1`, since on it unloads
