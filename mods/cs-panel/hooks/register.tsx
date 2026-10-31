@@ -15,9 +15,7 @@ declare const Fragment: any
 
 export const PANE = 'cs-panel'
 const TITLE = 'cs'
-// The dock opens this wide when there is room (ignored inline): the 58-column
-// body holds a 19-cell name, every column (a gauge in the value) and the
-// widest strip.
+// The dock's width (an inline pane ignores it): a 58-column body holds every column.
 const DOCK_COLUMNS = 60
 // How long each cs run may take.
 const LIST_TIMEOUT_MS = 10000
@@ -158,6 +156,17 @@ export function register(on: On) {
     ring = e.element === undefined ? undefined : { key: e.element, at: drawn.indexOf(e.element) }
     if (e.element !== undefined && isRowId(e.element) && lineOf(e.element) !== undefined) select($, e.element)
     return moved
+  })
+
+  // An arrow, the wheel or a page key moves the selection `e.by` rows (the pane
+  // windows its own); the ring at no place (-1) has the next drawing put it there.
+  on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
+    const ids = (currentLines() ?? []).flatMap(l => l.kind === 'row' ? [l.row.id] : [])
+    if (ids.length === 0) return next(e)
+    const at = selected === undefined ? 0 : Math.max(0, ids.indexOf(selected))
+    const id = ids[Math.min(ids.length - 1, Math.max(0, at + e.by))]
+    if (id !== undefined && id !== ids[at]) { ring = { key: id, at: -1 }; select($, id) }
+    return {}
   })
 
   // Closing the pane (Esc, its mark, a plugin) stops its reads and forgets the
