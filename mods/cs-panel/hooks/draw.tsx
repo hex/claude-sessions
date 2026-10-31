@@ -1,43 +1,41 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the masthead, the selected row's card, the problem lines, the column header, a window of rows fitted to the body and the keys under it.
+// ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the masthead, the selected row's card, the problem lines, the filter field, the column header and a window of rows fitted to the body.
 // ABOUTME: Pure over its view and exported with its word tables, so the design lab draws a fixture without the engine.
 import type { EngineInterface, RenderElement, TextProps } from 'claude-code'
-import { shownOf, type Action, type Line, type Pending, type Row, type RowId, type Source } from './settings'
+import { filterLines, keyOf, labelOf, shownOf, type Line, type Pending, type Row, type RowId, type Source } from './settings'
 
 declare const h: any
 declare const Fragment: any
 
 // Everything drawPane needs: the lines (undefined until cs or /config first
-// answers), the selection, why a source is stale, the session name, the room.
+// answers), the selection, why a source is stale, the session name, the room,
+// the filter's text and whether the surface draws an Input.
 export type PanelView = {
   lines: readonly Line[] | undefined
-  // The selected row; one no longer listed falls back to the first row.
+  // The selected row; one not shown falls back to the first row shown.
   selected: RowId | undefined
   problems: readonly string[]
   session: string | undefined
-  // Pane props: bodyColumns, scroll.bodyRows, isFocused.
+  // Pane props: bodyColumns, scroll.bodyRows.
   columns: number
   bodyRows: number
-  hasKeys: boolean
+  filter: string
+  hasField: boolean
 }
 
 export type Handlers = {
-  // The row pressed offers no change: select it.
-  select: (id: RowId) => void
-  // A strip key, or a row's press (change), for that row.
-  act: (action: Action, id: RowId) => void
+  // Enter on a row: its dialog, or why it has none.
+  change: (id: RowId) => void
+  // The field's text, on every edit.
+  filter: (text: string) => void
+  // Enter in the field: the ring to the first row shown.
+  toRows: () => void
 }
 
-// The strip's keys, one per Action, in strip order. Three fixed letters, so no
-// two Buttons ever share a hotkey (two clash, later wins), however many rows.
-// `short` is the label a narrow strip draws.
-export const KEYS: Record<Action, { hotkey: string; verb: string; short: string }> = {
-  change: { hotkey: 'c', verb: 'change', short: 'change' },
-  unset: { hotkey: 'u', verb: 'default', short: 'default' },
-  session: { hotkey: 'p', verb: 'this session only', short: 'session' },
-}
+// The filter field's key; a row's key is its RowId.
+export const FILTER = 'filter'
 
 // Every word the pane draws itself.
 export const WORDS = {
@@ -48,16 +46,16 @@ export const WORDS = {
   from: { shell: 'shell', launch: 'launch', session: 'session', machine: 'machine', default: 'default' } satisfies Record<Source, string>,
   mod: 'mod',
   locked: 'locked',
-  modsGroup: 'Mods',
+  modsGroup: 'Mods', noMatch: (text: string) => `no setting matches ${text}`,
   pending: { asking: 'asking', writing: 'writing' } satisfies Record<Pending, string>,
   above: (n: number) => `+${n} above`,
   below: (n: number) => `+${n} below`,
-  close: 'Esc: close',
-  takeKeys: 'ctrl+x tab: keys',
+  filter: 'filter', find: 'type to filter', toRows: 'first row',
   pinned: (key: string, value: string) => `${key}=${value} in your environment wins; unset it there to change it here`,
   shellOnly: (key: string) => `change it from a shell: cs -config set ${key} 1 (on, it unloads every mod at the next launch, this panel too)`,
   reloads: (plugin: string) => `changing it reloads ${plugin}${plugin === 'cs' ? ' (an armed rotation countdown starts over)' : ''}`,
   managed: 'a managed setting owns it',
+  noSession: "this session's file sets it, and this conversation has no cs session name to write it with",
   brand: 'claude-sessions',
   title: 'settings',
   settings: (n: number) => `${n} settings`, changed: (n: number) => `${n} changed`,
@@ -105,11 +103,6 @@ const NAME_MOST = 26
 const GAP = 2
 const MARK_CELLS = 2
 const DOT = `  ${WORDS.marks.dot}  `
-const KEY_GAP = 3
-// A plain Button draws `<hotkey>: <label>`.
-const KEY_CELLS = 3
-// The selected row, a row and a count either side: the strip's empty line keeps them.
-const WINDOW_FULL = 5
 const GAUGE_CELLS = 10
 const VALUE_CELLS = { wide: GAUGE_CELLS + 4, narrow: 11 }
 // cs's `when` for a change that applies at once: the when cell leaves it out.
@@ -154,10 +147,6 @@ function valueRuns(l: RowLine, room: number, p: Palette): Run[] {
   const full = Math.round(Number(value) / 10)
   return [{ text: WORDS.marks.full.repeat(full), color: isDefault ? p.faint : p.amber }, { text: WORDS.marks.empty.repeat(GAUGE_CELLS - full), color: p.faint },
     { text: ` ${value}`, color: tone }].filter(run => run.text !== '')
-}
-
-function labelOf(row: Row): string {
-  return row.kind === 'mod' ? row.mod.label : row.setting.label
 }
 
 // The longest prefix of `from` that leaves the name NAME_MIN cells.
@@ -237,21 +226,6 @@ export function windowOf(count: number, at: number, room: number): { from: numbe
   return { from, to: from + shown, above: true, below: true }
 }
 
-// The selected row's strip: all of it, no hint, the short labels, else stacked.
-type Key = { action: Action; label: string }
-export function stripFor(line: RowLine | undefined, columns: number, hasKeys: boolean): { keys: Key[]; hint: string | undefined; stacked: boolean } {
-  const hint = hasKeys ? WORDS.close : WORDS.takeKeys
-  const actions = line?.actions ?? []
-  const full = actions.map(action => ({ action, label: KEYS[action].verb }))
-  const short = actions.map(action => ({ action, label: KEYS[action].short }))
-  const width = (keys: Key[], withHint: boolean) => [...keys.map(k => KEY_CELLS + k.label.length), ...(withHint ? [hint.length] : [])]
-    .reduce((sum, cells, i) => sum + cells + (i === 0 ? 0 : KEY_GAP), 0)
-  if (width(full, true) <= columns) return { keys: full, hint, stacked: false }
-  if (width(full, false) <= columns) return { keys: full, hint: undefined, stacked: false }
-  if (width(short, false) <= columns) return { keys: short, hint: undefined, stacked: false }
-  return { keys: short, hint: undefined, stacked: true }
-}
-
 // `runs` in at most `most` lines of `columns` broken between words, then cut with `…`.
 function wrapRuns(runs: readonly Run[], columns: number, most: number): Run[][] {
   type Cell = { char: string; run: number }
@@ -281,24 +255,26 @@ function wrapRuns(runs: readonly Run[], columns: number, most: number): Run[][] 
   }, []).map(({ run, text }) => ({ ...runs[run], text })))
 }
 
-// Why no key reaches the row, why cs skipped a value, when a change applies or what reloads.
-function noteOf(row: Row): string {
+// Why Enter opens no dialog on the row, why cs skipped a value, when a change
+// applies or what reloads.
+export function noteOf(row: Row, hasSelf: boolean): string {
   if (row.kind === 'mod') return row.mod.isLocked ? WORDS.managed : WORDS.reloads(row.mod.plugin)
   const s = row.setting
   if (s.source === 'shell') return WORDS.pinned(s.key, s.value ?? WORDS.none)
   if (s.edit === 'shell') return WORDS.shellOnly(s.key)
+  if (s.source === 'session' && !hasSelf) return WORDS.noSession
   return s.ignored ?? s.whenText
 }
 
 // The selected row's label and key, then its whole value, its source and its note.
-function cardOf(l: RowLine, columns: number, most: number, p: Palette): Run[][] {
+function cardOf(l: RowLine, columns: number, most: number, p: Palette, hasSelf: boolean): Run[][] {
   const row = l.row
   const from: Run = row.kind === 'mod' ? { text: row.mod.isLocked ? WORDS.locked : WORDS.mod, color: p.mut }
     : { text: WORDS.from[row.setting.source], color: p[SOURCE_INK[row.setting.source]] }
   const dot: Run = { text: ` ${WORDS.marks.dot} `, color: p.mut }
   const room = Math.max(1, columns - MARK_CELLS)
-  return [clip([{ text: labelOf(row), color: p.ink, weight: 'bold' }, { text: '  ' }, { text: row.kind === 'mod' ? row.mod.key : row.setting.key, color: p.mut }], room),
-    ...wrapRuns([...valueRuns(l, Infinity, p), dot, from, dot, { text: noteOf(row), color: p.mut }], room, most)]
+  return [clip([{ text: labelOf(row), color: p.ink, weight: 'bold' }, { text: '  ' }, { text: keyOf(row), color: p.mut }], room),
+    ...wrapRuns([...valueRuns(l, Infinity, p), dot, from, dot, { text: noteOf(row, hasSelf), color: p.mut }], room, most)]
     .map(line => [{ text: `${WORDS.marks.edge} `, color: p.rail[1] }, ...line])
 }
 
@@ -318,48 +294,45 @@ function mastheadOf(v: PanelView, p: Palette): Run[] {
   return [...brand, ...parts.slice(0, ends.filter(end => end <= room).length).flat()]
 }
 
-// The Buttons' keys: a strip key by its action, a row by its RowId.
-const actKey = (action: Action) => `act:${action}`
-
 // A Line, or the empty line above every heading but the first.
 type BodyLine = Line | { kind: 'gap' }
 
 const rowsIn = (lines: readonly BodyLine[]) => lines.filter(l => l.kind === 'row').length
 
-// What a view draws, for drawPane and ringOf; a group's name stands for `+0 above`.
+// What a view draws, for drawPane and ringOf: the rows the filter shows, under
+// the field and the column header once any row is listed; a group's name
+// stands for `+0 above`.
 function layoutOf(v: PanelView) {
   const p = paletteOf(v.lines ?? [])
-  const lines = (v.lines ?? []).flatMap((l, i): BodyLine[] => l.kind !== 'row' && i > 0 ? [{ kind: 'gap' }, l] : [l])
+  const isListed = (v.lines ?? []).length > 0
+  const lines = filterLines(v.lines ?? [], v.filter).flatMap((l, i): BodyLine[] => l.kind === 'group' && i > 0 ? [{ kind: 'gap' }, l] : [l])
   const listed = lines.findIndex(l => l.kind === 'row' && l.row.id === v.selected)
   const at = listed >= 0 ? listed : lines.findIndex(l => l.kind === 'row')
   const found = lines[at]
   const selected = found?.kind === 'row' ? found : undefined
-  const strip = stripFor(selected, v.columns, v.hasKeys)
   const notice = v.lines === undefined && v.problems.length === 0 ? WORDS.reading : undefined
-  // The masthead and its rule, the problems, the notice; a gap, the header, its rule.
-  const top = 2 + v.problems.length + (notice === undefined ? 0 : 1) + (lines.length > 0 ? 3 : 0)
-  const keys = strip.stacked ? strip.keys.length : 1
+  const noMatch = isListed && lines.length === 0 ? WORDS.noMatch(v.filter.trim()) : undefined
+  // The masthead and its rule, the problems, the notice; the field, the header, its rule; the no-match line.
+  const top = 2 + v.problems.length + (notice === undefined ? 0 : 1) + (isListed ? 3 : 0) + (noMatch === undefined ? 0 : 1)
   // The card's wrapped lines leave a line for its label and one for the window.
-  const card = selected === undefined ? [] : cardOf(selected, v.columns, Math.max(1, v.bodyRows - top - keys - 2), p)
-  const room = v.bodyRows - top - card.length - keys
-  const isGapped = room - 1 >= Math.min(lines.length, WINDOW_FULL)
-  const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, room - (isGapped ? 1 : 0)))
+  const card = selected === undefined ? [] : cardOf(selected, v.columns, Math.max(1, v.bodyRows - top - 2), p, v.session !== undefined)
+  const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - top - card.length))
   const isEmptyAbove = shown.above && rowsIn(lines.slice(0, shown.from)) === 0
-  return { p, lines, selected, card, strip, notice, isGapped, ...shown, ...(isEmptyAbove ? { from: 0, above: false } : {}) }
+  return { p, isListed, lines, selected, card, notice, noMatch, ...shown, ...(isEmptyAbove ? { from: 0, above: false } : {}) }
 }
 
-// The keys of the Buttons drawPane draws for a view, in the order the focus
-// ring walks them (the window's rows, then the strip's; a heading is no
+// The keys of the elements drawPane draws for a view, in the order the focus
+// ring walks them (the field, then the window's rows; a heading is no
 // Button), and the selected row's key, undefined with no rows.
 export function ringOf(v: PanelView): { keys: string[]; selected: string | undefined } {
-  const { lines, selected, strip, from, to } = layoutOf(v)
-  return { keys: [...lines.slice(from, to).flatMap(l => l.kind === 'row' ? [l.row.id] : []), ...strip.keys.map(k => actKey(k.action))], selected: selected?.row.id }
+  const { isListed, lines, selected, from, to } = layoutOf(v)
+  return { keys: [...(isListed && v.hasField ? [FILTER] : []), ...lines.slice(from, to).flatMap(l => l.kind === 'row' ? [l.row.id] : [])], selected: selected?.row.id }
 }
 
 // Where the focus ring goes back to after a drawing, or undefined while its
-// place still holds the Button it was put on. The terminal keeps the ring as
-// a place among the Buttons, not a key, so a drawing that moves that Button
-// (a strip of another length, a shifted window, a row added above) hands the
+// place still holds the element it was put on. The terminal keeps the ring as
+// a place among the elements, not a key, so a drawing that moves that element
+// (a shifted window, a row added above, a filter that hides it) hands the
 // place to another, or to none past the last. Back on the same key while it
 // is drawn, else on the selected row.
 export function ringBack(ring: { key: string; at: number }, next: { keys: readonly string[]; selected: string | undefined }): string | undefined {
@@ -367,16 +340,20 @@ export function ringBack(ring: { key: string; at: number }, next: { keys: readon
   return next.keys.includes(ring.key) ? ring.key : next.selected
 }
 
-// The strip goes last, so a long list never pushes it off. A row's Button holds
-// the label alone (the focus marks it) and never shrinks, so every line is measured.
+// A group's name in bold ink, then a soft rule to the body's edge.
+function headingOf(title: string, columns: number, p: Palette): Run[] {
+  const name = cut(title, Math.max(1, columns - 2))
+  return [{ text: name, color: p.ink, weight: 'bold' }, { text: ` ${WORDS.marks.rule.repeat(Math.max(1, columns - name.length - 1))}`, color: p.soft }]
+}
+
+// A row's Button holds the label alone (the focus marks it) and never shrinks,
+// so every line is measured. Enter in the field sends the ring to the rows.
 export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['resolve']>, on: Handlers): RenderElement {
   const { Box, Text, Button } = el
-  const { p, lines, selected, card, strip, notice, isGapped, from, to, above, below } = layoutOf(v)
+  const { p, isListed, lines, selected, card, notice, noMatch, from, to, above, below } = layoutOf(v)
   const { nameCells, cols } = tableOf(v.columns)
   const runs = (line: readonly Run[]) => line.map(({ text, ...style }) => <Text {...style}>{text}</Text>)
-  const hint = strip.hint === undefined ? [] : [<Text color={p.mut}>{strip.hint}</Text>]
-  const keys = [...strip.keys.map(k => <Button key={actKey(k.action)} plain hotkey={KEYS[k.action].hotkey} label={k.label}
-    onPress={() => { if (selected !== undefined) on.act(k.action, selected.row.id) }}><Text color={p.mut}>{k.label}</Text></Button>), ...hint]
+  const Input = v.hasField && 'Input' in el ? el.Input : undefined
   return (
     <Box flexDirection="column">
       <Text>{runs(mastheadOf(v, p))}</Text>
@@ -384,26 +361,23 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
       {card.map(line => <Text>{runs(line)}</Text>)}
       {v.problems.map(problem => <Text color={p.mut}>{cut(problem, v.columns)}</Text>)}
       {notice !== undefined && <Text color={p.mut}>{cut(notice, v.columns)}</Text>}
-      {lines.length > 0 && <Text>{' '}</Text>}
-      {lines.length > 0 && <Text color={p.mut} weight="bold">
+      {isListed && (Input === undefined ? <Text>{' '}</Text> : <Box flexDirection="row"><Text color={p.mut}>{`${WORDS.filter} `}</Text>
+        <Input key={FILTER} placeholder={WORDS.find} value={v.filter} submitLabel={WORDS.toRows} autoFocus onInput={on.filter} onSubmit={text => { on.filter(text); on.toRows() }} /></Box>)}
+      {isListed && <Text color={p.mut} weight="bold">
         {`${fit(`${' '.repeat(MARK_CELLS)}${WORDS.heads.name}`, MARK_CELLS + nameCells)}${cols.map(c => `${' '.repeat(GAP)}${fit(c.head, c.cells)}`).join('')}`}</Text>}
-      {lines.length > 0 && <Text color={p.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
+      {isListed && <Text color={p.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
+      {noMatch !== undefined && <Text color={p.mut}>{cut(noMatch, v.columns)}</Text>}
       {above && <Text color={p.faint}>{WORDS.above(rowsIn(lines.slice(0, from)))}</Text>}
-      {lines.slice(from, to).map(l => l.kind === 'gap' ? <Text>{' '}</Text> : l.kind !== 'row'
-        ? <Text color={p.mut} weight="bold">{`${' '.repeat(MARK_CELLS)}${cut(l.kind === 'mods' ? WORDS.modsGroup : l.title, Math.max(1, v.columns - MARK_CELLS))}`}</Text>
-        : (
-          <Box flexDirection="row">
-            {runs([l === selected ? { text: `${WORDS.marks.selected} `, color: p.rail[1] } : { text: ' '.repeat(MARK_CELLS) }])}
-            <Button key={l.row.id} plain label={labelOf(l.row)} {...(l === selected ? { autoFocus: true } : {})}
-              onPress={() => l.actions.includes('change') ? on.act('change', l.row.id) : on.select(l.row.id)}>
-              {runs([{ text: fit(labelOf(l.row), nameCells), color: p.ink, ...(l === selected ? { weight: 'bold' } as const : {}) }])}
-            </Button>
-            <Text>{runs(cols.flatMap(c => [{ text: ' '.repeat(GAP) }, ...c.runs(l, c.cells, p)]))}</Text>
-          </Box>
-        ))}
+      {lines.slice(from, to).map(l => l.kind === 'gap' ? <Text>{' '}</Text> : l.kind === 'group' ? <Text>{runs(headingOf(l.title, v.columns, p))}</Text> : (
+        <Box flexDirection="row">
+          {runs([l === selected ? { text: `${WORDS.marks.selected} `, color: p.rail[1] } : { text: ' '.repeat(MARK_CELLS) }])}
+          <Button key={l.row.id} plain label={labelOf(l.row)} {...(l === selected ? { autoFocus: true } : {})} onPress={() => on.change(l.row.id)}>
+            {runs([{ text: fit(labelOf(l.row), nameCells), color: p.ink, ...(l === selected ? { weight: 'bold' } as const : {}) }])}
+          </Button>
+          <Text>{runs(cols.flatMap(c => [{ text: ' '.repeat(GAP) }, ...c.runs(l, c.cells, p)]))}</Text>
+        </Box>
+      ))}
       {below && <Text color={p.faint}>{WORDS.below(rowsIn(lines.slice(to)))}</Text>}
-      {isGapped && <Text>{' '}</Text>}
-      <Box flexDirection={strip.stacked ? 'column' : 'row'} columnGap={KEY_GAP}>{keys}</Box>
     </Box>
   )
 }

@@ -1,13 +1,13 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: cs-panel mod: bare /cs (and /cs-panel) opens a pane of cs's settings, its mods' /config rows and its CS_* settings, and changes one per key press.
+// ABOUTME: cs-panel mod: bare /cs (and /cs-panel) opens a pane of cs's settings, its mods' /config rows and its CS_* settings, under a filter field, and changes one per Enter.
 // ABOUTME: The only effects of the mod: its hooks, its module state, the cs runs, $.config.set, and the tables of every line it hands the engine.
 import type { EngineInterface, On } from 'claude-code'
-import { drawPane, ringBack, ringOf, type Handlers, type PanelView } from './draw'
+import { drawPane, FILTER, noteOf, ringBack, ringOf, WORDS, type Handlers, type PanelView } from './draw'
 import {
-  isModProvider, isRowId, linesOf, modChange, modRowsOf, parseSettings, scopeFor, settingChange, shownOf, writeArgv,
-  type Action, type Ask, type Line, type ModRow, type Pending, type RowId, type Setting,
+  filterLines, isEditable, isModProvider, isRowId, labelOf, linesOf, modChange, modRowsOf, parseSettings, settingChange, shownOf, WHERE, writeArgv,
+  type Ask, type Line, type ModRow, type Pending, type RowId, type Setting,
 } from './settings'
 
 declare const h: any
@@ -30,7 +30,7 @@ export const COMMANDS = {
 
 export const REPLIES = {
   noBin: 'The launch did not say where cs is (CS_BIN); open this conversation with cs to change its settings.',
-  opened: 'cs settings are in the panel: Tab moves, c or Enter changes, u puts back the default, p changes it for this session only, Esc closes.',
+  opened: 'cs settings are in the panel: type to filter, the arrows move, Enter changes the row, Esc closes.',
   notPlaced: (reason: string) => `The panel is open but not drawn yet: ${reason}`,
   failed: (reason: string) => `The panel did not start: ${reason}`,
 } as const
@@ -43,6 +43,7 @@ export const ASKS = {
     `What should ${label} (${key}) be?${values.length === 0 ? '' : ` It takes ${values.join(', ')}.`} Pick one, or type a value under Other.`,
   mod: (label: string, key: string, values: readonly string[]) =>
     `What should ${label} (${key}) be?${values.length === 0 ? '' : ` It takes ${values.join(', ')}.`} Pick one, or type a value under Other.`,
+  where: (label: string, key: string, value: string) => `Where should ${label} (${key}) be ${value}?`,
 } as const
 
 export const TOASTS = {
@@ -52,9 +53,8 @@ export const TOASTS = {
   refused: (key: string, why: string) => `${key} not changed: ${why}`,
   modSaved: (key: string, value: string, plugin: string) => `${key}=${value} in /config: ${plugin} reloads with it`,
   notNumber: (label: string, answer: string) => `${label} takes a number; got ${answer}`,
-  // A key pressed on a drawing older than the row's state: the row is pending
-  // or the rows changed.
-  notOffered: (action: string, name: string) => `${action} is not offered for ${name} now`,
+  notNow: (name: string) => `${name} is still changing, or no longer listed; try again`,
+  readOnly: (label: string, why: string) => `${label}: ${why}`,
 } as const
 
 // Lines the pane draws above the rows when a source is stale or missing.
@@ -91,6 +91,7 @@ let mods: ModRow[] | undefined
 let settingsProblem: string | undefined
 let modsProblem: string | undefined
 let selected: RowId | undefined
+let filter = ''
 let pending = new Map<RowId, Pending>()
 let reading = false
 let readAgain = false
@@ -104,7 +105,7 @@ let ring: { key: string; at: number } | undefined
 
 export function register(on: On) {
   launch = undefined; settings = undefined; answered = undefined; mods = undefined; settingsProblem = undefined; modsProblem = undefined
-  selected = undefined; pending = new Map(); reading = false; readAgain = false; isOpen = false; registered = false; drawn = []; ring = undefined
+  selected = undefined; filter = ''; pending = new Map(); reading = false; readAgain = false; isOpen = false; registered = false; drawn = []; ring = undefined
 
   // /cs-panel, once per load. Nothing opens here: the panel opens only when
   // asked.
@@ -137,19 +138,21 @@ export function register(on: On) {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     if (!isOpen) $.clock.after(0, () => inBackground($, resume($)))
     launch ??= await readLaunch($)
-    const view: PanelView = { lines: currentLines(), selected, problems: problems(), session: launch?.self, columns: e.props.bodyColumns, bodyRows: e.props.scroll.bodyRows, hasKeys: e.props.isFocused }
+    // The mobile app's element table holds an Input at run time, but the app draws none.
+    const view: PanelView = { lines: currentLines(), selected, problems: problems(), session: launch?.self, columns: e.props.bodyColumns, bodyRows: e.props.scroll.bodyRows,
+      filter, hasField: e.surface !== 'mobile' }
     const next = ringOf(view)
     drawn = next.keys
-    if (!view.hasKeys) ring = undefined
+    if (!e.props.isFocused) ring = undefined
     const back = ring && ringBack(ring, next)
     if (back !== undefined) $.clock.after(0, () => inBackground($, refocus($, back)))
     return drawPane(view, $.ui.resolve(e), handlers($))
   })
 
   // Selection follows the focus ring: Tab or an arrow landing on a row selects
-  // it, so the strip and the detail name that row before any key is pressed.
-  // The ring moves first; a ring moved to a strip key keeps the selection.
-  // Every move, the mod's own included, records where the ring now is.
+  // it, so the card names that row before Enter. The ring moves first; a ring
+  // moved to the field keeps the selection. Every move, the mod's own
+  // included, records where the ring now is.
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
     const moved = await next(e)
     if (moved.deny !== undefined) return moved
@@ -158,24 +161,26 @@ export function register(on: On) {
     return moved
   })
 
-  // An arrow, the wheel or a page key moves the selection `e.by` rows (the pane
-  // windows its own); the ring at no place (-1) has the next drawing put it there.
+  // An arrow, the wheel or a page key moves the selection `e.by` of the rows the
+  // filter shows (the pane windows its own), Up from the first to the field; the
+  // ring at no place (-1) has the next drawing put it there.
   on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
-    const ids = (currentLines() ?? []).flatMap(l => l.kind === 'row' ? [l.row.id] : [])
+    const ids = shownIds()
     if (ids.length === 0) return next(e)
     const at = selected === undefined ? 0 : Math.max(0, ids.indexOf(selected))
+    if (at === 0 && e.by < 0 && drawn.includes(FILTER)) { inBackground($, refocus($, FILTER)); return {} }
     const id = ids[Math.min(ids.length - 1, Math.max(0, at + e.by))]
     if (id !== undefined && id !== ids[at]) { ring = { key: id, at: -1 }; select($, id) }
     return {}
   })
 
   // Closing the pane (Esc, its mark, a plugin) stops its reads and forgets the
-  // ring, which closes with it; a close another hook refused leaves both. Rows
-  // stay, so a reopen draws the last answer at once and the first read
-  // replaces it.
+  // ring and the filter, which close with it; a close another hook refused
+  // leaves them. Rows stay, so a reopen draws the last answer at once and the
+  // first read replaces it.
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const closed = await next(e)
-    if (closed.deny === undefined) { isOpen = false; ring = undefined }
+    if (closed.deny === undefined) { isOpen = false; ring = undefined; filter = '' }
     return closed
   })
 
@@ -292,7 +297,12 @@ function problems(): string[] {
 // The lines as they stand: undefined until either source first answered.
 function currentLines(): Line[] | undefined {
   if (mods === undefined && settings === undefined) return undefined
-  return linesOf(mods ?? [], settings ?? [], pending, launch?.self !== undefined)
+  return linesOf(mods ?? [], settings ?? [], pending, WORDS.modsGroup)
+}
+
+// The rows the filter shows, top to bottom.
+function shownIds(): RowId[] {
+  return filterLines(currentLines() ?? [], filter).flatMap(l => l.kind === 'row' ? [l.row.id] : [])
 }
 
 function lineOf(id: RowId): Extract<Line, { kind: 'row' }> | undefined {
@@ -313,17 +323,23 @@ function select($: EngineInterface, id: RowId): void {
 }
 
 function handlers($: EngineInterface): Handlers {
-  return { select: id => select($, id), act: (action, id) => inBackground($, act($, action, id)) }
+  return {
+    change: id => inBackground($, change($, id)),
+    filter: text => { if (text !== filter) { filter = text; $.ui.invalidate('ui.render') } },
+    toRows: () => { const first = shownIds()[0]; if (first !== undefined) { select($, first); inBackground($, refocus($, first)) } },
+  }
 }
 
-// The one entry for every key and row press. The row is looked up afresh and
-// the press refused with a toast when it no longer offers the action (a press
-// from a drawing older than the last read or the row's claim). The row is
-// claimed before the first await, so a second press finds nothing offered;
+// Enter on a row. The row is looked up afresh and Enter refused with a toast
+// when the row waits on a change or is gone (a drawing older than the last
+// read or the row's claim), or says why when no dialog changes it. The row is
+// claimed before the first await, so a second Enter finds it waiting;
 // whatever happens, it is released and both sources are read again.
-async function act($: EngineInterface, action: Action, id: RowId): Promise<void> {
+async function change($: EngineInterface, id: RowId): Promise<void> {
   const line = lineOf(id)
-  if (line === undefined || !line.actions.includes(action)) { $.ui.toast(TOASTS.notOffered(action, id.slice(id.indexOf(':') + 1))); return }
+  if (line === undefined || line.pending !== undefined) { $.ui.toast(TOASTS.notNow(id.slice(id.indexOf(':') + 1))); return }
+  const hasSelf = launch?.self !== undefined
+  if (!isEditable(line.row, hasSelf)) { $.ui.toast(TOASTS.readOnly(labelOf(line.row), noteOf(line.row, hasSelf))); return }
   select($, id)
   pending.set(id, 'asking')
   $.ui.invalidate('ui.render')
@@ -332,7 +348,7 @@ async function act($: EngineInterface, action: Action, id: RowId): Promise<void>
     // callee it cannot name.
     switch (line.row.kind) {
       case 'mod': await changeMod($, line.row.mod, id); break
-      case 'setting': await changeSetting($, line.row.setting, action, id); break
+      case 'setting': await changeSetting($, line.row.setting, hasSelf, id); break
     }
   } finally {
     pending.delete(id)
@@ -341,20 +357,18 @@ async function act($: EngineInterface, action: Action, id: RowId): Promise<void>
   }
 }
 
-// change and session: settingChange's plan, answered, then one cs write where
-// scopeFor says. unset: the write at once, where the value lives. cs's reply
-// is the toast either way, so the panel keeps no copy of cs's checks.
-async function changeSetting($: EngineInterface, s: Setting, action: Action, id: RowId): Promise<void> {
-  let value: string | undefined
-  if (action !== 'unset') {
-    const plan = settingChange(s)
-    const answer = plan.kind === 'now' ? { kind: 'value', value: plan.value } as const : await asked($, ASKS.setting(s.label, s.key, plan.values), plan)
-    if (answer === undefined || answer.kind === 'keep') return
-    value = answer.kind === 'default' ? undefined : answer.value
-  }
+// settingChange's dialog, answered, then the Where dialog when the answer asks
+// it, then one cs write. cs's reply is the toast, so the panel keeps no copy
+// of cs's checks.
+async function changeSetting($: EngineInterface, s: Setting, hasSelf: boolean, id: RowId): Promise<void> {
+  const plan = settingChange(s, hasSelf)
+  const answer = await asked($, ASKS.setting(s.label, s.key, plan.values), plan)
+  if (answer === undefined || answer.kind === 'keep') return
+  const scope = answer.kind === 'where' ? await asked($, ASKS.where(s.label, s.key, answer.value), WHERE) : answer.scope
+  if (scope === undefined) return
   pending.set(id, 'writing')
   $.ui.invalidate('ui.render')
-  const run = await runCs($, writeArgv(scopeFor(s, action), launch?.self, s.key, value), { timeoutMs: WRITE_TIMEOUT_MS })
+  const run = await runCs($, writeArgv(scope, launch?.self, s.key, answer.value), { timeoutMs: WRITE_TIMEOUT_MS })
   $.ui.toast(run.ok ? TOASTS.written(lastLine(run.stdout)) : TOASTS.refused(s.key, run.why))
 }
 
