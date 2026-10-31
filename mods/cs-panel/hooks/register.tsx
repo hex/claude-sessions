@@ -16,7 +16,8 @@ declare const Fragment: any
 export const PANE = 'cs-panel'
 const TITLE = 'cs'
 // The dock opens this wide when there is room (ignored inline): the 58-column
-// body holds a 22-cell name, every column and the widest strip.
+// body holds a 19-cell name, every column (a gauge in the value) and the
+// widest strip.
 const DOCK_COLUMNS = 60
 // How long each cs run may take.
 const LIST_TIMEOUT_MS = 10000
@@ -138,7 +139,7 @@ export function register(on: On) {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     if (!isOpen) $.clock.after(0, () => inBackground($, resume($)))
     launch ??= await readLaunch($)
-    const view: PanelView = { lines: currentLines(), selected, problems: problems(), columns: e.props.bodyColumns, bodyRows: e.props.scroll.bodyRows, hasKeys: e.props.isFocused }
+    const view: PanelView = { lines: currentLines(), selected, problems: problems(), session: launch?.self, columns: e.props.bodyColumns, bodyRows: e.props.scroll.bodyRows, hasKeys: e.props.isFocused }
     const next = ringOf(view)
     drawn = next.keys
     if (!view.hasKeys) ring = undefined
