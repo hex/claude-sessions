@@ -1,7 +1,7 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: Draws the cs-panel pane from a view: the header, the strip of keys for the selected row, its detail line, the problem lines, and a window of rows fitted to the body.
+// ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the masthead, the strip of keys for the selected row, its detail line, the problem lines, the column header and a window of rows fitted to the body.
 // ABOUTME: Pure over its view and exported with its word tables, so the design lab draws a fixture without the engine.
 import type { EngineInterface, RenderElement, TextProps } from 'claude-code'
 import { shownOf, type Action, type Line, type Pending, type Row, type RowId, type Setting, type Source } from './settings'
@@ -10,8 +10,8 @@ declare const h: any
 declare const Fragment: any
 
 // Everything drawPane needs: the lines (undefined until cs or /config first
-// answers), the selection, why a source is stale, the session name the header
-// names, and the room the Pane props give.
+// answers), the selection, why a source is stale, the session name the
+// masthead names, and the room the Pane props give.
 export type PanelView = {
   lines: readonly Line[] | undefined
   // The selected row; one no longer listed falls back to the first row.
@@ -64,49 +64,61 @@ export const WORDS = {
   managed: 'a managed setting owns it',
   brand: 'claude-sessions',
   title: 'settings',
-  // The selected row's bar, a toggle's dot, a gauge's cells, a heading's
-  // rule, and the header's bar and dot.
-  marks: { selected: '▌', on: '●', off: '○', full: '▰', empty: '▱', rule: '─', bar: '▍', dot: '·' },
+  settings: (n: number) => `${n} settings`, changed: (n: number) => `${n} changed`,
+  heads: { name: 'setting', value: 'value', from: 'from', when: 'when' },
+  // The bars, a toggle's dots, a gauge's cells, the rules, the masthead's dot.
+  marks: { selected: '▌', on: '●', off: '○', full: '▰', empty: '▱', rule: '─', hero: '━', dot: '·' },
 } as const
 
 type RowLine = Extract<Line, { kind: 'row' }>
 
-// The colours of lib/05-term.sh's palette the pane draws in, by the
-// porcelain's CS_TERM_THEME: `light` (a cream terminal) takes the muted set,
-// anything else the vivid one. `accent` is cs's amber, `rule` its rust (a
-// group's name), and the wordmark install.sh.in's rust-to-gold gradient,
-// one colour a letter (the muted one run between the muted rust and gold).
-type Ink = { accent: string; rule: string; wordmark: readonly string[] }
+// The cs TUI's palettes (tui/src/theme.rs), the light one when the porcelain's
+// CS_TERM_THEME is `light` (a cream terminal): `hero` is the masthead rule's
+// gradient, `rail` the selection bar's, and the wordmark install.sh.in's
+// rust-to-gold, one colour a letter (lib/05-term.sh's muted pair when light).
 type Rgb = readonly [number, number, number]
-const rgb = ([r, g, b]: Rgb) => `rgb(${r},${g},${b})`
-function gradient([r1, g1, b1]: Rgb, [r2, g2, b2]: Rgb, n: number): string[] {
-  const at = (from: number, to: number, i: number) => Math.round(from + (to - from) * i / (n - 1))
-  return Array.from({ length: n }, (_, i) => rgb([at(r1, r2, i), at(g1, g2, i), at(b1, b2, i)]))
-}
-const INKS = {
-  dark: { accent: rgb([255, 183, 77]), rule: rgb([230, 74, 25]), wordmark: ([[230, 74, 25], [232, 83, 24], [234, 91, 22], [235, 100, 21], [237, 108, 20],
-    [239, 117, 19], [241, 125, 17], [243, 134, 16], [245, 142, 15], [246, 151, 14], [248, 159, 12], [250, 168, 11], [252, 176, 10], [254, 185, 9], [255, 193, 7]] as const).map(rgb) },
-  light: { accent: rgb([162, 122, 58]), rule: rgb([166, 86, 60]), wordmark: gradient([166, 86, 60], [156, 118, 56], WORDS.brand.length) },
-} satisfies Record<'dark' | 'light', Ink>
+const rgb = (channels: readonly number[]) => `rgb(${channels.join(',')})`
+type Palette = Record<'ink' | 'mut' | 'faint' | 'soft' | 'wash' | 'teal' | 'green' | 'amber', string> & { hero: readonly Rgb[]; rail: readonly string[]; wordmark: readonly string[] }
 
-function inkOf(lines: readonly Line[]): Ink {
-  return lines.some(l => l.kind === 'row' && l.row.kind === 'setting' && l.row.setting.key === 'CS_TERM_THEME' && l.row.setting.value === 'light') ? INKS.light : INKS.dark
+// The TUI's ramp: cell `i` of `n` along the stops, linear between the two it
+// falls between, each channel truncated; one cell takes the first stop.
+function ramp(stops: readonly Rgb[], n: number, i: number): string {
+  const at = n <= 1 ? 0 : i / (n - 1) * (stops.length - 1), a = Math.floor(at)
+  const from = stops[a], to = stops[Math.min(a + 1, stops.length - 1)]
+  if (from === undefined || to === undefined) throw new Error(`ramp: cell ${i} of ${n} falls outside ${stops.length} stops`)
+  return rgb(([0, 1, 2] as const).map(c => Math.trunc(from[c] + (at - a) * (to[c] - from[c]))))
+}
+
+const PALETTES = {
+  dark: { ink: rgb([245, 230, 211]), mut: rgb([161, 136, 127]), faint: rgb([120, 104, 96]), soft: rgb([56, 50, 46]), wash: rgb([60, 46, 36]), teal: rgb([45, 212, 191]),
+    green: rgb([139, 195, 74]), amber: rgb([246, 154, 0]), hero: [[221, 80, 20], [237, 128, 0], [246, 154, 0], [214, 162, 30]], rail: [[221, 80, 20], [246, 154, 0], [250, 180, 60]].map(rgb),
+    wordmark: [[230, 74, 25], [232, 83, 24], [234, 91, 22], [235, 100, 21], [237, 108, 20], [239, 117, 19], [241, 125, 17], [243, 134, 16], [245, 142, 15], [246, 151, 14],
+      [248, 159, 12], [250, 168, 11], [252, 176, 10], [254, 185, 9], [255, 193, 7]].map(rgb) },
+  light: { ink: rgb([43, 33, 24]), mut: rgb([122, 106, 88]), faint: rgb([168, 151, 130]), soft: rgb([226, 213, 196]), wash: rgb([255, 240, 218]), teal: rgb([15, 118, 110]),
+    green: rgb([92, 140, 84]), amber: rgb([242, 167, 53]), hero: [[143, 50, 28], [216, 90, 36], [242, 167, 53], [214, 162, 30]], rail: [[193, 58, 29], [228, 91, 34], [232, 167, 46]].map(rgb),
+    wordmark: Array.from(WORDS.brand, (_, i) => ramp([[166, 86, 60], [156, 118, 56]], WORDS.brand.length, i)) },
+} satisfies Record<'dark' | 'light', Palette>
+
+function paletteOf(lines: readonly Line[]): Palette {
+  return lines.some(l => l.kind === 'row' && l.row.kind === 'setting' && l.row.setting.key === 'CS_TERM_THEME' && l.row.setting.value === 'light') ? PALETTES.light : PALETTES.dark
 }
 
 // A run of one style. Every line the pane draws is a row of runs exactly as
 // wide as their texts are long.
-type Run = { text: string } & Pick<TextProps, 'color' | 'dimColor' | 'weight'>
+type Run = { text: string } & Pick<TextProps, 'color' | 'weight'>
 
-// The columns right of the name, in the order a narrow body drops them from
-// the end. Each is drawn cut and padded to its cells, so every row is exactly
-// as wide as every other.
-type Column = { cells: number; runs: (line: RowLine, cells: number, ink: Ink) => Run[] }
+// The columns right of the name, under their heads, dropped from the end by a
+// narrow body; each cut and padded to its cells, so all rows are as wide.
+type Column = { head: string; cells: number; runs: (line: RowLine, cells: number, p: Palette) => Run[] }
 const NAME_MIN = 8
+// The most a name takes; a wider body gives the rest to the last column.
+const NAME_MOST = 26
 const GAP = 2
 // `▌ ` on the selected row, two spaces elsewhere.
 const MARK_CELLS = 2
-// Between the strip's keys, and before its hint, drawn dim.
-const SEP = ` ${WORDS.marks.dot} `
+// Between the masthead's parts, and between the strip's keys and its hint.
+const DOT = `  ${WORDS.marks.dot}  `
+const KEY_GAP = 3
 // A strip key's cells besides its label: its hotkey and `: ` (a plain Button
 // draws `<hotkey>: <label>`).
 const KEY_CELLS = 3
@@ -117,25 +129,21 @@ const GAUGE_CELLS = 10
 const VALUE_CELLS = { wide: GAUGE_CELLS + 4, narrow: 11 }
 // cs's `when` for a change that applies at once: the when cell leaves it out.
 const AT_ONCE = 'now'
-const VALUE: Column = { cells: VALUE_CELLS.wide, runs: valueRuns }
+const VALUE: Column = { head: WORDS.heads.value, cells: VALUE_CELLS.wide, runs: valueRuns }
 // Only what is set reads in the from and when cells: a default row leaves
 // both empty, a mod row its when.
 const REST: readonly Column[] = [
-  { cells: 7, runs: (l, cells, ink) => l.row.kind === 'mod'
-    ? [{ text: fit(l.row.mod.isLocked ? WORDS.locked : WORDS.mod, cells), dimColor: true }]
+  { head: WORDS.heads.from, cells: 7, runs: (l, cells, p) => l.row.kind === 'mod'
+    ? [{ text: fit(l.row.mod.isLocked ? WORDS.locked : WORDS.mod, cells), color: p.mut }]
     : l.row.setting.source === 'default' ? [{ text: fit('', cells) }]
-      : [{ text: fit(WORDS.from[l.row.setting.source], cells), ...SOURCE_INK[l.row.setting.source](ink) }] },
-  { cells: 10, runs: (l, cells) => l.row.kind === 'setting' && l.row.setting.source !== 'default' && l.row.setting.when !== AT_ONCE
-    ? [{ text: fit(l.row.setting.when, cells), dimColor: true }] : [{ text: fit('', cells) }] },
+      : [{ text: fit(WORDS.from[l.row.setting.source], cells), color: p[SOURCE_INK[l.row.setting.source]] }] },
+  { head: WORDS.heads.when, cells: 10, runs: (l, cells, p) => l.row.kind === 'setting' && l.row.setting.source !== 'default' && l.row.setting.when !== AT_ONCE
+    ? [{ text: fit(l.row.setting.when, cells), color: p.mut }] : [{ text: fit('', cells) }] },
 ]
 
-// Where a set value comes from, in colour: a file's in the theme's claude
-// (session) or success (machine) colour, the shell's in the accent, as it
-// overrides both, the launch's dim.
-const SOURCE_INK: Record<Exclude<Source, 'default'>, (ink: Ink) => Pick<Run, 'color' | 'dimColor'>> = {
-  session: () => ({ color: 'claude' }), machine: () => ({ color: 'success' }), shell: ink => ({ color: ink.accent }),
-  launch: () => ({ dimColor: true }),
-}
+// A set source's colour, the shell's amber as it overrides both files.
+const SOURCE_INK: Record<Exclude<Source, 'default'>, 'teal' | 'green' | 'amber' | 'faint'> = { session: 'teal', machine: 'green', shell: 'amber', launch: 'faint' }
+const CHANGED: ReadonlySet<Source> = new Set(['session', 'machine', 'shell'])
 
 // The settings whose value is a percentage, by key.
 const PERCENT_KEYS: ReadonlySet<string> = new Set(['CS_STATUSLINE_CTX_WARN', 'CS_STATUSLINE_CTX_CRIT', 'CS_CTX_WARN_CTX', 'CS_ROTATE_NUDGE_CTX',
@@ -151,21 +159,22 @@ function valueOf(row: Row): boolean | string {
   return s.value ?? s.fallback ?? WORDS.none
 }
 
-// A value cell: what the row waits on, dim; on as `● on`, the dot in success;
-// off as `○ off`, dim; a percentage that reads as a whole number up to 100 as
-// a gauge of its tenths (filled in the accent, the rest dim) and the number,
-// where the cell holds both; else the value. A default's value is all dim.
-function valueRuns(l: RowLine, cells: number, ink: Ink): Run[] {
-  if (l.pending !== undefined) return [{ text: fit(WORDS.pending[l.pending], cells), dimColor: true }]
+// A value cell: what the row waits on, muted; `● on`, the dot green; `○ off`
+// muted; a whole percentage up to 100 as a gauge of its tenths and the number
+// where the cell holds both; else the value. A set value is in ink and its
+// gauge filled in amber, a default's muted and its gauge all faint.
+function valueRuns(l: RowLine, cells: number, p: Palette): Run[] {
+  if (l.pending !== undefined) return [{ text: fit(WORDS.pending[l.pending], cells), color: p.mut }]
   const value = valueOf(l.row)
-  if (value === true) return [{ text: WORDS.marks.on, color: 'success' }, { text: fit(` ${WORDS.on}`, cells - 1) }]
-  if (value === false) return [{ text: fit(`${WORDS.marks.off} ${WORDS.off}`, cells), dimColor: true }]
-  const quiet: Pick<Run, 'dimColor'> = l.row.kind === 'setting' && l.row.setting.source === 'default' ? { dimColor: true } : {}
+  const isDefault = l.row.kind === 'setting' && l.row.setting.source === 'default'
+  const tone = isDefault ? p.mut : p.ink
+  if (value === true) return [{ text: WORDS.marks.on, color: p.green }, { text: fit(` ${WORDS.on}`, cells - 1), color: tone }]
+  if (value === false) return [{ text: fit(`${WORDS.marks.off} ${WORDS.off}`, cells), color: p.mut }]
   const isPercent = l.row.kind === 'setting' && PERCENT_KEYS.has(l.row.setting.key) && /^\d{1,3}$/.test(value) && Number(value) <= 100
-  if (!isPercent || cells < GAUGE_CELLS + 1 + value.length) return [{ text: fit(value, cells), ...quiet }]
+  if (!isPercent || cells < GAUGE_CELLS + 1 + value.length) return [{ text: fit(value, cells), color: tone }]
   const full = Math.round(Number(value) / 10)
-  return [{ text: WORDS.marks.full.repeat(full), ...(quiet.dimColor ? quiet : { color: ink.accent }) }, { text: WORDS.marks.empty.repeat(GAUGE_CELLS - full), dimColor: true },
-    { text: fit(` ${value}`, cells - GAUGE_CELLS), ...quiet }].filter(run => run.text !== '')
+  return [{ text: WORDS.marks.full.repeat(full), color: isDefault ? p.faint : p.amber }, { text: WORDS.marks.empty.repeat(GAUGE_CELLS - full), color: p.faint },
+    { text: fit(` ${value}`, cells - GAUGE_CELLS), color: tone }].filter(run => run.text !== '')
 }
 
 function labelOf(row: Row): string {
@@ -190,6 +199,15 @@ export function columnsFor(columns: number): readonly Column[] {
   const wide = fitted([VALUE, ...REST], columns)
   const narrow = fitted([{ ...VALUE, cells: VALUE_CELLS.narrow }, ...REST], columns)
   return wide.length >= narrow.length ? wide : narrow
+}
+
+// The name's cells and the columns a body this wide draws: the name takes
+// what the columns leave, up to NAME_MOST, and the last column the rest.
+function tableOf(columns: number): { nameCells: number; cols: readonly Column[] } {
+  const cols = columnsFor(columns)
+  const room = columns - MARK_CELLS - cols.reduce((sum, c) => sum + GAP + c.cells, 0)
+  const nameCells = Math.max(1, Math.min(NAME_MOST, room))
+  return { nameCells, cols: cols.map((c, i) => i === cols.length - 1 ? { ...c, cells: c.cells + Math.max(0, room - nameCells) } : c) }
 }
 
 // `text` cut to `cells` with `…`. Every text the panel fits is cs's ASCII
@@ -223,11 +241,9 @@ export function windowOf(count: number, at: number, room: number): { from: numbe
   return { from, to: from + shown, above: true, below: true }
 }
 
-// The strip for the selected row, fitted widest first: `c: change ·
-// u: default · p: this session only · Esc: close`, then without the hint,
-// then the short labels (`p: session`); a body narrower than that stacks the
-// keys one per line, without the dots. Each key is KEY_CELLS + label cells,
-// so the fit is exact.
+// The strip for the selected row, the widest that fits, KEY_GAP cells apart:
+// `c: change   u: default   p: this session only   Esc: close`, no hint, the
+// short labels (`p: session`), else stacked; a key is KEY_CELLS + its label.
 type Key = { action: Action; label: string }
 export function stripFor(line: RowLine | undefined, columns: number, hasKeys: boolean): { keys: Key[]; hint: string | undefined; stacked: boolean } {
   const hint = hasKeys ? WORDS.close : WORDS.takeKeys
@@ -235,7 +251,7 @@ export function stripFor(line: RowLine | undefined, columns: number, hasKeys: bo
   const full = actions.map(action => ({ action, label: KEYS[action].verb }))
   const short = actions.map(action => ({ action, label: KEYS[action].short }))
   const width = (keys: Key[], withHint: boolean) => [...keys.map(k => KEY_CELLS + k.label.length), ...(withHint ? [hint.length] : [])]
-    .reduce((sum, cells, i) => sum + cells + (i === 0 ? 0 : SEP.length), 0)
+    .reduce((sum, cells, i) => sum + cells + (i === 0 ? 0 : KEY_GAP), 0)
   if (width(full, true) <= columns) return { keys: full, hint, stacked: false }
   if (width(full, false) <= columns) return { keys: full, hint: undefined, stacked: false }
   if (width(short, false) <= columns) return { keys: short, hint: undefined, stacked: false }
@@ -285,26 +301,20 @@ function sentenceOf(s: Setting): string {
   return WORDS.about(s.key, s.ignored ?? s.whenText)
 }
 
-// The first line: the wordmark, one colour a letter, then ` ▍ settings`, the
-// bar in the accent, then ` · <session>` dim, fitted widest first: the
-// session name only from 40 columns, cut to the room left; `settings` only
-// where it fits; a body narrower than the wordmark cuts it.
-function headerOf(columns: number, session: string | undefined, ink: Ink): Run[] {
-  const letters: Run[] = [...WORDS.brand].slice(0, columns).map((text, i) => ({ text, color: ink.wordmark[i] }))
-  const title = [{ text: ` ${WORDS.marks.bar}`, color: ink.accent }, { text: ` ${WORDS.title}` }]
-  const named = ` ${WORDS.marks.dot} `
-  const room = columns - WORDS.brand.length - title.reduce((sum, run) => sum + run.text.length, 0)
-  if (room < 0) return letters
-  if (session === undefined || columns < 40 || room <= named.length) return [...letters, ...title]
-  return [...letters, ...title, { text: `${named}${cut(session, room - named.length)}`, dimColor: true }]
-}
-
-// A group's heading, the body wide: `── <name> ───…`, the name bold in the
-// rust and the rule dim.
-function ruleOf(title: string, columns: number, ink: Ink): Run[] {
-  const name = cut(title, Math.max(1, columns - 4))
-  const rule = WORDS.marks.rule
-  return [{ text: `${rule}${rule} `, dimColor: true }, { text: name, color: ink.rule, weight: 'bold' }, { text: ` ${rule.repeat(Math.max(0, columns - name.length - 4))}`, dimColor: true }]
+// The masthead's first line, as the cs TUI's: `▌ `, the wordmark (cut by a
+// narrower body), `  settings`, `  ·  <rows> settings`, `  ·  <M> changed`
+// (teal unless 0) and `  ·  <session>`, dropped from the right to fit. M
+// counts settings a file or the shell sets: a /config row tells no default.
+function mastheadOf(v: PanelView, p: Palette): Run[] {
+  const brand: Run[] = [{ text: `${WORDS.marks.selected} `, color: p.rail[0] }, ...[...WORDS.brand].slice(0, Math.max(0, v.columns - MARK_CELLS)).map((text, i) => ({ text, color: p.wordmark[i] }))]
+  const rows = (v.lines ?? []).flatMap(l => l.kind === 'row' ? [l.row] : [])
+  const changed = rows.filter(row => row.kind === 'setting' && CHANGED.has(row.setting.source)).length
+  const tail: Run[] = [{ text: `  ${WORDS.title}`, color: p.ink, weight: 'bold' },
+    ...(v.lines === undefined ? [] : [{ text: `${DOT}${WORDS.settings(rows.length)}`, color: p.ink }, { text: `${DOT}${WORDS.changed(changed)}`, color: changed > 0 ? p.teal : p.mut }]),
+    ...(v.session === undefined ? [] : [{ text: `${DOT}${v.session}`, color: p.mut }])]
+  const room = v.columns - brand.reduce((sum, run) => sum + run.text.length, 0)
+  const ends = tail.map((_, i) => tail.slice(0, i + 1).reduce((sum, run) => sum + run.text.length, 0))
+  return [...brand, ...tail.slice(0, ends.filter(end => end <= room).length)]
 }
 
 // The Buttons' keys: a strip key by its action, a row by its RowId.
@@ -319,7 +329,8 @@ const rowsIn = (lines: readonly BodyLine[]) => lines.filter(l => l.kind === 'row
 // What a view draws, worked out once for drawPane and ringOf: the body's
 // lines, the selected row (an id no longer listed falls back to the first
 // row), the strip, the detail, the notice in place of lines, and the window
-// of lines the room left under the header takes.
+// of lines the room under the column header takes, with the first group's
+// name in place of `+0 above`.
 function layoutOf(v: PanelView) {
   const lines = (v.lines ?? []).flatMap((l, i): BodyLine[] => l.kind !== 'row' && i > 0 ? [{ kind: 'gap' }, l] : [l])
   const listed = lines.findIndex(l => l.kind === 'row' && l.row.id === v.selected)
@@ -329,8 +340,11 @@ function layoutOf(v: PanelView) {
   const strip = stripFor(selected, v.columns, v.hasKeys)
   const detail = detailOf(selected, v.columns)
   const notice = v.lines === undefined && v.problems.length === 0 ? WORDS.reading : undefined
-  const chrome = 1 + (strip.stacked ? strip.keys.length : 1) + detail.length + v.problems.length + (notice === undefined ? 0 : 1)
-  return { lines, selected, strip, detail, notice, ...windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - chrome)) }
+  // The masthead, its rule and a gap; with lines, a gap, the header, its rule.
+  const chrome = 3 + (strip.stacked ? strip.keys.length : 1) + detail.length + v.problems.length + (notice === undefined ? 0 : 1) + (lines.length > 0 ? 3 : 0)
+  const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - chrome))
+  const isEmptyAbove = shown.above && rowsIn(lines.slice(0, shown.from)) === 0
+  return { lines, selected, strip, detail, notice, ...shown, ...(isEmptyAbove ? { from: 0, above: false } : {}) }
 }
 
 // The keys of the Buttons drawPane draws for a view, in the order the focus
@@ -355,50 +369,50 @@ export function ringBack(ring: { key: string; at: number }, next: { keys: readon
   return next.keys.includes(ring.key) ? ring.key : next.selected
 }
 
-// The pane body, top to bottom: the header, the strip (before the rows, so a
-// long list never pushes the keys off the pane), the selected row's detail,
-// the problem lines, `+N above`, the window of lines, `+N below`; `+N` counts
-// rows, not headings or empty lines. The strip's keys are plain Buttons, a dim
-// ` · ` between them and before the hint, none when stacked. A heading is its
-// rule; a row is a row Box of the marker's Text, one plain Button keyed by its
-// RowId holding only the label (bold when selected) cut to its cells, so the
-// focus marks the label alone, and the Text of the padded columns: a Button
-// never shrinks, so every line is measured to `columns` before it is drawn. A
-// row's press changes it (Enter on the ring's row, a click, a tap), or selects
-// it when it offers no change. The selected row carries autoFocus, so a pane
-// opened with focus starts the ring there.
+// The pane body: the masthead and its hero rule, an empty line, the strip
+// (above the rows, so a long list never pushes the keys off), the detail, the
+// problems, an empty line, the column header and its rule, `+N above`, the
+// window and `+N below` (`+N` counts rows). A row is a row Box of the marker's
+// Text, a plain Button keyed by its RowId holding only the label (the focus
+// marks it alone) and the padded columns' Text: a Button never shrinks, so
+// every line is measured to `columns`. A press changes the row, or selects it
+// when it offers no change; the selected row, on the wash, takes autoFocus.
 export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['resolve']>, on: Handlers): RenderElement {
   const { Box, Text, Button } = el
   const { lines, selected, strip, detail, notice, from, to, above, below } = layoutOf(v)
-  const ink = inkOf(v.lines ?? [])
-  const cols = columnsFor(v.columns)
-  const nameCells = Math.max(1, v.columns - MARK_CELLS - cols.reduce((sum, c) => sum + GAP + c.cells, 0))
+  const p = paletteOf(v.lines ?? [])
+  const { nameCells, cols } = tableOf(v.columns)
   const runs = (line: readonly Run[]) => line.map(({ text, ...style }) => <Text {...style}>{text}</Text>)
+  const hint = strip.hint === undefined ? [] : [<Text color={p.mut}>{strip.hint}</Text>]
   const keys = [...strip.keys.map(k => <Button key={actKey(k.action)} plain hotkey={KEYS[k.action].hotkey} label={k.label}
-    onPress={() => { if (selected !== undefined) on.act(k.action, selected.row.id) }} />), ...(strip.hint === undefined ? [] : [<Text dimColor>{strip.hint}</Text>])]
+    onPress={() => { if (selected !== undefined) on.act(k.action, selected.row.id) }}><Text color={p.mut}>{k.label}</Text></Button>), ...hint]
   return (
     <Box flexDirection="column">
-      <Text>{runs(headerOf(v.columns, v.session, ink))}</Text>
-      <Box flexDirection={strip.stacked ? 'column' : 'row'}>
-        {strip.stacked ? keys : keys.flatMap((key, i) => i === 0 ? [key] : [<Text dimColor>{SEP}</Text>, key])}
-      </Box>
-      {detail.map(text => <Text dimColor>{text}</Text>)}
-      {v.problems.map(problem => <Text dimColor>{cut(problem, v.columns)}</Text>)}
-      {notice !== undefined && <Text dimColor>{cut(notice, v.columns)}</Text>}
-      {above && <Text dimColor>{WORDS.above(rowsIn(lines.slice(0, from)))}</Text>}
+      <Text>{runs(mastheadOf(v, p))}</Text>
+      <Text>{runs(Array.from({ length: v.columns }, (_, i) => ({ text: WORDS.marks.hero, color: ramp(p.hero, v.columns, i) })))}</Text>
+      <Text>{' '}</Text>
+      <Box flexDirection={strip.stacked ? 'column' : 'row'} columnGap={KEY_GAP}>{keys}</Box>
+      {detail.map(text => <Text color={p.faint}>{text}</Text>)}
+      {v.problems.map(problem => <Text color={p.mut}>{cut(problem, v.columns)}</Text>)}
+      {notice !== undefined && <Text color={p.mut}>{cut(notice, v.columns)}</Text>}
+      {lines.length > 0 && <Text>{' '}</Text>}
+      {lines.length > 0 && <Text color={p.mut} weight="bold">
+        {`${fit(`${' '.repeat(MARK_CELLS)}${WORDS.heads.name}`, MARK_CELLS + nameCells)}${cols.map(c => `${' '.repeat(GAP)}${fit(c.head, c.cells)}`).join('')}`}</Text>}
+      {lines.length > 0 && <Text color={p.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
+      {above && <Text color={p.faint}>{WORDS.above(rowsIn(lines.slice(0, from)))}</Text>}
       {lines.slice(from, to).map(l => l.kind === 'gap' ? <Text>{' '}</Text> : l.kind !== 'row'
-        ? <Text>{runs(ruleOf(l.kind === 'mods' ? WORDS.modsGroup : l.title, v.columns, ink))}</Text>
+        ? <Text color={p.mut} weight="bold">{`${' '.repeat(MARK_CELLS)}${cut(l.kind === 'mods' ? WORDS.modsGroup : l.title, Math.max(1, v.columns - MARK_CELLS))}`}</Text>
         : (
-          <Box flexDirection="row">
-            {runs([l === selected ? { text: `${WORDS.marks.selected} `, color: ink.accent } : { text: ' '.repeat(MARK_CELLS) }])}
+          <Box flexDirection="row" {...(l === selected ? { backgroundColor: p.wash } : {})}>
+            {runs([l === selected ? { text: `${WORDS.marks.selected} `, color: p.rail[1] } : { text: ' '.repeat(MARK_CELLS) }])}
             <Button key={l.row.id} plain label={labelOf(l.row)} {...(l === selected ? { autoFocus: true } : {})}
               onPress={() => l.actions.includes('change') ? on.act('change', l.row.id) : on.select(l.row.id)}>
-              {runs([{ text: fit(labelOf(l.row), nameCells), ...(l === selected ? { weight: 'bold' } as const : {}) }])}
+              {runs([{ text: fit(labelOf(l.row), nameCells), color: p.ink, ...(l === selected ? { weight: 'bold' } as const : {}) }])}
             </Button>
-            <Text>{runs(cols.flatMap(c => [{ text: ' '.repeat(GAP) }, ...c.runs(l, c.cells, ink)]))}</Text>
+            <Text>{runs(cols.flatMap(c => [{ text: ' '.repeat(GAP) }, ...c.runs(l, c.cells, p)]))}</Text>
           </Box>
         ))}
-      {below && <Text dimColor>{WORDS.below(rowsIn(lines.slice(to)))}</Text>}
+      {below && <Text color={p.faint}>{WORDS.below(rowsIn(lines.slice(to)))}</Text>}
     </Box>
   )
 }
