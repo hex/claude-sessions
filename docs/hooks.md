@@ -1124,22 +1124,29 @@ cs's groups and order from `cs -config list --porcelain`, run through `CS_BIN`
 settings and no copy of their checks: labels, choices, defaults, when a change
 applies and where each value comes from all arrive in that record. A row shows
 its label, its value (cs's name for the default when nothing sets it), where the
-value comes from (`shell`, `launch`, `session`, `machine` or `default`; `mod` or
-`locked` for a `/config` row) and when a change applies (`now`, `/clear`,
-`launch` or `now+launch`).
+value comes from (`shell`, `launch`, `session` or `machine`; `mod` or `locked`
+for a `/config` row) and when a change applies (`/clear`, `launch` or
+`now+launch`). A row at its default leaves the last two empty, and a change
+that applies at once (`now`) leaves the last one empty.
 
 The pane draws in cs's own colours: the vivid set on a dark terminal, the
 muted set when `CS_TERM_THEME` is `light`. Its first line is the
 `claude-sessions` wordmark in the installer's rust-to-gold gradient, then
 `▍ settings` and the session name. The name shows from 40 columns, and
-`settings` only where it fits. Each group's heading is a rule across the pane.
-A toggle reads `● on` or `○ off`. A percent setting draws a ten-cell gauge
-before its number where the value column has room for both. The source word
-takes the colour of where the value lives: `session` in Claude's colour,
-`machine` green, `shell` amber (the environment overrides both files), and
-`launch` and `default` dim. The selected row has an amber `▌` and a bold
-label. Each strip key is a chip on a grey background; Claude Code draws its
-letter in its own accent colour.
+`settings` only where it fits. Only what something sets stands out. A row at
+its default draws its value dim. A row a file, the shell or the launch sets
+draws its value in the text colour, and its source word in the colour of where
+the value lives: `session` in Claude's colour, `machine` green, `shell` amber
+(the environment overrides both files), and `launch` dim. Its when word is
+dim. A toggle reads `● on` or `○ off`. A percent setting draws a ten-cell
+gauge before its number where the value column has room for both: filled in
+amber when set, all dim at the default. Each group's heading is a dim rule
+across the pane with the group's name bold in rust, and an empty line sits
+above every heading but the first. The selected row has an amber `▌` and a
+bold label, and the focus marks the label alone. The strip's keys are plain,
+with a dim `·` between them and before `Esc: close`; Claude Code draws each
+key's letter in its own accent colour. The detail line reads `<KEY> · <when
+a change applies>`.
 
 Tab, the arrows or a click select a row (`ui.focus`). The line under the strip
 says what the selected row is and when a change takes hold. The strip holds the
