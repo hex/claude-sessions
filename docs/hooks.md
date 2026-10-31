@@ -862,7 +862,8 @@ the conversation it meets next unjudged.
 The mods hand Claude Code every toast, `$.ui.ask` dialog, `$.ui.log` notice,
 slash-command reply and command registration from tables they export: cs and
 cs-update in `register.tsx` (`TOASTS`, `ASKS`, `LOGS`, `REPLIES`, `COMMANDS`),
-cs-panel in `register.tsx` and `draw.tsx` (`WORDS`, `ACTIONS` too), cs-feed in
+cs-panel in `register.tsx`, `draw.tsx` (`WORDS`, `KEYS`) and `settings.ts`
+(`LABELS`), cs-feed in
 `words.ts`. `tests/test_mod_tables.sh` fails when a call site writes
 such a line inline. Claude Code leads a toast, a notice and a command reply with
 the plugin's name, so no line starts with it. Exported functions draw the

@@ -183,7 +183,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 
 - Adding from another session sends task mail requiring acceptance.
 - See [queue controls](hooks.md#cs-not-a-hook-script--a-claude-code-mod) for mid-turn `/queue`, Start/Not yet/Compact, and conversation/subagent/workflow execution. Choosing workflows authorizes that tool.
-- `/cs next|prev|first|last|<n>` scrolls the transcript along the band's rail of prompts (one tick per prompt the person sent), mid-turn too; see [the rail](hooks.md#cs-not-a-hook-script--a-claude-code-mod).
+- Bare `/cs` opens the settings pane; see [the panel mod](hooks.md#cs-panel-not-a-hook-script--a-claude-code-mod). `/cs next|prev|first|last|<n>` scrolls the transcript along the band's rail of prompts (one tick per prompt the person sent), mid-turn too; see [the rail](hooks.md#cs-not-a-hook-script--a-claude-code-mod).
 - See [queue drain and breakers](hooks.md#narrative-remindersh-stop-filechanged-cwdchanged) for listed-order turn boundaries, native-task mirroring, the default five-failure/85%-context/85%-quota limits, rearming, and the return digest.
 - Mail uses `--kind notify|task|text|result`. Task mail enters the queue only after acceptance.
 - Bodies are at most 65,536 bytes. A lone `-` reads stdin.
