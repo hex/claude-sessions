@@ -253,6 +253,22 @@ test_get_follows_the_precedence() {
     assert_eq "0|" "$rc|$out" "nothing sets it: empty, exit 0" || return 1
 }
 
+# The key reaches bash's indirect expansion, which evaluates an array
+# subscript: a key that is not a name is refused before any lookup runs it.
+test_a_key_that_is_not_a_name_runs_nothing() {
+    local out rc=0 verb
+    for verb in get unset "set"; do
+        rc=0
+        if [ "$verb" = set ]; then
+            out=$(cs_plain -config set 'x[$(echo INJECTED >&2)]' 1) || rc=$?
+        else
+            out=$(cs_plain -config "$verb" 'x[$(echo INJECTED >&2)]') || rc=$?
+        fi
+        assert_eq "1|Error: x[\$(echo INJECTED >&2)] is not a cs setting; cs -config list names every one" "$rc|$out" \
+            "$verb refuses the key by name and runs nothing of it" || return 1
+    done
+}
+
 # The porcelain is the one record the panel and the cs mod parse: one line per
 # allowed key, table order, eleven tab-separated fields, nothing else.
 _porcelain_world() {
@@ -447,21 +463,37 @@ test_the_launch_hands_claude_no_file_value() {
     {
         echo '#!/usr/bin/env bash'
         echo '{'
-        for k in CS_NO_TASK_TOOLS CS_STATUSLINE_LAYOUT CS_TERM_THEME CS_TERM_THEME_AUTO CLAUDE_CODE_ENABLE_TODO_TOOLS; do
+        for k in CS_NO_TASK_TOOLS CS_STATUSLINE_LAYOUT CS_TERM_THEME CS_TERM_THEME_AUTO CS_TERM_BG_RGB CLAUDE_CODE_ENABLE_TODO_TOOLS; do
             printf "    printf '%s=%%s\\\\n' \"\${%s-<unset>}\"\n" "$k" "$k"
         done
+        printf "    printf 'bg source=%%s\\\\n' \"\$('%s' -config list --porcelain | awk -F'\\\\t' '\$1 == \"CS_TERM_BG_RGB\" { print \$10 }')\"\n" "$CS_BIN"
         printf '} > "%s"\n' "$got"
     } > "$stub"
     chmod +x "$stub"
     machine_cfg 'CS_STATUSLINE_LAYOUT=band'
     session_cfg "$dir" 'CS_NO_TASK_TOOLS=1' 'CS_TERM_THEME=light'
-    CLAUDE_CODE_BIN="$stub" CS_NO_UPDATE_CHECK=1 CS_NO_ITERM2=1 CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 \
+    CLAUDE_CODE_BIN="$stub" CS_NO_UPDATE_CHECK=1 CS_NO_ITERM2=1 CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_BG_RGB='30;30;30' \
         "$CS_BIN" alpha <<< "" > "$TEST_TMPDIR/launch.out" 2>&1 || { echo "  FAIL: the launch failed"; cat "$TEST_TMPDIR/launch.out"; return 1; }
     assert_eq "CS_NO_TASK_TOOLS=<unset>
 CS_STATUSLINE_LAYOUT=<unset>
 CS_TERM_THEME=<unset>
 CS_TERM_THEME_AUTO=<unset>
-CLAUDE_CODE_ENABLE_TODO_TOOLS=<unset>" "$(cat "$got")" "the file decided the launch, and claude inherits none of it" || return 1
+CS_TERM_BG_RGB=<unset>
+CLAUDE_CODE_ENABLE_TODO_TOOLS=<unset>
+bg source=default" "$(cat "$got")" "the file decided the launch, and claude inherits none of it" || return 1
+    # The file's theme is the measured one: the measurement stands as one, so
+    # claude's children read the background as the launch's, not as a pin
+    # nobody exported.
+    session_cfg "$dir" 'CS_TERM_THEME=dark'
+    CLAUDE_CODE_BIN="$stub" CS_NO_UPDATE_CHECK=1 CS_NO_ITERM2=1 CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_BG_RGB='30;30;30' \
+        "$CS_BIN" alpha <<< "" > "$TEST_TMPDIR/launch.out" 2>&1 || { echo "  FAIL: the same-theme launch failed"; cat "$TEST_TMPDIR/launch.out"; return 1; }
+    assert_eq "CS_NO_TASK_TOOLS=<unset>
+CS_STATUSLINE_LAYOUT=<unset>
+CS_TERM_THEME=dark
+CS_TERM_THEME_AUTO=1
+CS_TERM_BG_RGB=30;30;30
+CLAUDE_CODE_ENABLE_TODO_TOOLS=1
+bg source=launch" "$(cat "$got")" "a file theme equal to the measured one keeps the measurement a measurement" || return 1
     rm "$dir/.cs/local/config" "$MCFG"
     CLAUDE_CODE_BIN="$stub" CS_NO_UPDATE_CHECK=1 CS_NO_ITERM2=1 CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 \
         "$CS_BIN" alpha <<< "" > "$TEST_TMPDIR/launch.out" 2>&1 || { echo "  FAIL: the second launch failed"; cat "$TEST_TMPDIR/launch.out"; return 1; }
@@ -469,7 +501,9 @@ CLAUDE_CODE_ENABLE_TODO_TOOLS=<unset>" "$(cat "$got")" "the file decided the lau
 CS_STATUSLINE_LAYOUT=<unset>
 CS_TERM_THEME=dark
 CS_TERM_THEME_AUTO=1
-CLAUDE_CODE_ENABLE_TODO_TOOLS=1" "$(cat "$got")" "without the files the measurement and the opt-in go through (sensitivity)" || return 1
+CS_TERM_BG_RGB=<unset>
+CLAUDE_CODE_ENABLE_TODO_TOOLS=1
+bg source=default" "$(cat "$got")" "without the files the measurement and the opt-in go through (sensitivity)" || return 1
 }
 
 # The picker is a child of cs, and a theme the loader filled is unexported:
@@ -598,6 +632,7 @@ run_test test_unset_removes_every_line_of_the_key
 run_test test_set_refuses_what_no_reader_takes
 run_test test_named_set_writes_the_session_file
 run_test test_get_follows_the_precedence
+run_test test_a_key_that_is_not_a_name_runs_nothing
 run_test test_list_porcelain_equals_the_golden_record
 run_test test_list_prints_the_table_and_the_skipped_lines
 run_test test_concurrent_sets_both_land
