@@ -1129,24 +1129,32 @@ for a `/config` row) and when a change applies (`/clear`, `launch` or
 `now+launch`). A row at its default leaves the last two empty, and a change
 that applies at once (`now`) leaves the last one empty.
 
-The pane draws in cs's own colours: the vivid set on a dark terminal, the
-muted set when `CS_TERM_THEME` is `light`. Its first line is the
-`claude-sessions` wordmark in the installer's rust-to-gold gradient, then
-`▍ settings` and the session name. The name shows from 40 columns, and
-`settings` only where it fits. Only what something sets stands out. A row at
-its default draws its value dim. A row a file, the shell or the launch sets
-draws its value in the text colour, and its source word in the colour of where
-the value lives: `session` in Claude's colour, `machine` green, `shell` amber
-(the environment overrides both files), and `launch` dim. Its when word is
-dim. A toggle reads `● on` or `○ off`. A percent setting draws a ten-cell
-gauge before its number where the value column has room for both: filled in
-amber when set, all dim at the default. Each group's heading is a dim rule
-across the pane with the group's name bold in rust, and an empty line sits
-above every heading but the first. The selected row has an amber `▌` and a
-bold label, and the focus marks the label alone. The strip's keys are plain,
-with a dim `·` between them and before `Esc: close`; Claude Code draws each
-key's letter in its own accent colour. The detail line reads `<KEY> · <when
-a change applies>`.
+The pane draws in the cs TUI's look and palette (`tui/src/theme.rs`): the dark
+palette, or the light one when `CS_TERM_THEME` is `light`. Its masthead is two
+lines, as in the TUI. The first is `▌`, the `claude-sessions` wordmark in the
+installer's rust-to-gold gradient, `settings`, the number of rows, the number
+of settings a file or the shell sets (`3 changed`, teal, or muted at 0) and the
+session name. Where the pane is too narrow, these parts drop from the right,
+down to the wordmark alone. A `/config` row never counts as changed, since the
+panel cannot see its default. The second line is a `━` rule across the pane in
+the TUI's hero gradient. Under it, between empty lines, come the strip and the
+detail line. The strip's keys are plain and three cells apart, with muted
+labels; Claude Code draws each key's letter in its own accent colour. The
+detail line reads `<KEY> · <when a change applies>` in the faint colour. The
+rows sit under a muted bold column header (`setting`, `value`, `from`,
+`when`) and a soft rule. Each group is its name in muted bold, with an empty
+line above every group but the first. A name takes up to 26 cells, and the
+last column takes what a wider pane leaves.
+
+Only what something sets stands out. A row at its default draws its value
+muted. A row a file, the shell or the launch sets draws its value in ink, and
+its source word in the colour of where the value lives: `session` teal,
+`machine` green, `shell` amber (the environment overrides both files), and
+`launch` faint. Its when word is muted. A toggle reads `● on`, the dot green,
+or `○ off`. A percent setting draws a ten-cell gauge before its number where
+the value column has room for both: filled in amber when set, all faint at the
+default. The selected row lies on the TUI's selection wash, with `▌` in the
+rail's second colour and its label bold, and the focus marks the label alone.
 
 Tab, the arrows or a click select a row (`ui.focus`). The line under the strip
 says what the selected row is and when a change takes hold. The strip holds the
