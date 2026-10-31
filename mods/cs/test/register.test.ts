@@ -3140,6 +3140,7 @@ test('a file theme of the other polarity leaves the launch\'s measured backgroun
   expect(await after(darkFile('-', 'default'))).toBe('rgb(251,191,36)')
   expect(await after(darkFile('252;247;229', 'launch'))).toBe('rgb(180,83,9)')
   expect(await after(darkFile('30;30;30', 'session'))).toBe('rgb(251,191,36)')
+  expect(await after(darkFile('252;247;229', 'shell'))).toBe('rgb(180,83,9)')
   delete envVars.CS_TERM_BG_RGB
 })
 

@@ -1176,9 +1176,9 @@ async function refreshFileSettings($: EngineInterface) {
 
 const SETTING_SOURCES = new Set(['default', 'machine', 'session', 'shell', 'launch'])
 
-// One record of cs's resolution: the value a reader sees and where cs says it
-// comes from.
-type FileSetting = { value: string; source: string }
+// One record of cs's resolution: the value a reader sees (none for `-`) and
+// where cs says it comes from.
+type FileSetting = { value: string | undefined; source: string }
 
 // The porcelain's records: eleven tab-separated fields, the key first, the
 // value ninth (`-` for none) and its source tenth. Each value a settings file
@@ -1191,7 +1191,7 @@ function parseFileSettings(text: string): Map<string, FileSetting> | { unreadabl
     const fields = line.split('\t')
     const [key, , , , , , , , value, source] = fields
     if (fields.length !== 11 || key === undefined || value === undefined || source === undefined || !SETTING_SOURCES.has(source)) return { unreadable: line }
-    if (value !== '-') settings.set(key, { value, source })
+    settings.set(key, { value: value === '-' ? undefined : value, source })
   }
   return settings
 }
@@ -1207,18 +1207,19 @@ function fileValue(key: string): string | undefined {
   return s !== undefined && (s.source === 'session' || s.source === 'machine') ? s.value : undefined
 }
 
-// The theme and the background a reader draws with. A file's background is a
-// pin. Otherwise the environment's background is the launch's measurement,
-// which counts only while cs still calls it that: a file theme of the other
-// polarity made cs drop it, and cs then reports the background as default,
-// so the environment's value is that dropped measurement, not a pin.
+// The theme and the background a reader draws with. The background follows
+// its own record: a file's value, the environment's for a shell pin or the
+// launch's measurement, and none when cs reports it as default, as the
+// environment may still hold a measurement cs dropped for a file theme of
+// the other polarity. Before cs has answered, the environment's.
 async function themeAndBackground($: EngineInterface): Promise<{ theme: string | undefined; bg: string | undefined }> {
-  const fileTheme = fileValue('CS_TERM_THEME')
-  const fileBg = fileValue('CS_TERM_BG_RGB')
-  const measured = fileTheme === undefined || fileSettings.get('CS_TERM_BG_RGB')?.source === 'launch'
+  const bg = fileSettings.get('CS_TERM_BG_RGB')
   return {
-    theme: fileTheme ?? await $.env.get("CS_TERM_THEME"),
-    bg: fileBg ?? (measured ? await $.env.get("CS_TERM_BG_RGB") : undefined),
+    theme: fileValue('CS_TERM_THEME') ?? await $.env.get("CS_TERM_THEME"),
+    bg: bg === undefined ? await $.env.get("CS_TERM_BG_RGB")
+      : bg.source === 'session' || bg.source === 'machine' ? bg.value
+      : bg.source === 'default' ? undefined
+      : await $.env.get("CS_TERM_BG_RGB"),
   }
 }
 
