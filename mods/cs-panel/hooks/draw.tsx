@@ -1,7 +1,7 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the band, the problem lines, the search box, the selected row's card, the column header and a window of rows fitted to the body.
+// ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the masthead, the problem lines, the search box, the column header, a window of rows fitted to the body and the selected row's card at its foot.
 // ABOUTME: Pure over its view and exported with its word tables, so the design lab draws a fixture without the engine.
 import type { EngineInterface, RenderElement, TextProps, ThemeKey } from 'claude-code'
 import { filterLines, keyOf, labelOf, shownOf, type Line, type Pending, type Row, type RowId, type Source } from './settings'
@@ -58,11 +58,11 @@ export const WORDS = {
   reloads: (plugin: string) => `changing it reloads ${plugin}${plugin === 'cs' ? ' (an armed rotation countdown starts over)' : ''}`,
   managed: 'a managed setting owns it',
   noSession: "this session's file sets it, and this conversation has no cs session name to write it with",
-  brand: 'claude-sessions', update: (version: string) => `cs ${version} available`, toUpdate: 'run cs -update',
+  brand: 'claude-sessions', cs: 'cs', available: 'available', toUpdate: 'run cs -update', caption: 'selected',
   settings: (n: number) => `${n} settings`, changed: (n: number) => `${n} changed`,
   heads: { name: 'setting', value: 'value', from: 'from', when: 'when' },
-  // The bars, a toggle's dots, a gauge's cells, the rules, the dot, the card's edge.
-  marks: { selected: '▌', on: '●', off: '○', full: '▰', empty: '▱', rule: '─', dot: '·', edge: '▍' },
+  // The bars, a toggle's dots, a gauge's cells, the rules, the dot, the card's edge, the masthead's box.
+  marks: { selected: '▌', on: '●', off: '○', full: '▰', empty: '▱', rule: '─', dot: '·', edge: '▍', box: { top: ['╭', '╮'], bottom: ['╰', '╯'], side: '│' } },
 } as const
 
 type RowLine = Extract<Line, { kind: 'row' }>
@@ -72,23 +72,17 @@ type RowLine = Extract<Line, { kind: 'row' }>
 // teal and the machine source's green (blue in the colour-blind themes).
 const THEME = { ink: 'text', mut: 'inactive', faint: 'subtle', soft: 'subtle', teal: 'planMode', green: 'success' } as const satisfies Record<string, ThemeKey>
 
-// The brand's accents on every theme: tui/src/theme.rs's amber; the band's
-// stops, its hero stops rust to gold scaled by 0.77, 0.62, 0.56 and 0.57; and
-// the band's ink, the TUI's dark-theme ink, at 5:1 or more on every cell.
-type Rgb = readonly [number, number, number]
+// The brand's accents on every theme: tui/src/theme.rs's amber, and
+// install.sh.in's banner, its rust and gold and the wordmark's letters from one to the other.
 const rgb = (channels: readonly number[]) => `rgb(${channels.join(',')})`
-const BRAND = { amber: rgb([246, 154, 0]), band: [[170, 62, 15], [147, 79, 0], [138, 86, 0], [122, 92, 17]] satisfies Rgb[], ink: rgb([245, 230, 211]) }
-
-// The TUI's ramp: cell `i` of `n` along the stops, each channel truncated.
-function ramp(stops: readonly Rgb[], n: number, i: number): string {
-  const at = n <= 1 ? 0 : i / (n - 1) * (stops.length - 1), a = Math.floor(at)
-  const from = stops[a], to = stops[Math.min(a + 1, stops.length - 1)]
-  if (from === undefined || to === undefined) throw new Error(`ramp: cell ${i} of ${n} falls outside ${stops.length} stops`)
-  return rgb(([0, 1, 2] as const).map(c => Math.trunc(from[c] + (at - a) * (to[c] - from[c]))))
+const BRAND = {
+  amber: rgb([246, 154, 0]), rust: rgb([230, 74, 25]), gold: rgb([255, 193, 7]),
+  wordmark: [[230, 74, 25], [232, 83, 24], [234, 91, 22], [235, 100, 21], [237, 108, 20], [239, 117, 19], [241, 125, 17], [243, 134, 16], [245, 142, 15], [246, 151, 14],
+    [248, 159, 12], [250, 168, 11], [252, 176, 10], [254, 185, 9], [255, 193, 7]].map(rgb),
 }
 
 // A run of one style; a line is a row of runs as wide as their texts.
-type Run = { text: string } & Pick<TextProps, 'color' | 'backgroundColor' | 'weight'>
+type Run = { text: string } & Pick<TextProps, 'color' | 'weight'>
 
 // The columns right of the name, dropped from the end by a narrow body.
 type Column = { head: string; cells: number; runs: (line: RowLine, cells: number) => Run[] }
@@ -262,40 +256,45 @@ export function noteOf(row: Row, hasSelf: boolean): string {
   return s.ignored ?? s.whenText
 }
 
-// The selected row's label and key, then its whole value, its source and its note.
+// The selected row's label and key after a caption that says so, then its
+// whole value, its source and its note.
 function cardOf(l: RowLine, columns: number, most: number, hasSelf: boolean): Run[][] {
   const row = l.row
   const from: Run = row.kind === 'mod' ? { text: row.mod.isLocked ? WORDS.locked : WORDS.mod, color: THEME.mut }
     : { text: WORDS.from[row.setting.source], color: SOURCE_INK[row.setting.source] }
   const dot: Run = { text: DOT, color: THEME.mut }
   const room = Math.max(1, columns - MARK_CELLS)
-  return [clip([{ text: labelOf(row), color: THEME.ink, weight: 'bold' }, { text: '  ' }, { text: keyOf(row), color: THEME.mut }], room),
+  return [clip([{ text: `${WORDS.caption}${DOT}`, color: THEME.mut }, { text: labelOf(row), color: THEME.ink, weight: 'bold' }, { text: '  ' }, { text: keyOf(row), color: THEME.mut }], room),
     ...wrapRuns([...valueRuns(l, Infinity), dot, from, dot, { text: noteOf(row, hasSelf), color: THEME.mut }], room, most)]
     .map(line => [{ text: `${WORDS.marks.edge} `, color: THEME.soft }, ...line])
 }
 
-// The band: the wordmark in bold, cs's version, the rows, how many a file or
-// the shell sets (a /config row tells no default) and the session name, then,
-// while cs is short of the version an update waits at, that version and what
-// installs it, between an empty band line above and one below. A line runs
-// from under the rows' labels to a cell short of the edge, its first part cut
-// to fit and the rest dropped from the right, one Text per cell in the band's
-// ink on the band's ramp.
-function bandOf(v: PanelView): Run[][] {
+// The masthead, install.sh.in's banner the body wide: a round box, its top
+// border and left side rust and its right side and bottom border gold, around
+// the wordmark in bold letter by letter from rust to gold, cs's version, the
+// rows, how many a file or the shell sets (a /config row tells no default) and
+// the session name, then, while cs is short of the version an update waits at,
+// that version and what installs it. A line starts a cell in from the left side
+// and ends at least a cell short of the right, its first part cut to fit and
+// the rest dropped from the right.
+function mastheadOf(v: PanelView): Run[][] {
   const width = (runs: readonly Run[]) => runs.reduce((sum, run) => sum + run.text.length, 0)
-  const room = Math.max(1, v.columns - MARK_CELLS - 1)
+  const room = Math.max(1, v.columns - 4)
+  const { box } = WORDS.marks
+  const border = ([left, right]: readonly [string, string], color: string): Run[] => [{ text: `${left}${WORDS.marks.rule.repeat(Math.max(0, v.columns - 2))}${right}`, color }]
   const line = (first: readonly Run[], rest: readonly Run[][]): Run[] => {
     const kept = [...clip(first, room), ...rest.slice(0, rest.filter((_, i) => width(first) + width(rest.slice(0, i + 1).flat()) <= room).length).flat()]
-    return [{ text: ' '.repeat(MARK_CELLS) }, ...kept, { text: ' '.repeat(Math.max(0, v.columns - MARK_CELLS - width(kept))) }]
-      .flatMap(run => [...run.text].map(text => ({ ...run, text }))).map((cell, i) => ({ ...cell, color: BRAND.ink, backgroundColor: ramp(BRAND.band, v.columns, i) }))
+    return [{ text: box.side, color: BRAND.rust }, { text: ' ' }, ...kept, { text: ' '.repeat(Math.max(1, v.columns - 3 - width(kept))) }, { text: box.side, color: BRAND.gold }]
   }
-  const after = (gap: string, text: string | undefined): Run[][] => text === undefined ? [] : [[{ text: `${gap}${text}` }]]
+  const after = (gap: string, text: string | undefined, color: string): Run[][] => text === undefined ? [] : [[{ text: gap, color: THEME.mut }, { text, color }]]
   const rows = (v.lines ?? []).flatMap(l => l.kind === 'row' ? [l.row] : [])
   const changed = rows.filter(row => row.kind === 'setting' && CHANGED.has(row.setting.source)).length
-  const counts = v.lines === undefined ? [] : [...after(DOT, WORDS.settings(rows.length)), ...after(DOT, WORDS.changed(changed))]
-  const band = line([{ text: WORDS.brand, weight: 'bold' }], [...after(' ', v.version), ...counts, ...after(DOT, v.session)])
-  const update = v.update === undefined || v.update === v.version ? [] : [line([{ text: WORDS.update(v.update) }], after(DOT, WORDS.toUpdate))]
-  return [line([], []), band, ...update, line([], [])]
+  const counts = v.lines === undefined ? [] : [...after(DOT, WORDS.settings(rows.length), THEME.ink), ...after(DOT, WORDS.changed(changed), THEME.ink)]
+  const wordmark = [...WORDS.brand].map((text, i): Run => ({ text, color: BRAND.wordmark[i], weight: 'bold' }))
+  const words = line(wordmark, [...after(' ', v.version, THEME.mut), ...counts, ...after(DOT, v.session, THEME.mut)])
+  const update = v.update === undefined || v.update === v.version ? []
+    : [line([{ text: `${WORDS.cs} `, color: THEME.mut }, { text: v.update, color: BRAND.amber }, { text: ` ${WORDS.available}`, color: THEME.mut }], after(DOT, WORDS.toUpdate, THEME.mut))]
+  return [border(box.top, BRAND.rust), words, ...update, border(box.bottom, BRAND.gold)]
 }
 
 // A Line, or the empty line above every heading but the first.
@@ -315,14 +314,16 @@ function layoutOf(v: PanelView) {
   const selected = found?.kind === 'row' ? found : undefined
   const notice = v.lines === undefined && v.problems.length === 0 ? WORDS.reading : undefined
   const noMatch = isListed && lines.length === 0 ? WORDS.noMatch(v.filter.trim()) : undefined
-  const band = bandOf(v)
-  // The band, the problems, the notice; the search box, the header, its rule; the no-match line.
-  const top = band.length + v.problems.length + (notice === undefined ? 0 : 1) + (isListed ? BOX_LINES + 2 : 0) + (noMatch === undefined ? 0 : 1)
-  // The card's wrapped lines leave a line for its label and one for the window.
-  const card = selected === undefined ? [] : cardOf(selected, v.columns, Math.max(1, v.bodyRows - top - 2), v.session !== undefined)
-  const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - top - card.length))
+  const masthead = mastheadOf(v)
+  // The masthead, the problems, the notice; the search box, the header, its rule; the no-match line.
+  const top = masthead.length + v.problems.length + (notice === undefined ? 0 : 1) + (isListed ? BOX_LINES + 2 : 0) + (noMatch === undefined ? 0 : 1)
+  // The card's wrapped lines leave a line for its rule, one for its label and one for the window.
+  const card = selected === undefined ? [] : cardOf(selected, v.columns, Math.max(1, v.bodyRows - top - 3), v.session !== undefined)
+  // The footer under the window: the card under its rule.
+  const bottom = card.length === 0 ? 0 : 1 + card.length
+  const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - top - bottom))
   const isEmptyAbove = shown.above && rowsIn(lines.slice(0, shown.from)) === 0
-  return { band, isListed, lines, selected, card, notice, noMatch, ...shown, ...(isEmptyAbove ? { from: 0, above: false } : {}) }
+  return { masthead, isListed, lines, selected, card, notice, noMatch, ...shown, ...(isEmptyAbove ? { from: 0, above: false } : {}) }
 }
 
 // The keys of the elements drawPane draws for a view, in the order the focus
@@ -354,18 +355,17 @@ function headingOf(title: string, columns: number): Run[] {
 // so every line is measured. Enter in the field sends the ring to the rows.
 export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['resolve']>, on: Handlers): RenderElement {
   const { Box, Text, Button } = el
-  const { band, isListed, lines, selected, card, notice, noMatch, from, to, above, below } = layoutOf(v)
+  const { masthead, isListed, lines, selected, card, notice, noMatch, from, to, above, below } = layoutOf(v)
   const { nameCells, cols } = tableOf(v.columns)
   const runs = (line: readonly Run[]) => line.map(({ text, ...style }) => <Text {...style}>{text}</Text>)
   const Input = v.hasField && 'Input' in el ? el.Input : undefined
   return (
     <Box flexDirection="column">
-      {band.map(line => <Text>{runs(line)}</Text>)}
+      {masthead.map(line => <Text>{runs(line)}</Text>)}
       {v.problems.map(problem => <Text color={THEME.mut}>{cut(problem, v.columns)}</Text>)}
       {notice !== undefined && <Text color={THEME.mut}>{cut(notice, v.columns)}</Text>}
       {isListed && (Input === undefined ? Array.from({ length: BOX_LINES }, () => <Text>{' '}</Text>) : <Box borderStyle="round" borderColor={THEME.soft} paddingX={1} flexDirection="row" width={v.columns}>
         <Input key={FILTER} placeholder={WORDS.find} value={v.filter} submitLabel={WORDS.toRows} autoFocus onInput={on.filter} onSubmit={text => { on.filter(text); on.toRows() }} /></Box>)}
-      {card.map(line => <Text>{runs(line)}</Text>)}
       {isListed && <Text color={THEME.mut} weight="bold">
         {`${fit(`${' '.repeat(MARK_CELLS)}${WORDS.heads.name}`, MARK_CELLS + nameCells)}${cols.map(c => `${' '.repeat(GAP)}${fit(c.head, c.cells)}`).join('')}`}</Text>}
       {isListed && <Text color={THEME.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
@@ -381,6 +381,8 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
         </Box>
       ))}
       {below && <Text color={THEME.faint}>{WORDS.below(rowsIn(lines.slice(to)))}</Text>}
+      {card.length > 0 && <Text color={THEME.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
+      {card.map(line => <Text>{runs(line)}</Text>)}
     </Box>
   )
 }
