@@ -41,7 +41,7 @@ export type Setting = {
   source: Source
   // A file value cs skipped that would otherwise apply, with its line and why.
   ignored: string | undefined
-  // cs's sentence for what the setting does; '' when cs gives none.
+  // cs's sentence for what the setting does.
   describe: string
 }
 
@@ -56,12 +56,11 @@ const NONE = '-'
 
 const noneOf = (field: string): string | undefined => field === NONE ? undefined : field
 
-// Parse, not validate: eleven tab fields per line (key group label edit
-// choices default when whenText value source ignored), or twelve with the
-// description after them, or the whole answer is refused with its first bad
-// line, so a strict reader never draws shifted columns. A closed word (edit,
-// source) outside its set refuses too: a cs change the panel does not know is
-// a drawn problem, not a wrong row.
+// Parse, not validate: twelve tab fields per line (key group label edit
+// choices default when whenText value source ignored describe), or the whole
+// answer is refused with its first bad line, so a strict reader never draws
+// shifted columns. A closed word (edit, source) outside its set refuses too: a
+// cs change the panel does not know is a drawn problem, not a wrong row.
 // tests/fixtures/config-porcelain.txt pins the wire.
 export function parseSettings(stdout: string): Setting[] | Unreadable {
   const lines = stdout.split('\n').filter(line => line !== '')
@@ -77,14 +76,14 @@ export function parseSettings(stdout: string): Setting[] | Unreadable {
 
 function settingOf(line: string): Setting | undefined {
   const f = line.split('\t')
-  if (f.length !== 11 && f.length !== 12) return undefined
-  const [key, group, label, edit, choices, fallback, when, whenText, value, source, ignored, describe = NONE] = f as [string, string, string, string, string, string, string, string, string, string, string, string?]
+  if (f.length !== 12) return undefined
+  const [key, group, label, edit, choices, fallback, when, whenText, value, source, ignored, describe] = f as [string, string, string, string, string, string, string, string, string, string, string, string]
   if (!KEY.test(key) || !EDITS.includes(edit) || !SOURCES.includes(source)) return undefined
-  if ([group, label, when, whenText].some(field => field === '' || field === NONE) || describe === '') return undefined
+  if ([group, label, when, whenText, describe].some(field => field === '' || field === NONE)) return undefined
   if ((edit === 'choice') !== (choices !== NONE)) return undefined
   return {
     key: key as SettingKey, group, label, edit: edit as Edit, choices: choices === NONE ? [] : choices.split(','), fallback: noneOf(fallback),
-    when, whenText, value: noneOf(value), source: source as Source, ignored: noneOf(ignored), describe: noneOf(describe) ?? '',
+    when, whenText, value: noneOf(value), source: source as Source, ignored: noneOf(ignored), describe,
   }
 }
 
