@@ -6,7 +6,7 @@
 import type { EngineInterface, RenderElement, TextProps, ThemeKey } from 'claude-code'
 import {
   changeOf, filterLines, flips, keyOf, labelOf, lockOf, shownOf, turnsOff, writesTo,
-  type Field, type Line, type Lock, type Pending, type Row, type RowId, type Scope, type Source,
+  type Field, type Line, type Lock, type Pending, type Picker, type Row, type RowId, type Scope, type Source,
 } from './settings'
 
 declare const h: any
@@ -19,8 +19,9 @@ export type Chooser = { kind: 'row'; id: RowId; text: string; at: number } | { k
 
 // Everything drawPane needs: the lines (undefined until cs or /config first
 // answers), the selection, why a source is stale, the session name, cs's
-// version and a pending one, the room, the filter's text and the Input, what
-// the pane asks in place and the scope line's file.
+// version and a pending one, the room, the filter's text and whether the
+// surface draws fields (an Input, a Select), what the pane asks in place and
+// the scope line's file.
 export type PanelView = {
   lines: readonly Line[] | undefined
   // The selected row; one not shown falls back to the first row shown.
@@ -42,7 +43,7 @@ export type PanelView = {
 export type Handlers = {
   // Enter on a row: its change, its chooser, or why it has neither.
   change: (id: RowId) => void
-  // Enter on a choice of the row's chooser, by its key.
+  // Enter on a choice of the row's chooser, or a pick in its picker, by the choice's key.
   pick: (id: RowId, key: string) => void
   // The chooser's field: its text on every edit, and Enter with it.
   type: (text: string) => void
@@ -59,14 +60,16 @@ export type Handlers = {
   scope: (scope: Scope) => void
 }
 
-// The keys of the search box, the reset control, the chooser's field and its
-// choices, the confirmation's two and the scope line's; a row's key is its RowId.
+// The keys of the search box, the reset control, the chooser's field, its
+// picker and its choices, the confirmation's two and the scope line's; a row's
+// key is its RowId.
 export const FILTER = 'filter'
 export const RESET = 'reset'
 export const TYPED = 'typed'
+export const PICKER = 'picker'
 const OPTION = 'option:'
 export const optionKey = (label: string) => `${OPTION}${label}`
-export const isChooserKey = (key: string) => key === TYPED || key.startsWith(OPTION)
+export const isChooserKey = (key: string) => key === TYPED || key === PICKER || key.startsWith(OPTION)
 export const CONFIRM = 'confirm'
 export const KEEP = 'keep'
 const scopeKey = (scope: Scope) => `scope:${scope}`
@@ -369,25 +372,35 @@ function scopeOf(v: PanelView, width: number): NonNullable<Footer['scope']> {
   return { lead: undefined, runs: { session: clip(whole.session, each), machine: clip(whole.machine, each) } }
 }
 
-// A line of the chooser under the selected row: its field alone, or as many
-// of its choices as fit side by side, each with its key, label and text.
-type ChooserLine = { kind: 'field'; field: Field } | { kind: 'choices'; choices: { key: string; label: string; text: string }[] }
+// A line of the chooser under the selected row: its field alone, its picker
+// alone, `rows` lines tall, or as many of its choices as fit side by side,
+// each with its key, label and text.
+type ChooserLine = { kind: 'field'; field: Field } | { kind: 'picker'; picker: Picker; rows: number } | { kind: 'choices'; choices: { key: string; label: string; text: string }[] }
 // The chooser's lines start this far in, under the row's label.
 const CHOOSER_CELLS = MARK_CELLS + GAP
+// The options the terminal's Select draws under its value while the ring is
+// on it, at most; a line under them counts the rest.
+const PICKER_SHOWN = 8
 
 // The chooser open on `l`, none while it is open on no row or on another, the
-// row is locked or Enter changes it at once: its field on a line of its own
-// where the surface draws an Input, then its choices with ` · ` between them,
-// a line holding as many as fit and a choice wider than a line cut with `…`.
+// row is locked or Enter changes it at once: its field or its picker on a line
+// of its own where the surface draws one, the picker open while the ring is on
+// it (its first element); then its choices with ` · ` between them, led by the
+// picker's values but the current one where the surface draws no picker, a
+// line holding as many as fit and a choice wider than a line cut with `…`.
 function chooserOf(v: PanelView, l: RowLine): ChooserLine[] {
   const hasSelf = v.session !== undefined
   if (v.chooser?.kind !== 'row' || v.chooser.id !== l.row.id || lockOf(l.row, hasSelf) !== undefined) return []
   const change = changeOf(l.row, writesTo(v.scope, hasSelf))
   if (change.kind === 'now') return []
   const cells = Math.max(1, v.columns - CHOOSER_CELLS)
-  const lines: ChooserLine[] = change.field !== undefined && v.hasField ? [{ kind: 'field', field: change.field }] : []
+  const { control } = change
+  const open = (count: number) => 1 + Math.min(PICKER_SHOWN, count) + (count > PICKER_SHOWN ? 1 : 0)
+  const lines: ChooserLine[] = control === undefined || !v.hasField ? [] : control.kind === 'field' ? [{ kind: 'field', field: control }]
+    : [{ kind: 'picker', picker: control, rows: v.chooser.at === 0 ? open(control.options.length) : 1 }]
+  const choices = control?.kind === 'picker' && !v.hasField ? [...control.options.filter(o => o.label !== control.current), ...change.choices] : change.choices
   let width = 0
-  for (const choice of change.choices) {
+  for (const choice of choices) {
     const option = { key: optionKey(choice.label), label: choice.label, text: cut(choice.label, cells) }
     const last = lines.at(-1)
     if (last?.kind === 'choices' && width + DOT.length + option.text.length <= cells) {
@@ -402,7 +415,7 @@ function chooserOf(v: PanelView, l: RowLine): ChooserLine[] {
 }
 
 // The keys of a chooser's elements in the order the ring walks them.
-const chooserKeysOf = (lines: readonly ChooserLine[]) => lines.flatMap(line => line.kind === 'field' ? [TYPED] : line.choices.map(c => c.key))
+const chooserKeysOf = (lines: readonly ChooserLine[]) => lines.flatMap(line => line.kind === 'field' ? [TYPED] : line.kind === 'picker' ? [PICKER] : line.choices.map(c => c.key))
 
 // The masthead, install.sh.in's banner the body wide: a round box, its top
 // border and left side rust and its right side and bottom border gold, around
@@ -456,10 +469,11 @@ function layoutOf(v: PanelView) {
   // window, its rule then the selected row's lines in what the body leaves past
   // one line of window, none where that is no line.
   const chooser = selected === undefined ? [] : chooserOf(v, selected)
-  const room = v.bodyRows - top - 2 - chooser.length
+  const chooserRows = chooser.reduce((sum, line) => sum + (line.kind === 'picker' ? line.rows : 1), 0)
+  const room = v.bodyRows - top - 2 - chooserRows
   const footer = selected === undefined || room < 1 ? undefined : footerOf(selected, v, room)
   const bottom = footer === undefined ? 0 : 1 + footer.card.length + (footer.controls === undefined ? 0 : 1) + (footer.scope === undefined ? 0 : 1)
-  const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - top - bottom - chooser.length))
+  const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - top - bottom - chooserRows))
   const isEmptyAbove = shown.above && rowsIn(lines.slice(0, shown.from)) === 0
   // While the filter holds text, how many rows it shows of all of them.
   const count = v.filter.trim() === '' ? undefined : WORDS.shown(rowsIn(lines), rowsIn(v.lines ?? []))
@@ -517,12 +531,15 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
   const { nameCells, cols } = tableOf(v.columns)
   const runs = (line: readonly Run[]) => line.map(({ text, ...style }) => <Text {...style}>{text}</Text>)
   const Input = v.hasField && 'Input' in el ? el.Input : undefined
+  const Select = v.hasField && 'Select' in el ? el.Select : undefined
   const ringed = v.chooser?.kind === 'row' ? chooserKeysOf(chooser)[v.chooser.at] : undefined
   const focus = (key: string) => key === ringed ? { autoFocus: true } as const : {}
   const indent = <Text>{' '.repeat(CHOOSER_CELLS)}</Text>
   const chooserLine = (id: RowId, line: ChooserLine) => line.kind === 'field'
     ? <Box flexDirection="row">{indent}{Input === undefined ? <Text>{' '}</Text> : <Input key={TYPED} value={v.chooser?.kind === 'row' ? v.chooser.text : line.field.value}
       {...(line.field.placeholder === undefined ? {} : { placeholder: line.field.placeholder })} submitLabel={WORDS.set} {...focus(TYPED)} onInput={on.type} onSubmit={text => on.submit(id, text)} />}</Box>
+    : line.kind === 'picker' ? <Box flexDirection="row">{indent}{Select === undefined ? <Text>{' '}</Text> : <Select key={PICKER} options={line.picker.options.map(o => ({ value: o.label }))}
+      {...(line.picker.current === undefined ? {} : { value: line.picker.current })} {...focus(PICKER)} onSelect={value => on.pick(id, optionKey(value))} />}</Box>
     : <Box flexDirection="row">{indent}{line.choices.flatMap((c, i) => [...(i === 0 ? [] : [<Text color={THEME.mut}>{DOT}</Text>]),
       <Button key={c.key} plain label={c.label} {...focus(c.key)} onPress={() => on.pick(id, c.key)}><Text color={THEME.ink}>{c.text}</Text></Button>])}</Box>
   const plainButton = (key: string, label: string, onPress: () => void, inner: readonly Run[]) => <Button key={key} plain label={label} onPress={onPress}>{runs(inner)}</Button>

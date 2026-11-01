@@ -221,21 +221,33 @@ export type Choice = { label: string; answer: Answer }
 
 // A chooser's field for a typed value: the text it opens with, what it shows
 // while empty, and what Enter with a text does.
-export type Field = { value: string; placeholder: string | undefined; read: (text: string) => Answer }
+export type Field = { kind: 'field'; value: string; placeholder: string | undefined; read: (text: string) => Answer }
+
+// A chooser's picker of one of a row's values: every value in its owner's
+// order, each labelled by itself, the one the row holds among them keeping
+// it; and that one, undefined when the row holds none of them.
+export type Picker = { kind: 'picker'; options: readonly Choice[]; current: string | undefined }
 
 // What Enter on a row does: one change at once, or a chooser opened under the
-// row, a field first where the row takes a typed value, then its choices, the
-// last one Keep.
-export type Change = { kind: 'now'; answer: Answer } | { kind: 'choose'; field: Field | undefined; choices: readonly Choice[] }
+// row, a field first where the row takes a typed value or a picker where it
+// takes one of its values, then its choices, the last one Keep.
+export type Change = { kind: 'now'; answer: Answer } | { kind: 'choose'; control: Field | Picker | undefined; choices: readonly Choice[] }
+
+// The picker of `values` for a row holding `current`, `pick` what picking another does.
+function pickerOf(values: readonly string[], current: string | undefined, pick: (value: string) => Answer): Picker {
+  const isHeld = current !== undefined && values.includes(current)
+  return { kind: 'picker', options: values.map(value => ({ label: value, answer: value === current ? KEEP : pick(value) })), current: isHeld ? current : undefined }
+}
 
 // A setting's change. A value this session's file holds changes there; any
 // other goes to `target`, the file writesTo names, so a change always moves
 // what the row shows. Default, an unset in the file that holds the value, is
 // offered while a file holds it (a typed setting always), Keep always, the
-// current value never. An off flag's labels name its feature: Turn off writes
-// 1, and its default, the flag unset, is on.
+// current value only in the picker, where picking it keeps the row. An off
+// flag's labels name its feature: Turn off writes 1, and its default, the flag
+// unset, is on.
 //   flag   -> no file holding it: the flip at once; else Turn on|off, Default, Keep
-//   choice -> the other choices, Default, Keep
+//   choice -> a picker of every choice, then Default, Keep
 //   text   -> a field holding the value, whose text cs's checker judges, then
 //             Default, Keep <value>
 export function settingChange(s: Setting, target: Scope): Change {
@@ -253,19 +265,19 @@ export function settingChange(s: Setting, target: Scope): Change {
       // The feature is on at 1, or for an off flag at anything but 1.
       const isOn = (s.value === '1') !== turnsOff(s.edit), value = isOn === turnsOff(s.edit) ? '1' : '0'
       if (!isHeld) return { kind: 'now', answer: write(value) }
-      return { kind: 'choose', field: undefined, choices: [{ label: LABELS.turn(!isOn), answer: write(value) }, ...fallback, keep] }
+      return { kind: 'choose', control: undefined, choices: [{ label: LABELS.turn(!isOn), answer: write(value) }, ...fallback, keep] }
     }
     case 'choice':
-      return { kind: 'choose', field: undefined, choices: [...s.choices.filter(choice => choice !== (s.value ?? s.fallback)).map(choice => ({ label: choice, answer: write(choice) })), ...fallback, keep] }
+      return { kind: 'choose', control: pickerOf(s.choices, s.value ?? s.fallback, choice => write(choice)), choices: [...fallback, keep] }
     case 'text':
-      return { kind: 'choose', field: { value: s.value ?? '', placeholder: s.fallback, read: text => write(text) }, choices: [...fallback, keep] }
+      return { kind: 'choose', control: { kind: 'field', value: s.value ?? '', placeholder: s.fallback, read: text => write(text) }, choices: [...fallback, keep] }
   }
 }
 
 // A /config row's change; the owner's config.set guard judges a value, and
 // its deny is the toast:
 //   boolean -> at once: the negation
-//   choice  -> its other options, Keep
+//   choice  -> a picker of its options, Keep
 //   number  -> a field holding the value, Keep <value>; a text that reads as
 //              no number is refused unwritten
 //   text    -> a field holding the value, Keep <value>
@@ -277,15 +289,15 @@ export function modChange(m: ModRow): Change {
     case 'boolean':
       return { kind: 'now', answer: set(m.value !== true) }
     case 'choice':
-      return { kind: 'choose', field: undefined, choices: [...m.options.filter(option => option !== shown).map(option => ({ label: option, answer: set(option) })), { label: LABELS.keep, answer: KEEP }] }
+      return { kind: 'choose', control: pickerOf(m.options, shown, option => set(option)), choices: [{ label: LABELS.keep, answer: KEEP }] }
     case 'number':
-      return { kind: 'choose', field: { value: shown, placeholder: undefined, read: text => {
+      return { kind: 'choose', control: { kind: 'field', value: shown, placeholder: undefined, read: text => {
         const typed = text.trim()
         const value = Number(typed)
         return typed !== '' && Number.isFinite(value) ? set(value) : { kind: 'notNumber', label: m.label, text }
       } }, choices: [keep] }
     case 'text':
-      return { kind: 'choose', field: { value: shown, placeholder: undefined, read: text => set(text) }, choices: [keep] }
+      return { kind: 'choose', control: { kind: 'field', value: shown, placeholder: undefined, read: text => set(text) }, choices: [keep] }
   }
 }
 

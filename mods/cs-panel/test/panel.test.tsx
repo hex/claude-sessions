@@ -116,12 +116,14 @@ const NOOP = { change: () => {}, pick: () => {}, type: () => {}, submit: () => {
 // `<hotkey>: ` when it is plain with a hotkey (the 2.1.316 terminal's Button),
 // an Input its label, then its text or else its placeholder, and a row Box
 // puts its columnGap between its children and its paddingX either side of them.
+// A Select draws its first line (selectOf).
 type Node = { type: string; props: Record<string, unknown>; children?: unknown[] }
 function textOf(node: unknown): string {
   if (typeof node === 'string') return node
   const n = node as Node
   const children = n.children ?? []
   if (n.type === 'Input') return `${String(n.props.label ?? '')}${String(n.props.value || n.props.placeholder || '')}`
+  if (n.type === 'Select') return selectOf(n).head
   if (n.type === 'Button') {
     const shown = children.length === 0 ? String(n.props.label) : children.map(textOf).join('')
     return n.props.plain === true && n.props.hotkey !== undefined ? `${n.props.hotkey}: ${shown}` : shown
@@ -129,6 +131,21 @@ function textOf(node: unknown): string {
   if (n.type !== 'Box') return children.map(textOf).join('')
   const pad = ' '.repeat(Number(n.props.paddingX ?? 0))
   return `${pad}${children.map(textOf).join(' '.repeat(Number(n.props.columnGap ?? 0)))}${pad}`
+}
+
+// A Select as the 2.1.316 terminal draws it: its label and `: ` when it has
+// one, the option it holds (`none` without one) and ▾; focused it is open, ▴
+// in the ▾'s place and under it, two cells in, the eight options that end at
+// the one it holds or start the list, then `… N more` for those hidden below.
+// The kit marks no focus, so the test reads the ring's autoFocus mark as it.
+function selectOf(n: Node): { head: string; open: string[] } {
+  const options = n.props.options as { value: string; label?: string }[]
+  const at = Math.max(0, options.findIndex(o => o.value === n.props.value))
+  const held = options[at]?.value === n.props.value ? options[at] : undefined
+  const isOpen = n.props.autoFocus === true
+  const first = Math.max(0, at - 7), shown = options.slice(first, first + 8), hidden = options.length - first - shown.length
+  return { head: `${n.props.label === undefined ? '' : `${String(n.props.label)}: `}${held === undefined ? 'none' : held.label ?? held.value} ${isOpen ? '▴' : '▾'}`,
+    open: isOpen ? [...shown.map(o => `  ${o.label ?? o.value}`), ...(hidden > 0 ? [`  … ${hidden} more`] : [])] : [] }
 }
 
 // Every element of a drawn tree, outermost first in document order.
@@ -160,11 +177,18 @@ function runsOf(tree: unknown, key: string): { text: string; color?: unknown; di
 // The body's lines top to bottom, one per child of its column Box, but a Box
 // with a border, which the terminal (Ink) draws three lines tall: the border
 // above, its line between a side either side, the border below, as wide as
-// the Box. The kit lays nothing out, so this is the test's model of the
-// terminal, and it knows the round border alone.
+// the Box, and a row Box holding a Select, whose open options fall under its
+// first line in its column. The kit lays nothing out, so this is the test's
+// model of the terminal, and it knows the round border alone.
 function bodyLines(tree: unknown): string[] {
   return ((tree as Node).children ?? []).flatMap(child => {
     const { borderStyle, width } = typeof child === 'string' ? {} : (child as Node).props ?? {}
+    const kids = typeof child === 'string' ? [] : (child as Node).children ?? []
+    const select = kids.findIndex(c => (c as Node).type === 'Select')
+    if (select >= 0) {
+      const lead = ' '.repeat(kids.slice(0, select).map(textOf).join('').length)
+      return [textOf(child), ...selectOf(kids[select] as Node).open.map(line => `${lead}${line}`)]
+    }
     if (borderStyle === undefined) return [textOf(child)]
     if (borderStyle !== 'round' || typeof width !== 'number') throw new Error(`the test draws a round border across a width, not ${String(borderStyle)} across ${String(width)}`)
     return [`╭${'─'.repeat(width - 2)}╮`, `│${textOf(child).padEnd(width - 2)}│`, `╰${'─'.repeat(width - 2)}╯`]
@@ -240,14 +264,20 @@ const scopeLine = (columns = 58, chosen: 'session' | 'machine' = 'session') => {
 // A line of a chooser as the terminal shows it: four cells in, its choices
 // with ` · ` between them.
 const options = (...labels: string[]) => `    ${labels.join(' · ')}`
+// A chooser's picker as the terminal shows it four cells in: the value it
+// holds and ▾, or with the ring on it ▴ and every option under it two cells
+// further in.
+const picked = (value: string, open?: readonly string[]) => open === undefined ? [`    ${value} ▾`] : [`    ${value} ▴`, ...open.map(option => `      ${option}`)]
+// cs's choices of the rewrite provider, in its order.
+const PROVIDERS = ['claude', 'claude-api', 'openai', 'openai-api', 'gemini', 'gemini-api', 'grok', 'xai']
 // The keys' line while reset all… asks to confirm: two cells in, what the
 // reset removes cut to leave its two Buttons room, then ` · confirm · keep`.
 const confirming = (text: string, columns = 58) => `  ${cut(text, columns - 19)} · confirm · keep`
 // The lines of the chooser open under the selected row: those right under it
-// that start four cells in.
+// that start four cells in or further.
 const chooserIn = (lines: string[]) => {
   const at = lines.findIndex(line => line.startsWith('▌ '))
-  const end = lines.findIndex((line, i) => i > at && !/^ {4}\S/.test(line))
+  const end = lines.findIndex((line, i) => i > at && !/^ {4,}\S/.test(line))
   return lines.slice(at + 1, end < 0 ? lines.length : end).map(line => line.trimEnd())
 }
 // A row as the terminal shows it at the dock's 58 columns, trimmed: below 72
@@ -881,7 +911,7 @@ test('the keys\' line is a row Box ending in the reset control, one plain Button
 
 // The Button or Input keyed `key` in a drawing, and the Text runs it draws.
 function elementOf(tree: unknown, key: string): Node {
-  const found = nodesOf(tree).find(n => (n.type === 'Button' || n.type === 'Input') && n.props.key === key)
+  const found = nodesOf(tree).find(n => ['Button', 'Input', 'Select'].includes(n.type) && n.props.key === key)
   if (found === undefined) throw new Error(`nothing keyed ${key} in the drawing`)
   return found
 }
@@ -916,7 +946,7 @@ const MACHINE_FLAGS = edited('CS_STATUSLINE_DISABLE', { 9: '1', 10: 'machine' },
 // A row's chooser open, its field holding `text`, the ring on its first element.
 const opened = (id: RowId, text = '') => ({ kind: 'row', id, text, at: 0 }) as const
 
-test('a row\'s chooser draws under it, four cells in, its choices plain Buttons with · between them: a flag a file holds Turn on or off, Default and Keep; a choice the other choices, Default while a file holds it, and Keep; a typed setting its Input on a line of its own, then Default and Keep <value>; a mod row its other options, or its Input, then Keep; choices that do not fit wrap by whole choices', async ($, on) => {
+test('a row\'s chooser draws under it, four cells in: a choice a picker of every choice holding the current one, then Default while a file holds the value and Keep as plain Buttons with · between them; a flag a file holds Turn on or off, Default and Keep; a typed setting its Input on a line of its own, then Default and Keep <value>; a mod row a picker of its options, or its Input, then Keep; Buttons that do not fit wrap by whole choices', async ($, on) => {
   const draw = drawer($, on)
   const under = async (id: RowId, text = '', over: Partial<PanelView> & { porcelain?: string; hasSelf?: boolean } = {}) =>
     chooserIn((await draw(viewOf({ selected: id, chooser: opened(id, text), ...over }))).lines)
@@ -924,76 +954,90 @@ test('a row\'s chooser draws under it, four cells in, its choices plain Buttons 
   expect(await under('cs:CS_STATUSLINE_DISABLE', '', { porcelain: MACHINE_FLAGS })).toEqual([options('Turn on', 'Default (on)', 'Keep')])
   expect(await under('cs:CS_SCOPE_DISABLE')).toEqual([options('Turn on', 'Default (on)', 'Keep')])
   expect(await under('cs:CS_NO_MAIL_WAKE')).toEqual([options('Turn off', 'Default (on)', 'Keep')])
-  expect(await under('cs:CS_STATUSLINE_LAYOUT')).toEqual([options('quiet', 'capsules', 'Default (quiet)', 'Keep')])
-  expect(await under('cs:CS_STATUSLINE_LAYOUT', '', { hasSelf: false })).toEqual([options('quiet', 'capsules', 'Default (quiet)', 'Keep')])
-  expect(await under('cs:CS_REWRITE_PROVIDER')).toEqual([options('claude-api', 'openai', 'openai-api', 'gemini', 'gemini-api'), options('grok', 'xai', 'Keep')])
-  expect(await under('cs:CS_REWRITE_PROGRESS')).toEqual([options('native', 'line', 'static', 'Keep')])
-  expect(await under('cs:CS_TERM_THEME')).toEqual([options('light', 'Keep')])
+  expect(await under('cs:CS_STATUSLINE_LAYOUT')).toEqual([...picked('band', ['quiet', 'band', 'capsules']), options('Default (quiet)', 'Keep')])
+  expect(await under('cs:CS_STATUSLINE_LAYOUT', '', { hasSelf: false })).toEqual([...picked('band', ['quiet', 'band', 'capsules']), options('Default (quiet)', 'Keep')])
+  // With the ring off the picker it is its one line.
+  expect(chooserIn((await draw(viewOf({ selected: 'cs:CS_STATUSLINE_LAYOUT', chooser: { ...opened('cs:CS_STATUSLINE_LAYOUT'), at: 1 } }))).lines))
+    .toEqual([...picked('band'), options('Default (quiet)', 'Keep')])
+  expect(await under('cs:CS_REWRITE_PROVIDER')).toEqual([...picked('claude', PROVIDERS), options('Keep')])
+  expect(await under('cs:CS_REWRITE_PROGRESS')).toEqual([...picked('screen', ['screen', 'native', 'line', 'static']), options('Keep')])
+  expect(await under('cs:CS_TERM_THEME')).toEqual([...picked('dark', ['light', 'dark']), options('Keep')])
+  // A row at a default that is none of its choices holds none in the picker.
+  expect(await under('cs:CS_TERM_THEME', '', { porcelain: edited('CS_TERM_THEME', { 9: '-', 10: 'default' }) })).toEqual([...picked('none', ['light', 'dark']), options('Keep')])
   expect(await under('cs:CS_STATUSLINE_CTX_WARN', '50')).toEqual(['    50', options('Default (40)', 'Keep 50')])
   // An empty field shows the default's name.
   expect(await under('cs:CS_SCOPE_BUDGET_MS')).toEqual(['    1500', options('Default (1500)', 'Keep 1500')])
   expect(await under('cs:CS_STATUSLINE_SEGMENTS', 'logo,session,notes,mail,git,model,ctx,limits', { porcelain: SEGMENTS })).toEqual(['    logo,session,notes,mail,git,model,ctx,limits',
     options('Default (logo,session,notes,mail,git,model,ctx,limits)'), options('Keep logo,session,notes,mail,git,model,ctx,limits')])
-  expect(await under('mod:cs.bandPrompt')).toEqual([options('read', 'Keep')])
+  expect(await under('mod:cs.bandPrompt')).toEqual([...picked('latest', ['latest', 'read']), options('Keep')])
   expect(await under('mod:cs.bandBars', '10')).toEqual(['    10', options('Keep 10')])
   // A row Enter flips at once, a locked row and a row not selected draw no chooser.
   expect(await under('cs:CS_NERD_FONTS')).toEqual([])
   expect(await under('cs:CS_STATUSLINE_FRAME')).toEqual([])
   expect(await under('cs:CS_STATUSLINE_CTX_WARN', '50', { hasSelf: false })).toEqual([])
   expect(chooserIn((await draw(viewOf({ selected: 'cs:CS_STATUSLINE_DISABLE', chooser: opened('cs:CS_STATUSLINE_LAYOUT') }))).lines)).toEqual([])
-  // At 24 columns the choices wrap into what 20 cells hold and a choice wider is cut.
-  expect(await under('cs:CS_REWRITE_PROVIDER', '', { columns: 24 })).toEqual([options('claude-api', 'openai'), options('openai-api', 'gemini'), options('gemini-api', 'grok'), options('xai', 'Keep')])
+  // At 24 columns the Buttons wrap into what 20 cells hold and one wider is cut.
+  expect(await under('cs:CS_STATUSLINE_CTX_WARN', '50', { columns: 24 })).toEqual(['    50', options('Default (40)'), options('Keep 50')])
   expect((await under('cs:CS_STATUSLINE_SEGMENTS', 'logo', { porcelain: SEGMENTS, columns: 24 })).slice(1)).toEqual([options('Default (logo,sessi…'), options('Keep logo,session,n…')])
-  // The elements: each choice a plain Button keyed option:<label>, its text in
-  // ink, the dots muted; the field an Input keyed typed, `set` its Enter; the
-  // ring's mark on the element the ring is on, and off the row.
+  // The elements: the picker a Select keyed picker with no label, each choice
+  // an option by its value, the one the row holds its value; each Button plain,
+  // keyed option:<label>, its text in ink, the dots muted; the field an Input
+  // keyed typed, `set` its Enter; the ring's mark on the element the ring is
+  // on, and off the row.
   const { tree } = await draw(viewOf({ selected: 'cs:CS_STATUSLINE_LAYOUT', chooser: { ...opened('cs:CS_STATUSLINE_LAYOUT'), at: 2 } }))
-  const keys = ['option:quiet', 'option:capsules', 'option:Default (quiet)', 'option:Keep']
-  expect(keys.map(key => elementOf(tree, key)).map(b => [b.props.plain, b.props.label, b.props.autoFocus, runsIn(b)])).toEqual([
-    [true, 'quiet', undefined, [['quiet', COLOURS.ink]]], [true, 'capsules', undefined, [['capsules', COLOURS.ink]]],
-    [true, 'Default (quiet)', true, [['Default (quiet)', COLOURS.ink]]], [true, 'Keep', undefined, [['Keep', COLOURS.ink]]]])
-  expect(runsIn(rowOf(tree, 'option:quiet'))).toEqual([['    ', undefined], ['quiet', undefined], [' · ', COLOURS.mut], ['capsules', undefined], [' · ', COLOURS.mut],
-    ['Default (quiet)', undefined], [' · ', COLOURS.mut], ['Keep', undefined]])
+  const picker = elementOf(tree, 'picker')
+  expect([picker.type, picker.props.label, picker.props.options, picker.props.value, picker.props.autoFocus])
+    .toEqual(['Select', undefined, [{ value: 'quiet' }, { value: 'band' }, { value: 'capsules' }], 'band', undefined])
+  expect(elementOf((await draw(viewOf({ selected: 'cs:CS_STATUSLINE_LAYOUT', chooser: opened('cs:CS_STATUSLINE_LAYOUT') }))).tree, 'picker').props.autoFocus).toBe(true)
+  expect(['option:Default (quiet)', 'option:Keep'].map(key => elementOf(tree, key)).map(b => [b.props.plain, b.props.label, b.props.autoFocus, runsIn(b)])).toEqual([
+    [true, 'Default (quiet)', undefined, [['Default (quiet)', COLOURS.ink]]], [true, 'Keep', true, [['Keep', COLOURS.ink]]]])
+  expect(runsIn(rowOf(tree, 'option:Keep'))).toEqual([['    ', undefined], ['Default (quiet)', undefined], [' · ', COLOURS.mut], ['Keep', undefined]])
   expect(elementOf(tree, 'cs:CS_STATUSLINE_LAYOUT').props.autoFocus).toBe(undefined)
   const typed = (await draw(viewOf({ selected: 'cs:CS_STATUSLINE_CTX_WARN', chooser: opened('cs:CS_STATUSLINE_CTX_WARN', '45') }))).tree
   const input = elementOf(typed, 'typed')
   expect([input.type, input.props.value, input.props.placeholder, input.props.submitLabel, input.props.autoFocus]).toEqual(['Input', '45', '40', 'set', true])
   expect(elementOf(typed, 'option:Default (40)').props.autoFocus).toBe(undefined)
-  // No line of a chooser passes the body, but the field's: the terminal scrolls
-  // an Input's text inside it, the kit draws it whole.
+  // No line of a chooser passes the body, the open picker's included, but the
+  // field's: the terminal scrolls an Input's text inside it, the kit draws it whole.
   for (const columns of [24, 40, 58, 80]) {
-    for (const id of ['cs:CS_REWRITE_PROVIDER', 'cs:CS_STATUSLINE_SEGMENTS', 'cs:CS_STATUSLINE_LAYOUT', 'mod:cs.bandPrompt'] as const) {
-      const drawn = (await draw(viewOf({ selected: id, chooser: opened(id), porcelain: SEGMENTS, columns }))).tree
-      const lines = nodesOf(drawn).filter(n => n.type === 'Box' && (n.children ?? []).some(c => String((c as Node).props?.key).startsWith('option:'))).map(textOf)
+    for (const [id, fields] of [['cs:CS_REWRITE_PROVIDER', 0], ['cs:CS_STATUSLINE_SEGMENTS', 1], ['cs:CS_STATUSLINE_LAYOUT', 0], ['mod:cs.bandPrompt', 0]] as const) {
+      const lines = chooserIn((await draw(viewOf({ selected: id, chooser: opened(id), porcelain: SEGMENTS, columns }))).lines).slice(fields)
       expect([lines.length > 0, lines.filter(line => line.length > columns)], `${id}'s chooser at ${columns}`).toEqual([true, []])
     }
   }
 })
 
-test('the window counts the chooser\'s lines: at 14 rows the selected row, its chooser, and a footer of the label, the value line and the scope line; at 12 the label alone, or with a field\'s two lines no footer and the window two lines', async ($, on) => {
+test('the window counts the chooser\'s lines, a picker with the ring on it open to every option: at 18 rows the selected row, its chooser, and a footer of the label, the value line and the scope line; at 16 the label alone; with the ring off the picker 14 rows hold the label and the value line; a field\'s two lines leave 14 rows the label and the value line and 12 no footer; nine choices take a line more for the one past eight', async ($, on) => {
   const draw = drawer($, on)
-  const at = async (id: RowId, bodyRows: number, text = '') => {
-    const view = viewOf({ selected: id, chooser: opened(id, text), bodyRows })
+  const at = async (id: RowId, bodyRows: number, text = '', over: Partial<PanelView> & { porcelain?: string } = {}) => {
+    const view = viewOf({ selected: id, chooser: opened(id, text), bodyRows, ...over })
     return { lines: (await draw(view)).lines.map(line => line.trimEnd()), keys: ringOf(view).keys }
   }
   const top = [...MASTHEAD_AT_58, ...field(58), ...HEAD_AT_58]
-  const layout = options('quiet', 'capsules', 'Default (quiet)', 'Keep')
-  const keys = ['option:quiet', 'option:capsules', 'option:Default (quiet)', 'option:Keep']
-  expect(await at('cs:CS_STATUSLINE_LAYOUT', 14)).toEqual({ lines: [...top, at58('Layout', 'band', true), layout,
+  const row = at58('Layout', 'band', true)
+  const layout = [...picked('band', ['quiet', 'band', 'capsules']), options('Default (quiet)', 'Keep')]
+  const keys = ['picker', 'option:Default (quiet)', 'option:Keep']
+  expect(await at('cs:CS_STATUSLINE_LAYOUT', 18)).toEqual({ lines: [...top, row, ...layout,
     soft(58), '▍ selected · Layout', '▍ band · machine · applies at the next repaint', scopeLine()],
     keys: ['filter', 'cs:CS_STATUSLINE_LAYOUT', ...keys, 'scope:session', 'scope:machine'] })
-  expect(await at('cs:CS_STATUSLINE_LAYOUT', 12)).toEqual({ lines: [...top, at58('Layout', 'band', true), layout, soft(58), '▍ selected · Layout'],
+  expect(await at('cs:CS_STATUSLINE_LAYOUT', 16)).toEqual({ lines: [...top, row, ...layout, soft(58), '▍ selected · Layout'],
+    keys: ['filter', 'cs:CS_STATUSLINE_LAYOUT', ...keys] })
+  expect(await at('cs:CS_STATUSLINE_LAYOUT', 14, '', { chooser: { ...opened('cs:CS_STATUSLINE_LAYOUT'), at: 1 } })).toEqual({
+    lines: [...top, row, ...picked('band'), options('Default (quiet)', 'Keep'), soft(58), '▍ selected · Layout', '▍ band · machine · applies at the next repaint'],
     keys: ['filter', 'cs:CS_STATUSLINE_LAYOUT', ...keys] })
   expect(await at('cs:CS_STATUSLINE_CTX_WARN', 14, '50')).toEqual({ lines: [...top, at58('Context warn %', '50%', true), '    50', options('Default (40)', 'Keep 50'),
     soft(58), '▍ selected · Context warn %', '▍ 50% · session · applies at the next repaint'],
     keys: ['filter', 'cs:CS_STATUSLINE_CTX_WARN', 'typed', 'option:Default (40)', 'option:Keep 50'] })
   expect(await at('cs:CS_STATUSLINE_CTX_WARN', 12, '50')).toEqual({ lines: [...top, at58('Context warn %', '50%', true), '    50', options('Default (40)', 'Keep 50'), '+34 below'],
     keys: ['filter', 'cs:CS_STATUSLINE_CTX_WARN', 'typed', 'option:Default (40)', 'option:Keep 50'] })
+  // The picker draws eight options and a line for the rest: 20 rows hold the selected row and its eleven lines.
+  const nine = edited('CS_REWRITE_PROVIDER', { 5: [...PROVIDERS, 'local'].join(',') })
+  expect((await at('cs:CS_REWRITE_PROVIDER', 20, '', { porcelain: nine })).lines).toEqual([...top, at58('Provider', 'claude', true), ...picked('claude', PROVIDERS), '      … 1 more', options('Keep')])
   // In a tall body the chooser sits in the window under its row, the rows go on under it.
   const tall = (await at('cs:CS_STATUSLINE_LAYOUT', 90)).lines
-  expect(tall.slice(tall.indexOf(at58('Layout', 'band', true)) - 1, tall.indexOf(at58('Layout', 'band', true)) + 3))
-    .toEqual([at58('Status line', '● on'), at58('Layout', 'band', true), layout, at58('Segments', 'logo,session,notes,mail,git,model,ctx,limits')])
-  expect(tall.length).toBe(8 + GOLDEN_LINES + 1 + 8)
+  expect(tall.slice(tall.indexOf(row) - 1, tall.indexOf(row) + 7))
+    .toEqual([at58('Status line', '● on'), row, ...layout, at58('Segments', 'logo,session,notes,mail,git,model,ctx,limits')])
+  expect(tall.length).toBe(8 + GOLDEN_LINES + 5 + 8)
 })
 
 test('reset all… pressed swaps the keys\' line for its confirmation: how many overrides the scope line\'s file holds, cut to fit, what stays while it fits, then plain Buttons keyed confirm and keep; the ring walks them where it walked the reset control', async ($, on) => {
@@ -1106,6 +1150,8 @@ async function enter(pane: Pane, key: string): Promise<string[]> {
 // Enter on the open chooser's choice labelled `label`, or Enter in its field with `text`.
 const pick = (pane: Pane, label: string) => pane.press({ key: `option:${label}` })
 const submit = (pane: Pane, text: string) => pane.input({ key: 'typed', text, kind: 'submit' })
+// A pick of `value` in the open chooser's picker.
+const choose = (pane: Pane, value: string) => pane.select({ key: 'picker', value })
 
 // How many times cs listed its settings.
 const listings = (w: { runs: string[][] }) => w.runs.filter(argv => argv.join(' ') === LIST.join(' ')).length
@@ -1279,22 +1325,25 @@ test('Enter on an on/off setting a file holds opens Turn on or off, Default and 
   expect(listings(w)).toBe(1 + 8)
 })
 
-test('Enter on a choice opens the other choices, Default while a file holds the value, and Keep, wrapped where they do not fit; each choice writes the file the scope line names', async ($, on) => {
+test('Enter on a choice opens a picker of every choice holding the current one, then Default while a file holds the value and Keep; a pick writes the file the scope line names, and a pick of the current one writes nothing and reads nothing again', async ($, on) => {
   const { w } = world(on)
   const pane = await openPane($)
-  expect(await enter(pane, 'cs:CS_STATUSLINE_LAYOUT')).toEqual([options('quiet', 'capsules', 'Default (quiet)', 'Keep')])
-  await pick(pane, 'capsules')
+  expect(await enter(pane, 'cs:CS_STATUSLINE_LAYOUT')).toEqual([...picked('band', ['quiet', 'band', 'capsules']), options('Default (quiet)', 'Keep')])
+  await choose(pane, 'capsules')
+  expect(chooserIn(bodyLines(await pane.drawn()))).toEqual([])
   await pane.press({ key: 'scope:machine' })
-  await enter(pane, 'cs:CS_STATUSLINE_LAYOUT'); await pick(pane, 'quiet')
+  await enter(pane, 'cs:CS_STATUSLINE_LAYOUT'); await choose(pane, 'quiet')
   await enter(pane, 'cs:CS_STATUSLINE_LAYOUT'); await pick(pane, 'Default (quiet)')
   await enter(pane, 'cs:CS_STATUSLINE_LAYOUT'); await pick(pane, 'Keep')
-  expect(await enter(pane, 'cs:CS_REWRITE_PROVIDER')).toEqual([options('claude-api', 'openai', 'openai-api', 'gemini', 'gemini-api', 'grok', 'xai', 'Keep')])
-  await pick(pane, 'xai')
+  await enter(pane, 'cs:CS_STATUSLINE_LAYOUT'); await choose(pane, 'band')
+  expect(chooserIn(bodyLines(await pane.drawn()))).toEqual([])
+  expect(await enter(pane, 'cs:CS_REWRITE_PROVIDER')).toEqual([...picked('claude', PROVIDERS), options('Keep')])
+  await choose(pane, 'xai')
   await pane.press({ key: 'scope:session' })
-  expect(await enter(pane, 'cs:CS_REWRITE_PROGRESS')).toEqual([options('native', 'line', 'static', 'Keep')])
-  await pick(pane, 'line')
-  expect(await enter(pane, 'cs:CS_TERM_THEME')).toEqual([options('light', 'Keep')])
-  await pick(pane, 'light')
+  expect(await enter(pane, 'cs:CS_REWRITE_PROGRESS')).toEqual([...picked('screen', ['screen', 'native', 'line', 'static']), options('Keep')])
+  await choose(pane, 'line')
+  expect(await enter(pane, 'cs:CS_TERM_THEME')).toEqual([...picked('dark', ['light', 'dark']), options('Keep')])
+  await choose(pane, 'light')
   expect(writes(w)).toEqual([
     [BIN, 'alpha', '-config', 'set', 'CS_STATUSLINE_LAYOUT', 'capsules'],
     [BIN, '-config', 'set', 'CS_STATUSLINE_LAYOUT', 'quiet'],
@@ -1303,6 +1352,7 @@ test('Enter on a choice opens the other choices, Default while a file holds the 
     [BIN, 'alpha', '-config', 'set', 'CS_REWRITE_PROGRESS', 'line'],
     [BIN, 'alpha', '-config', 'set', 'CS_TERM_THEME', 'light'],
   ])
+  expect(listings(w)).toBe(1 + 6)
 })
 
 test('Enter on a typed setting opens its field holding the value, the default\'s name while it is empty, then Default and Keep <value>; Enter in the field writes what it holds, this session\'s value there whatever the scope line says, any other to the file the scope line names; the field keeps its text over a redraw', async ($, on) => {
@@ -1360,8 +1410,8 @@ test('with no session name the pane draws no scope line, every write goes to thi
   expect(await enter(pane, 'cs:CS_NERD_FONTS')).toEqual([options('Turn off', 'Default (off)', 'Keep')])
   await pick(pane, 'Turn off')
   expect(await enter(pane, 'cs:CS_STATUSLINE_DISABLE')).toEqual([])
-  expect(await enter(pane, 'cs:CS_STATUSLINE_LAYOUT')).toEqual([options('quiet', 'capsules', 'Default (quiet)', 'Keep')])
-  await pick(pane, 'capsules')
+  expect(await enter(pane, 'cs:CS_STATUSLINE_LAYOUT')).toEqual([...picked('band', ['quiet', 'band', 'capsules']), options('Default (quiet)', 'Keep')])
+  await choose(pane, 'capsules')
   await enter(pane, 'cs:CS_SCOPE_BUDGET_MS'); await submit(pane, '2000')
   expect(await enter(pane, 'cs:CS_STATUSLINE_CTX_WARN')).toEqual([])
   expect(writes(w)).toEqual([
@@ -1409,7 +1459,7 @@ test('Enter on a row nothing changes toasts the card\'s why and opens and writes
   expect([writes(w), w.sets, chooser]).toEqual([[], [], [[], [], []]])
 })
 
-test('Keep closes the chooser and writes nothing, says nothing and reads nothing again', async ($, on) => {
+test('Keep, or a pick of the value a row holds, closes the chooser and writes nothing, says nothing and reads nothing again', async ($, on) => {
   const { w } = world(on)
   const pane = await openPane($)
   for (const [key, label] of [['cs:CS_STATUSLINE_CTX_WARN', 'Keep 50'], ['cs:CS_SCOPE_DISABLE', 'Keep'], ['cs:CS_STATUSLINE_LAYOUT', 'Keep'], ['mod:cs.bandBars', 'Keep 10'],
@@ -1417,6 +1467,11 @@ test('Keep closes the chooser and writes nothing, says nothing and reads nothing
     await enter(pane, key)
     await pick(pane, label)
     expect(chooserIn(bodyLines(await pane.drawn())), `${key} after ${label}`).toEqual([])
+  }
+  for (const [key, value] of [['cs:CS_STATUSLINE_LAYOUT', 'band'], ['cs:CS_REWRITE_PROVIDER', 'claude'], ['mod:cs.bandPrompt', 'latest']] as const) {
+    await enter(pane, key)
+    await choose(pane, value)
+    expect(chooserIn(bodyLines(await pane.drawn())), `${key} after ${value}`).toEqual([])
   }
   expect([writes(w), w.sets, w.toasts, listings(w), w.lists]).toEqual([[], [], [], 1, 1])
 })
@@ -1426,7 +1481,7 @@ test('cs\'s reply is the toast: its line when the write lands, and when cs refus
     ? { stdout: 'CS_STATUSLINE_LAYOUT=capsules in ~/.claude-sessions/alpha/.cs/local/config: applies at the next repaint\n' }
     : { exitCode: 1, stderr: 'Error: CS_SCOPE_BUDGET_MS is a whole number of milliseconds; got lots\n' } })
   const pane = await openPane($)
-  await enter(pane, 'cs:CS_STATUSLINE_LAYOUT'); await pick(pane, 'capsules')
+  await enter(pane, 'cs:CS_STATUSLINE_LAYOUT'); await choose(pane, 'capsules')
   await enter(pane, 'cs:CS_SCOPE_BUDGET_MS'); await submit(pane, 'lots')
   expect(w.toasts).toEqual([
     'CS_STATUSLINE_LAYOUT=capsules in ~/.claude-sessions/alpha/.cs/local/config: applies at the next repaint',
@@ -1486,12 +1541,12 @@ test('a reset cs refuses toasts its refusal and reads cs again; before cs first 
     lists + 1])
 })
 
-test('Enter on a /config row changes it through $.config.set: a boolean toggles to its negation at once, a choice opens its other options and Keep, a number its field and Keep <value>; abc is refused unwritten, a deny is toasted', async ($, on) => {
+test('Enter on a /config row changes it through $.config.set: a boolean toggles to its negation at once, a choice opens a picker of its options and Keep, a number its field and Keep <value>; abc is refused unwritten, a deny is toasted', async ($, on) => {
   const { w } = world(on)
   const pane = await openPane($)
   expect(await enter(pane, 'mod:cs.bandPrompts')).toEqual([])
-  expect(await enter(pane, 'mod:cs.bandPrompt')).toEqual([options('read', 'Keep')])
-  await pick(pane, 'read')
+  expect(await enter(pane, 'mod:cs.bandPrompt')).toEqual([...picked('latest', ['latest', 'read']), options('Keep')])
+  await choose(pane, 'read')
   expect(await enter(pane, 'mod:cs.bandBars')).toEqual(['    10', options('Keep 10')])
   await submit(pane, 'abc')
   await enter(pane, 'mod:cs.bandBars'); await submit(pane, '12')
@@ -1529,6 +1584,8 @@ test('Enter on a row whose last change still runs says so and writes nothing', a
     'CS_STATUSLINE_DISABLE=1 in ~/.claude-sessions/alpha/.cs/local/config: applies at the next repaint'])
 })
 
+// The terminal raises no ui.scroll while the ring is on a Select: its arrows
+// move the Select's own highlight. The kit raises one wherever the ring is.
 test('with a chooser open the arrows walk its elements, held to the first and the last, and the selection stays; Enter on the row puts the ring on its first element and a choice made puts it back on the row: each move goes by $.ui.focus, which the kit refuses, so the element marked for the ring is pinned', async ($, on) => {
   const { w, clock } = world(on)
   const pane = await openPane($)
@@ -1543,16 +1600,16 @@ test('with a chooser open the arrows walk its elements, held to the first and th
   }
   const layout = (ring: string) => ({ card: '▍ selected · Layout', ring: ['filter', ring] })
   await enter(pane, 'cs:CS_STATUSLINE_LAYOUT')
-  expect(await shown()).toEqual(layout('option:quiet'))
+  expect(await shown()).toEqual(layout('picker'))
   await scroll(1)
-  expect(await shown()).toEqual(layout('option:capsules'))
+  expect(await shown()).toEqual(layout('option:Default (quiet)'))
   await scroll(5)
   expect(await shown()).toEqual(layout('option:Keep'))
   const moved = w.logs.length
   await scroll(1)
   expect([await shown(), w.logs.length]).toEqual([layout('option:Keep'), moved])
   await scroll(-10)
-  expect(await shown()).toEqual(layout('option:quiet'))
+  expect(await shown()).toEqual(layout('picker'))
   expect(w.scrolls).toBe(0)
   await pick(pane, 'Keep')
   await clock.settle()
@@ -1572,7 +1629,7 @@ test('Enter on another row opens its chooser and closes the first; the ring land
   const pane = await openPane($)
   const shown = async () => { const lines = bodyLines(await pane.drawn()); return { chooser: chooserIn(lines), foot: lines.slice(-2).map(line => line.trimEnd()) } }
   await enter(pane, 'cs:CS_STATUSLINE_LAYOUT')
-  expect(await enter(pane, 'cs:CS_TERM_THEME')).toEqual([options('light', 'Keep')])
+  expect(await enter(pane, 'cs:CS_TERM_THEME')).toEqual([...picked('dark', ['light', 'dark']), options('Keep')])
   expect(bodyLines(await pane.drawn()).filter(line => line.includes('capsules'))).toEqual([])
   await focus($, 'cs:CS_STATUSLINE_LAYOUT')
   expect((await shown()).chooser).toEqual([])
@@ -1586,7 +1643,7 @@ test('Enter on another row opens its chooser and closes the first; the ring land
   expect(await shown()).toEqual({ chooser: [], foot: [confirming('remove 1 override from this machine\'s file', 80), scopeLine(80, 'machine')] })
   await pane.press({ key: 'keep' })
   await enter(pane, 'cs:CS_STATUSLINE_LAYOUT')
-  expect((await shown()).chooser).toEqual([options('quiet', 'capsules', 'Default (quiet)', 'Keep')])
+  expect((await shown()).chooser).toEqual([...picked('band', ['quiet', 'band', 'capsules']), options('Default (quiet)', 'Keep')])
   await $.command.run({ ...COMMAND, command: 'close-panel' })
   expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
   await pane.redraw()
@@ -1738,7 +1795,7 @@ test('the session start registers /cs-panel once, to run mid-turn too, and opens
   expect(w.opens).toEqual([])
 })
 
-test('the pane draws on every surface, its rows as Buttons and its field as an Input in the search box, but on the mobile app, which draws no Input: there three empty lines stand in the box\'s place, so the chrome is as tall', async ($, on) => {
+test('the pane draws on every surface, its rows as Buttons, its field as an Input in the search box and a choice\'s picker as a Select, but on the mobile app, which draws neither: there three empty lines stand in the box\'s place, so the chrome is as tall, and a choice offers Buttons', async ($, on) => {
   world(on)
   expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
@@ -1750,9 +1807,17 @@ test('the pane draws on every surface, its rows as Buttons and its field as an I
       .toEqual([surface === 'mobile' ? [' ', ' ', ' '] : field(80), headAt(80).trimEnd(), 8 + GOLDEN_LINES + 6, [hint('Enter flip', 80), scopeLine(80)]])
     await pane.unmount()
   }
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const pane = await $.ui.mount({ plugin: 'cs-panel', surface, component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
+    await pane.press({ key: 'cs:CS_STATUSLINE_LAYOUT' })
+    expect([(await pane.find({ key: 'picker' }))?.type, (await pane.find({ key: 'option:capsules' }))?.type], surface)
+      .toEqual(surface === 'mobile' ? [undefined, 'Button'] : ['Select', undefined])
+    await pane.press({ key: 'option:Keep' })
+    await pane.unmount()
+  }
 })
 
-test('on the mobile app, which draws no Input, a typed setting\'s chooser is its Default and Keep alone and the ring skips the field; a choice\'s Buttons draw and write as on the terminal', async ($, on) => {
+test('on the mobile app, which draws no Input or Select, a typed setting\'s chooser is its Default and Keep alone and the ring skips the field; a choice\'s chooser is its other choices, Default while a file holds it, and Keep, as Buttons that write as the picker does', async ($, on) => {
   const { w } = world(on)
   expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
   const pane = await $.ui.mount({ plugin: 'cs-panel', surface: 'mobile', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
@@ -1762,8 +1827,15 @@ test('on the mobile app, which draws no Input, a typed setting\'s chooser is its
     .toEqual(['option:Default (40)', 'option:Keep 50'])
   await pane.press({ key: 'cs:CS_STATUSLINE_LAYOUT' })
   expect(chooserIn(bodyLines(await pane.drawn()))).toEqual([options('quiet', 'capsules', 'Default (quiet)', 'Keep')])
+  expect(ringOf(viewOf({ hasField: false, selected: 'cs:CS_STATUSLINE_LAYOUT', chooser: opened('cs:CS_STATUSLINE_LAYOUT') })).keys.filter(key => key.startsWith('option:') || key === 'picker'))
+    .toEqual(['option:quiet', 'option:capsules', 'option:Default (quiet)', 'option:Keep'])
   await pane.press({ key: 'option:capsules' })
-  expect(writes(w)).toEqual([[BIN, 'alpha', '-config', 'set', 'CS_STATUSLINE_LAYOUT', 'capsules']])
+  await pane.press({ key: 'cs:CS_STATUSLINE_LAYOUT' }); await pane.press({ key: 'option:Default (quiet)' })
+  await pane.press({ key: 'mod:cs.bandPrompt' })
+  expect(chooserIn(bodyLines(await pane.drawn()))).toEqual([options('read', 'Keep')])
+  await pane.press({ key: 'option:read' })
+  expect([writes(w), w.sets]).toEqual([[[BIN, 'alpha', '-config', 'set', 'CS_STATUSLINE_LAYOUT', 'capsules'], [BIN, '-config', 'unset', 'CS_STATUSLINE_LAYOUT']],
+    [{ key: 'cs.bandPrompt', value: 'read' }]])
 })
 
 test('no line the mod hands the engine names the plugin first: the engine prefixes it', () => {

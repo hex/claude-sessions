@@ -171,6 +171,7 @@ export function register(on: On) {
   // chooser's elements, held to its ends; with none open, the selection `e.by`
   // of the rows the filter shows (the pane windows its own), Up from the first
   // to the field. The ring at no place (-1) has the next drawing put it there.
+  // None arrives while the ring is on a picker: its arrows move its own highlight.
   on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
     const keys = chooserKeys()
     if (chooser?.kind === 'row' && keys.length > 0) {
@@ -386,17 +387,20 @@ function handlers($: EngineInterface): Handlers {
   }
 }
 
-// Enter on a row, Enter on one of its chooser's choices, or Enter in its
-// chooser's field.
+// Enter on a row, Enter on one of its chooser's choices or a pick in its
+// picker, or Enter in its chooser's field.
 type Entry = { kind: 'row' } | { kind: 'choice'; key: string } | { kind: 'field'; text: string }
 
 // What an entry asks of the row's change as it stands: its chooser opened, an
-// answer, or nothing it offers now (a drawing older than the last read).
+// answer, or nothing it offers now (a drawing older than the last read). A
+// picker's values are choices too, as Buttons where the surface draws no picker.
 function answerOf(change: Change, entry: Entry): Answer | 'choose' | undefined {
+  if (entry.kind === 'row') return change.kind === 'now' ? change.answer : 'choose'
+  if (change.kind === 'now') return undefined
+  const { control } = change
   switch (entry.kind) {
-    case 'row': return change.kind === 'now' ? change.answer : 'choose'
-    case 'choice': return change.kind === 'choose' ? change.choices.find(c => optionKey(c.label) === entry.key)?.answer : undefined
-    case 'field': return change.kind === 'choose' ? change.field?.read(entry.text) : undefined
+    case 'choice': return [...(control?.kind === 'picker' ? control.options : []), ...change.choices].find(c => optionKey(c.label) === entry.key)?.answer
+    case 'field': return control?.kind === 'field' ? control.read(entry.text) : undefined
   }
 }
 
@@ -419,7 +423,7 @@ async function change($: EngineInterface, id: RowId, entry: Entry): Promise<void
   const answer = answerOf(plan, entry)
   if (answer === 'choose') {
     // Set first, so the keys read are the ones it draws.
-    chooser = { kind: 'row', id, text: plan.kind === 'choose' ? plan.field?.value ?? '' : '', at: 0 }
+    chooser = { kind: 'row', id, text: plan.kind === 'choose' && plan.control?.kind === 'field' ? plan.control.value : '', at: 0 }
     ask($, chooser, chooserKeys()[0])
     return
   }
