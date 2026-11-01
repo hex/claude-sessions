@@ -147,18 +147,14 @@ test('the work draws nothing while on: a call, a group, a result, the progress h
   expect(engine).toEqual(['call', 'group', 'result', 'hint ctrl+b to run in background', 'duration'])
 })
 
-test('the working line draws nothing on the terminal and the engine\'s row on the desktop', async ($, on) => {
+test('the working line is Claude Code\'s own: chat only leaves its words and suffix as the engine set them', async ($, on) => {
   session(on)
-  let calls = 0
-  on('ui.render', { component: 'Spinner' }, ($, e) => { calls++; return $.ui.resolve(e).Text({ children: `${e.props.word}${e.props.suffix}` }) })
-  const props = { word: 'Sauteing', message: null, suffix: '…', mode: 'tool-use' } as const
-  const line = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'Spinner', props })
-  expect(await line.findAll({ type: 'Text' })).toEqual([])
+  const seen: unknown[] = []
+  on('ui.render', { component: 'Spinner' }, ($, e) => { seen.push([e.props.message, e.props.suffix]); return $.ui.resolve(e).Text({ children: e.props.word }) })
+  const line = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'Spinner', props: { word: 'Sauteing', message: null, suffix: '…', mode: 'tool-use' } })
+  expect((await line.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['Sauteing'])
+  expect(seen).toEqual([[null, '…']])
   await line.unmount()
-  const desktop = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'desktop', component: 'Spinner', requestId: 'desktop', props })
-  expect((await desktop.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['Sauteing…'])
-  await desktop.unmount()
-  expect(calls).toBe(2)
 })
 
 test('SessionMode appends the chat only mode while preserving the engine modes', async ($, on) => {

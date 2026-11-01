@@ -1372,12 +1372,9 @@ notifications and hook feedback draw nothing too. A message Claude Code did
 not stamp draws as yours when it names no sender and is not hook feedback (a
 channel the engine cannot attest, a message stored before stamps), and
 nothing otherwise. A message from a source chat only has no rule for,
-such as a channel or a plugin, keeps Claude Code's drawing. While a turn runs,
-the working line (`✳ Sauteing… (9s · ↓ 444 tokens)`) draws nothing on the
-terminal: no word, elapsed time or tokens, and no clock; the mode line under
-the prompt and the status line are the signs a turn is running. On the
-desktop the row keeps Claude Code's drawing, since it carries the turn's mark
-there. Questions, info notices, the prompt hint and the row
+such as a channel or a plugin, keeps Claude Code's drawing. Questions, info
+notices, the prompt hint, the working line (`✳ Sauteing… (9s · ↓ 444 tokens)`,
+Claude Code's own animated sign that a turn runs) and the row
 above the prompt stay Claude Code's. A row that reports itself expanded
 (ctrl+o, `--verbose`) draws Claude Code's own, so the detailed view still
 shows everything. The inks follow the `/config` theme, read once per load.

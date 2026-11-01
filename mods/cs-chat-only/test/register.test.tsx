@@ -18,7 +18,7 @@ test('register installs the command, the band press and every chat only render s
     { event: 'session.start', matcher: undefined },
     { event: 'command.run', matcher: { command: 'chat-only' } },
     { event: 'ui.press', matcher: { plugin: 'cs', element: 'cs-chat-only' } },
-    ...['UserMessage', 'AssistantMessage', 'ToolUse', 'ToolGroup', 'ToolResult', 'ToolProgress', 'TurnDuration', 'CommandOutput', 'SessionMode', 'Spinner'].map(component => ({ event: 'ui.render', matcher: { component } })),
+    ...['UserMessage', 'AssistantMessage', 'ToolUse', 'ToolGroup', 'ToolResult', 'ToolProgress', 'TurnDuration', 'CommandOutput', 'SessionMode'].map(component => ({ event: 'ui.render', matcher: { component } })),
   ])
   expect(seen.filter(entry => entry.event === 'ui.render').map(entry => typeof entry.matcher === 'object' && entry.matcher !== null && 'component' in entry.matcher ? entry.matcher.component : undefined)).toEqual(Object.keys(PAINTERS))
 })

@@ -11,7 +11,7 @@ teardown() { :; }
 
 # The one shape every session registers (rationale decision 1): its exact
 # inventory, as `claude plugin validate` prints it.
-HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=chat-only}, ui.press{plugin=cs, element=cs-chat-only}, ui.render{component=UserMessage}, ui.render{component=AssistantMessage}, ui.render{component=ToolUse}, ui.render{component=ToolGroup}, ui.render{component=ToolResult}, ui.render{component=ToolProgress}, ui.render{component=TurnDuration}, ui.render{component=CommandOutput}, ui.render{component=SessionMode}, ui.render{component=Spinner}'
+HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=chat-only}, ui.press{plugin=cs, element=cs-chat-only}, ui.render{component=UserMessage}, ui.render{component=AssistantMessage}, ui.render{component=ToolUse}, ui.render{component=ToolGroup}, ui.render{component=ToolResult}, ui.render{component=ToolProgress}, ui.render{component=TurnDuration}, ui.render{component=CommandOutput}, ui.render{component=SessionMode}'
 
 test_mod_manifest_names_the_plugin_and_its_module_and_declares_no_state() {
     local manifest="$MOD/.claude-plugin/plugin.json"

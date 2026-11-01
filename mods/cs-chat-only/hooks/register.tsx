@@ -128,10 +128,10 @@ function registerChatOnly(on: On) {
 /**
  * The sites chat only draws. AskUserQuestion, InfoNotice and PromptHint stay
  * the engine's (ruling §20.13), and so does the row above the prompt
- * (AbovePrompt, cs's band). The working line (Spinner) draws nothing on the
- * terminal. Pane is no site: chat only opens none.
+ * (AbovePrompt, cs's band) and the working line (Spinner, Claude Code's own
+ * animated sign that a turn runs). Pane is no site: chat only opens none.
  */
-type Hooked = Exclude<RenderComponent, 'AskUserQuestion' | 'InfoNotice' | 'PromptHint' | 'Pane' | 'AbovePrompt'>
+type Hooked = Exclude<RenderComponent, 'AskUserQuestion' | 'InfoNotice' | 'PromptHint' | 'Pane' | 'Spinner' | 'AbovePrompt'>
 type Props<C extends RenderComponent> = Partial<RenderInput<C>['props']>
 
 /**
@@ -182,10 +182,6 @@ export const PAINTERS = {
     return verdict === 'nothing' ? { kind: 'nothing' } : { kind: 'tree', tree: drawCommandOutput(verdict, pen) }
   },
   SessionMode: (e) => ({ kind: 'rewrite', props: { modes: sessionModes(e.props.modes) } }),
-  // Nothing under your message while Claude works: no word, elapsed time or
-  // tokens. The desktop's row carries the turn's mark, so it stays the
-  // engine's there.
-  Spinner: (e) => e.surface === 'terminal' ? { kind: 'nothing' } : { kind: 'engine' },
 } satisfies PainterTable
 
 /**
@@ -245,5 +241,4 @@ function sites(on: On, table: PainterTable): void {
   on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => { return site<'TurnDuration'>($, e, next, table.TurnDuration) })
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => { return site<'CommandOutput'>($, e, next, table.CommandOutput) })
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => { return site<'SessionMode'>($, e, next, table.SessionMode) })
-  on('ui.render', { component: 'Spinner' }, async ($, e, next) => { return site<'Spinner'>($, e, next, table.Spinner) })
 }
