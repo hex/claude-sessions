@@ -1,7 +1,7 @@
-# ABOUTME: cs [<name>] -config list|get|set|unset: shows the settings readers see and where each comes from, and
+# ABOUTME: cs [<name>] -config list|get|set|unset|reset: shows the settings readers see and where each comes from, and
 # ABOUTME: keeps them in this machine's ~/.config/cs/config or a session's .cs/local/config through one writer.
 
-_CONFIG_USAGE="Usage: cs [<name>] -config list [--porcelain] | get <KEY> | set <KEY> <value> | unset <KEY>"
+_CONFIG_USAGE="Usage: cs [<name>] -config list [--porcelain] | get <KEY> | set <KEY> <value> | unset <KEY> | reset [--yes]"
 
 # A settings file as messages name it: a session's as <name>/.cs/local/config,
 # any other with ~ for $HOME. In _CONFIG_LABEL.
@@ -56,24 +56,27 @@ _config_listed() {  # list, key
     return 1
 }
 
-# <file>'s new contents: every line but <key>'s, then "<key>=<value>" when a
-# value is given (three args set, two unset). Every other line stays as typed,
-# in order, comments, blanks and lines readers skip included. A failed read
-# fails the render, so cs_write_atomic keeps the old file.
-_config_render() {  # file, key, [value]
+# <file>'s new contents: every line but those of <keys>, space-separated,
+# then "<keys>=<value>" when a value is given for the one key set writes
+# (three args set; two unset, with one key, and reset, with every setting the
+# file holds). A line is a key's when the text before its first = is the key.
+# Every other line stays as typed, in order, comments, blanks and lines
+# readers skip included. A failed read fails the render, so cs_write_atomic
+# keeps the old file.
+_config_render() {  # file, keys, [value]
     if [ -f "$1" ]; then
-        awk -v key="$2" 'index($0, key "=") != 1' "$1" || return 1
+        awk -v keys=" $2 " '(i = index($0, "=")) < 2 || !index(keys, " " substr($0, 1, i - 1) " ")' "$1" || return 1
     fi
     if [ $# -ge 3 ]; then
         printf '%s=%s\n' "$2" "$3" || return 1
     fi
 }
 
-# Writes <key> (or drops it, with no value) in <file>, under the lock beside
+# Writes <keys> (or drops their lines, with no value) in <file>, under the lock beside
 # the file, through cs_write_atomic, which refuses a link that leads out of a
 # session. The directory is made first: a session's .cs/local through
 # cs_mkdir_inside, this machine's ~/.config/cs with mkdir -p, its error shown.
-_config_write() {  # file, session dir or "", key, [value]
+_config_write() {  # file, session dir or "", keys, [value]
     local file="$1" sdir="$2" err
     shift 2
     if [ -n "$sdir" ]; then
@@ -85,9 +88,9 @@ _config_write() {  # file, session dir or "", key, [value]
         || error "$1 not changed: $_CONFIG_LABEL could not be written"
 }
 
-# What `set` adds on stderr when <key>'s new value is not the one readers
-# will see: the environment pins it, or (a machine write from inside a
-# session) the session's own file sets it.
+# What `set` and `reset` add on stderr when <key>'s new value, or its
+# default, is not the one readers will see: the environment pins it, or (a
+# machine write from inside a session) the session's own file sets it.
 _config_shadowed() {  # key, wrote the machine's file (1 or "")
     cs_config_source "$1"
     if [ "$_CS_CFG_SOURCE" = shell ]; then
@@ -97,6 +100,25 @@ _config_shadowed() {  # key, wrote the machine's file (1 or "")
         _config_label "" "$(_config_session_name)"
         printf '%s is also set in %s (%s), which wins in that session\n' "$1" "$_CONFIG_LABEL" "${!v}" >&2
     fi
+}
+
+# The settings <file> holds, each once, in file order: " KEY KEY " in
+# _CONFIG_FILE_KEYS and how many in _CONFIG_FILE_COUNT. A line is a
+# setting's when the text before its first = names a record, whatever its
+# value: the lines _config_render drops for those keys. Status 1 when the
+# file cannot be read.
+_config_file_settings() {  # file
+    local line key
+    _CONFIG_FILE_KEYS=" "
+    _CONFIG_FILE_COUNT=0
+    _cs_config_index
+    while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in *=*) key=${line%%=*} ;; *) continue ;; esac
+        _cs_config_record "$key" || continue
+        case "$_CONFIG_FILE_KEYS" in *" $key "*) continue ;; esac
+        _CONFIG_FILE_KEYS="$_CONFIG_FILE_KEYS$key "
+        _CONFIG_FILE_COUNT=$((_CONFIG_FILE_COUNT + 1))
+    done < "$1"
 }
 
 # The skipped file value that would otherwise apply to <key>, as the
@@ -176,7 +198,7 @@ _config_list_human() {  # session name or ""
 }
 
 cmd_config() {  # session name or "", action, args...
-    local name="$1" sdir="" file action
+    local name="$1" sdir="" file action yes="" arg answer count keys key
     shift
     if [ -n "$name" ]; then
         sdir="$SESSIONS_ROOT/$name"
@@ -188,7 +210,10 @@ cmd_config() {  # session name or "", action, args...
     fi
     _config_label "$file" "$name"
     case "${1:-}" in
-        set|unset) [ -n "$file" ] || error "$_CONFIG_LABEL: there is no file to write" ;;
+        --yes|-y) [ "${2:-}" != reset ] || set -- reset "$1" "${@:3}" ;;
+    esac
+    case "${1:-}" in
+        set|unset|reset) [ -n "$file" ] || error "$_CONFIG_LABEL: there is no file to write" ;;
     esac
     action="${1:-}"
     [ $# -eq 0 ] || shift
@@ -226,6 +251,40 @@ cmd_config() {  # session name or "", action, args...
             fi
             _config_write "$file" "$sdir" "$1"
             printf '%s removed from %s\n' "$1" "$_CONFIG_LABEL"
+            ;;
+        reset)
+            for arg in "$@"; do
+                case "$arg" in --yes|-y) yes=1 ;; *) error "$_CONFIG_USAGE" ;; esac
+            done
+            [ -z "$sdir" ] || _vet_named_session "$sdir"
+            if [ ! -f "$file" ]; then
+                printf 'no settings file at %s; nothing to reset\n' "$_CONFIG_LABEL"
+                return 0
+            fi
+            _config_file_settings "$file" 2>/dev/null || error "$_CONFIG_LABEL could not be read; nothing changed"
+            if [ "$_CONFIG_FILE_COUNT" -eq 0 ]; then
+                printf 'nothing to reset in %s\n' "$_CONFIG_LABEL"
+                return 0
+            fi
+            if [ "$_CONFIG_FILE_COUNT" -eq 1 ]; then count="1 setting"; else count="$_CONFIG_FILE_COUNT settings"; fi
+            if [ -z "$yes" ]; then
+                if ! cs_interactive; then
+                    printf "${RED}Error: %s${NC}\n" "cs -config reset needs --yes without a terminal" >&2
+                    exit 2
+                fi
+                printf 'Remove %s from %s? [y/N] ' "$count" "$_CONFIG_LABEL" >&2
+                read -r answer || answer=""
+                case "$answer" in
+                    y|Y) ;;
+                    *) printf 'nothing changed\n'; return 0 ;;
+                esac
+            fi
+            keys=${_CONFIG_FILE_KEYS# }
+            _config_write "$file" "$sdir" "${keys% }"
+            printf '%s removed from %s\n' "$count" "$_CONFIG_LABEL"
+            for key in $_CONFIG_FILE_KEYS; do
+                if [ -n "$sdir" ]; then _config_shadowed "$key" ""; else _config_shadowed "$key" 1; fi
+            done
             ;;
         *)
             error "$_CONFIG_USAGE"
