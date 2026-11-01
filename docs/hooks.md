@@ -1134,13 +1134,16 @@ are Claude Code's own theme keys: `text`, `inactive`, `subtle` for both faint
 and soft, `planMode` and `success`. Claude Code resolves them to your theme at
 each redraw, so the pane follows it (auto, dark or light) with no setting, and
 `CS_TERM_THEME` changes none of its colours. Only the brand's colours stay the
-same on every theme: the amber and the hero gradient of `tui/src/theme.rs`, and
-the band's black ink.
+same on every theme: the amber of `tui/src/theme.rs`, the band's gradient and
+the band's light ink.
 
-The pane opens on the band: a line as wide as the pane on the hero gradient,
-rust to gold, each cell on its own stop. Its words are black, at a contrast of
-5.2:1 or more against every stop, and start under the rows' labels: the
-`claude-sessions` wordmark in bold, cs's version, the number of rows, the
+The pane opens on the band, a header block of three lines as wide as the pane:
+an empty line, the words, and an empty line. Each cell of the three sits on its
+own stop of one gradient, rust to gold: the hero gradient of `tui/src/theme.rs`
+darkened, its four stops scaled by 0.77, 0.62, 0.56 and 0.57. The words are in
+`rgb(245,230,211)`, the dark-theme ink of `tui/src/theme.rs`, at a contrast of
+5:1 or more on every cell (5.02:1 at the lowest), and start under the rows'
+labels: the `claude-sessions` wordmark in bold, cs's version, the number of rows, the
 number of settings a file or the shell sets (`3 changed`) and the session name,
 with a `·` between the counts and the name. Where the pane is too narrow, these
 parts drop from the right, down to the wordmark alone, cut short on the
@@ -1149,9 +1152,10 @@ see its default. The version is what `cs -version` prints, asked once each
 time the mod loads, when the pane first opens or a reload finds it open; until
 cs answers, the band goes on without it. A run that fails, or prints anything but `cs <version>`, writes
 `cs -version <why>` to the transcript, and the next open asks again. When the
-launch found a newer cs (`CS_UPDATE_AVAILABLE`), a second band line on the same
-gradient reads `cs <version> available · run cs -update`, dropped from the
-right the same way. That line goes once the band's version is that version,
+launch found a newer cs (`CS_UPDATE_AVAILABLE`), a line under the words, on
+the same gradient and above the lower empty line, reads
+`cs <version> available · run cs -update`, dropped from the right the same
+way. That line goes once the band's version is that version,
 as when a reload after an update installed from this conversation reads it
 again. The problem
 lines and the reading words sit right under the band.
