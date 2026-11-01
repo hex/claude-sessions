@@ -185,7 +185,7 @@ export const TOASTS = {
   clearFailed: (err: string) => `/clear did not run: ${err}`,
   nextStep: (line: string) => `next step: ${line}`,
   noRotation: (refusal: string) => `no rotation in this session: ${refusal}`,
-  feedFailed: (err: string) => `feed update failed: ${err}`,
+  cleanChatFailed: (err: string) => `clean chat update failed: ${err}`,
   finishFailed: (task: string, err: string) => `/finish${task === '' ? '' : ` ${task}`} did not run: ${err}`,
   pressedNotEmptied: (err: string) => `could not empty ${PRESSED}: ${err}`,
   wrapFailed: (err: string) => `/wrap did not run: ${err}`,
@@ -206,7 +206,7 @@ export const LOGS = {
   featuresNoAnswer: (base: string, err: string) => `cs ${base} -features did not answer: ${err}`,
   transcriptUnread: (err: string) => `the transcript could not be read: ${err}`,
   colorFailed: (color: string, err: string) => `/color ${color} did not run: ${err}`,
-  feedUnread: (message: string) => `the feed setting could not be read: ${message}`,
+  cleanChatUnread: (message: string) => `the clean chat setting could not be read: ${message}`,
   settingsExited: (code: number, line: string) => `cs -config list exited ${code}: ${line}`,
   settingsUnreadable: (record: string) => `cs -config list gave a record the band cannot read: ${record}`,
   settingsUnread: (err: string) => `cs's settings could not be read: ${err}`,
@@ -254,11 +254,11 @@ let clearing = false
 // asks on every render while a handoff is armed.
 let lastRefusal: string | undefined
 // Whether cs's last answer on this session's control files was a refusal. Set
-// and cleared by every vet (sessionVetted), so the session start's and a feed
-// press's alike; only a passed vet or a reload clears it, never a prompt. The
-// feed key reads off while it is set: the band's label says what cs-feed
-// draws, and cs-feed reads a refused session as off.
-let feedVetRefused = false
+// and cleared by every vet (sessionVetted), so the session start's and a clean
+// chat press's alike; only a passed vet or a reload clears it, never a prompt.
+// The clean chat key reads off while it is set: the band's label says what
+// cs-clean-chat draws, and cs-clean-chat reads a refused session as off.
+let cleanChatVetRefused = false
 // Counts presses of the clear button: a press acts only if no later press or
 // prompt came while cs was answering it.
 let pressCount = 0
@@ -298,15 +298,16 @@ type BandPress = () => void | Promise<unknown>
 export type BandEntry =
   // A word's ink colours the whole label, or only its `lead` glyph with the rest dim.
   | { key: string; kind: 'word'; label: string; ink?: { color: string | undefined } | { lead: string; color: string } }
-  | { key: string; kind: 'press'; label: string; onPress: BandPress; ink?: { lead: string; color: string } }
-  | { key: string; kind: 'chord'; label: string; action: string; onPress: BandPress; ink?: { text: string; color: string | undefined } }
+  // A press's ink colours its `lead` glyph or its `tail` glyph; the rest keeps the line's ink.
+  | { key: string; kind: 'press'; label: string; onPress: BandPress; ink?: { lead: string; color: string } | { tail: string; color: string | undefined } }
+  | { key: string; kind: 'chord'; label: string; action: string; onPress: BandPress }
 type BandFacts = {
   featured?: { label: string; onPress?: BandPress }
   countdown?: { seconds: number; ink: string | undefined }
   rotating: boolean
   armed: boolean
   wrapping: boolean
-  feed?: { on: boolean; color: string | undefined; onPress: BandPress }
+  cleanChat?: { on: boolean; color: string | undefined; onPress: BandPress }
   waiting: number
   gate?: string
   queued: number
@@ -329,8 +330,8 @@ export function buildBandEntries(facts: BandFacts): BandEntry[] {
   // The grace follows the clear key whose press stops it.
   if (facts.countdown !== undefined) entries.push({ key: 'cs-countdown', kind: 'word', label: `in ${facts.countdown.seconds}s`, ink: { color: facts.countdown.ink } })
   if (facts.wrapping) entries.push({ key: 'cs-wrap', kind: 'chord', label: 'wrap', action: WRAP_ACTION, onPress: facts.wrap })
-  if (facts.feed !== undefined) entries.push({ key: 'cs-feed', kind: 'chord', label: facts.feed.on ? 'feed ✓' : 'feed', action: FEED_ACTION, onPress: facts.feed.onPress, ink: facts.feed.on ? { text: '✓', color: facts.feed.color } : undefined })
-  // The queue has no chord: a click or Enter under the band's focus starts it.
+  // The clean chat key and the queue have no chord: a click or Enter under the band's focus presses them.
+  if (facts.cleanChat !== undefined) entries.push({ key: 'cs-clean-chat', kind: 'press', label: facts.cleanChat.on ? 'clean chat ✓' : 'clean chat', onPress: facts.cleanChat.onPress, ink: facts.cleanChat.on ? { tail: '✓', color: facts.cleanChat.color } : undefined })
   if (facts.waiting > 0) entries.push({ key: 'cs-queue', kind: 'press', label: `${QUEUE_GLYPH} run ${facts.waiting} queued ${facts.waiting === 1 ? 'task' : 'tasks'}`, onPress: facts.queue, ink: { lead: QUEUE_GLYPH, color: facts.queueInk } })
   // The features word leads what the session is; only a ready feature can be pressed.
   if (facts.featured !== undefined) {
@@ -397,8 +398,8 @@ type BandOptions = { prompts: boolean; prompt: 'latest' | 'read'; bars: number }
 let bandOptions: BandOptions | undefined
 let bandProblem: string | undefined
 let bandProblemSaid = false
-let feedPressPending: Promise<void> | undefined
-let feedComplaint: string | undefined
+let cleanChatPressPending: Promise<void> | undefined
+let cleanChatComplaint: string | undefined
 
 // What is wrong with a value for one of the band's rows, by field name;
 // undefined when the band can draw it, or the field is not the band's.
@@ -417,13 +418,13 @@ export function register(on: On, options: PluginOptions) {
     ? { prompts: options.bandPrompts as boolean, prompt: options.bandPrompt as BandOptions['prompt'], bars: options.bandBars as number }
     : undefined
   bandProblemSaid = false
-  feedPressPending = undefined
-  feedComplaint = undefined
+  cleanChatPressPending = undefined
+  cleanChatComplaint = undefined
   // A (re)load has no countdown: the engine cancelled the old one's timers.
   left = undefined; ticker = undefined; bandIdle = false; turnRunning = false; stepToastedFor = undefined; adopted = undefined; clearSeen = false; clearing = false; birth = undefined; startPercent = undefined; registered = false
   finishWatch = undefined; finishTurnOver = false; finishShown = new Set(); finishGate = undefined; finishProblemShown = false
   lastRefusal = undefined
-  feedVetRefused = false
+  cleanChatVetRefused = false
   featuresWord = undefined; featuresReading = false; featuresClock = undefined; featuresComplaint = undefined
   fileSettings = new Map(); settingsInFlight = undefined; settingsComplaint = undefined
   railFile = undefined; prompts = []; drawnRows = new Map(); shown = new Map(); denied = new Set(); denySaid = false; notYetSaid = false; tailSaid = false; drawnRead = -1; redrawPending = false
@@ -650,17 +651,17 @@ export function register(on: On, options: PluginOptions) {
     // The features word leads what the session is, at the line's right; a
     // running gate already names the feature it lands.
     let featured = !e.props.hasSurvey && gate === undefined ? featuresWord : undefined
-    let feedEligible = bandIdle && !armed
-    if ((rotating || waiting > 0 || queued > 0 || mail > 0 || railing || featured || feedEligible) && !(await ownsRotation($))) { rotating = false; waiting = 0; queued = 0; mail = 0; railing = false; featured = undefined; feedEligible = false }
+    let cleanChatEligible = bandIdle && !armed
+    if ((rotating || waiting > 0 || queued > 0 || mail > 0 || railing || featured || cleanChatEligible) && !(await ownsRotation($))) { rotating = false; waiting = 0; queued = 0; mail = 0; railing = false; featured = undefined; cleanChatEligible = false }
     // The named tick is remembered on every path, drawn or not, so a row's
     // report that moves nothing visible schedules no redraw.
     const named = namedIndex()
     drawnRead = named
     const hasContent = rotating || waiting > 0 || queued > 0 || mail > 0 || gate !== undefined || railing || featured !== undefined
-    if (!hasContent && !feedEligible) return drawn
-    // Listing /feed reads availability without queuing a command or adding a status row.
-    const feeding = feedEligible && (await $.command.list()).some(command => command.name === 'feed' && command.source === 'plugin' && command.plugin === 'cs-feed')
-    if (!hasContent && !feeding) return drawn
+    if (!hasContent && !cleanChatEligible) return drawn
+    // Listing /clean-chat reads availability without queuing a command or adding a status row.
+    const offersCleanChat = cleanChatEligible && (await $.command.list()).some(command => command.name === 'clean-chat' && command.source === 'plugin' && command.plugin === 'cs-clean-chat')
+    if (!hasContent && !offersCleanChat) return drawn
     const wrapped = rotating && !armed && (await wrapFinished($))
     const chords = await boundChords($)
     const own = paletteColor(await sessionColor($))
@@ -673,7 +674,7 @@ export function register(on: On, options: PluginOptions) {
       countdown: armed && left !== undefined ? { seconds: left, ink: await rampColor($, left) } : undefined,
       rotating, armed, wrapping, waiting, gate, queued, queueRunning: queueStarted, mail,
       queueInk: amberColor(bg, theme),
-      feed: feeding ? { on: !feedVetRefused && await readFeed($), color: own, onPress: () => pressFeed($) } : undefined,
+      cleanChat: offersCleanChat ? { on: !cleanChatVetRefused && await readCleanChat($), color: own, onPress: () => pressCleanChat($) } : undefined,
       rotate: armed ? () => pressClear($) : () => pressRotate($),
       wrap: () => askToWrap($),
       queue: () => pressQueueStart($),
@@ -717,7 +718,7 @@ const DROP_ORDER = ['cs-mail', 'cs-queued', 'cs-features', 'cs-gate']
 // right edge beside the rail. The line's free cells stand between the two.
 type Zone = 'actions' | 'status'
 const ZONES = new Map<string, Zone>([
-  ['cs-rotate', 'actions'], ['cs-countdown', 'actions'], ['cs-wrap', 'actions'], ['cs-feed', 'actions'], ['cs-queue', 'actions'], ['cs-queued', 'actions'],
+  ['cs-rotate', 'actions'], ['cs-countdown', 'actions'], ['cs-wrap', 'actions'], ['cs-clean-chat', 'actions'], ['cs-queue', 'actions'], ['cs-queued', 'actions'],
   ['cs-features', 'status'], ['cs-gate', 'status'], ['cs-mail', 'status'],
 ])
 // The cells between two entries of a zone, and the fewest between the zones.
@@ -787,8 +788,9 @@ const SHORTEST_CELLS = 2
 
 // The entries that leave whole, first to last, once the words are short and
 // every bound chord is its key: the countdown's free text before the actions,
-// the presses before the chords. Only chords are left after them.
-const LEAVE_ORDER = ['cs-countdown', 'cs-features', 'cs-queue']
+// the presses before the chords, the clean chat key the last press to go.
+// Only chords are left after them.
+const LEAVE_ORDER = ['cs-countdown', 'cs-features', 'cs-queue', 'cs-clean-chat']
 
 // The entries a line of `room` cells draws, and whether it spells the chord
 // prefix. The engine's Buttons never shrink, so a line wider than its room
@@ -816,7 +818,7 @@ export function fitBand(all: BandEntry[], chords: Record<string, string>, room: 
     if (leaving === undefined) {
       if (last.kind !== 'chord') throw new Error(`cs: the band left ${last.key} for last, where only chords stay`)
       const keep = (last.keyOnly ? 0 : cellWidth(last.label)) - excess
-      if (keep >= 1) return { entries: [...fitted.entries.slice(0, -1), { ...last, label: cutToCells(last.label, keep), ink: undefined }], prefixed: false }
+      if (keep >= 1) return { entries: [...fitted.entries.slice(0, -1), { ...last, label: cutToCells(last.label, keep) }], prefixed: false }
     }
     kept = kept.filter(entry => entry.key !== (leaving ?? last.key))
   }
@@ -982,12 +984,12 @@ export function drawBand(v: BandView, el: BandElements): RenderElement {
           : 'lead' in entry.ink ? <Text><Text color={entry.ink.color}>{entry.ink.lead}</Text><Text dimColor>{entry.label.slice(entry.ink.lead.length)}</Text></Text>
           : <Text bold color={entry.ink.color}>{entry.label}</Text>
         : entry.kind === 'chord'
-          ? entry.keyOnly ? keyButton(entry) : entry.ink === undefined
-            ? <Button key={entry.key} action={entry.action} plain label={entry.label} onPress={entry.onPress} />
-            : <Button key={entry.key} action={entry.action} plain label={entry.label} onPress={entry.onPress}>{entry.label.slice(0, -entry.ink.text.length)}<Text color={entry.ink.color}>{entry.ink.text}</Text></Button>
+          ? entry.keyOnly ? keyButton(entry) : <Button key={entry.key} action={entry.action} plain label={entry.label} onPress={entry.onPress} />
           : entry.ink === undefined
             ? <Button key={entry.key} plain label={entry.label} onPress={entry.onPress} />
-            : <Button key={entry.key} plain label={entry.label} onPress={entry.onPress}><Text color={entry.ink.color}>{entry.ink.lead}</Text>{entry.label.slice(entry.ink.lead.length)}</Button>,
+            : 'lead' in entry.ink
+              ? <Button key={entry.key} plain label={entry.label} onPress={entry.onPress}><Text color={entry.ink.color}>{entry.ink.lead}</Text>{entry.label.slice(entry.ink.lead.length)}</Button>
+              : <Button key={entry.key} plain label={entry.label} onPress={entry.onPress}>{entry.label.slice(0, -entry.ink.tail.length)}<Text color={entry.ink.color}>{entry.ink.tail}</Text></Button>,
     ])
   }
   return (
@@ -1711,7 +1713,7 @@ async function armedHandoff($: EngineInterface): Promise<string | undefined> {
 // is a no. Each new refusal is toasted once. Each answer starts a cs process
 // (0.15-0.44 s measured), so only the steps that act ask: the session start's
 // heartbeat, a countdown's start and zero, a forced /rotate, a press of the
-// clear, rotate or feed button, and the emptying of the wrap marker
+// clear, rotate or clean chat button, and the emptying of the wrap marker
 // (clearWrapped, as a prompt starts a turn) and of the press marker
 // (clearPressed, at a main-loop turn's end or when the engine refuses the
 // press's run).
@@ -1732,7 +1734,7 @@ async function sessionVetted($: EngineInterface, cwd: string): Promise<boolean> 
   }
   if (refusal !== undefined && refusal !== lastRefusal) $.ui.toast(TOASTS.noRotation(refusal))
   lastRefusal = refusal
-  feedVetRefused = refusal !== undefined
+  cleanChatVetRefused = refusal !== undefined
   return refusal === undefined
 }
 
@@ -1774,50 +1776,49 @@ async function sessionColor($: EngineInterface): Promise<string | undefined> {
 // CS_ROTATE_WRAP_KEYS in lib/01-manifests.sh, which binds them.
 export const ROTATE_ACTION = 'strip:jump1'
 export const WRAP_ACTION = 'strip:jump2'
-export const FEED_ACTION = 'strip:jump3'
 
-// The feed is on by default: no file reads on, as cs-feed reads it (KEEP IN
-// SYNC with feedState in mods/cs-feed/hooks/settings.ts).
-async function readFeed($: EngineInterface): Promise<boolean> {
+// Clean chat is on by default: no file reads on, as cs-clean-chat reads it
+// (KEEP IN SYNC with cleanChatState in mods/cs-clean-chat/hooks/settings.ts).
+async function readCleanChat($: EngineInterface): Promise<boolean> {
   let complaint: string
   try {
     // Writes are non-atomic: only the whole on line counts. Trimming would
     // accept a torn write without its newline; every other value is off.
-    const text = await $.fs.read(`${await $.session.cwd()}/.cs/local/feed`)
-    feedComplaint = undefined
+    const text = await $.fs.read(`${await $.session.cwd()}/.cs/local/clean-chat`)
+    cleanChatComplaint = undefined
     return text === 'on\n'
   } catch (err) {
     const message = String(err instanceof Error ? err.message : err)
     if (message.endsWith(' failed: ENOENT')) {
-      feedComplaint = undefined
+      cleanChatComplaint = undefined
       return true
     }
-    complaint = LOGS.feedUnread(message)
+    complaint = LOGS.cleanChatUnread(message)
   }
-  if (complaint !== feedComplaint) $.ui.log(complaint)
-  feedComplaint = complaint
+  if (complaint !== cleanChatComplaint) $.ui.log(complaint)
+  cleanChatComplaint = complaint
   return false
 }
 
-async function pressFeed($: EngineInterface) {
-  if (feedPressPending !== undefined) return feedPressPending
+async function pressCleanChat($: EngineInterface) {
+  if (cleanChatPressPending !== undefined) return cleanChatPressPending
   const pending = (async () => {
     try {
       const cwd = await $.session.cwd()
       if (!(await sessionVetted($, cwd))) return
-      const on = !(await readFeed($))
-      await $.fs.write(`${cwd}/.cs/local/feed`, on ? 'on\n' : 'off\n')
+      const on = !(await readCleanChat($))
+      await $.fs.write(`${cwd}/.cs/local/clean-chat`, on ? 'on\n' : 'off\n')
     } catch (err) {
-      $.ui.toast(TOASTS.feedFailed(String(err instanceof Error ? err.message : err)))
+      $.ui.toast(TOASTS.cleanChatFailed(String(err instanceof Error ? err.message : err)))
     } finally {
       $.ui.invalidate('ui.render')
     }
   })()
-  feedPressPending = pending
+  cleanChatPressPending = pending
   try {
     await pending
   } finally {
-    if (feedPressPending === pending) feedPressPending = undefined
+    if (cleanChatPressPending === pending) cleanChatPressPending = undefined
   }
 }
 

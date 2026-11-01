@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# ABOUTME: Tests for the cs-feed mod under mods/cs-feed (a Claude Code function-hooks plugin that restyles the chat per session).
+# ABOUTME: Tests for the cs-clean-chat mod under mods/cs-clean-chat (a Claude Code function-hooks plugin that restyles the chat per session).
 # ABOUTME: Pins the manifest, keeps the mod out of the installer, lints the hook source, and runs plugin validate, tsc and the engine test kit when claude is present.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
-MOD="$SCRIPT_DIR/../mods/cs-feed"
+MOD="$SCRIPT_DIR/../mods/cs-clean-chat"
 
 setup() { :; }
 teardown() { :; }
 
 # The one shape every session registers (rationale decision 1): its exact
 # inventory, as `claude plugin validate` prints it.
-HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=feed}, ui.press{plugin=cs, element=cs-feed}, ui.render{component=UserMessage}, ui.render{component=AssistantMessage}, ui.render{component=ToolUse}, ui.render{component=ToolGroup}, ui.render{component=ToolResult}, ui.render{component=ToolProgress}, ui.render{component=TurnDuration}, ui.render{component=CommandOutput}, ui.render{component=SessionMode}'
+HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=clean-chat}, ui.press{plugin=cs, element=cs-clean-chat}, ui.render{component=UserMessage}, ui.render{component=AssistantMessage}, ui.render{component=ToolUse}, ui.render{component=ToolGroup}, ui.render{component=ToolResult}, ui.render{component=ToolProgress}, ui.render{component=TurnDuration}, ui.render{component=CommandOutput}, ui.render{component=SessionMode}'
 
 test_mod_manifest_names_the_plugin_and_its_module_and_declares_no_state() {
     local manifest="$MOD/.claude-plugin/plugin.json"
-    assert_eq "cs-feed" "$(jq -r .name "$manifest")" "plugin name" || return 1
+    assert_eq "cs-clean-chat" "$(jq -r .name "$manifest")" "plugin name" || return 1
     local module
     module="$(jq -r '.modules[0]' "$MOD/hooks/hooks.json")"
     assert_eq "./register.tsx" "$module" "hooks.json names the register module" || return 1
@@ -23,13 +23,13 @@ test_mod_manifest_names_the_plugin_and_its_module_and_declares_no_state() {
     assert_file_exists "$MOD/hooks/$module" "the named module exists" || return 1
     # The switch is a file the mod reads, never $.state: no state types to declare.
     assert_eq "false" "$(jq 'has("types")' "$manifest")" "no state types" || return 1
-    # No install switch (ruling 1): the on/off is the session's .cs/local/feed, never a /config row.
+    # No install switch (ruling 1): the on/off is the session's .cs/local/clean-chat, never a /config row.
     assert_eq "false" "$(jq 'has("userConfig")' "$manifest")" "no userConfig" || return 1
 }
 
-# The feed is experimental: the mod's source stays here, and the installer,
+# Clean chat is experimental: the mod's source stays here, and the installer,
 # which lists every mod file it deploys (cs-mermaid's among them), lists none
-# of cs-feed's.
+# of cs-clean-chat's.
 test_mod_is_kept_out_of_the_installer() {
     local file
     for file in .claude-plugin/plugin.json hooks/hooks.json hooks/draw.tsx hooks/register.tsx hooks/session.ts hooks/settings.ts hooks/verdict.ts hooks/words.ts; do
@@ -37,12 +37,12 @@ test_mod_is_kept_out_of_the_installer() {
     done
     grep -qF "cs-mermaid/hooks/register.tsx" "$SCRIPT_DIR/../install.sh" \
         || { echo "  FAIL: install.sh lists no mod files to deploy"; return 1; }
-    if grep -qF "cs-feed/" "$SCRIPT_DIR/../install.sh"; then
-        echo "  FAIL: install.sh deploys cs-feed: $(grep -nF "cs-feed/" "$SCRIPT_DIR/../install.sh" | head -1)"; return 1
+    if grep -qF "cs-clean-chat/" "$SCRIPT_DIR/../install.sh"; then
+        echo "  FAIL: install.sh deploys cs-clean-chat: $(grep -nF "cs-clean-chat/" "$SCRIPT_DIR/../install.sh" | head -1)"; return 1
     fi
 }
 
-# Nothing the feed registers awaits across a tool call or a stream, it never
+# Nothing clean chat registers awaits across a tool call or a stream, it never
 # reads a classic hook or rewrites the prompt, it has no install switch, and
 # it runs no command (rationale decision 4, ruling 1, (b) "No $.command.run").
 test_mod_source_never_spells_the_refused_events_or_command_run() {
@@ -57,7 +57,7 @@ test_mod_source_never_spells_the_refused_events_or_command_run() {
 
 test_mod_validate_inventories_the_one_shape() {
     require_tool claude || return $?
-    local out raw="${TMPDIR:-/tmp}/cs-mod-feed-validate.$$"
+    local out raw="${TMPDIR:-/tmp}/cs-mod-clean-chat-validate.$$"
     env -u ANTHROPIC_API_KEY claude plugin validate "$MOD" > "$raw" 2>&1
     local status=$?
     out="$(sed 's/\x1b\[[0-9;]*m//g' "$raw")"; rm -f "$raw"
@@ -103,7 +103,7 @@ test_mod_typechecks_against_the_engine_contract() {
 # `claude plugin test`, not bare bun; the kit runs only with function hooks on.
 test_mod_unit_tests_pass_under_the_engine_test_kit() {
     require_tool claude || return $?
-    local out raw="${TMPDIR:-/tmp}/cs-mod-feed-test.$$"
+    local out raw="${TMPDIR:-/tmp}/cs-mod-clean-chat-test.$$"
     env -u ANTHROPIC_API_KEY CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin test "$MOD" > "$raw" 2>&1
     local status=$?
     out="$(sed 's/\x1b\[[0-9;]*m//g' "$raw")"; rm -f "$raw"

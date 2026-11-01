@@ -1,4 +1,4 @@
-// ABOUTME: cs-feed's decisions: what a user row, a command's answer and the mode line draw while this session's feed is on, from the row's own props.
+// ABOUTME: cs-clean-chat's decisions: what a user row, a command's answer and the mode line draw while clean chat is on in this session, from the row's own props.
 // ABOUTME: Pure functions with no $; draw.tsx turns a verdict into a tree. The tool rows and Claude's replies need no decision (register.tsx PAINTERS).
 import type { PromptOrigin } from 'claude-code'
 
@@ -44,13 +44,13 @@ function isHookFeedback(text: string): boolean {
   return /^(?:Stop hook feedback|UserPromptSubmit|PostToolUse|PreToolUse)[^\n]*:/.test(text)
 }
 
-/** CommandOutput §3.3: dim "·" and the text, red on error, a leading "cs-feed:" removed; an empty answer draws nothing. */
+/** CommandOutput §3.3: dim "·" and the text, red on error, a leading "cs-clean-chat:" removed; an empty answer draws nothing. */
 export function decideCommandOutput(props: { readonly text: string; readonly isErrored: boolean }): 'nothing' | { readonly text: string; readonly isErrored: boolean } {
-  const text = props.text.trim().replace(/^cs-feed:\s*/, '').trim()
+  const text = props.text.trim().replace(/^cs-clean-chat:\s*/, '').trim()
   return text ? { text, isErrored: props.isErrored } : 'nothing'
 }
 
-/** SessionMode §3.5: append the feed's mode while this session's feed is on. Off, site() passes the row through before any painter runs. */
+/** SessionMode §3.5: append clean chat's mode while it is on in this session. Off, site() passes the row through before any painter runs. */
 export function sessionModes(modes: readonly string[]): readonly string[] {
   return [...modes, labels.mode]
 }

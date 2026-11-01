@@ -230,14 +230,14 @@ CS_SKILL_FILES=(
 )
 
 # Mod directories under mods/ the installer keeps out: experimental, their
-# source and tests in the checkout only. cs-feed is one, so the cs band, which
-# draws its feed key only beside cs-feed's /feed, draws none. Every file under
-# mods/ outside these and their test/ is in CS_MOD_FILES below
-# (tests/test_install.sh holds the two lists to that), and cs -doctor's drift
-# scan skips them.
+# source and tests in the checkout only. cs-clean-chat is one, so the cs band,
+# which draws its clean chat key only beside cs-clean-chat's /clean-chat, draws
+# none. Every file under mods/ outside these and their test/ is in
+# CS_MOD_FILES below (tests/test_install.sh holds the two lists to that), and
+# cs -doctor's drift scan skips them.
 # shellcheck disable=SC2034  # read by cs -doctor and tests/test_install.sh
 CS_MODS_KEPT_OUT=(
-    cs-feed
+    cs-clean-chat
 )
 
 # Mods cs ships: Claude Code function-hooks plugins, deployed file by file as
@@ -353,8 +353,7 @@ _strip_hook_registration() {
 # "command:<name>" actions, which submit /<name>. Ctrl+X 1 and Ctrl+X 2 bind
 # the engine actions the cs mod's band Buttons answer to: they press the
 # band's rotate (or /clear) and wrap keys. KEEP IN SYNC with ROTATE_ACTION and
-# WRAP_ACTION in mods/cs/hooks/register.tsx; its FEED_ACTION has no key while
-# cs-feed is kept out (CS_MODS_KEPT_OUT above). install.sh
+# WRAP_ACTION in mods/cs/hooks/register.tsx. install.sh
 # asks once per machine and binds each in the context block Claude Code wants
 # it in (home, below): the command keys in Chat, the chords in Global, where
 # the mod reads them. cs -uninstall takes back only the keys that still hold
@@ -1392,7 +1391,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "a7f947af6070bb7c51d92bd88f50ac574aeae9015c9ffa7b38a12c9598545f69  bin/cs"
+    "c6a04c60bb822365272fe4a686ac1a1fe9e68e0e792a92201bce406c1a1360f2  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "d8c282be6bf96631ec6e458c0389cedefdf58fb60a96f4fac49778f051d5e801  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
@@ -1426,7 +1425,7 @@ CS_PAYLOAD_SHA256=(
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
     "8ffa3249cadb8017e5e0809326fc22f3ec0e2c1f9e3dd70c049782888190727f  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
-    "f07f0796befaa40356d318833ed46be921101f3c122869790f20ffecab0c2fb2  mods/cs/hooks/register.tsx"
+    "1fcddb6ff68a8dc2a19c72b92a194df00743e544c6c4847fb8af1816c70b5a25  mods/cs/hooks/register.tsx"
     "6986a18d6c82df9f80579e651cc1c83e1002ebc558415379f4b285c1640c845f  mods/cs/tips.json"
     "7a97c18b6ae755d8ec7862532eb15bbf627170a1fab8cc90dd2f8f77a57164be  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
@@ -1442,7 +1441,7 @@ CS_PAYLOAD_SHA256=(
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
     "36f4aa4ea9678515b714a0f75c4c19fe0db585a81bd01daffa12b888e20e9b0b  mods/cs-panel/hooks/register.tsx"
     "ec54a3f23abd53203ac414b2229dc86b17d7a6040906ce6f3c39721c29987dcc  mods/cs-panel/hooks/settings.ts"
-    "1d5e970dd3d5cd270274ea47d9963e6ed6e8554c591957103781d15d89755752  mods/cs-panel/hooks/draw.tsx"
+    "e80603d2118f6790fd40ee753d95f68bcf6b5faaa5fd5ce9d180ac28a0c6b032  mods/cs-panel/hooks/draw.tsx"
     "62251a79bfd7c81b444fc7d1ba83e97fcafa8e64abdba8d2f5eded930ac500c2  completions/cs.bash"
     "41076b2d6e97163497974dc7c109f8a0053d8846cb52676dfa821319bea17eb2  completions/_cs"
 )

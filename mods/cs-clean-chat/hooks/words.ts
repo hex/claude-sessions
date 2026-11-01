@@ -1,28 +1,28 @@
-// ABOUTME: cs-feed's words: every string the engine shows for the mod, from the /feed replies and log lines to the error lines that take a failed reply's place.
+// ABOUTME: cs-clean-chat's words: every string the engine shows for the mod, from the /clean-chat replies and log lines to the error lines that take a failed reply's place.
 // ABOUTME: Pure. The error strings are the spec's (explore-features §6), pinned by tests.
-import type { FeedProblem } from './settings'
+import type { CleanChatProblem } from './settings'
 
-export const labels = { you: '❯', mode: 'feed · /feed to switch' } as const
+export const labels = { you: '❯', mode: 'clean chat · /clean-chat to switch' } as const
 export const marks = { dot: '·' } as const
 
-// The lines the feed hands the engine to draw on surfaces of the engine's own:
-// its transcript notices (the engine leads each with `cs-feed: `), the
-// replies of /feed and its slash menu row.
+// The lines clean chat hands the engine to draw on surfaces of the engine's
+// own: its transcript notices (the engine leads each with `cs-clean-chat: `),
+// the replies of /clean-chat and its slash menu row.
 export const logs = {
   unread: (path: string, reason: string) => `could not read ${path}: ${reason}`,
-  unusable: (path: string, problem: FeedProblem, text: string) => `could not use ${path}: ${problem === 'torn' ? 'it is torn, with no closing newline' : `it holds ${JSON.stringify(text.slice(0, 40))}, neither on nor off`}; the feed is off until /feed or the band's feed key writes the file again`,
-  feedOff: (refusal: string) => `the feed is off in this session: ${refusal}`,
-  themeUnread: (reason: string) => `could not read the theme: ${reason}; the feed draws in its dark-theme colours`,
+  unusable: (path: string, problem: CleanChatProblem, text: string) => `could not use ${path}: ${problem === 'torn' ? 'it is torn, with no closing newline' : `it holds ${JSON.stringify(text.slice(0, 40))}, neither on nor off`}; clean chat is off until /clean-chat or the band's clean chat key writes the file again`,
+  cleanChatOff: (refusal: string) => `clean chat is off in this session: ${refusal}`,
+  themeUnread: (reason: string) => `could not read the theme: ${reason}; clean chat draws in its dark-theme colours`,
 } as const
 export const replies = {
   notASession: 'this directory is not a cs session (no .cs/local), so nothing changed.',
-  refused: (refusal: string) => `no feed change in this session: ${refusal}`,
+  refused: (refusal: string) => `no clean chat change in this session: ${refusal}`,
   status: (on: boolean) => on ? 'on' : 'off',
-  switched: (on: boolean) => on ? "feed on: your messages and Claude's replies only" : "feed off: Claude Code's own drawing",
-  usage: '/feed toggles the feed · /feed on | off | status',
+  switched: (on: boolean) => on ? "clean chat on: your messages and Claude's replies only" : "clean chat off: Claude Code's own drawing",
+  usage: '/clean-chat toggles clean chat · /clean-chat on | off | status',
 } as const
 export const commands = {
-  feed: { name: 'feed', description: "Show only your messages and Claude's replies in this session: toggle, on, off or status", argumentHint: 'on | off | status', immediate: true },
+  cleanChat: { name: 'clean-chat', description: "Show only your messages and Claude's replies in this session: toggle, on, off or status", argumentHint: 'on | off | status', immediate: true },
 } as const
 
 /** §3.1: a message that starts with a slash command: its name, then its arguments (empty when it has none). */

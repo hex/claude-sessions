@@ -1,11 +1,11 @@
-// ABOUTME: cs-feed mod: while this session's feed is on, the chat shows your messages and Claude's replies and nothing of the work between them. On by default; a session cs -vet-session refuses gets Claude Code's own drawing.
-// ABOUTME: On/off comes from cs's band key (a ui.press hook reads the file after next) or /feed. PAINTERS is the one table of render sites; site() is the one caller of next().
+// ABOUTME: cs-clean-chat mod: while clean chat is on in this session, the chat shows your messages and Claude's replies and nothing of the work between them. On by default; a session cs -vet-session refuses gets Claude Code's own drawing.
+// ABOUTME: On/off comes from cs's band key (a ui.press hook reads the file after next) or /clean-chat. PAINTERS is the one table of render sites; site() is the one caller of next().
 import type { EngineInterface, On, RenderComponent, RenderElement, RenderInput } from 'claude-code'
 
-import { applyFeed, feedRecord, newLoad, readFeed, writeFeed } from './session'
+import { applyCleanChat, cleanChatRecord, newLoad, readCleanChat, writeCleanChat } from './session'
 import type { Load } from './session'
-import { parseFeedArgs } from './settings'
-import type { FeedCommand } from './settings'
+import { parseCleanChatArgs } from './settings'
+import type { CleanChatCommand } from './settings'
 import { decideCommandOutput, decideUser, sessionModes } from './verdict'
 import { NOTHING, drawCommandOutput, drawError, drawReply, drawUser, inks } from './draw'
 import type { Pen } from './draw'
@@ -19,35 +19,35 @@ type $ = EngineInterface
 // A per-session toggle is not a reload: it is a file this load reads.
 let load: Load = newLoad()
 
-/** No install switch: register() always registers the one shape, and each render hook returns the engine's drawing while this session's feed is off. */
+/** No install switch: register() always registers the one shape, and each render hook returns the engine's drawing while clean chat is off in this session. */
 export function register(on: On) {
   load = newLoad()
-  registerFeed(on)
+  registerCleanChat(on)
 }
 
 /**
- * Carries out a typed /feed command for THIS session and returns its reply.
- * It never reloads and runs no command.
+ * Carries out a typed /clean-chat command for THIS session and returns its
+ * reply. It never reloads and runs no command.
  *
- *   usage                        replies.usage; reads nothing
- *   await feedRecord(load, $)    the mirror exists from here on (vetted at the load's on-read)
- *   status                       applyFeed(load, $, 'status'), then `on` or `off` as vetted
- *   toggle                       the file's value read again and flipped (not the mirror's: a hand edit is
- *                                followed), then written as `switch` writes it
- *   switch                       writeFeed: asks cs -vet-session first (ruling §20.22); refused, nothing is written
+ *   usage                             replies.usage; reads nothing
+ *   await cleanChatRecord(load, $)    the mirror exists from here on (vetted at the load's on-read)
+ *   status                            applyCleanChat(load, $, 'status'), then `on` or `off` as vetted
+ *   toggle                            the file's value read again and flipped (not the mirror's: a hand edit is
+ *                                     followed), then written as `switch` writes it
+ *   switch                            writeCleanChat: asks cs -vet-session first (ruling §20.22); refused, nothing is written
  *
  * The texts carry no plugin name: the engine leads a command's output with it
- * (`cs-feed: no feed change ...` on screen). A refusal writes nothing, leaves
+ * (`cs-clean-chat: no clean chat change ...` on screen). A refusal writes nothing, leaves
  * the mirror and the drawing as they were, and says why in the reply: the
  * refusal text is cs's own (session.vetRefusal). The band's press asks the
  * same cs rule with the same argv, so a session cs refuses is refused by both
  * writers.
  *
- * Writing commands queue on load.writes, so a second /feed reads the file the
- * first one wrote. /feed is `immediate`, so a typed /feed runs mid-turn at
- * once (spike3 M12).
+ * Writing commands queue on load.writes, so a second /clean-chat reads the
+ * file the first one wrote. /clean-chat is `immediate`, so a typed
+ * /clean-chat runs mid-turn at once (spike3 M12).
  */
-function perform($: $, cmd: FeedCommand): Promise<string> {
+function perform($: $, cmd: CleanChatCommand): Promise<string> {
   if (cmd.kind === 'status' || cmd.kind === 'usage') return performNow($, cmd)
   const result = (load.writes ?? Promise.resolve()).then(() => performNow($, cmd))
   // The caller keeps result's rejection; the queue must still admit the next command.
@@ -55,16 +55,16 @@ function perform($: $, cmd: FeedCommand): Promise<string> {
   return result
 }
 
-async function performNow($: $, cmd: FeedCommand): Promise<string> {
+async function performNow($: $, cmd: CleanChatCommand): Promise<string> {
   if (cmd.kind === 'usage') return replies.usage
-  await feedRecord(load, $)
+  await cleanChatRecord(load, $)
   if (cmd.kind === 'status') {
-    await applyFeed(load, $, 'status')
-    if (load.on === undefined) throw new Error('feed record did not settle')
+    await applyCleanChat(load, $, 'status')
+    if (load.on === undefined) throw new Error('clean chat record did not settle')
     return replies.status(load.on)
   }
-  const on = cmd.kind === 'switch' ? cmd.on : !(await readFeed(load, $, await $.session.cwd()))
-  const result = await writeFeed(load, $, on)
+  const on = cmd.kind === 'switch' ? cmd.on : !(await readCleanChat(load, $, await $.session.cwd()))
+  const result = await writeCleanChat(load, $, on)
   if (result === 'no-session') return replies.notASession
   if (result !== 'written') return replies.refused(result.refused)
   return replies.switched(on)
@@ -75,43 +75,46 @@ async function performNow($: $, cmd: FeedCommand): Promise<string> {
  * stream. Every hook is registered whatever this session's switch says; the
  * switch decides what they draw, never what is registered.
  */
-function registerFeed(on: On) {
+function registerCleanChat(on: On) {
   // Commands do not survive a reload (spike Q2, measured): every load registers it.
-  // cs's band shows the feed chord only while $.command.list() lists /feed from
-  // plugin cs-feed, reads it when the band is evaluated (4-5 ms after a reloaded
-  // plugin's session.start, spike3 M14), and nothing redraws the band when the
-  // command list changes later. So the registration is the FIRST statement,
-  // issued before any await, and session.start settles (next) only after it
-  // resolved. Not a manifest markdown command: the band filters
-  // `source === 'plugin' && plugin === 'cs-feed'`, and /feed must be answered
-  // by the command.run hook below. /clear (cs's rotation) reloads nothing
-  // (spike3 M13: same load, no session.start, /feed stays registered).
+  // cs's band shows the clean chat key only while $.command.list() lists
+  // /clean-chat from plugin cs-clean-chat, reads it when the band is evaluated
+  // (4-5 ms after a reloaded plugin's session.start, spike3 M14), and nothing
+  // redraws the band when the command list changes later. So the registration
+  // is the FIRST statement, issued before any await, and session.start settles
+  // (next) only after it resolved. Not a manifest markdown command: the band
+  // filters `source === 'plugin' && plugin === 'cs-clean-chat'`, and
+  // /clean-chat must be answered by the command.run hook below. /clear (cs's
+  // rotation) reloads nothing (spike3 M13: same load, no session.start,
+  // /clean-chat stays registered).
   on('session.start', async ($, e, next) => {
-    await $.command.register(commands.feed)
+    await $.command.register(commands.cleanChat)
     return next(e)
   })
 
-  on('command.run', { command: 'feed' }, async ($, e) => {
-    return { text: await perform($, parseFeedArgs(e.args)) }
+  on('command.run', { command: 'clean-chat' }, async ($, e) => {
+    return { text: await perform($, parseCleanChatArgs(e.args)) }
   })
 
-  // cs's band key (`ctrl+x 3 feed`, Button key `cs-feed`, action strip:jump3).
-  // next(e) resolves only after cs's onPress (pressFeed) promise settles
-  // (spike5 M16: 64 of 64, idle and mid-turn, both --plugin-dir orders), so
-  // the file read straight after it is the post-press value, with no timer.
-  // Band-side precondition: pressFeed awaits its $.fs.write before returning
-  // and the Button's onPress returns pressFeed's promise. A press while one is
-  // pending gets that press's in-flight promise (pressFeed is single-flight)
-  // and writes nothing, so both hooks read the same value. A press pressFeed
+  // cs's band key (`clean chat`, Button key `cs-clean-chat`, pressed by a
+  // click or the band's focus). next(e) resolves only after cs's onPress
+  // (pressCleanChat) promise settles (spike5 M16: 64 of 64, idle and
+  // mid-turn, both --plugin-dir orders), so the file read straight after it
+  // is the post-press value, with no timer. Band-side precondition:
+  // pressCleanChat awaits its $.fs.write before returning and the Button's
+  // onPress returns pressCleanChat's promise. A press while one is pending
+  // gets that press's in-flight promise (pressCleanChat is single-flight) and
+  // writes nothing, so both hooks read the same value. A press pressCleanChat
   // refuses (session not vetted, a write error) leaves the file as it is or
   // torn; the read says what both sides now show. This read is not vetted
-  // again (ruling §20.22): pressFeed vetted before it wrote, so a flip to on
-  // read here is the press's; an on that did not change keeps the load's
-  // cached answer, so a session cs refused stays off (session.applyFeed 'press').
+  // again (ruling §20.22): pressCleanChat vetted before it wrote, so a flip
+  // to on read here is the press's; an on that did not change keeps the
+  // load's cached answer, so a session cs refused stays off
+  // (session.applyCleanChat 'press').
   // Matcher literals: KEEP IN SYNC with settings.BAND_PLUGIN / BAND_ELEMENT (a kit test compares them).
-  on('ui.press', { plugin: 'cs', element: 'cs-feed' }, async ($, e, next) => {
+  on('ui.press', { plugin: 'cs', element: 'cs-clean-chat' }, async ($, e, next) => {
     const result = await next(e)
-    await applyFeed(load, $, 'press')
+    await applyCleanChat(load, $, 'press')
     return result
   })
 
@@ -123,10 +126,10 @@ function registerFeed(on: On) {
 // ---------------------------------------------------------------------------
 
 /**
- * The sites the feed draws. AskUserQuestion, InfoNotice and PromptHint stay the
- * engine's (ruling §20.13), and so do the working line (Spinner, Claude
+ * The sites clean chat draws. AskUserQuestion, InfoNotice and PromptHint stay
+ * the engine's (ruling §20.13), and so do the working line (Spinner, Claude
  * Code's own liveness signal) and the row above the prompt (AbovePrompt,
- * cs's band). Pane is no site: the feed opens none.
+ * cs's band). Pane is no site: clean chat opens none.
  */
 type Hooked = Exclude<RenderComponent, 'AskUserQuestion' | 'InfoNotice' | 'PromptHint' | 'Pane' | 'Spinner' | 'AbovePrompt'>
 type Props<C extends RenderComponent> = Partial<RenderInput<C>['props']>
@@ -196,10 +199,10 @@ export const PAINTERS = {
  *   - the row's own isExpanded (ctrl+o, --verbose) returns the engine's
  *     drawing with props untouched (§10, per row: no module flag), so the
  *     detailed view still shows everything.
- *   - this session's feed off returns the engine's drawing too. The check
- *     reads the per-load mirror (session.feedRecord), not the file, so off
- *     costs the hop and next(e), no op; applyFeed() invalidates on every
- *     flip. The mirror says off in a session cs -vet-session refuses,
+ *   - clean chat off in this session returns the engine's drawing too. The
+ *     check reads the per-load mirror (session.cleanChatRecord), not the
+ *     file, so off costs the hop and next(e), no op; applyCleanChat()
+ *     invalidates on every flip. The mirror says off in a session cs -vet-session refuses,
  *     whatever the file says (ruling §20.22). Until the load's record
  *     settles, every evaluation awaits it here: in a session whose file reads
  *     on, absent included, that wait holds the load's vet (one cs process,
@@ -211,7 +214,7 @@ async function site<C extends Hooked>($: $, e: RenderInput<C>, next: (e: RenderI
   const engine = (props?: Props<C>) => drawn ??= next(props ? { ...e, props: { ...e.props, ...props } } : e)
   try {
     if ('isExpanded' in e.props && e.props.isExpanded) return await engine()
-    const on = load.on ?? await feedRecord(load, $)
+    const on = load.on ?? await cleanChatRecord(load, $)
     if (!on) return await engine()
     const pen: Pen = { el: $.ui.resolve(e), ink: inks(load.light), pad: e.surface === 'terminal' ? 2 : 0 }
     const decision = paint(e, pen)

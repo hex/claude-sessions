@@ -1,4 +1,4 @@
-// ABOUTME: Pins the feed's error lines to the feature specification's literal examples.
+// ABOUTME: Pins clean chat's error lines to the feature specification's literal examples.
 // ABOUTME: A failed reply's text in, the line that takes its place out; no drawing hooks.
 import { expect, test } from 'claude-code/testing'
 import { errorLine } from '../hooks/words'

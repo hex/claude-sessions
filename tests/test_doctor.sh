@@ -334,15 +334,15 @@ test_doctor_warns_on_mod_tips_drift() {
         "a tips file the installer never copied is drift" || return 1
 }
 
-# A mod the installer keeps out (CS_MODS_KEPT_OUT, cs-feed) is never deployed,
+# A mod the installer keeps out (CS_MODS_KEPT_OUT, cs-clean-chat) is never deployed,
 # so its source is not drift: no "not deployed" row names it.
 test_doctor_drift_skips_a_kept_out_mod() {
     local checkout="$TEST_TMPDIR/keptmodco" deployed="$TEST_TMPDIR/keptmoddep" skills="$TEST_TMPDIR/keptmodskills"
     make_fake_checkout "$checkout" "$deployed"
-    mkdir -p "$checkout/mods/cs/hooks" "$checkout/mods/cs-feed/hooks" "$skills/cs/hooks"
+    mkdir -p "$checkout/mods/cs/hooks" "$checkout/mods/cs-clean-chat/hooks" "$skills/cs/hooks"
     echo 'export const CRIT_PERCENT = 65' > "$checkout/mods/cs/hooks/register.tsx"
     cp "$checkout/mods/cs/hooks/register.tsx" "$skills/cs/hooks/register.tsx"
-    echo 'export const FEED = 1' > "$checkout/mods/cs-feed/hooks/register.tsx"
+    echo 'export const CLEAN_CHAT = 1' > "$checkout/mods/cs-clean-chat/hooks/register.tsx"
     local output
     output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" CS_SKILLS_DIR="$skills" "$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "Deploy drift" "the scan ran to its verdict" || return 1
