@@ -1262,14 +1262,22 @@ four cells in, ` · ` between them, wrapped onto more lines by whole choices
 where one line cannot hold them, and a choice wider than the line ends in
 `…`. A row that takes a typed value puts an Input on a line of its own above
 them, holding the value (the default's name while empty), Enter
-labelled `set`. The window counts the chooser's lines, and the selected row
-stays drawn above it. The ring moves onto the chooser's first element, the
-arrows walk its elements while it stays open and stop at its ends, and Enter
-picks one. `Keep` closes the chooser and writes nothing. Selecting another
-row, editing the filter or closing the pane closes it too. No chooser offers
-the value the row already has. The mobile app draws no Input, so there you
-cannot type a value, and a typed setting's chooser offers only
-`Default` and `Keep`.
+labelled `set`. A row that takes one of its values puts a picker there
+instead: a Select listing every value in its owner's order, with the one the
+row holds selected. On the terminal it reads `band ▾`, and with the ring on it
+the picker opens to its options under that line, eight at most and `… N more`
+for the rest. The window counts the chooser's lines, the open picker's
+included, and the selected row stays drawn above it. The ring moves onto the
+chooser's first element, the arrows walk its elements while it stays open and
+stop at its ends, and Enter picks one. On the picker the arrows move its
+highlight instead. `Keep` closes the chooser and writes nothing, and so does
+picking the value the row already holds. Esc on the picker closes the pane, as
+it does on a row, so `Keep` stays a Button under it. Selecting another row,
+editing the filter or closing the pane closes the chooser too. No Button
+offers the value the row already has. The mobile app draws no Input and no
+Select, so there you cannot type a value, a typed setting's chooser offers
+only `Default` and `Keep`, and a setting with choices offers its other values
+as Buttons ahead of those.
 
 A change goes where the value lives when this session's file holds it: cs
 writes it there. Any other value goes to the file the scope line names, or to
@@ -1284,8 +1292,8 @@ row shows. cs's own checker judges a typed value.
   there. A flag that turns its feature off at 1 says these in the feature's
   words: `Turn off` writes 1, `Turn on` writes 0, which cs reads as unset,
   and its default is `on`.
-- A setting with choices offers the other choices, then `Default` while a
-  file holds the value, then `Keep`.
+- A setting with choices offers its picker, then `Default` while a file holds
+  the value, then `Keep`.
 - Any other setting offers its Input, then `Default (<default>)` and
   `Keep <value>`.
 
@@ -1299,7 +1307,7 @@ while it stays open and forgets it when it closes.
 The toast is cs's own reply: the line naming the file and when the change
 applies, or the line refusing the value (`not changed: exited 1: Error: …`).
 A `/config` row changes through `$.config.set`, which runs the owning plugin's
-own `config.set` guard: a toggle flips at once, a choice offers its other
+own `config.set` guard: a toggle flips at once, a choice offers a picker of its
 options and `Keep`, a number or text row offers its Input and `Keep <value>`,
 and the panel refuses a text a number row cannot read before it writes
 anything (`<label> takes a number; got <text>`). The owner reloads with the
