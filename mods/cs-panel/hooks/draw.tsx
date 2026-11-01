@@ -1,7 +1,7 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the masthead, the problem lines, the search box, the column header, a window of rows fitted to the body and the selected row's footer.
+// ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the masthead, the problem lines, the search box, the column header, a window of rows fitted to the body and the selected row's footer, which the reset control ends.
 // ABOUTME: Pure over its view and exported with its word tables, so the design lab draws a fixture without the engine.
 import type { EngineInterface, RenderElement, TextProps, ThemeKey } from 'claude-code'
 import { filterLines, keyOf, labelOf, lockOf, shownOf, turnsOff, type Line, type Lock, type Pending, type Row, type RowId, type Source } from './settings'
@@ -34,10 +34,13 @@ export type Handlers = {
   filter: (text: string) => void
   // Enter in the field: the ring to the first row shown.
   toRows: () => void
+  // Enter on the reset control: its dialog.
+  reset: () => void
 }
 
-// The filter field's key; a row's key is its RowId.
+// The filter field's key and the reset control's; a row's key is its RowId.
 export const FILTER = 'filter'
+export const RESET = 'reset'
 
 // Every word the pane draws itself.
 export const WORDS = {
@@ -65,6 +68,8 @@ export const WORDS = {
   // The footer's last line: the keys, the middle one why Enter changes nothing on a locked row.
   hint: { move: '↑↓ move', change: 'Enter change', close: 'Esc close',
     locked: { pinned: 'shell sets it', shellOnly: 'shell only', managed: 'managed', noSession: 'no session name' } satisfies Record<Lock, string> },
+  // The reset control at the right end of the keys' line.
+  reset: 'reset all…',
   // The bars, a toggle's dots, the rules, the dot, the footer's edge, the masthead's box.
   marks: { selected: '▌', on: '●', off: '○', rule: '─', dot: '·', edge: '▍', box: { top: ['╭', '╮'], bottom: ['╰', '╯'], side: '│' } },
 } as const
@@ -252,13 +257,18 @@ export function noteOf(row: Row, hasSelf: boolean): string {
   return s.ignored ?? s.whenText
 }
 
+// The footer's lines: the selected row's, then the keys' line, which the reset
+// control ends, or undefined where the body has no room for it.
+type Footer = { card: Run[][]; keys: Run[] | undefined }
+
 // The selected row's footer, in `room` lines where it can: the label after a
 // caption that says so; what the setting does; its whole value, its source and
 // its note; its key; then the keys, the middle one why Enter changes nothing
-// on a locked row. A short body takes back the description and the value
-// line's later lines, then the key, then the keys' line; the description
-// gives way to the value line, and keeps a line beside it where two are left.
-function footerOf(l: RowLine, columns: number, room: number, hasSelf: boolean): Run[][] {
+// on a locked row, cut to leave a cell before the reset control. A short body
+// takes back the description and the value line's later lines, then the key,
+// then the keys' line; the description gives way to the value line, and keeps
+// a line beside it where two are left.
+function footerOf(l: RowLine, columns: number, room: number, hasSelf: boolean): Footer {
   const row = l.row
   const from: Run = row.kind === 'mod' ? { text: row.mod.isLocked ? WORDS.locked : WORDS.mod, color: THEME.mut }
     : { text: WORDS.from[row.setting.source], color: SOURCE_INK[row.setting.source] }
@@ -272,7 +282,9 @@ function footerOf(l: RowLine, columns: number, room: number, hasSelf: boolean): 
   const keys = [WORDS.hint.move, lock === undefined ? WORDS.hint.change : WORDS.hint.locked[lock], WORDS.hint.close].join(DOT)
   const card = [clip([{ text: `${WORDS.caption}${DOT}`, color: THEME.mut }, { text: labelOf(row), color: THEME.ink, weight: 'bold' }], width), ...about, ...value,
     ...(room >= 4 ? [[{ text: cut(keyOf(row), width), color: THEME.mut }]] : [])]
-  return [...card.map(line => [{ text: `${WORDS.marks.edge} `, color: THEME.soft }, ...line]), ...(room >= 3 ? [[{ text: ' '.repeat(MARK_CELLS) }, { text: cut(keys, width), color: THEME.mut }]] : [])]
+  const keysCells = Math.max(1, width - WORDS.reset.length - 1)
+  return { card: card.map(line => [{ text: `${WORDS.marks.edge} `, color: THEME.soft }, ...line]),
+    keys: room >= 3 ? [{ text: ' '.repeat(MARK_CELLS) }, { text: cut(keys, keysCells).padEnd(keysCells + 1), color: THEME.mut }] : undefined }
 }
 
 // The masthead, install.sh.in's banner the body wide: a round box, its top
@@ -324,8 +336,8 @@ function layoutOf(v: PanelView) {
   // The masthead, the problems, the notice; the search box, the header, its rule; the no-match line.
   const top = masthead.length + v.problems.length + (notice === undefined ? 0 : 1) + (isListed ? BOX_LINES + 2 : 0) + (noMatch === undefined ? 0 : 1)
   // The footer under the window, its rule then the selected row's lines in what the body leaves past one line of window.
-  const footer = selected === undefined ? [] : footerOf(selected, v.columns, v.bodyRows - top - 2, v.session !== undefined)
-  const bottom = footer.length === 0 ? 0 : 1 + footer.length
+  const footer = selected === undefined ? undefined : footerOf(selected, v.columns, v.bodyRows - top - 2, v.session !== undefined)
+  const bottom = footer === undefined ? 0 : 1 + footer.card.length + (footer.keys === undefined ? 0 : 1)
   const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - top - bottom))
   const isEmptyAbove = shown.above && rowsIn(lines.slice(0, shown.from)) === 0
   // While the filter holds text, how many rows it shows of all of them.
@@ -334,11 +346,12 @@ function layoutOf(v: PanelView) {
 }
 
 // The keys of the elements drawPane draws for a view, in the order the focus
-// ring walks them (the field, then the window's rows; a heading is no
-// Button), and the selected row's key, undefined with no rows.
+// ring walks them (the field, the window's rows, then the reset control; a
+// heading is no Button), and the selected row's key, undefined with no rows.
 export function ringOf(v: PanelView): { keys: string[]; selected: string | undefined } {
-  const { isListed, lines, selected, from, to } = layoutOf(v)
-  return { keys: [...(isListed && v.hasField ? [FILTER] : []), ...lines.slice(from, to).flatMap(l => l.kind === 'row' ? [l.row.id] : [])], selected: selected?.row.id }
+  const { isListed, lines, selected, footer, from, to } = layoutOf(v)
+  return { keys: [...(isListed && v.hasField ? [FILTER] : []), ...lines.slice(from, to).flatMap(l => l.kind === 'row' ? [l.row.id] : []),
+    ...(footer?.keys === undefined ? [] : [RESET])], selected: selected?.row.id }
 }
 
 // Where the focus ring goes back to after a drawing, or undefined while its
@@ -369,7 +382,7 @@ function headingOf(title: string, columns: number): Run[] {
 
 // A row's Button holds the whole row after its mark (the focus inverts it all)
 // and never shrinks, so every line is measured. Enter in the field sends the
-// ring to the rows.
+// ring to the rows. The keys' line ends in the reset control's Button.
 export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['resolve']>, on: Handlers): RenderElement {
   const { Box, Text, Button } = el
   const { masthead, isListed, lines, selected, footer, notice, noMatch, count, from, to, above, below } = layoutOf(v)
@@ -397,8 +410,10 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
         </Box>
       ))}
       {below && <Text color={THEME.faint}>{WORDS.below(rowsIn(lines.slice(to)))}</Text>}
-      {footer.length > 0 && <Text color={THEME.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
-      {footer.map(line => <Text>{runs(line)}</Text>)}
+      {footer !== undefined && <Text color={THEME.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
+      {footer?.card.map(line => <Text>{runs(line)}</Text>)}
+      {footer?.keys !== undefined && <Box flexDirection="row">{runs(footer.keys)}<Button key={RESET} plain label={WORDS.reset} onPress={on.reset}>
+        <Text color={THEME.mut}>{WORDS.reset}</Text></Button></Box>}
     </Box>
   )
 }

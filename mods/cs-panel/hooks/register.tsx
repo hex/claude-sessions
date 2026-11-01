@@ -1,13 +1,13 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: cs-panel mod: bare /cs (and /cs-panel) opens a pane of cs's settings, its mods' /config rows and its CS_* settings, under a filter field, and changes one per Enter.
+// ABOUTME: cs-panel mod: bare /cs (and /cs-panel) opens a pane of cs's settings, its mods' /config rows and its CS_* settings, under a filter field, and changes one per Enter or resets one file's.
 // ABOUTME: The only effects of the mod: its hooks, its module state, the cs runs, $.config.set, and the tables of every line it hands the engine.
 import type { EngineInterface, On } from 'claude-code'
 import { drawPane, FILTER, noteOf, ringBack, ringOf, WORDS, type Handlers, type PanelView } from './draw'
 import {
-  filterLines, isModProvider, isRowId, labelOf, linesOf, lockOf, modChange, modRowsOf, parseSettings, settingChange, shownOf, WHERE, writeArgv,
-  type Ask, type Line, type ModRow, type Pending, type RowId, type Scope, type Setting,
+  filterLines, isModProvider, isRowId, labelOf, linesOf, lockOf, modChange, modRowsOf, parseSettings, resetArgv, resetChange, settingChange, shownOf, WHERE, writeArgv,
+  type Ask, type Line, type ModRow, type Pending, type ResetAsk, type RowId, type Scope, type Setting,
 } from './settings'
 
 declare const h: any
@@ -39,18 +39,27 @@ export const REPLIES = {
 // one past the labels can be typed. A setting and a /config row ask alike.
 const what = (label: string, key: string, values: readonly string[]) =>
   `What should ${label} (${key}) be?${values.length === 0 ? '' : ` It takes ${values.join(', ')}.`} Pick one, or type a value under Other.`
+const fileOf = (scope: Scope) => scope === 'machine' ? "this machine's file" : "this session's file"
 // After a setting's question: the file its answers write, and what an off
-// flag's Turn label sets.
+// flag's Turn label sets. The reset's question: how many settings each file it
+// offers overrides, then what no reset touches, the shell's exports while one
+// overrides a setting and the mod rows while any is listed.
 export const ASKS = {
   header: 'cs', setting: what, mod: what,
-  writes: (scope: Scope) => `It writes ${scope === 'machine' ? "this machine's" : "this session's"} file.`,
+  writes: (scope: Scope) => `It writes ${fileOf(scope)}.`,
   sets: (label: string, key: string, value: string) => `${label} sets ${key}=${value}.`,
   where: (label: string, key: string, value: string) => `Where should ${label} (${key}) be ${value}?`,
+  reset: (files: ResetAsk['files'], hasShell: boolean, hasMods: boolean) => [
+    `Reset every cs setting to its default? This removes ${files.map(f => `${WORDS.overrides(f.overrides)} from ${fileOf(f.scope)}`).join(', or ')}.`,
+    ...(hasShell ? ["Your shell's exports stay."] : []), ...(hasMods ? ['Mod rows keep their values.'] : [])].join(' '),
 } as const
 
 export const TOASTS = {
-  // cs's own reply to a write: what it wrote, where, and when it applies.
+  // cs's own reply to a write or a reset: what it changed, where, and when it applies.
   written: (line: string) => line,
+  // A reset cs refused, as runCs says it; one asked before cs first listed its settings.
+  notReset: (why: string) => `cs settings not reset: ${why}`,
+  notRead: 'cs has not listed its settings yet, so nothing was reset',
   // `why` is runCs's (`exited <code>: <cs's own line>`) or a config.set deny.
   refused: (key: string, why: string) => `${key} not changed: ${why}`,
   modSaved: (key: string, value: string, plugin: string) => `${key}=${value} in /config: ${plugin} reloads with it`,
@@ -345,6 +354,7 @@ function handlers($: EngineInterface): Handlers {
     change: id => inBackground($, change($, id)),
     filter: text => { if (text !== filter) { filter = text; $.ui.invalidate('ui.render') } },
     toRows: () => { const first = shownIds()[0]; if (first !== undefined) { select($, first); inBackground($, refocus($, first)) } },
+    reset: () => inBackground($, resetSettings($)),
   }
 }
 
@@ -404,6 +414,21 @@ async function changeMod($: EngineInterface, m: ModRow, id: RowId): Promise<void
   $.ui.invalidate('ui.render')
   const result = await $.config.set({ key: m.key, value: answer.value })
   $.ui.toast(result.deny === undefined ? TOASTS.modSaved(m.key, shownOf(result.value), m.plugin) : TOASTS.refused(m.key, result.deny))
+}
+
+// Enter on the reset control: resetChange's dialog, answered, then one cs run
+// that removes every setting from the file the answer names. Its counts are
+// cs's list's, so before the first list it says so and asks nothing. cs's
+// reply is the toast, and both sources are read again. A press while one runs
+// asks again: cs answers a reset of an emptied file with nothing to reset.
+async function resetSettings($: EngineInterface): Promise<void> {
+  if (settings === undefined) { $.ui.toast(TOASTS.notRead); return }
+  const plan = resetChange(settings, launch?.self !== undefined)
+  const scope = await asked($, ASKS.reset(plan.files, plan.hasShell, mods !== undefined && mods.length > 0), plan)
+  if (scope === undefined) return
+  const run = await runCs($, resetArgv(scope, launch?.self), { timeoutMs: WRITE_TIMEOUT_MS })
+  $.ui.toast(run.ok ? TOASTS.written(lastLine(run.stdout)) : TOASTS.notReset(run.why))
+  await refresh($)
 }
 
 // The plan's dialog, read; undefined when dismissed (the person chose to

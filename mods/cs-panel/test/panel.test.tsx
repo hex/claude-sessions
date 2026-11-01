@@ -109,7 +109,7 @@ test('the mod rows are the rows of cs, cs-update and cs-mermaid only: an engine 
 
 // ── Drawing ──────────────────────────────────────────────────────────────
 
-const NOOP = { change: () => {}, filter: () => {}, toRows: () => {} }
+const NOOP = { change: () => {}, filter: () => {}, toRows: () => {}, reset: () => {} }
 
 // The text one line of the drawing shows on the terminal, from the plain-data
 // tree: a Button draws its children, or its label when it has none, after
@@ -222,9 +222,10 @@ const aboveIn = (lines: string[]) => boxAt(lines) < 0 ? lines.slice(MASTHEAD_LIN
 // The lines under the pane's last rule the body wide, the footer's: the
 // selected row's lines, then the keys' line.
 const cardIn = (lines: string[]) => lines.slice(lines.findLastIndex(line => /^─+$/.test(line)) + 1)
-// The footer's last line, two cells in and cut to the body: the keys, the
-// middle one Enter's, or why Enter changes nothing on the row.
-const hint = (middle = 'Enter change', columns = 58) => `  ${cut(`↑↓ move · ${middle} · Esc close`, columns - 2)}`
+// The footer's last line, the body wide: two cells in, the keys, the middle
+// one Enter's or why Enter changes nothing on the row, cut to leave a cell
+// before `reset all…` at the right end.
+const hint = (middle = 'Enter change', columns = 58) => `  ${cut(`↑↓ move · ${middle} · Esc close`, columns - 13).padEnd(columns - 12)}reset all…`
 const cut = (text: string, cells: number) => text.length > cells ? `${text.slice(0, cells - 1)}…` : text
 // A row as the terminal shows it at the dock's 58 columns, trimmed: below 72
 // columns the value is the only column, so the name takes the 40 cells it
@@ -517,16 +518,16 @@ test('every row, headline, line of the masthead, the card and the field fits 24,
   expect((await at('cs:CS_STATUSLINE_LAYOUT', 20)).slice(8, -7)).toEqual(['+5 above', at58('Status line', '● on'), at58('Layout', 'band', true),
     at58('Segments', 'logo,session,notes'), '+38 below'])
   expect(ringOf(viewOf({ columns: 58, bodyRows: 20, selected: 'cs:CS_STATUSLINE_DISABLE' })).keys)
-    .toEqual(['filter', 'cs:CS_STATUSLINE_DISABLE', 'cs:CS_STATUSLINE_LAYOUT'])
-  expect(ringOf(viewOf({ columns: 58, bodyRows: 18, selected: 'mod:cs.bandPrompts', hasField: false })).keys).toEqual(['mod:cs.bandPrompts', 'mod:cs.bandPrompt'])
+    .toEqual(['filter', 'cs:CS_STATUSLINE_DISABLE', 'cs:CS_STATUSLINE_LAYOUT', 'reset'])
+  expect(ringOf(viewOf({ columns: 58, bodyRows: 18, selected: 'mod:cs.bandPrompts', hasField: false })).keys).toEqual(['mod:cs.bandPrompts', 'mod:cs.bandPrompt', 'reset'])
 })
 
 test('a drawing that moves the element the ring was put on sends the ring back to that key, else to the selected row; one that moves nothing sends it nowhere', () => {
   const short = (selected: RowId, filter = '') => ringOf(viewOf({ columns: 58, bodyRows: 20, selected, filter }))
-  // The ring walks the field, then the window's rows.
-  expect(short('cs:CS_STATUSLINE_LAYOUT')).toEqual({ keys: ['filter', 'cs:CS_STATUSLINE_DISABLE', 'cs:CS_STATUSLINE_LAYOUT', 'cs:CS_STATUSLINE_SEGMENTS'],
+  // The ring walks the field, then the window's rows, then the footer's reset control.
+  expect(short('cs:CS_STATUSLINE_LAYOUT')).toEqual({ keys: ['filter', 'cs:CS_STATUSLINE_DISABLE', 'cs:CS_STATUSLINE_LAYOUT', 'cs:CS_STATUSLINE_SEGMENTS', 'reset'],
     selected: 'cs:CS_STATUSLINE_LAYOUT' })
-  expect(ringOf(viewOf()).keys.length).toBe(47)
+  expect(ringOf(viewOf()).keys.length).toBe(48)
   // The field holds the first place in every drawing, so typing moves nothing.
   expect(ringBack({ key: 'filter', at: 0 }, short('cs:CS_STATUSLINE_LAYOUT', 'scope'))).toBe(undefined)
   // LAYOUT keeps the third place under DISABLE's window, which starts at the group's headline.
@@ -535,10 +536,15 @@ test('a drawing that moves the element the ring was put on sends the ring back t
   expect(ringBack({ key: 'cs:CS_STATUSLINE_SEGMENTS', at: 3 }, short('cs:CS_STATUSLINE_DISABLE'))).toBe('cs:CS_STATUSLINE_DISABLE')
   // Filtered to `named`, Band: named prompt moves from the third place to the
   // second, and the ring goes back to it there.
-  expect(short('mod:cs.bandPrompt', 'named').keys).toEqual(['filter', 'mod:cs.bandPrompt'])
+  expect(short('mod:cs.bandPrompt', 'named').keys).toEqual(['filter', 'mod:cs.bandPrompt', 'reset'])
   expect(ringBack({ key: 'mod:cs.bandPrompt', at: 2 }, short('mod:cs.bandPrompt', 'named'))).toBe('mod:cs.bandPrompt')
+  // The reset control moves with the rows above it, and the ring goes back to it.
+  expect(ringBack({ key: 'reset', at: 4 }, short('cs:CS_STATUSLINE_LAYOUT'))).toBe(undefined)
+  expect(ringBack({ key: 'reset', at: 4 }, short('mod:cs.bandPrompt', 'named'))).toBe('reset')
+  // A filter that matches nothing draws no footer, so no reset control: the ring goes to no row.
+  expect(short('cs:CS_STATUSLINE_LAYOUT', 'zzz')).toEqual({ keys: ['filter'], selected: undefined })
   // A filter that hides the row the ring was on sends it to the first row shown, now selected.
-  expect(short('cs:CS_STATUSLINE_DISABLE', 'scope')).toEqual({ keys: ['filter', 'cs:CS_SCOPE_DISABLE', 'cs:CS_SCOPE_TRACE_DISABLE', 'cs:CS_SCOPE_BUDGET_MS'],
+  expect(short('cs:CS_STATUSLINE_DISABLE', 'scope')).toEqual({ keys: ['filter', 'cs:CS_SCOPE_DISABLE', 'cs:CS_SCOPE_TRACE_DISABLE', 'cs:CS_SCOPE_BUDGET_MS', 'reset'],
     selected: 'cs:CS_SCOPE_DISABLE' })
   expect(ringBack({ key: 'cs:CS_STATUSLINE_DISABLE', at: 1 }, short('cs:CS_STATUSLINE_DISABLE', 'scope'))).toBe('cs:CS_SCOPE_DISABLE')
   // A row the ring is headed for holds no place yet: the drawing puts it there.
@@ -755,8 +761,9 @@ test('each row is a row Box the body wide of the marker Text and one plain Butto
   const other = rowOf(tree, 'cs:CS_STATUSLINE_DISABLE')
   expect(other.children?.map(child => [(child as Node).type, (child as Node).props?.autoFocus])).toEqual([['Text', undefined], ['Button', undefined]])
   expect(rowsOf(tree).filter(line => line.startsWith('▌ '))).toEqual([`▌ ${'Layout'.padEnd(40)}  ${'band'.padEnd(14)}`])
+  // The rows' Buttons, and the footer's reset control.
   const buttons = nodesOf(tree).filter(n => n.type === 'Button')
-  expect(buttons.length).toBe(46)
+  expect(buttons.length).toBe(47)
   expect(buttons.flatMap(b => (b.children ?? []).map(c => typeof c === 'string' ? 'string' : (c as Node).type)).filter(type => type !== 'Text')).toEqual([])
   const labels = rowBoxes(tree).map(box => {
     const key = String(((box.children ?? []).find(c => (c as Node).type === 'Button') as Node).props.key)
@@ -780,7 +787,7 @@ test('the field is a search box right under the masthead, over the column header
     .toEqual(['Input', 'filter', 'scope', 'search settings', true, 'select', 0])
 })
 
-test('the footer sits under a soft rule the body wide, each line of the selected row opening with ▍ in the rules\' soft colour: selected · muted and the label bold in ink, then the value as its row draws it, the source in its colour and the note muted, then the key muted; under them the keys\' line, muted, two cells in', async ($, on) => {
+test('the footer sits under a soft rule the body wide, each line of the selected row opening with ▍ in the rules\' soft colour: selected · muted and the label bold in ink, then the value as its row draws it, the source in its colour and the note muted, then the key muted; under them the keys\' line, muted, two cells in, and the reset control at its right end', async ($, on) => {
   const draw = drawer($, on)
   const card = async (selected: RowId, over: { rows?: ConfigRow[] } = {}) => {
     const parts = ((await draw(viewOf({ selected, ...over }))).tree as Node).children as Node[]
@@ -792,7 +799,7 @@ test('the footer sits under a soft rule the body wide, each line of the selected
   const edge = ['▍ ', COLOURS.soft]
   const dot = [' · ', COLOURS.mut]
   const caption = ['selected · ', COLOURS.mut]
-  const keys = (middle = 'Enter change') => [['  '], [`↑↓ move · ${middle} · Esc close`, COLOURS.mut]]
+  const keys = (middle = 'Enter change') => [['  '], [`↑↓ move · ${middle} · Esc close`.padEnd(46), COLOURS.mut], ['reset all…']]
   expect(await card('cs:CS_STATUSLINE_LAYOUT')).toEqual([
     [edge, caption, ['Layout', COLOURS.ink, 'bold']],
     [edge, ['How the status line looks: plain text, one full-width', COLOURS.ink]],
@@ -819,6 +826,24 @@ test('the footer sits under a soft rule the body wide, each line of the selected
     keys(),
   ])
   expect((await card('mod:cs-mermaid.drawDiagrams', { rows: LOCKED }))[1]?.slice(4, 5)).toEqual([['locked', COLOURS.mut]])
+})
+
+test('the keys\' line is a row Box ending in the reset control, one plain Button keyed reset holding reset all… muted, with no hotkey and no focus mark; the column header keeps its heads and the filter\'s count; with no footer or no keys\' line there is no control', async ($, on) => {
+  const draw = drawer($, on)
+  const { lines, tree } = await draw(viewOf())
+  const box = rowOf(tree, 'reset')
+  const [indent, keys, button] = (box.children ?? []) as Node[]
+  expect([box.props.flexDirection, textOf(box), (box.children ?? []).length]).toEqual(['row', hint(), 3])
+  expect([indent?.type, textOf(indent), keys?.type, keys?.props.color, button?.type]).toEqual(['Text', '  ', 'Text', COLOURS.mut, 'Button'])
+  expect([button?.props.key, button?.props.plain, button?.props.label, button?.props.hotkey, button?.props.autoFocus]).toEqual(['reset', true, 'reset all…', undefined, undefined])
+  expect((button?.children ?? []).map(c => [(c as Node).type, textOf(c), (c as Node).props.color])).toEqual([['Text', 'reset all…', COLOURS.mut]])
+  expect(lines.at(-1)).toBe('  ↑↓ move · Enter change · Esc close            reset all…')
+  expect(lines.slice(6, 8)).toEqual([HEAD_AT_58[0]?.padEnd(58), soft(58)])
+  expect((await draw(viewOf({ filter: 'scope' }))).lines[6]).toBe(counted(58, HEAD_AT_58[0] ?? '', '3 of 46'))
+  // At 24 columns the keys give up their end to leave a cell before it.
+  expect((await draw(viewOf({ columns: 24 }))).lines.at(-1)).toBe('  ↑↓ move · … reset all…')
+  const hasReset = async (over: Partial<PanelView>) => nodesOf((await draw(viewOf(over))).tree).some(n => n.props?.key === 'reset')
+  expect([await hasReset({ filter: 'zzz' }), await hasReset({ columns: 24, bodyRows: 12 }), await hasReset({ hasField: false })]).toEqual([false, false, true])
 })
 
 test('the pane draws every colour but the brand\'s in a theme key, so the engine follows the person\'s theme; what CS_TERM_THEME reads changes no colour', async ($, on) => {
@@ -1223,6 +1248,74 @@ test('cs\'s reply is the toast: its line when the write lands, and when cs refus
   ])
 })
 
+// cs's reset of each file, and the reset dialog's question: what each file it
+// offers holds, as the rows' sources say, then what stays.
+const RESET_MACHINE = [BIN, '-config', 'reset', '--yes']
+const RESET_SESSION = [BIN, 'alpha', '-config', 'reset', '--yes']
+const STAYS = " Your shell's exports stay. Mod rows keep their values."
+const resetting = (removes: string, stays = STAYS) => `Reset every cs setting to its default? This removes ${removes}.${stays}`
+const BOTH_FILES = ["This machine's file", "This session's file", 'Keep everything']
+
+test('the reset control asks which file to empty, naming the overrides each holds and what stays; each file\'s answer runs cs -config reset --yes on it, cs\'s line is the toast and both sources are read again; Keep everything, a typed answer or a dismissal runs nothing', async ($, on) => {
+  let reply: Answer = { stdout: '3 settings removed from ~/.claude-sessions/alpha/.cs/local/config\n' }
+  const { w } = world(on, { answer: argv => argv.includes('reset') ? reply : argv[2] === 'list' ? { stdout: GOLDEN } : {} })
+  const pane = await openPane($)
+  const reads = () => [w.runs.filter(argv => argv.join(' ') === LIST.join(' ')).length, w.lists]
+  const reset = async (...replies: string[]) => { w.replies = replies; await pane.press({ key: 'reset' }) }
+  expect(reads()).toEqual([1, 1])
+  await reset("This session's file")
+  expect([writes(w), w.toasts, reads()]).toEqual([[RESET_SESSION], ['3 settings removed from ~/.claude-sessions/alpha/.cs/local/config'], [2, 2]])
+  reply = { stdout: 'no settings file at ~/.config/cs/config; nothing to reset\n' }
+  await reset("This machine's file")
+  await reset('Keep everything')
+  await reset('both')
+  await reset()
+  expect([writes(w), w.toasts.slice(1), reads()]).toEqual([[RESET_SESSION, RESET_MACHINE], ['no settings file at ~/.config/cs/config; nothing to reset'], [3, 3]])
+  expect(dialogs(w)).toEqual(Array.from({ length: 5 }, () => ({ question: resetting("1 override from this machine's file, or 3 overrides from this session's file"), options: BOTH_FILES })))
+})
+
+test('the reset question counts the overrides each file holds now, says the shell\'s exports stay only while the shell sets one and the mod rows keep theirs only while any is listed; with no session name it offers this machine\'s file alone', async ($, on) => {
+  let list = THREE
+  const { w, clock } = world(on, { answer: argv => argv[2] === 'list' ? { stdout: list } : { stdout: 'nothing to reset in ~/.claude-sessions/alpha/.cs/local/config\n' } })
+  const pane = await openPane($)
+  w.replies = ['Keep everything']
+  await pane.press({ key: 'reset' })
+  list = NONE
+  w.rows = []
+  await $.turn.complete(DONE)
+  await clock.settle()
+  w.replies = ["This session's file"]
+  await pane.press({ key: 'reset' })
+  expect(dialogs(w)).toEqual([
+    { question: resetting("1 override from this machine's file, or 2 overrides from this session's file", ' Mod rows keep their values.'), options: BOTH_FILES },
+    { question: resetting("0 overrides from this machine's file, or 0 overrides from this session's file", ''), options: BOTH_FILES },
+  ])
+  expect([writes(w), w.toasts]).toEqual([[RESET_SESSION], ['nothing to reset in ~/.claude-sessions/alpha/.cs/local/config']])
+})
+
+test('with no session name the reset dialog offers this machine\'s file and Keep everything, and an answer naming this session\'s file runs nothing', async ($, on) => {
+  const { w } = world(on, { env: { CS_BIN: BIN } })
+  const pane = await openPane($)
+  for (const reply of ["This session's file", "This machine's file"]) { w.replies = [reply]; await pane.press({ key: 'reset' }) }
+  expect(dialogs(w)).toEqual(Array.from({ length: 2 }, () => ({ question: resetting("1 override from this machine's file"), options: ["This machine's file", 'Keep everything'] })))
+  expect(writes(w)).toEqual([RESET_MACHINE])
+})
+
+test('a reset cs refuses toasts its refusal and reads cs again; before cs first lists its settings the control says so and asks nothing', async ($, on) => {
+  let list: Answer = { exitCode: 1, stderr: 'Error: boom\n' }
+  const { w, clock } = world(on, { answer: argv => argv.includes('reset') ? { exitCode: 1, stderr: 'Error: cannot write ~/.config/cs/config: Permission denied\n' } : list })
+  const pane = await openPane($)
+  await pane.press({ key: 'reset' })
+  expect([w.toasts, w.asked, writes(w)]).toEqual([['cs has not listed its settings yet, so nothing was reset'], [], []])
+  list = { stdout: GOLDEN }
+  await $.turn.complete(DONE)
+  await clock.settle()
+  w.replies = ["This machine's file"]
+  const lists = w.lists
+  await pane.press({ key: 'reset' })
+  expect([writes(w), w.toasts.slice(1), w.lists]).toEqual([[RESET_MACHINE], ['cs settings not reset: exited 1: Error: cannot write ~/.config/cs/config: Permission denied'], lists + 1])
+})
+
 test('Enter on a /config row changes it through $.config.set: a boolean toggles to its negation at once, a choice and a number ask, abc is refused unwritten, a deny is toasted', async ($, on) => {
   const { w } = world(on)
   const pane = await openPane($)
@@ -1430,9 +1523,9 @@ test('no line the mod hands the engine names the plugin first: the engine prefix
   const call = (f: unknown) => typeof f === 'string' ? f : (f as (...args: string[]) => string)('x', 'y', 'z')
   const lines = [
     COMMANDS['cs-panel'].description, ...Object.values(REPLIES).map(call), ASKS.setting('x', 'y', []), ASKS.setting('x', 'y', ['a', 'b']), ASKS.mod('x', 'y', []),
-    ASKS.writes('machine'), ASKS.sets('x', 'y', 'z'), ASKS.where('x', 'y', 'z'), ...Object.values(TOASTS).map(call), ...Object.values(PROBLEMS).map(call),
-    ...Object.values(LOGS).map(call),
+    ASKS.writes('machine'), ASKS.sets('x', 'y', 'z'), ASKS.where('x', 'y', 'z'), ASKS.reset([{ scope: 'machine', overrides: 1 }], true, true),
+    ...Object.values(TOASTS).map(call), ...Object.values(PROBLEMS).map(call), ...Object.values(LOGS).map(call),
   ]
-  expect(lines.length).toBe(23)
+  expect(lines.length).toBe(26)
   expect(lines.filter(line => line.toLowerCase().startsWith('cs-panel'))).toEqual([])
 })

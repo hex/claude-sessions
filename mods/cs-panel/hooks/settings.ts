@@ -1,4 +1,4 @@
-// ABOUTME: What the cs-panel rows are: `cs -config list --porcelain` parsed into settings, the /config rows cs's mods own, the grouped lines, the filter and each row's dialog.
+// ABOUTME: What the cs-panel rows are: `cs -config list --porcelain` parsed into settings, the /config rows cs's mods own, the grouped lines, the filter, each row's dialog and the reset's.
 // ABOUTME: Pure: what a change asks and where it writes are decided here; register.tsx runs them.
 import type { ConfigKind, ConfigRow, ConfigValue } from 'claude-code'
 
@@ -202,6 +202,8 @@ export const LABELS = {
   fallback: (fallback: string | undefined) => fallback === undefined ? 'Default' : `Default (${fallback})`,
   cancel: 'Cancel',
   machine: 'This machine', session: 'This session only',
+  file: { machine: "This machine's file", session: "This session's file" } satisfies Record<Scope, string>,
+  keepAll: 'Keep everything',
 } as const
 
 // A dialog: the labels, the values the question names (a choice with more
@@ -271,6 +273,18 @@ export function settingChange(s: Setting, hasSelf: boolean): SettingAsk {
 export const WHERE: Ask<Scope | undefined> = { kind: 'ask', options: [LABELS.machine, LABELS.session], values: [],
   read: answer => answer === LABELS.machine ? 'machine' : answer === LABELS.session ? 'session' : undefined }
 
+// The reset dialog: this machine's file, this session's under a session name,
+// or Keep everything; an answer that names no file offered resets nothing.
+// Beside the labels, how many settings each offered file overrides now, as the
+// rows' sources say, and whether the shell overrides any, which no reset touches.
+export type ResetAsk = Ask<Scope | undefined> & { files: readonly { scope: Scope; overrides: number }[]; hasShell: boolean }
+
+export function resetChange(settings: readonly Setting[], hasSelf: boolean): ResetAsk {
+  const scopes: readonly Scope[] = hasSelf ? ['machine', 'session'] : ['machine']
+  return { kind: 'ask', options: [...scopes.map(scope => LABELS.file[scope]), LABELS.keepAll], values: [], read: answer => scopes.find(scope => LABELS.file[scope] === answer),
+    files: scopes.map(scope => ({ scope, overrides: settings.filter(s => s.source === scope).length })), hasShell: settings.some(s => s.source === 'shell') }
+}
+
 // Leave it, this value (the owner's config.set guard judges it, and its deny
 // is the toast), or an answer a number row cannot take, refused unwritten.
 export type ModAnswer = { kind: 'keep' } | { kind: 'value'; value: ConfigValue } | { kind: 'notNumber'; answer: string }
@@ -317,5 +331,15 @@ export function writeArgv(scope: Scope, self: string | undefined, key: SettingKe
   const verb = value === undefined ? ['-config', 'unset', key] : ['-config', 'set', key, value]
   if (scope === 'machine') return verb
   if (self === undefined) throw new Error(`writeArgv: ${key} is to be written to this session's file, but cs named no session for this conversation`)
+  return [self, ...verb]
+}
+
+// The argv of a reset, for runCs: cs removes every setting from the file, unasked.
+//   machine : -config reset --yes
+//   session : <self> -config reset --yes
+export function resetArgv(scope: Scope, self: string | undefined): string[] {
+  const verb = ['-config', 'reset', '--yes']
+  if (scope === 'machine') return verb
+  if (self === undefined) throw new Error("resetArgv: this session's file is to be reset, but cs named no session for this conversation")
   return [self, ...verb]
 }
