@@ -66,6 +66,8 @@ export const TOASTS = {
   notNumber: (label: string, answer: string) => `${label} takes a number; got ${answer}`,
   notNow: (name: string) => `${name} is still changing, or no longer listed; try again`,
   readOnly: (label: string, why: string) => `${label}: ${why}`,
+  // Enter while one of the pane's dialogs waits for an answer.
+  dialogOpen: 'answer the open dialog first (Esc closes it)',
 } as const
 
 // Lines the pane draws above the rows when a source is stale or missing.
@@ -108,6 +110,9 @@ let filter = ''
 let pending = new Map<RowId, Pending>()
 let reading = false
 let readAgain = false
+// Whether one of the pane's dialogs is open: the engine draws one at a time
+// and queues the next, so while it is open Enter opens none.
+let isAsking = false
 let isOpen = false
 let registered = false
 // Where the focus ring is, for ringBack: `drawn` is the last drawing's keys in
@@ -118,7 +123,7 @@ let ring: { key: string; at: number } | undefined
 
 export function register(on: On) {
   launch = undefined; version = undefined; settings = undefined; answered = undefined; mods = undefined; settingsProblem = undefined; modsProblem = undefined
-  selected = undefined; filter = ''; pending = new Map(); reading = false; readAgain = false; isOpen = false; registered = false; drawn = []; ring = undefined
+  selected = undefined; filter = ''; pending = new Map(); reading = false; readAgain = false; isAsking = false; isOpen = false; registered = false; drawn = []; ring = undefined
 
   // /cs-panel, once per load. Nothing opens here: the panel opens only when
   // asked.
@@ -358,12 +363,14 @@ function handlers($: EngineInterface): Handlers {
   }
 }
 
-// Enter on a row. The row is looked up afresh and Enter refused with a toast
-// when the row waits on a change or is gone (a drawing older than the last
-// read or the row's claim), or says why when no dialog changes it. The row is
-// claimed before the first await, so a second Enter finds it waiting;
-// whatever happens, it is released and both sources are read again.
+// Enter on a row. Enter is refused with a toast while a dialog is open, and
+// when the row, looked up afresh, waits on a change or is gone (a drawing
+// older than the last read or the row's claim), or says why when no dialog
+// changes it. The row is claimed before the first await, so a second Enter
+// finds it waiting; whatever happens, it is released and both sources are
+// read again.
 async function change($: EngineInterface, id: RowId): Promise<void> {
+  if (isAsking) { $.ui.toast(TOASTS.dialogOpen); return }
   const line = lineOf(id)
   if (line === undefined || line.pending !== undefined) { $.ui.toast(TOASTS.notNow(id.slice(id.indexOf(':') + 1))); return }
   const hasSelf = launch?.self !== undefined
@@ -385,16 +392,15 @@ async function change($: EngineInterface, id: RowId): Promise<void> {
   }
 }
 
-// settingChange's dialog, answered, then the Where dialog when the answer asks
-// it, then one cs write. cs's reply is the toast, so the panel keeps no copy
-// of cs's checks.
+// settingChange's dialog answered, or a flip's answer, then the Where dialog
+// when the answer asks it, then one cs write. cs's reply is the toast, so the
+// panel keeps no copy of cs's checks.
 async function changeSetting($: EngineInterface, s: Setting, hasSelf: boolean, id: RowId): Promise<void> {
   const plan = settingChange(s, hasSelf)
-  const question = [ASKS.setting(s.label, s.key, plan.values), ...(plan.writes === undefined ? [] : [ASKS.writes(plan.writes)]),
-    ...(plan.sets === undefined ? [] : [ASKS.sets(plan.sets.label, s.key, plan.sets.value)])].join(' ')
-  const answer = await asked($, question, plan)
+  const answer = plan.kind === 'now' ? plan.answer : await asked($, [ASKS.setting(s.label, s.key, plan.values), ...(plan.writes === undefined ? [] : [ASKS.writes(plan.writes)]),
+    ...(plan.sets === undefined ? [] : [ASKS.sets(plan.sets.label, s.key, plan.sets.value)])].join(' '), plan)
   if (answer === undefined || answer.kind === 'keep') return
-  const scope = answer.kind === 'where' ? await asked($, ASKS.where(s.label, s.key, answer.value), WHERE) : answer.scope
+  const scope = answer.kind === 'where' ? await asked($, ASKS.where(s.label, s.key, answer.named), WHERE) : answer.scope
   if (scope === undefined) return
   pending.set(id, 'writing')
   $.ui.invalidate('ui.render')
@@ -421,7 +427,9 @@ async function changeMod($: EngineInterface, m: ModRow, id: RowId): Promise<void
 // cs's list's, so before the first list it says so and asks nothing. cs's
 // reply is the toast, and both sources are read again. A press while one runs
 // asks again: cs answers a reset of an emptied file with nothing to reset.
+// While a dialog is open it is refused with a toast, as a row's Enter is.
 async function resetSettings($: EngineInterface): Promise<void> {
+  if (isAsking) { $.ui.toast(TOASTS.dialogOpen); return }
   if (settings === undefined) { $.ui.toast(TOASTS.notRead); return }
   const plan = resetChange(settings, launch?.self !== undefined)
   const scope = await asked($, ASKS.reset(plan.files, plan.hasShell, mods !== undefined && mods.length > 0), plan)
@@ -432,13 +440,17 @@ async function resetSettings($: EngineInterface): Promise<void> {
 }
 
 // The plan's dialog, read; undefined when dismissed (the person chose to
-// leave it) or when no one can be asked, as in a -p run.
+// leave it) or when no one can be asked, as in a -p run. Every dialog the
+// pane opens goes through here, so isAsking holds while one is open.
 async function asked<A>($: EngineInterface, question: string, plan: Ask<A>): Promise<A | undefined> {
   let answer: string
+  isAsking = true
   try {
     answer = await $.ui.ask(question, { header: ASKS.header, options: plan.options })
   } catch {
     return undefined
+  } finally {
+    isAsking = false
   }
   return plan.read(answer)
 }

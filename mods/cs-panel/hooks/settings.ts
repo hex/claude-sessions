@@ -213,33 +213,37 @@ export type Ask<A> = { kind: 'ask'; options: readonly string[]; values: readonly
 const MOST_OPTIONS = 4
 
 // Leave it, write `value` (undefined unsets it) to `scope`, or a value whose
-// file the Where dialog asks.
-export type SettingAnswer = { kind: 'keep' } | { kind: 'write'; scope: Scope; value: string | undefined } | { kind: 'where'; value: string }
+// file the Where dialog asks, naming it as `named`: the value, or a flag's on
+// or off.
+export type SettingAnswer = { kind: 'keep' } | { kind: 'write'; scope: Scope; value: string | undefined } | { kind: 'where'; value: string; named: string }
 
 // A setting's dialog, and what its question says beside the labels: the file
 // an answer writes unless its label names this session (undefined when a value
 // asks Where), and for an off flag the value its Turn label writes.
 export type SettingAsk = Ask<SettingAnswer> & { writes: Scope | undefined; sets: { label: string; value: string } | undefined }
 
-// A setting's dialog. A change goes where the value lives (this session's file
-// when it sets the value, else this machine's), so it moves what the row shows;
-// with a session name, a value bound for the machine asks Where first. Default
-// (an unset there) is offered when a file holds the value, Keep always, the
-// current value never; an answer no label names is a value typed under Other,
-// which cs's checker judges. An off flag's labels name its feature: Turn off
-// writes 1, and its default, the flag unset, is on.
-//   flag   -> Turn on|off, Default, This session only: on|off, Keep
+// A setting's dialog, or for a flag no file holds the flip, with no dialog
+// asking the value. A change goes where the value lives (this session's file
+// when it sets the value, else this machine's), so it moves what the row
+// shows; with a session name, a value bound for the machine asks Where first,
+// a flip's too. Default (an unset there) is offered when a file holds the
+// value, Keep always, the current value never; an answer no label names is a
+// value typed under Other, which cs's checker judges. An off flag's labels
+// name its feature: Turn off writes 1, and its default, the flag unset, is on.
+//   flag   -> no file holding it: the flip at once; else Turn on|off, Default,
+//             This session only: on|off, Keep
 //   choice -> the other choices that fit beside Default and Keep (the question
 //             names every value when some do not), Default, Keep
 //   text   -> Keep <value> and Default, always: an ask takes two labels
-export function settingChange(s: Setting, hasSelf: boolean): SettingAsk {
+export function settingChange(s: Setting, hasSelf: boolean): SettingAsk | { kind: 'now'; answer: SettingAnswer } {
   if (s.edit === 'shell' || s.edit === 'shelloff') throw new Error(`settingChange: ${s.key} is changed from a shell, and the panel offers no change for it`)
   type Offer = readonly [string, SettingAnswer]
   const home: Scope = s.source === 'session' ? 'session' : 'machine'
   const asksWhere = hasSelf && home === 'machine'
-  const typed = (value: string): SettingAnswer => asksWhere ? { kind: 'where', value } : { kind: 'write', scope: home, value }
+  const typed = (value: string, named = value): SettingAnswer => asksWhere ? { kind: 'where', value, named } : { kind: 'write', scope: home, value }
   const isFlag = s.edit === 'flag' || s.edit === 'flagoff'
-  const fallback: Offer[] = s.source === 'session' || s.source === 'machine' || s.edit === 'text'
+  const isHeld = s.source === 'session' || s.source === 'machine'
+  const fallback: Offer[] = isHeld || s.edit === 'text'
     ? [[LABELS.fallback(isFlag ? stateOf(turnsOff(s.edit)) : s.fallback), { kind: 'write', scope: home, value: undefined }]] : []
   const keep: Offer = [s.edit === 'text' ? LABELS.keepValue(s.value ?? s.fallback ?? NONE) : LABELS.keep, { kind: 'keep' }]
   let offers: Offer[]
@@ -250,6 +254,7 @@ export function settingChange(s: Setting, hasSelf: boolean): SettingAsk {
     case 'flagoff': {
       // The feature is on at 1, or for an off flag at anything but 1.
       const isOn = (s.value === '1') !== turnsOff(s.edit), value = isOn === turnsOff(s.edit) ? '1' : '0'
+      if (!isHeld) return { kind: 'now', answer: typed(value, stateOf(!isOn)) }
       offers = [[LABELS.turn(!isOn), { kind: 'write', scope: home, value }], ...fallback, ...(asksWhere ? [[LABELS.sessionOnly(!isOn), { kind: 'write', scope: 'session', value }] as const] : []), keep]
       sets = turnsOff(s.edit) ? { label: LABELS.turn(!isOn), value } : undefined
       break
@@ -316,6 +321,11 @@ export function modChange(m: ModRow): { kind: 'now'; value: ConfigValue } | Ask<
       return { kind: 'ask', options: [LABELS.keepValue(shown), LABELS.cancel], values: [], read: keepOr(answer => ({ kind: 'value', value: answer })) }
   }
 }
+
+// Whether Enter changes the row with no dialog asking its value: a mod's
+// boolean, and a cs flag no file holds, whose flip may still ask Where.
+export const flips = (row: Row, hasSelf: boolean): boolean =>
+  (row.kind === 'mod' ? modChange(row.mod) : settingChange(row.setting, hasSelf)).kind === 'now'
 
 // A /config value as the pane and its toasts show it.
 export function shownOf(value: ConfigValue): string {

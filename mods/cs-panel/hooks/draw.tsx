@@ -4,7 +4,7 @@
 // ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the masthead, the problem lines, the search box, the column header, a window of rows fitted to the body and the selected row's footer, which the reset control ends.
 // ABOUTME: Pure over its view and exported with its word tables, so the design lab draws a fixture without the engine.
 import type { EngineInterface, RenderElement, TextProps, ThemeKey } from 'claude-code'
-import { filterLines, keyOf, labelOf, lockOf, shownOf, turnsOff, type Line, type Lock, type Pending, type Row, type RowId, type Source } from './settings'
+import { filterLines, flips, keyOf, labelOf, lockOf, shownOf, turnsOff, type Line, type Lock, type Pending, type Row, type RowId, type Source } from './settings'
 
 declare const h: any
 declare const Fragment: any
@@ -65,8 +65,8 @@ export const WORDS = {
   settings: (n: number) => `${n} settings`, overrides: (n: number) => n === 1 ? '1 override' : `${n} overrides`,
   shown: (n: number, of: number) => `${n} of ${of}`, percent: (value: string) => `${value}%`,
   heads: { name: 'Setting', value: 'Value', source: 'Source', applies: 'Applies' },
-  // The footer's last line: the keys, the middle one why Enter changes nothing on a locked row.
-  hint: { move: '↑↓ move', change: 'Enter change', close: 'Esc close',
+  // The footer's last line: the keys, the middle one what Enter does or why it changes nothing on a locked row.
+  hint: { move: '↑↓ move', change: 'Enter change', flip: 'Enter flip', close: 'Esc close',
     locked: { pinned: 'shell sets it', shellOnly: 'shell only', managed: 'managed', noSession: 'no session name' } satisfies Record<Lock, string> },
   // The reset control at the right end of the keys' line.
   reset: 'reset all…',
@@ -263,11 +263,11 @@ type Footer = { card: Run[][]; keys: Run[] | undefined }
 
 // The selected row's footer, in `room` lines where it can: the label after a
 // caption that says so; what the setting does; its whole value, its source and
-// its note; its key; then the keys, the middle one why Enter changes nothing
-// on a locked row, cut to leave a cell before the reset control. A short body
-// takes back the description and the value line's later lines, then the key,
-// then the keys' line; the description gives way to the value line, and keeps
-// a line beside it where two are left.
+// its note; its key; then the keys, the middle one what Enter does or why it
+// changes nothing on a locked row, cut to leave a cell before the reset
+// control. A short body takes back the description and the value line's later
+// lines, then the key, then the keys' line; the description gives way to the
+// value line, and keeps a line beside it where two are left.
 function footerOf(l: RowLine, columns: number, room: number, hasSelf: boolean): Footer {
   const row = l.row
   const from: Run = row.kind === 'mod' ? { text: row.mod.isLocked ? WORDS.locked : WORDS.mod, color: THEME.mut }
@@ -279,7 +279,8 @@ function footerOf(l: RowLine, columns: number, room: number, hasSelf: boolean): 
   const value = wrapRuns([...valueRuns(l), dot, from, dot, { text: noteOf(row, hasSelf), color: THEME.mut }], width, describe === '' || wrapped < 2 ? wrapped : wrapped - 1)
   const about = describe === '' || value.length === wrapped ? [] : wrapRuns([{ text: describe, color: THEME.ink }], width, wrapped - value.length)
   const lock = lockOf(row, hasSelf)
-  const keys = [WORDS.hint.move, lock === undefined ? WORDS.hint.change : WORDS.hint.locked[lock], WORDS.hint.close].join(DOT)
+  const enter = lock !== undefined ? WORDS.hint.locked[lock] : flips(row, hasSelf) ? WORDS.hint.flip : WORDS.hint.change
+  const keys = [WORDS.hint.move, enter, WORDS.hint.close].join(DOT)
   const card = [clip([{ text: `${WORDS.caption}${DOT}`, color: THEME.mut }, { text: labelOf(row), color: THEME.ink, weight: 'bold' }], width), ...about, ...value,
     ...(room >= 4 ? [[{ text: cut(keyOf(row), width), color: THEME.mut }]] : [])]
   const keysCells = Math.max(1, width - WORDS.reset.length - 1)
