@@ -56,7 +56,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 - `cs .` requires the exact root of a known session, adopted project, or feature worktree. It refuses subdirectories and unrelated directories with adoption guidance.
 - cs resumes the [recorded conversation](session-layout.md#machine-local-files-cslocal-gitignored) with `claude --resume`, rather than `--continue`. Launches pass `--name` and a per-session `/color`.
 - The duplicate-conversation guard recognizes identifiers after `--session-id`, `--resume`, `-r`, and `--parent-session-id`. A leftover shell child carrying the identifier does not block a launch. `--force` overrides that guard and the ordinary process lock.
-- See [session commit rules](hooks.md#narrative-remindersh-stop-filechanged-cwdchanged) for the initial commit and [autosave](hooks.md#autosave-commitssh-posttooluse-on-writeedit) for later crash recovery.
+- See [session commit rules](hooks.md#stop-noticessh-stop-async) for the initial commit and [autosave](hooks.md#autosave-commitssh-posttooluse-on-writeedit) for later crash recovery.
 - See [session resolution](hooks.md#how-a-hook-finds-its-session-cs-resolvesh) for desktop and IDE hooks, their contribution without rebinding the launched conversation, and the plain-terminal `claude` exception.
 - A newer conversation opened outside cs produces a launch warning with its identifier and `claude --resume <identifier>`.
 

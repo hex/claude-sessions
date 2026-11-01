@@ -13,6 +13,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Changed
 - `cs -list` prints the cs-tui hint from the listing itself, so `cs -list --bogus` prints only the error.
+- The rotation nudge, the context warning and the narrative reminder no longer draw Claude Code's `Ran N stop hooks` row in the chat. They come from a second `Stop` hook, `stop-notices.sh`, registered as async, and reach Claude as context with your next prompt, so they never start or extend a turn. An armed or draining task queue still gets none of them.
 
 ## 2026.10.11
 
