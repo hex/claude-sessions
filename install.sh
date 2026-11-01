@@ -1440,11 +1440,11 @@ CS_PAYLOAD_SHA256=(
     "c591644117d9a870c4631ecb40c7fc47f7cbab7b74849feb07b318784ba85367  mods/cs-mermaid/skills/show-me/SKILL.md"
     "8aaadea0975e0ccbeadb995515245a9b3a2651f84626c9ba6806a57da3b5ac53  mods/cs-panel/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
-    "cd0a48e82ce805f4d98967539dd83281af5aa2391e7d3c1d11f124ab541c5fc0  mods/cs-panel/hooks/register.tsx"
-    "f54828d48291da8c606d0cc83b31ff595f82ee13da2cc76b3799694ea93e834e  mods/cs-panel/hooks/settings.ts"
-    "03e774cff5cd94c224b24b91ef8eba3140ca726ead5ba3088c42d8d51601dd9f  mods/cs-panel/hooks/draw.tsx"
-    "62251a79bfd7c81b444fc7d1ba83e97fcafa8e64abdba8d2f5eded930ac500c2  completions/cs.bash"
-    "41076b2d6e97163497974dc7c109f8a0053d8846cb52676dfa821319bea17eb2  completions/_cs"
+    "e61662b8a131a805f126fd635bdca683157ce35848253831f8a0c3c8163cc11a  mods/cs-panel/hooks/register.tsx"
+    "b354450a78a296f1b2c59dab9fb9a98817c75604ec839a73935a84ae7dc4ea0f  mods/cs-panel/hooks/settings.ts"
+    "6d5b9dad112fb230a6b5a36014b03477295cda84806f90ac7e42a8b1530ddc68  mods/cs-panel/hooks/draw.tsx"
+    "3595bfd6c3e3e266456eee69eb552ba28294cbb9d7a447ac4e6cb9b297cae178  completions/cs.bash"
+    "b34174fb73e20a6cf00db1c59bdb0905bec55154da11bb6ec15b49a580dfcd00  completions/_cs"
 )
 
 # Everything that lands in HOOKS_DIR, for the copy and cleanup loops. The
