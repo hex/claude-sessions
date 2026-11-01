@@ -11,9 +11,9 @@ teardown() { :; }
 
 # The one shape every session registers (rationale decision 1): its exact
 # inventory, as `claude plugin validate` prints it.
-HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=feed}, command.run{command=helpers}, ui.press{plugin=cs, element=cs-feed}, ui.render{component=Pane, requestId=cs-feed}, ui.render{component=Pane, requestId=cs-feed-helpers}, session.append{door=prompt}, session.append{door=command}, session.append{door=response}, session.append{door=tool-result}, session.append{door=delivery}, turn.start, turn.complete, agent.spawn, ui.render{component=UserMessage}, ui.render{component=AssistantMessage}, ui.render{component=ToolUse}, ui.render{component=ToolGroup}, ui.render{component=ToolResult}, ui.render{component=ToolProgress}, ui.render{component=TurnDuration}, ui.render{component=CommandOutput}, ui.render{component=Spinner}, ui.render{component=SessionMode}, ui.render{component=AbovePrompt}'
+HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=feed}, ui.press{plugin=cs, element=cs-feed}, ui.render{component=UserMessage}, ui.render{component=AssistantMessage}, ui.render{component=ToolUse}, ui.render{component=ToolGroup}, ui.render{component=ToolResult}, ui.render{component=ToolProgress}, ui.render{component=TurnDuration}, ui.render{component=CommandOutput}, ui.render{component=SessionMode}'
 
-test_mod_manifest_names_the_plugin_its_module_and_its_state_types() {
+test_mod_manifest_names_the_plugin_and_its_module_and_declares_no_state() {
     local manifest="$MOD/.claude-plugin/plugin.json"
     assert_eq "cs-feed" "$(jq -r .name "$manifest")" "plugin name" || return 1
     local module
@@ -21,10 +21,8 @@ test_mod_manifest_names_the_plugin_its_module_and_its_state_types() {
     assert_eq "./register.tsx" "$module" "hooks.json names the register module" || return 1
     assert_eq "1" "$(jq '.modules | length' "$MOD/hooks/hooks.json")" "one hooks module" || return 1
     assert_file_exists "$MOD/hooks/$module" "the named module exists" || return 1
-    local types
-    types="$(jq -r .types "$manifest")"
-    assert_eq "./hooks/state.d.ts" "$types" "types names the state declarations" || return 1
-    assert_file_exists "$MOD/${types#./}" "the types file exists" || return 1
+    # The switch is a file the mod reads, never $.state: no state types to declare.
+    assert_eq "false" "$(jq 'has("types")' "$manifest")" "no state types" || return 1
     # No install switch (ruling 1): the on/off is the session's .cs/local/feed, never a /config row.
     assert_eq "false" "$(jq 'has("userConfig")' "$manifest")" "no userConfig" || return 1
 }
@@ -34,7 +32,7 @@ test_mod_manifest_names_the_plugin_its_module_and_its_state_types() {
 # of cs-feed's.
 test_mod_is_kept_out_of_the_installer() {
     local file
-    for file in .claude-plugin/plugin.json hooks/hooks.json hooks/draw.tsx hooks/register.tsx hooks/session.ts hooks/settings.ts hooks/state.d.ts hooks/transcript.ts hooks/verdict.ts hooks/words.ts; do
+    for file in .claude-plugin/plugin.json hooks/hooks.json hooks/draw.tsx hooks/register.tsx hooks/session.ts hooks/settings.ts hooks/verdict.ts hooks/words.ts; do
         assert_file_exists "$MOD/$file" "the mod has $file" || return 1
     done
     grep -qF "cs-mermaid/hooks/register.tsx" "$SCRIPT_DIR/../install.sh" \
@@ -118,7 +116,7 @@ test_mod_unit_tests_pass_under_the_engine_test_kit() {
     assert_output_not_contains "$out" " 0 pass" "the suite ran something" || return 1
 }
 
-run_test test_mod_manifest_names_the_plugin_its_module_and_its_state_types
+run_test test_mod_manifest_names_the_plugin_and_its_module_and_declares_no_state
 run_test test_mod_is_kept_out_of_the_installer
 run_test test_mod_source_never_spells_the_refused_events_or_command_run
 run_test test_mod_validate_inventories_the_one_shape

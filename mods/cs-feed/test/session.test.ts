@@ -1,33 +1,105 @@
-// ABOUTME: Exercises the pure state transitions behind live transcript observations.
-// ABOUTME: Event order comes from the design's measured append and turn-start sequence.
+// ABOUTME: Exercises the switch's reads, vets and writes through the engine test kit: the default on, the refusals, the logs and the command queue.
+// ABOUTME: Test hooks stand in for the session's files, cs -vet-session and the /config theme; the engine's own drawing sits beneath the feed.
 import { expect, mock, test } from 'claude-code/testing'
-import { newLoad, observePrompt, observeTurnStart, observeResponse, openTurn, replaceResponseText } from '../hooks/session'
-import { DEFAULT_VIEW, parseStoredView } from '../hooks/settings'
-import { buildTranscript } from '../hooks/transcript'
+import type { On } from 'claude-code'
 
 const STATUS = { command: 'feed', args: 'status', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } } as const
+const feed = (args: string) => ({ ...STATUS, args })
+const PASSED = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+const VET = ['/bin/cs', '-vet-session', '/session']
+const FEED = '/session/.cs/local/feed'
 
-for (const file of ['off\n', undefined]) test(`${file === undefined ? 'an absent' : 'an off'} feed reads once per load without asking cs to vet it`, async ($, on) => {
-  const reads: string[] = []
-  const logs: string[] = []
+/**
+ * A cs session at /session: its files, a cs that trusts it and a theme with
+ * no row; every read path, process and log recorded. `outside` takes
+ * .cs/local away, `readError` fails every read with it, `bin` is CS_BIN.
+ */
+function session(on: On, files: Map<string, string>, opts: { outside?: true; readError?: string; bin?: string | undefined } = {}) {
+  const seen = { reads: [] as string[], runs: [] as unknown[], logs: [] as string[] }
+  const bin = 'bin' in opts ? opts.bin : '/bin/cs'
   on('session.cwd', () => ({ value: '/session' }))
   on('fs.read', ($, e) => {
-    reads.push(e.path)
-    if (e.path === '/session/.cs/local/feed' && file !== undefined) return { value: file }
-    return { deny: 'ENOENT: no such file or directory' }
+    seen.reads.push(e.path)
+    if (opts.readError !== undefined) return { deny: opts.readError }
+    const text = files.get(e.path)
+    return text === undefined ? { deny: 'ENOENT: no such file or directory' } : { value: text }
   })
-  on('ui.log', ($, e) => { logs.push(e.text); return { value: undefined } })
-  on('ui.render', { component: 'AssistantMessage' }, ($, e) => {
-    return $.ui.resolve(e).Text({ children: 'engine reply' })
-  })
+  on('fs.exists', ($, e) => ({ value: !opts.outside && e.path === '/session/.cs/local' }))
+  on('fs.write', ($, e) => { files.set(e.path, e.text); return { value: undefined } })
+  on('env.get', { name: 'CS_BIN' }, () => ({ value: bin }))
+  on('process.run', ($, e) => { seen.runs.push(e.argv); return { value: PASSED } })
+  on('config.list', () => ({ value: [] }))
+  on('ui.log', ($, e) => { seen.logs.push(e.text); return { value: undefined } })
+  on('ui.render', { component: 'AssistantMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine reply' }))
+  return seen
+}
+
+test('an off feed reads once per load without asking cs to vet it', async ($, on) => {
+  const seen = session(on, new Map([[FEED, 'off\n']]))
   const one = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'AssistantMessage', requestId: 'one', props: { text: 'answer', isFirstOfReply: true } })
   const two = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'AssistantMessage', requestId: 'two', props: { text: 'answer', isFirstOfReply: true } })
   expect((await one.find({ type: 'Text' }))?.text).toBe('engine reply')
   expect((await two.find({ type: 'Text' }))?.text).toBe('engine reply')
-  expect(reads).toEqual(['/session/.cs/local/feed', '/session/.cs/local/feed-view'])
-  expect(logs).toEqual([])
+  expect(seen.reads).toEqual([FEED])
+  expect(seen.runs).toEqual([])
+  expect(seen.logs).toEqual([])
   await one.unmount()
   await two.unmount()
+})
+
+test('an absent feed file in a cs session reads on: one vet, then the reply draws at the margin', async ($, on) => {
+  const runs: unknown[] = []
+  on('session.cwd', () => ({ value: '/session' }))
+  on('fs.read', () => ({ deny: 'ENOENT: no such file or directory' }))
+  on('fs.exists', ($, e) => ({ value: e.path === '/session/.cs/local' }))
+  on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
+  on('process.run', ($, e) => { runs.push(e.argv); return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } })
+  on('config.list', () => ({ value: [] }))
+  on('ui.render', { component: 'AssistantMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine reply' }))
+  const row = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'AssistantMessage', props: { text: 'answer', isFirstOfReply: true } })
+  expect((await row.findAll({ type: 'Box' })).some(box => box.props.paddingLeft === 2 && JSON.stringify(box.children).includes('engine reply'))).toBe(true)
+  expect(runs).toEqual([['/bin/cs', '-vet-session', '/session']])
+  expect(await $.command.run(STATUS)).toEqual({ text: 'on' })
+  expect(runs).toEqual([['/bin/cs', '-vet-session', '/session']])
+  await row.unmount()
+})
+
+test('an absent feed file outside a cs session reads off with no vet and no log', async ($, on) => {
+  const seen = session(on, new Map(), { outside: true })
+  const row = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'AssistantMessage', props: { text: 'answer', isFirstOfReply: true } })
+  expect((await row.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['engine reply'])
+  expect((await row.findAll({ type: 'Box' })).some(box => box.props.paddingLeft === 2)).toBe(false)
+  expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
+  expect(seen.runs).toEqual([])
+  expect(seen.logs).toEqual([])
+  await row.unmount()
+})
+
+test('feed text that is neither on nor off reads off and each kind is logged once per load, whichever read finds it', async ($, on) => {
+  const files = new Map([[FEED, 'on']])
+  const seen = session(on, files)
+  const row = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'AssistantMessage', props: { text: 'answer', isFirstOfReply: true } })
+  expect((await row.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['engine reply'])
+  const torn = 'could not use /session/.cs/local/feed: it is torn, with no closing newline; the feed is off until /feed or the band\'s feed key writes the file again'
+  expect(seen.logs).toEqual([torn])
+  expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
+  expect(seen.logs).toEqual([torn])
+  files.set(FEED, 'on\nyes\n')
+  expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
+  expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
+  expect(seen.logs).toEqual([torn, 'could not use /session/.cs/local/feed: it holds "on\\nyes\\n", neither on nor off; the feed is off until /feed or the band\'s feed key writes the file again'])
+  expect(seen.runs).toEqual([])
+  await row.unmount()
+})
+
+test('a feed file that cannot be read for a reason other than its absence reads off, logged once with its path and the error', async ($, on) => {
+  const seen = session(on, new Map(), { readError: 'EACCES: permission denied' })
+  const row = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'AssistantMessage', props: { text: 'answer', isFirstOfReply: true } })
+  expect((await row.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['engine reply'])
+  expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
+  expect(seen.logs).toEqual(['could not read /session/.cs/local/feed: cs-feed: $.fs.read: EACCES: permission denied'])
+  expect(seen.runs).toEqual([])
+  await row.unmount()
 })
 
 test('two renders share an on-read vet and a refusal keeps both on the engine with one log', {
@@ -53,6 +125,7 @@ test('two renders share an on-read vet and a refusal keeps both on the engine wi
     return { deny: 'ENOENT: no such file or directory' }
   })
   on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
+  on('config.list', () => ({ value: [] }))
   on('process.run', async ($, e) => {
     calls.push({ argv: e.argv, timeoutMs: e.init?.timeoutMs })
     entered?.()
@@ -81,73 +154,17 @@ test('two renders share an on-read vet and a refusal keeps both on the engine wi
   expect(logs).toEqual(['the feed is off in this session: not a trusted session'])
 })
 
-test('a torn feed-view leaves the feed on with the default view, logs once, and the next write rewrites it', async ($, on) => {
-  const files = new Map([['/session/.cs/local/feed', 'on\n'], ['/session/.cs/local/feed-view', '{"group":true']])
-  const logs: string[] = []
-  on('session.cwd', () => ({ value: '/session' }))
-  on('fs.read', ($, e) => { const value = files.get(e.path); return value === undefined ? { deny: 'ENOENT: no such file or directory' } : { value } })
-  on('fs.exists', () => ({ value: true }))
-  on('fs.write', ($, e) => { files.set(e.path, e.text); return { value: undefined } })
-  on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('session.messages', () => ({ value: [] }))
-  on('agent.list', () => ({ value: [] }))
-  on('config.list', () => ({ value: [] }))
-  on('ui.log', ($, e) => { logs.push(e.text); return { value: undefined } })
-  mock.clock(on)
-  on('ui.render', { component: 'ToolProgress' }, ($, e) => $.ui.resolve(e).Text({ children: `hint:${e.props.hint}` }))
-  const props = { tool_use_id: 'call', kind: 'background_hint', hint: 'ctrl+b' } as const
-  const row = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'ToolProgress', requestId: 'first', props })
-  expect((await row.find({ type: 'Text' }))?.text).toBe('hint:')
-  const torn = ['could not use /session/.cs/local/feed-view: feed-view is torn: missing closing newline; the feed draws its default view until /feed writes the file again']
-  expect(logs).toEqual(torn)
-  expect(await $.command.run(STATUS)).toEqual({ text: 'on · clean' })
-  expect(await $.command.run({ ...STATUS, args: 'clean' })).toEqual({ text: "Chat view: clean. your messages, Claude's replies, and one line per turn for the work." })
-  expect(files.get('/session/.cs/local/feed-view')).toBe('{"group":true,"clear":true,"keep":false,"style":"subtle","commands":"grouped","after":"clear","hide":[]}\n')
-  expect(parseStoredView(files.get('/session/.cs/local/feed-view'))).toEqual(DEFAULT_VIEW)
-  const later = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'ToolProgress', requestId: 'later', props })
-  expect((await later.find({ type: 'Text' }))?.text).toBe('hint:')
-  expect(await $.command.run(STATUS)).toEqual({ text: 'on · clean' })
-  expect(logs).toEqual(torn)
-  await row.unmount()
-  await later.unmount()
-})
-
-test('a feed-view that cannot be read for a reason other than its absence is logged with its path, and the default view draws', async ($, on) => {
-  const logs: string[] = []
-  on('session.cwd', () => ({ value: '/session' }))
-  on('fs.read', ($, e) => e.path.endsWith('/feed') ? { value: 'on\n' } : e.path.endsWith('/feed-view') ? { deny: 'EACCES: permission denied' } : { deny: 'ENOENT: no such file or directory' })
-  on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('session.messages', () => ({ value: [] }))
-  on('agent.list', () => ({ value: [] }))
-  on('config.list', () => ({ value: [] }))
-  on('ui.log', ($, e) => { logs.push(e.text); return { value: undefined } })
-  mock.clock(on)
-  on('ui.render', { component: 'ToolProgress' }, ($, e) => $.ui.resolve(e).Text({ children: `hint:${e.props.hint}` }))
-  const row = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'ToolProgress', requestId: 'first', props: { tool_use_id: 'call', kind: 'background_hint', hint: 'ctrl+b' } })
-  expect(logs).toEqual(['could not read /session/.cs/local/feed-view: cs-feed: $.fs.read: EACCES: permission denied'])
-  expect(await $.command.run(STATUS)).toEqual({ text: 'on · clean' })
-  await row.unmount()
-})
-
 test('feed status reads a hand edit and vets an outside flip on only once', async ($, on) => {
-  let file = 'off\n'
-  let vets = 0
-  const logs: string[] = []
-  on('session.cwd', () => ({ value: '/session' }))
-  on('fs.read', ($, e) => e.path.endsWith('/feed') ? { value: file } : { deny: 'ENOENT: no such file or directory' })
-  on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
-  on('process.run', () => { vets++; return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } })
-  on('ui.log', ($, e) => { logs.push(e.text); return { value: undefined } })
-  expect(await $.command.run(STATUS)).toEqual({ text: 'off · raw' })
-  file = 'on\n'
-  expect(await $.command.run(STATUS)).toEqual({ text: 'on · clean' })
-  expect(await $.command.run(STATUS)).toEqual({ text: 'on · clean' })
-  expect(vets).toBe(1)
-  file = 'off\n'
-  expect(await $.command.run(STATUS)).toEqual({ text: 'off · raw' })
-  expect(logs).toEqual([])
+  const files = new Map([[FEED, 'off\n']])
+  const seen = session(on, files)
+  expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
+  files.set(FEED, 'on\n')
+  expect(await $.command.run(STATUS)).toEqual({ text: 'on' })
+  expect(await $.command.run(STATUS)).toEqual({ text: 'on' })
+  expect(seen.runs).toEqual([VET])
+  files.set(FEED, 'off\n')
+  expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
+  expect(seen.logs).toEqual([])
 })
 
 test('feed on refuses a directory without cs local before asking for the binary or writing', async ($, on) => {
@@ -157,65 +174,43 @@ test('feed on refuses a directory without cs local before asking for the binary 
   on('fs.exists', ($, e) => { effects.push(e.path); return { value: false } })
   on('env.get', () => { effects.push('env'); return { value: undefined } })
   on('fs.write', () => { effects.push('write'); return { value: undefined } })
-  expect(await $.command.run({ ...STATUS, args: 'on' })).toEqual({ text: 'this directory is not a cs session (no .cs/local), so nothing changed.' })
-  expect(effects).toEqual(['/session/.cs/local'])
-  expect(await $.command.run(STATUS)).toEqual({ text: 'off · raw' })
+  on('config.list', () => ({ value: [] }))
+  expect(await $.command.run(feed('on'))).toEqual({ text: 'this directory is not a cs session (no .cs/local), so nothing changed.' })
+  expect(effects).toEqual(['/session/.cs/local', '/session/.cs/local'])
+  expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
 })
 
 test('a missing launch binary refuses a feed write and preserves the mirror and files', async ($, on) => {
-  const writes: unknown[] = []
-  on('session.cwd', () => ({ value: '/session' }))
-  on('fs.read', ($, e) => e.path.endsWith('/feed') ? { value: 'off\n' } : { deny: 'ENOENT: no such file or directory' })
-  on('fs.exists', () => ({ value: true }))
-  on('env.get', { name: 'CS_BIN' }, () => ({ value: undefined }))
-  on('fs.write', ($, e) => { writes.push(e); return { value: undefined } })
-  expect(await $.command.run({ ...STATUS, args: 'normal' })).toEqual({ text: 'no feed change in this session: the launch did not say where cs is (CS_BIN)' })
-  expect(writes).toEqual([])
-  expect(await $.command.run(STATUS)).toEqual({ text: 'off · raw' })
+  const files = new Map([[FEED, 'off\n']])
+  session(on, files, { bin: undefined })
+  expect(await $.command.run(feed('on'))).toEqual({ text: 'no feed change in this session: the launch did not say where cs is (CS_BIN)' })
+  expect([...files]).toEqual([[FEED, 'off\n']])
+  expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
 })
 
-test('a vetted preset writes the view before the switch and redraws an on-session view change', async ($, on) => {
-  const files = new Map<string, string>([['/session/.cs/local/feed', 'off\n']])
-  const writes: { path: string; text: string }[] = []
-  const runs: unknown[] = []
+test('a vetted write redraws once per flip, and a write that changes nothing redraws nothing', async ($, on) => {
+  const files = new Map([[FEED, 'off\n']])
+  const seen = session(on, files)
   const redraws: string[] = []
-  on('session.cwd', () => ({ value: '/session' }))
-  on('fs.read', ($, e) => {
-    const text = files.get(e.path)
-    return text === undefined ? { deny: 'ENOENT: no such file or directory' } : { value: text }
-  })
-  on('fs.exists', () => ({ value: true }))
-  on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
-  on('process.run', ($, e) => {
-    runs.push({ argv: e.argv, timeoutMs: e.init?.timeoutMs })
-    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
-  })
-  on('fs.write', ($, e) => { writes.push({ path: e.path, text: e.text }); files.set(e.path, e.text); return { value: undefined } })
   on('ui.invalidate', ($, e) => { redraws.push(e.event); return { value: undefined } })
-  expect(await $.command.run({ ...STATUS, args: 'normal' })).toEqual({ text: 'Chat view: normal. each run of tool calls is one line with counts.' })
-  expect(writes).toEqual([
-    { path: '/session/.cs/local/feed-view', text: '{"group":false,"clear":false,"keep":true,"style":"subtle","commands":"grouped","after":"keep","hide":[]}\n' },
-    { path: '/session/.cs/local/feed', text: 'on\n' },
-  ])
-  expect(await $.command.run(STATUS)).toEqual({ text: 'on · normal' })
-  expect(await $.command.run({ ...STATUS, args: 'clean' })).toEqual({ text: "Chat view: clean. your messages, Claude's replies, and one line per turn for the work." })
-  expect(await $.command.run(STATUS)).toEqual({ text: 'on · clean' })
+  expect(await $.command.run(feed('on'))).toEqual({ text: "feed on: your messages and Claude's replies only" })
+  expect(files.get(FEED)).toBe('on\n')
+  expect(await $.command.run(feed('on'))).toEqual({ text: "feed on: your messages and Claude's replies only" })
+  expect(await $.command.run(feed('off'))).toEqual({ text: "feed off: Claude Code's own drawing" })
+  expect(files.get(FEED)).toBe('off\n')
   expect(redraws).toEqual(['ui.render', 'ui.render'])
-  expect(runs).toEqual([
-    { argv: ['/bin/cs', '-vet-session', '/session'], timeoutMs: 10000 },
-    { argv: ['/bin/cs', '-vet-session', '/session'], timeoutMs: 10000 },
-  ])
+  expect(seen.runs).toEqual([VET, VET, VET])
 })
 
-test('overlapping preset writes finish in command order without replacing the later view', {
+test('a feed write queued behind one in flight reads the file the first one wrote', {
   plugins: [{ name: 'command-entry', tier: 'prepend', register(on) {
     on('command.run', { command: 'feed' }, async ($, e, next) => {
-      await $.ui.log(e.args)
+      await $.ui.log(`entry ${e.args}`)
       return next(e)
     })
   } }],
 }, async ($, on) => {
-  const files = new Map<string, string>([['/session/.cs/local/feed', 'off\n']])
+  const files = new Map([[FEED, 'off\n']])
   let release: (() => void) | undefined
   let entered: (() => void) | undefined
   let second: (() => void) | undefined
@@ -224,29 +219,27 @@ test('overlapping preset writes finish in command order without replacing the la
   const secondEntered = new Promise<void>(resolve => { second = resolve })
   let first = true
   on('session.cwd', () => ({ value: '/session' }))
-  on('fs.read', ($, e) => {
-    const text = files.get(e.path)
-    return text === undefined ? { deny: 'ENOENT: no such file or directory' } : { value: text }
-  })
+  on('fs.read', ($, e) => { const text = files.get(e.path); return text === undefined ? { deny: 'ENOENT: no such file or directory' } : { value: text } })
   on('fs.exists', () => ({ value: true }))
   on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
-  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('ui.log', ($, e) => { if (e.text === 'clean') second?.(); return { value: undefined } })
+  on('process.run', () => ({ value: PASSED }))
+  on('config.list', () => ({ value: [] }))
+  on('ui.log', ($, e) => { if (e.text === 'entry ') second?.(); return { value: undefined } })
   on('fs.write', async ($, e) => {
     if (first) { first = false; entered?.(); await held }
     files.set(e.path, e.text)
     return { value: undefined }
   })
   const clock = mock.clock(on)
-  const normal = $.command.run({ ...STATUS, args: 'normal' })
+  const switching = $.command.run(feed('on'))
   await started
-  const clean = $.command.run({ ...STATUS, args: 'clean' })
+  const toggling = $.command.run(feed(''))
   await secondEntered
   await clock.settle()
   release?.()
-  await Promise.all([normal, clean])
-  expect(await $.command.run(STATUS)).toEqual({ text: 'on · clean' })
-  expect(files.get('/session/.cs/local/feed-view')).toBe('{"group":true,"clear":true,"keep":false,"style":"subtle","commands":"grouped","after":"clear","hide":[]}\n')
+  expect(await Promise.all([switching, toggling])).toEqual([{ text: "feed on: your messages and Claude's replies only" }, { text: "feed off: Claude Code's own drawing" }])
+  expect(files.get(FEED)).toBe('off\n')
+  expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
 })
 
 for (const order of ['refusal first', 'write first']) test(`a successful write keeps its fresh vet with an older status refusal: ${order}`, async ($, on) => {
@@ -265,77 +258,38 @@ for (const order of ['refusal first', 'write first']) test(`a successful write k
   on('fs.read', ($, e) => e.path.endsWith('/feed') ? { value: file } : { deny: 'ENOENT: no such file or directory' })
   on('fs.exists', () => ({ value: true }))
   on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
+  on('config.list', () => ({ value: [] }))
   on('process.run', async () => {
     runs++
     if (runs === 1) {
       vetEntered?.()
       await vetHeld
-      return { value: { exitCode: 1, stdout: '', stderr: 'old refusal\n', isStdoutTruncated: false, isStderrTruncated: false } }
+      return { value: { ...PASSED, exitCode: 1, stderr: 'old refusal\n' } }
     }
-    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return { value: PASSED }
   })
   on('fs.write', async ($, e) => { writeEntered?.(); await writeHeld; file = e.text; return { value: undefined } })
   on('ui.log', ($, e) => { logs.push(e.text); return { value: undefined } })
-  expect(await $.command.run(STATUS)).toEqual({ text: 'off · raw' })
+  expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
   file = 'on\n'
   const status = $.command.run(STATUS)
   await vetStarted
-  const write = $.command.run({ ...STATUS, args: 'on' })
+  const write = $.command.run(feed('on'))
   await writeStarted
+  const switched = { text: "feed on: your messages and Claude's replies only" }
   if (order === 'refusal first') {
     releaseVet?.()
-    expect(await status).toEqual({ text: 'off · raw' })
+    expect(await status).toEqual({ text: 'off' })
     releaseWrite?.()
-    expect(await write).toEqual({ text: 'Chat view: on.' })
+    expect(await write).toEqual(switched)
   } else {
     releaseWrite?.()
-    expect(await write).toEqual({ text: 'Chat view: on.' })
+    expect(await write).toEqual(switched)
     releaseVet?.()
-    expect(await status).toEqual({ text: 'on · clean' })
+    expect(await status).toEqual({ text: 'on' })
   }
-  expect(await $.command.run(STATUS)).toEqual({ text: 'on · clean' })
+  expect(await $.command.run(STATUS)).toEqual({ text: 'on' })
   expect(file).toBe('on\n')
   expect(runs).toBe(2)
   expect(logs).toEqual(order === 'refusal first' ? ['the feed is off in this session: old refusal'] : [])
-})
-
-test('an unknown phase uses the band observation or a running call without inventing a turn id', () => {
-  const load = newLoad()
-  const t = buildTranscript([{ role: 'user', text: 'work', toolUses: [] }, { role: 'assistant', text: '', toolUses: [{ tool_use_id: 'live', tool: 'Read', input: {} }] }])
-  expect(openTurn(load, t)?.id).toBe('live')
-  load.obs.working = false
-  expect(openTurn(load, t)).toBeUndefined()
-  load.obs.phase = 'live'
-  const empty = buildTranscript([{ role: 'user', text: 'work', toolUses: [] }])
-  expect(openTurn(load, empty)).toEqual({ steps: [], runs: [] })
-  load.obs.phase = 'idle'
-  expect(openTurn(load, empty)).toBeUndefined()
-})
-
-test('a prompt-door idle peer opens its first response call unless a typed prompt intervenes', () => {
-  const load = newLoad()
-  observePrompt(load, { door: 'prompt', peer: true, isMeta: true })
-  observeTurnStart(load)
-  observeResponse(load, { uuid: 'reply', text: 'working', calls: ['peer-call'] })
-  expect([...load.obs.turnOpeners]).toEqual(['peer-call'])
-  observeResponse(load, { uuid: 'later', text: 'done', calls: ['later-call'] })
-  expect([...load.obs.turnOpeners]).toEqual(['peer-call'])
-  const typed = newLoad()
-  observePrompt(typed, { door: 'prompt', peer: true, isMeta: true })
-  observePrompt(typed, { door: 'prompt', peer: false, isMeta: false })
-  observeTurnStart(typed)
-  observeResponse(typed, { uuid: 'reply', text: 'working', calls: ['typed-call'] })
-  expect([...typed.obs.turnOpeners]).toEqual([])
-})
-
-test('a response anchors its text before filing the same row’s new calls', () => {
-  const load = newLoad()
-  observeResponse(load, { uuid: 'first', text: 'starting', calls: ['before'] })
-  expect(load.obs.anchors.has('first')).toBe(false)
-  observeResponse(load, { uuid: 'second', text: 'continuing', calls: ['after'] })
-  expect(load.obs.anchors.get('second')).toEqual({ call: 'before', text: 'continuing', seq: 1 })
-  expect(load.obs.callSincePrompt).toBe('after')
-  replaceResponseText(load, 'second', 'stored text')
-  expect(load.obs.anchors.get('second')).toEqual({ call: 'before', text: 'stored text', seq: 1 })
-  expect([...load.obs.latestByCall]).toEqual([['before', 'second']])
 })
