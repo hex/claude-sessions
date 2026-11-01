@@ -1129,8 +1129,13 @@ for a `/config` row) and when a change applies (`/clear`, `launch` or
 `now+launch`). A row at its default leaves the last two empty, and a change
 that applies at once (`now`) leaves the last one empty.
 
-The pane draws in the cs TUI's look and palette (`tui/src/theme.rs`): the dark
-palette, or the light one when `CS_TERM_THEME` is `light`. Its masthead is two
+The pane draws in the cs TUI's look. Ink, muted, faint, soft, teal and green
+are Claude Code's own theme keys: `text`, `inactive`, `subtle` for both faint
+and soft, `planMode` and `success`. Claude Code resolves them to your theme at
+each redraw, so the pane follows it (auto, dark or light) with no setting, and
+`CS_TERM_THEME` changes none of its colours. Only the brand's accents stay the
+same on every theme: the amber, hero gradient and rail of `tui/src/theme.rs`,
+and the installer's wordmark. The pane's masthead is two
 lines, as in the TUI. The first is `▌`, the `claude-sessions` wordmark in the
 installer's rust-to-gold gradient, `settings` in bold ink, the number of rows
 in ink, the number of settings a file or the shell sets (`3 changed`, teal, or
