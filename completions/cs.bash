@@ -156,16 +156,18 @@ _cs_completions() {
     done
 
     # Context: after -config, global or after a session name: its action,
-    # then for get, set and unset a setting's name, which cs itself lists.
+    # then for get, set and unset a setting's name, which cs itself lists, and
+    # for reset its --yes.
     local ci
     for ((ci=1; ci < cword; ci++)); do
         [[ "${words[ci]}" == "-config" ]] || continue
         COMPREPLY=()
         if (( cword == ci + 1 )); then
-            COMPREPLY=($(compgen -W "list get set unset" -- "$cur"))
+            COMPREPLY=($(compgen -W "list get set unset reset" -- "$cur"))
         elif (( cword == ci + 2 )); then
             case "${words[ci+1]}" in
                 list) COMPREPLY=($(compgen -W "--porcelain" -- "$cur")) ;;
+                reset) COMPREPLY=($(compgen -W "--yes" -- "$cur")) ;;
                 get|set|unset) COMPREPLY=($(compgen -W "$(cs -config list --porcelain 2>/dev/null | cut -f1)" -- "$cur")) ;;
             esac
         fi

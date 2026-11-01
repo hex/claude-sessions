@@ -494,6 +494,39 @@ test_zsh_adopt_completes_its_flags() {
     assert_eq "--yes" "$out" "zsh cs -adopt <name> --<TAB> offers --yes alone" || return 1
 }
 
+# -config offers its actions, reset among them, and reset then offers --yes,
+# in the global form and after a session name.
+test_bash_config_completes_reset() {
+    create_test_session "conf-one" >/dev/null
+    put_built_cs_on_path
+    local out; out=$(bash_candidates_words "$BASH_COMP" cs -config "")
+    assert_eq "list
+get
+set
+unset
+reset" "$out" "cs -config <TAB> offers every action" || return 1
+    out=$(bash_candidates_words "$BASH_COMP" cs -config reset --)
+    assert_eq "--yes" "$out" "cs -config reset --<TAB> offers --yes" || return 1
+    out=$(bash_candidates_words "$BASH_COMP" cs conf-one -config reset --)
+    assert_eq "--yes" "$out" "cs <name> -config reset --<TAB> offers --yes" || return 1
+}
+
+test_zsh_config_completes_reset() {
+    require_tool zsh || return $?
+    create_test_session "zconf-one" >/dev/null
+    put_built_cs_on_path
+    local out; out=$(zsh_candidates_words cs -config "")
+    assert_eq "list
+get
+set
+unset
+reset" "$out" "zsh cs -config <TAB> offers every action" || return 1
+    out=$(zsh_candidates_words cs -config reset --)
+    assert_eq "--yes" "$out" "zsh cs -config reset --<TAB> offers --yes" || return 1
+    out=$(zsh_candidates_words cs zconf-one -config reset --)
+    assert_eq "--yes" "$out" "zsh cs <name> -config reset --<TAB> offers --yes" || return 1
+}
+
 echo ""
 echo "cs completion drift tests"
 echo "========================="
@@ -581,6 +614,8 @@ run_test test_zsh_rm_completes_beyond_first_name
 run_test test_zsh_rm_completes_its_flags
 run_test test_bash_adopt_completes_its_flags
 run_test test_zsh_adopt_completes_its_flags
+run_test test_bash_config_completes_reset
+run_test test_zsh_config_completes_reset
 
 # Extract the SESSION subcommand arms — the second dispatch site, `cs <name>
 # -verb`, which is a different vocabulary from the top-level one above. The arms

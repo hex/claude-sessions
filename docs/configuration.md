@@ -360,11 +360,12 @@ session's own `.cs/local/config`, which outranks it in that session. `cs
 -config` writes both:
 
 ```
-cs -config list [--porcelain]          every setting: its value, where it comes from, when a change applies, then the lines the files skip
-cs -config get <KEY>                   the value readers see now; empty when nothing sets it
-cs -config set <KEY> <value>           keep it in this machine's file
-cs -config unset <KEY>                 remove it from this machine's file
-cs <name> -config list|get|set|unset   the same, for that session's own file
+cs -config list [--porcelain]                every setting: its value, where it comes from, when a change applies, then the lines the files skip
+cs -config get <KEY>                         the value readers see now; empty when nothing sets it
+cs -config set <KEY> <value>                 keep it in this machine's file
+cs -config unset <KEY>                       remove it from this machine's file
+cs -config reset [--yes]                     remove every setting from this machine's file
+cs <name> -config list|get|set|unset|reset   the same, for that session's own file
 ```
 
 ```
@@ -372,6 +373,9 @@ $ cs -config set CS_STATUSLINE_LAYOUT band
 CS_STATUSLINE_LAYOUT=band in ~/.config/cs/config: applies at the next repaint
 $ cs my-session -config set CS_SCOPE_DISABLE 1
 CS_SCOPE_DISABLE=1 in my-session/.cs/local/config: applies at your next prompt
+$ cs -config reset
+Remove 2 settings from ~/.config/cs/config? [y/N] y
+2 settings removed from ~/.config/cs/config
 ```
 
 **For tools.** `cs -config list --porcelain` prints one line per setting, in
@@ -401,10 +405,21 @@ means none, and the last field is never `-`.
 `set` refuses a key the files never hold, a key that is no cs setting and a
 value the setting's readers would not take, each by name. When your shell
 also exports the key, `set` still writes the file and says on stderr that the
-export wins until you unset it there. `cs <name> -config set` and `unset` run
-the same checks as opening the session first, so cs refuses a session whose
-`.cs/local` git tracks, or whose config links out of the session, before it
-writes anything.
+export wins until you unset it there. `cs <name> -config set`, `unset` and
+`reset` run the same checks as opening the session first, so cs refuses a
+session whose `.cs/local` git tracks, or whose config links out of the
+session, before it asks or writes anything.
+
+`reset` removes the line of every setting the file holds, a value its setting
+refuses included, and keeps every other line as typed, so readers fall back
+to the next source under Precedence. It counts settings, not lines. On a
+terminal it asks first and changes nothing unless you answer `y` or `Y`.
+`--yes` (or `-y`) skips the question. Without a terminal, a reset with
+something to remove and no `--yes` exits with status 2 and changes nothing. A
+reset with nothing to remove, a file with no setting or no file at all,
+changes nothing and needs no `--yes`. Your shell's exports are in no file, so
+a reset leaves them, and cs names on stderr each removed key that your
+environment still sets.
 
 **Precedence.** Each reader takes, per setting, your environment, else the
 session's file, else this machine's, else the default, every time it runs: the
@@ -420,7 +435,8 @@ started outside cs carry no session, so they read this machine's file only.
 never run it as shell: they strip no quotes, trim no spaces and expand
 nothing. Lines starting with `#` and blank lines are comments. Every reader
 skips a line that is not `KEY=value`, a key that is not a setting and a value
-its setting refuses, and the writer keeps them; `cs -config list` and `cs
+its setting refuses, and the writer keeps them, apart from the lines of a
+setting `set`, `unset` or `reset` removes; `cs -config list` and `cs
 -doctor` name each with its line number and why. A skipped session value lets
 this machine's value apply. A key on two lines takes the last; `set` collapses
 them into one line at the end. On and off settings take `1` and `0`, and a
