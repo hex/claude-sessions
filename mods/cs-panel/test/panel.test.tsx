@@ -281,6 +281,11 @@ test('the golden porcelain and the mod rows draw under the masthead, the first r
   const rows = rowsOf(tree)
   expect(rows.length).toBe(46)
   expect(rows.filter(line => line.length !== 58)).toEqual([])
+  // A percent setting is known by its label's `%`, not by a list of keys: a
+  // percent set in a file draws the gauge whichever key it is.
+  const BUTTON_AT_50 = GOLDEN.replace('applies by your next prompt\t-\tdefault\t-\n', 'applies by your next prompt\t50\tsession\t-\n')
+  expect(settingsOf(BUTTON_AT_50).find(s => s.key === 'CS_ROTATE_BUTTON_CTX')?.value).toBe('50')
+  expect(rowsOf((await draw(viewOf({ porcelain: BUTTON_AT_50 }))).tree).map(row => row.trimEnd())).toContain('  Rotate button from…  ▰▰▰▰▰▱▱▱▱▱ 50   session')
   // With no mod rows, the first group follows the column header's rule.
   expect((await draw(viewOf({ rows: [] }))).lines.slice(2, 8).map(line => line.trimEnd())).toEqual([
     '▍ Hide the status line  CS_STATUSLINE_DISABLE', '▍ ○ off · default · applies at the next repaint', FIELD, ...HEAD_AT_58, group('Status line')])
@@ -830,8 +835,10 @@ test('an arrow, the wheel or a page key moves the selection by its rows, held to
   expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
   const pane = await $.ui.mount({ plugin: 'cs-panel', surface: 'terminal', component: 'Pane', requestId: 'cs-panel', props: { ...PANE_PROPS, bodyColumns: 58, scroll: { offset: 0, bodyRows: 12 } } })
   await clock.settle()
-  // The card's first line, the selected row, and the Button the ring is sent
-  // to: the selected row's, the one Button drawn with autoFocus.
+  // The card's first line, the selected row, and the Button marked for the
+  // ring with autoFocus: the selected row's. On a surface that draws the
+  // field first that mark is inert (the first autoFocus drawn wins) and the
+  // ring moves by $.ui.focus, which the kit refuses, so this pins the mark only.
   const shown = async () => {
     const tree = await pane.drawn()
     await clock.settle()

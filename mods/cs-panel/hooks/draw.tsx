@@ -118,8 +118,8 @@ const REST: readonly Column[] = [
 const SOURCE_INK: Record<Source, string> = { session: THEME.teal, machine: THEME.green, shell: BRAND.amber, launch: THEME.faint, default: THEME.mut }
 const CHANGED: ReadonlySet<Source> = new Set(['session', 'machine', 'shell'])
 
-const PERCENT_KEYS: ReadonlySet<string> = new Set(['CS_STATUSLINE_CTX_WARN', 'CS_STATUSLINE_CTX_CRIT', 'CS_CTX_WARN_CTX', 'CS_ROTATE_NUDGE_CTX',
-  'CS_QUEUE_MAX_CTX', 'CS_QUEUE_MAX_5H', 'CS_ROTATE_FORCE_CTX'])
+// A percent setting: cs names each one with a label ending in `%`.
+const isPercentSetting = (label: string) => label.endsWith('%')
 
 // On (true), off (false), a word the shell pins a flag to, the value or the default's name.
 function valueOf(row: Row): boolean | string {
@@ -138,7 +138,7 @@ function valueRuns(l: RowLine, room: number): Run[] {
   const tone = isDefault ? THEME.mut : THEME.ink
   if (value === true) return [{ text: WORDS.marks.on, color: THEME.green }, { text: ` ${WORDS.on}`, color: tone }]
   if (value === false) return [{ text: `${WORDS.marks.off} ${WORDS.off}`, color: THEME.mut }]
-  const isPercent = l.row.kind === 'setting' && PERCENT_KEYS.has(l.row.setting.key) && /^\d{1,3}$/.test(value) && Number(value) <= 100
+  const isPercent = l.row.kind === 'setting' && isPercentSetting(l.row.setting.label) && /^\d{1,3}$/.test(value) && Number(value) <= 100
   if (!isPercent || room < GAUGE_CELLS + 1 + value.length) return [{ text: value, color: tone }]
   const full = Math.round(Number(value) / 10)
   return [{ text: WORDS.marks.full.repeat(full), color: isDefault ? THEME.faint : BRAND.amber }, { text: WORDS.marks.empty.repeat(GAUGE_CELLS - full), color: THEME.faint },
