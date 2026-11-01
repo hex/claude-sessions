@@ -1427,7 +1427,7 @@ CS_PAYLOAD_SHA256=(
     "8ffa3249cadb8017e5e0809326fc22f3ec0e2c1f9e3dd70c049782888190727f  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
     "f07f0796befaa40356d318833ed46be921101f3c122869790f20ffecab0c2fb2  mods/cs/hooks/register.tsx"
-    "f841609ed354ab29bf0076a2c1e86c7179c9de47301f5732a7c690d6e809303e  mods/cs/tips.json"
+    "6986a18d6c82df9f80579e651cc1c83e1002ebc558415379f4b285c1640c845f  mods/cs/tips.json"
     "7a97c18b6ae755d8ec7862532eb15bbf627170a1fab8cc90dd2f8f77a57164be  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
     "cfe8c63090aeb6d585b47ef65cae403fa214d8e466036eebb2e1b8ef654ee764  mods/cs-update/hooks/register.tsx"
@@ -1442,7 +1442,7 @@ CS_PAYLOAD_SHA256=(
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
     "aa825298894d98754f73c65b0eee3b9405e52b920f711907ff0814c85fa87239  mods/cs-panel/hooks/register.tsx"
     "ec54a3f23abd53203ac414b2229dc86b17d7a6040906ce6f3c39721c29987dcc  mods/cs-panel/hooks/settings.ts"
-    "f45574e3e3d44b572d7dbff48e9d5fc1dd449bd897c20d3010b9e3335d9cec1f  mods/cs-panel/hooks/draw.tsx"
+    "644589a7b84a9062fe086ca12723aa69ab7579f9eec7a423fdb400cc09bb3ab6  mods/cs-panel/hooks/draw.tsx"
     "62251a79bfd7c81b444fc7d1ba83e97fcafa8e64abdba8d2f5eded930ac500c2  completions/cs.bash"
     "41076b2d6e97163497974dc7c109f8a0053d8846cb52676dfa821319bea17eb2  completions/_cs"
 )
