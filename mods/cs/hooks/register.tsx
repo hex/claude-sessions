@@ -1185,7 +1185,7 @@ const SETTING_SOURCES = new Set(['default', 'machine', 'session', 'shell', 'laun
 // where cs says it comes from.
 type FileSetting = { value: string | undefined; source: string }
 
-// The porcelain's records: eleven tab-separated fields, the key first, the
+// The porcelain's records: twelve tab-separated fields, the key first, the
 // value ninth (`-` for none) and its source tenth. Each value a settings file
 // gave (source session or machine) is kept; a record of any other shape makes
 // the whole answer unreadable.
@@ -1195,7 +1195,7 @@ function parseFileSettings(text: string): Map<string, FileSetting> | { unreadabl
     if (line === '') continue
     const fields = line.split('\t')
     const [key, , , , , , , , value, source] = fields
-    if (fields.length !== 11 || key === undefined || value === undefined || source === undefined || !SETTING_SOURCES.has(source)) return { unreadable: line }
+    if (fields.length !== 12 || key === undefined || value === undefined || source === undefined || !SETTING_SOURCES.has(source)) return { unreadable: line }
     settings.set(key, { value: value === '-' ? undefined : value, source })
   }
   return settings
