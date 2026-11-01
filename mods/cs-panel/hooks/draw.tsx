@@ -1,7 +1,7 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the masthead, the selected row's card, the problem lines, the filter field, the column header and a window of rows fitted to the body.
+// ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the masthead, the selected row's card, the problem lines, the search box, the column header and a window of rows fitted to the body.
 // ABOUTME: Pure over its view and exported with its word tables, so the design lab draws a fixture without the engine.
 import type { EngineInterface, RenderElement, TextProps, ThemeKey } from 'claude-code'
 import { filterLines, keyOf, labelOf, shownOf, type Line, type Pending, type Row, type RowId, type Source } from './settings'
@@ -50,7 +50,7 @@ export const WORDS = {
   pending: { asking: 'asking', writing: 'writing' } satisfies Record<Pending, string>,
   above: (n: number) => `+${n} above`,
   below: (n: number) => `+${n} below`,
-  filter: 'filter', find: 'type to filter', toRows: 'first row',
+  find: 'search settings', toRows: 'select',
   pinned: (key: string, value: string) => `${key}=${value} in your environment wins; unset it there to change it here`,
   shellOnly: (key: string) => `change it from a shell: cs -config set ${key} 1 (on, it unloads every mod at the next launch, this panel too)`,
   reloads: (plugin: string) => `changing it reloads ${plugin}${plugin === 'cs' ? ' (an armed rotation countdown starts over)' : ''}`,
@@ -60,8 +60,8 @@ export const WORDS = {
   title: 'settings',
   settings: (n: number) => `${n} settings`, changed: (n: number) => `${n} changed`,
   heads: { name: 'setting', value: 'value', from: 'from', when: 'when' },
-  // The bars, a toggle's dots, a gauge's cells, the rules, the dot, the card's edge, the field's cursor.
-  marks: { selected: '▌', on: '●', off: '○', full: '▰', empty: '▱', rule: '─', hero: '━', dot: '·', edge: '▍', cursor: '▏' },
+  // The bars, a toggle's dots, a gauge's cells, the rules, the dot, the card's edge.
+  marks: { selected: '▌', on: '●', off: '○', full: '▰', empty: '▱', rule: '─', hero: '━', dot: '·', edge: '▍' },
 } as const
 
 type RowLine = Extract<Line, { kind: 'row' }>
@@ -101,6 +101,8 @@ const MARK_CELLS = 2
 const DOT = `  ${WORDS.marks.dot}  `
 const GAUGE_CELLS = 10
 const VALUE_CELLS = { wide: GAUGE_CELLS + 4, narrow: 11 }
+// The search box's lines on the terminal: its border above, the field, its border below.
+const BOX_LINES = 3
 // cs's `when` for a change that applies at once: the when cell leaves it out.
 const AT_ONCE = 'now'
 const VALUE: Column = { head: WORDS.heads.value, cells: VALUE_CELLS.wide, runs: (l, cells) => fitRuns(valueRuns(l, cells), cells) }
@@ -307,8 +309,8 @@ function layoutOf(v: PanelView) {
   const selected = found?.kind === 'row' ? found : undefined
   const notice = v.lines === undefined && v.problems.length === 0 ? WORDS.reading : undefined
   const noMatch = isListed && lines.length === 0 ? WORDS.noMatch(v.filter.trim()) : undefined
-  // The masthead and its rule, the problems, the notice; the field between two empty lines, the header, its rule; the no-match line.
-  const top = 2 + v.problems.length + (notice === undefined ? 0 : 1) + (isListed ? 5 : 0) + (noMatch === undefined ? 0 : 1)
+  // The masthead and its rule, the problems, the notice; the search box, the header, its rule; the no-match line.
+  const top = 2 + v.problems.length + (notice === undefined ? 0 : 1) + (isListed ? BOX_LINES + 2 : 0) + (noMatch === undefined ? 0 : 1)
   // The card's wrapped lines leave a line for its label and one for the window.
   const card = selected === undefined ? [] : cardOf(selected, v.columns, Math.max(1, v.bodyRows - top - 2), v.session !== undefined)
   const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - top - card.length))
@@ -356,11 +358,8 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
       {card.map(line => <Text>{runs(line)}</Text>)}
       {v.problems.map(problem => <Text color={THEME.mut}>{cut(problem, v.columns)}</Text>)}
       {notice !== undefined && <Text color={THEME.mut}>{cut(notice, v.columns)}</Text>}
-      {isListed && <Text>{' '}</Text>}
-      {isListed && (Input === undefined ? <Text>{' '}</Text> : <Box flexDirection="row">
-        {runs([{ text: `${WORDS.filter} `, color: THEME.ink, weight: 'bold' }, { text: `${WORDS.marks.cursor} `, color: BRAND.rail[1] }])}
+      {isListed && (Input === undefined ? Array.from({ length: BOX_LINES }, () => <Text>{' '}</Text>) : <Box borderStyle="round" borderColor={THEME.soft} paddingX={1} flexDirection="row" width={v.columns}>
         <Input key={FILTER} placeholder={WORDS.find} value={v.filter} submitLabel={WORDS.toRows} autoFocus onInput={on.filter} onSubmit={text => { on.filter(text); on.toRows() }} /></Box>)}
-      {isListed && <Text>{' '}</Text>}
       {isListed && <Text color={THEME.mut} weight="bold">
         {`${fit(`${' '.repeat(MARK_CELLS)}${WORDS.heads.name}`, MARK_CELLS + nameCells)}${cols.map(c => `${' '.repeat(GAP)}${fit(c.head, c.cells)}`).join('')}`}</Text>}
       {isListed && <Text color={THEME.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
