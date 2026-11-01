@@ -1363,8 +1363,10 @@ tool results, the progress hint and the turn's timing row draw an empty row
 under both renderers (under `tui: "fullscreen"` a lone shell call arrives as a
 one-call tool group, under the default renderer as a tool row and a result
 row). Messages from other sessions, helpers and teammates, task
-notifications, hook feedback and any message whose origin Claude Code did not
-stamp draw nothing too. A message from a source the feed has no rule for,
+notifications and hook feedback draw nothing too. A message Claude Code did
+not stamp draws as yours when it names no sender and is not hook feedback (a
+channel the engine cannot attest, a message stored before stamps), and
+nothing otherwise. A message from a source the feed has no rule for,
 such as a channel or a plugin, keeps Claude Code's drawing. Questions, info
 notices, the prompt hint, the working line and the row above the prompt stay
 Claude Code's: its own spinner says a turn is running. A row that reports

@@ -65,14 +65,16 @@ test('UserMessage draws nothing for a peer, a sent message, a task notification,
     { text: 'Agent "Read the notes" completed', origin: { kind: 'task-notification' } },
     { text: 'Ready', origin: { kind: 'unclassified' }, from: { name: 'alice' } },
     { text: 'Stop hook feedback:\nTests need another pass', origin: { kind: 'unclassified' } },
-    { text: 'Read the notes', origin: { kind: 'unclassified' } },
   ]
   for (const [index, props] of rows.entries()) {
     const row = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'UserMessage', requestId: `row-${index}`, props: { ...props, isExpanded: false } })
     expect(await row.findAll({ type: 'Text' })).toEqual([])
     await row.unmount()
   }
-  expect(calls).toBe(rows.length)
+  const unstamped = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'UserMessage', requestId: 'unstamped', props: { text: 'Read the notes', origin: { kind: 'unclassified' }, isExpanded: false } })
+  expect((await unstamped.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['❯', 'Read the notes'])
+  await unstamped.unmount()
+  expect(calls).toBe(rows.length + 1)
 })
 
 test('UserMessage draws your text in the you ink, and a slash command with its name in that ink and its arguments dim', async ($, on) => {

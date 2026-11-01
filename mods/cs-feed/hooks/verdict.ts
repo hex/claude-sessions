@@ -15,24 +15,33 @@ export type UserVerdict =
  *
  *   composer, bridge, sdk, scheduled-trigger   your line on the terminal; the engine's elsewhere
  *   task-notification, peer, peer-send-message nothing: a helper's, a task's or another session's message
- *   unclassified                               nothing: the engine names no provenance (a teammate's
- *                                              drain, an idle notice, a delivery receipt), so it is never
- *                                              presumed typed
+ *   unclassified                               your line when nobody is named as its sender and it is not
+ *                                              a hook's feedback (a channel the engine cannot attest, a
+ *                                              message stored before stamps); nothing for a teammate's
+ *                                              drain or a hook's feedback
  *   every other kind                           the engine's: its origin is not measured
  *
  * Exhaustive over the contract's kinds: a kind the engine adds fails to
  * compile here instead of drawing as one of the above.
  */
-export function decideUser(row: { readonly text: string; readonly origin: PromptOrigin }, surface: string): UserVerdict {
+export function decideUser(row: { readonly text: string; readonly origin: PromptOrigin; readonly from?: { readonly name: string } }, surface: string): UserVerdict {
+  const yours = (): UserVerdict => surface === 'terminal' ? { draw: 'you', text: row.text } : { draw: 'engine' }
   switch (row.origin.kind) {
     case 'composer': case 'bridge': case 'sdk': case 'scheduled-trigger':
-      return surface === 'terminal' ? { draw: 'you', text: row.text } : { draw: 'engine' }
-    case 'task-notification': case 'peer': case 'peer-send-message': case 'unclassified':
+      return yours()
+    case 'unclassified':
+      return row.from?.name || isHookFeedback(row.text) ? { draw: 'nothing' } : yours()
+    case 'task-notification': case 'peer': case 'peer-send-message':
       return { draw: 'nothing' }
     case 'projects-relay': case 'channel': case 'coordinator': case 'observer': case 'observer-activity':
     case 'auto-continuation': case 'slack-ping': case 'plugin':
       return { draw: 'engine' }
   }
+}
+
+/** The text a Stop, UserPromptSubmit, PreToolUse or PostToolUse hook fed back, as the engine frames it. */
+function isHookFeedback(text: string): boolean {
+  return /^(?:Stop hook feedback|UserPromptSubmit|PostToolUse|PreToolUse)[^\n]*:/.test(text)
 }
 
 /** CommandOutput §3.3: dim "·" and the text, red on error, a leading "cs-feed:" removed; an empty answer draws nothing. */
