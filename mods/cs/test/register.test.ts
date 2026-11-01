@@ -3559,9 +3559,9 @@ const REFUSED = { ...railOf(FOURTEEN), bars: 5, denied: new Set(['t12']) }
 test('the band draws the actions at the left, and at the right edge the mail, the prompt\'s name, and the bars in the last cells', () => {
   // 118 cells after the inset: the actions 62, `mail 1` 6, three cells, the
   // name 24, three cells, `…9 ` 3 and five bars leave 12 between the zones.
-  expect(lineAt(typical, 120, REFUSED)).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued tasks${gap(12)}mail 1   #14 the band is too busy   …9 ││┆│┃`)
+  expect(lineAt(typical, 120, REFUSED)).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ●   ▤ run 2 queued tasks${gap(12)}mail 1   #14 the band is too busy   …9 ││┆│┃`)
   // With the rail off the mail word alone holds the right edge: 118 less 62 and 6 leave 50.
-  expect(lineAt(typical, 120)).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued tasks${gap(50)}mail 1`)
+  expect(lineAt(typical, 120)).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ●   ▤ run 2 queued tasks${gap(50)}mail 1`)
 })
 
 test('with no actions the rail still ends in the line\'s last cell, the status words and the name before it', () => {
@@ -3589,10 +3589,10 @@ test('a narrowing line cuts the name, then drops it, then folds the bars into �
 
 test('a bar under the pointer swaps its prompt into the whole name box, and the bars stay where they stand', () => {
   const tree = drawBand(view({ entries: typical, bodyColumns: 120, rail: REFUSED }), EL)
-  expect(bandRows(tree, 120, 'cs-rail-9')).toEqual([`  ctrl+x 1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued tasks${gap(12)}mail 1   ${gap(13)}#10 step 10   …9 ││┆│┃`])
+  expect(bandRows(tree, 120, 'cs-rail-9')).toEqual([`  ctrl+x 1 rotate   2 wrap · clean chat ●   ▤ run 2 queued tasks${gap(12)}mail 1   ${gap(13)}#10 step 10   …9 ││┆│┃`])
   // The refused bar hovers as any other; the named one is a Text with no hover, so nothing swaps.
-  expect(bandRows(tree, 120, 'cs-rail-11')).toEqual([`  ctrl+x 1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued tasks${gap(12)}mail 1   ${gap(13)}#12 step 12   …9 ││┆│┃`])
-  expect(bandRows(tree, 120, 'cs-rail-13')).toEqual([`  ctrl+x 1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued tasks${gap(12)}mail 1   #14 the band is too busy   …9 ││┆│┃`])
+  expect(bandRows(tree, 120, 'cs-rail-11')).toEqual([`  ctrl+x 1 rotate   2 wrap · clean chat ●   ▤ run 2 queued tasks${gap(12)}mail 1   ${gap(13)}#12 step 12   …9 ││┆│┃`])
+  expect(bandRows(tree, 120, 'cs-rail-13')).toEqual([`  ctrl+x 1 rotate   2 wrap · clean chat ●   ▤ run 2 queued tasks${gap(12)}mail 1   #14 the band is too busy   …9 ││┆│┃`])
 })
 
 test('while a clear counts down, the count follows its clear key and the right edge stays where it was', () => {
@@ -3636,7 +3636,7 @@ test('a dim middle dot parts the keys, the clear key\'s count among them, from t
   // A chord with no key bound is still a key.
   expect(bandLine(drawBand(view({ chords: {}, entries: buildBandEntries({ ...quiet, rotating: true, waiting: 1 }), bodyColumns: 120 }), EL), 120)).toBe('  rotate · ▤ run 1 queued task')
   // The clean chat key is a press: the dot parts it from the keys before it.
-  expect(lineAt(buildBandEntries({ ...quiet, rotating: true, wrapping: true, cleanChat: { on: true, color: OWN, onPress: noPress } }), 120)).toBe('  ctrl+x 1 rotate   2 wrap · clean chat ✓')
+  expect(lineAt(buildBandEntries({ ...quiet, rotating: true, wrapping: true, cleanChat: { on: true, color: OWN, onPress: noPress } }), 120)).toBe('  ctrl+x 1 rotate   2 wrap · clean chat ●')
   // Keys alone, a count after its clear key, and a press with no key before it draw no dot.
   expect(lineAt(buildBandEntries({ ...quiet, rotating: true, wrapping: true }), 120)).toBe('  ctrl+x 1 rotate   2 wrap')
   expect(lineAt(buildBandEntries({ ...quiet, rotating: true, armed: true, countdown: { seconds: 18, ink: OWN } }), 120)).toBe('  ctrl+x 1 /clear now   in 18s')
@@ -3786,58 +3786,58 @@ test('a bar drawn after the named one hovers and jumps to its own prompt, and a 
 
 test('every entry the band never drops stays whole at the narrowest line that holds them, and the features word shortens a cell under it', () => {
   // The actions without the prefix (55), three cells and the features press (27) hold 85 cells.
-  expect(lineAt(everything, 87)).toBe('  1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued tasks   3 features · fix-auth ready')
-  expect(lineAt(everything, 86)).toBe('  1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued tasks   3 features · fix-auth rea…')
+  expect(lineAt(everything, 87)).toBe('  1 rotate   2 wrap · clean chat ●   ▤ run 2 queued tasks   3 features · fix-auth ready')
+  expect(lineAt(everything, 86)).toBe('  1 rotate   2 wrap · clean chat ●   ▤ run 2 queued tasks   3 features · fix-auth rea…')
 })
 
 test('a status word keeps at least its head, the words before its first `·`, and `…`: cut shorter it says nothing, so it leaves and the line is fitted again', () => {
   const oneReady = buildBandEntries({ ...quiet, featured: { label: '1 feature · fix-auth ready', onPress: noPress }, rotating: true, wrapping: true, cleanChat: { on: true, color: OWN, onPress: noPress }, waiting: 3, mail: 1 })
   // `1 feature…` is the shortest the features press draws.
-  expect(lineAt(oneReady, 77, railOf(FOUR))).toBe('  1 rotate   2 wrap · clean chat ✓   ▤ run 3 queued tasks   1 feature…   │││┃')
+  expect(lineAt(oneReady, 77, railOf(FOUR))).toBe('  1 rotate   2 wrap · clean chat ●   ▤ run 3 queued tasks   1 feature…   │││┃')
   // A cell fewer would cut it into its head: it leaves, and the shared prefix comes back.
-  expect(lineAt(oneReady, 76, railOf(FOUR))).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ✓   ▤ run 3 queued tasks${gap(5)}   │││┃`)
-  expect(lineAt(oneReady, 73, railOf(FOUR))).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ✓   ▤ run 3 queued tasks${gap(2)}   │││┃`)
-  expect(lineAt(oneReady, 69, railOf(FOUR))).toBe(`  1 rotate   2 wrap · clean chat ✓   ▤ run 3 queued tasks${gap(5)}   │││┃`)
+  expect(lineAt(oneReady, 76, railOf(FOUR))).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ●   ▤ run 3 queued tasks${gap(5)}   │││┃`)
+  expect(lineAt(oneReady, 73, railOf(FOUR))).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ●   ▤ run 3 queued tasks${gap(2)}   │││┃`)
+  expect(lineAt(oneReady, 69, railOf(FOUR))).toBe(`  1 rotate   2 wrap · clean chat ●   ▤ run 3 queued tasks${gap(5)}   │││┃`)
 })
 
 test('with every entry on, the band leaves out its lowest words, then shortens the free text before the actions, until it fits one line', () => {
   // 120, 80, 60 and 40 columns: the engine keeps five cells of each for the [-].
-  expect(lineAt(everything, 115)).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued tasks${gap(15)}3 features · fix-auth ready   mail 1`)
-  expect(lineAt(everything, 75)).toBe('  1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued tasks   3 features · f…')
+  expect(lineAt(everything, 115)).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ●   ▤ run 2 queued tasks${gap(15)}3 features · fix-auth ready   mail 1`)
+  expect(lineAt(everything, 75)).toBe('  1 rotate   2 wrap · clean chat ●   ▤ run 2 queued tasks   3 features · f…')
   // At 60 the features press would cut into its head: it leaves, the prefix goes and the queue press shortens.
-  expect(lineAt(everything, 55)).toBe('  1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued ta…')
-  expect(lineAt(everything, 35)).toBe('  1 rotate   2 · clean chat ✓   ▤…')
+  expect(lineAt(everything, 55)).toBe('  1 rotate   2 wrap · clean chat ●   ▤ run 2 queued ta…')
+  expect(lineAt(everything, 35)).toBe('  1 rotate   2 · clean chat ●   ▤…')
 })
 
 test('a shortened queue press keeps its count whole, or cuts to its glyph: cut inside `▤ run N` it would name another number', () => {
   const twelve = buildBandEntries({ ...quiet, rotating: true, wrapping: true, cleanChat: { on: true, color: OWN, onPress: noPress }, waiting: 12 })
-  expect(lineAt(twelve, 58)).toBe('  1 rotate   2 wrap · clean chat ✓   ▤ run 12 queued tasks')
-  expect(lineAt(twelve, 46)).toBe('  1 rotate   2 wrap · clean chat ✓   ▤ run 12…')
-  expect(lineAt(twelve, 45)).toBe('  1 rotate   2 wrap · clean chat ✓   ▤…')
-  expect(lineAt(twelve, 42)).toBe('  1 rotate   2 wrap · clean chat ✓   ▤…')
+  expect(lineAt(twelve, 58)).toBe('  1 rotate   2 wrap · clean chat ●   ▤ run 12 queued tasks')
+  expect(lineAt(twelve, 46)).toBe('  1 rotate   2 wrap · clean chat ●   ▤ run 12…')
+  expect(lineAt(twelve, 45)).toBe('  1 rotate   2 wrap · clean chat ●   ▤…')
+  expect(lineAt(twelve, 42)).toBe('  1 rotate   2 wrap · clean chat ●   ▤…')
 })
 
 test('the rail keeps its least, `…N ┃` three cells after the words, while the words can drop and shorten and still keep every action', () => {
   // 80 columns (75 after the [-]): the mail word drops, and the actions leave the rail room for its five bars.
-  expect(lineAt(typical, 75, REFUSED)).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued tasks${gap(3)}…9 ││┆│┃`)
+  expect(lineAt(typical, 75, REFUSED)).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ●   ▤ run 2 queued tasks${gap(3)}…9 ││┆│┃`)
   // With the features press too, the mail word drops and the press, cut into its head, leaves: the actions keep the prefix and the rail its five bars.
-  expect(lineAt(everything, 75, REFUSED)).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ✓   ▤ run 2 queued tasks${gap(3)}…9 ││┆│┃`)
+  expect(lineAt(everything, 75, REFUSED)).toBe(`  ctrl+x 1 rotate   2 wrap · clean chat ●   ▤ run 2 queued tasks${gap(3)}…9 ││┆│┃`)
   // Without the clean chat key, as an install with no cs-clean-chat draws it (docs/hooks.md), the features press stays, shortened, and the rail keeps its least.
   const noCleanChat = buildBandEntries({ ...quiet, featured: { label: '3 features · fix-auth ready', onPress: noPress }, rotating: true, wrapping: true, waiting: 2, mail: 1 })
   expect(lineAt(noCleanChat, 75, REFUSED)).toBe('  1 rotate   2 wrap · ▤ run 2 queued tasks   3 features · fix-auth…   …13 ┃')
   // 36 columns: the features press would cut into its head and leaves, the queue press shortens to a cell and `…`, and the rotate and wrap keys lose their words.
-  expect(lineAt(everything, 36, REFUSED)).toBe('  1   2 · clean chat ✓   ▤…   …12 │┃')
+  expect(lineAt(everything, 36, REFUSED)).toBe('  1   2 · clean chat ●   ▤…   …12 │┃')
   // 40 columns (35 after the [-]): the bare keys, the clean chat key and the queue's glyph leave the rail its least.
-  expect(lineAt(everything, 35, REFUSED)).toBe('  1   2 · clean chat ✓   ▤…   …13 ┃')
+  expect(lineAt(everything, 35, REFUSED)).toBe('  1   2 · clean chat ●   ▤…   …13 ┃')
 })
 
 test('the actions outrank the rail: where an action would leave whole beside its least, the words take the whole line and the rail what they leave', () => {
   const differ = { 'strip:jump1': 'ctrl+x 1', 'strip:jump2': 'ctrl+w 2' }
   const at = (bodyColumns: number) => bandLine(drawBand(view({ chords: differ, entries: everything, bodyColumns, rail: REFUSED }), EL), bodyColumns)
   // The keys bare and the presses (39 cells), three cells and `…13 ┃` fill 49 columns.
-  expect(at(49)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ✓   ▤…   …13 ┃')
+  expect(at(49)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ●   ▤…   …13 ┃')
   // Two fewer and the queue press would leave: it stays, the features press would cut into its head and leaves, and no bar fits.
-  expect(at(47)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ✓   ▤…')
+  expect(at(47)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ●   ▤…')
 })
 
 test('a chord drawn as its key alone is still its Button, pressed by its action, the key in the session colour', () => {
@@ -3845,7 +3845,7 @@ test('a chord drawn as its key alone is still its Button, pressed by its action,
   expect(pressable).toEqual([
     ['cs-rotate', 'strip:jump1', '1', [{ bold: true, color: OWN }]],
     ['cs-wrap', 'strip:jump2', '2', [{ bold: true, color: OWN }]],
-    ['cs-clean-chat', undefined, 'clean chat ✓', [{ color: OWN }]],
+    ['cs-clean-chat', undefined, 'clean chat ●', [{ color: OWN }]],
     ['cs-queue', undefined, '▤…', [{ color: 'rgb(180,83,9)' }]],
   ])
 })
@@ -3858,9 +3858,9 @@ test('a cut that lands after a space drops the space before the ellipsis, in the
 
 test('when even the keys overrun, the queue press leaves whole, then the clean chat key, then the chords right to left', () => {
   // The features press, which would cut into its head, has left already.
-  expect(lineAt(everything, 27)).toBe('  1   2 · clean chat ✓   ▤…')
-  expect(lineAt(everything, 26)).toBe('  1   2 · clean chat ✓')
-  expect(lineAt(everything, 22)).toBe('  1   2 · clean chat ✓')
+  expect(lineAt(everything, 27)).toBe('  1   2 · clean chat ●   ▤…')
+  expect(lineAt(everything, 26)).toBe('  1   2 · clean chat ●')
+  expect(lineAt(everything, 22)).toBe('  1   2 · clean chat ●')
   // With the clean chat key gone, the chords take their words back where they fit.
   expect(lineAt(everything, 21)).toBe('  1 rotate   2 wrap')
   expect(lineAt(everything, 19)).toBe('  1 rotate   2 wrap')
@@ -3882,11 +3882,11 @@ test('the queue press never shortens past `▤…`: it leaves whole, and a line 
 
 test('the countdown is free text after its clear key: it leaves before its own key loses its word, and the clean chat key outlasts it', () => {
   const counting = buildBandEntries({ ...quiet, featured: { label: '3 features · fix-auth ready', onPress: noPress }, countdown: { seconds: 30, ink: OWN }, rotating: true, armed: true, cleanChat: { on: true, color: OWN, onPress: noPress }, queued: 2, mail: 1 })
-  expect(lineAt(counting, 100)).toBe(`  ctrl+x 1 /clear now   in 30s · clean chat ✓   ▤ queue 2${gap(7)}3 features · fix-auth ready   mail 1`)
-  expect(lineAt(counting, 38)).toBe('  1 /clear now   in 30s · clean chat ✓')
+  expect(lineAt(counting, 100)).toBe(`  ctrl+x 1 /clear now   in 30s · clean chat ●   ▤ queue 2${gap(7)}3 features · fix-auth ready   mail 1`)
+  expect(lineAt(counting, 38)).toBe('  1 /clear now   in 30s · clean chat ●')
   // A cell fewer would key the clear bare: the count leaves, and the prefix comes back.
-  expect(lineAt(counting, 37)).toBe('  ctrl+x 1 /clear now · clean chat ✓')
-  expect(lineAt(counting, 18)).toBe('  1 · clean chat ✓')
+  expect(lineAt(counting, 37)).toBe('  ctrl+x 1 /clear now · clean chat ●')
+  expect(lineAt(counting, 18)).toBe('  1 · clean chat ●')
 })
 
 test('the band drops mail, the queue count, an unpressable features word, the gate word and then the chord prefix, in that order', () => {
@@ -3922,18 +3922,18 @@ test('with chords that differ, every chord outlives the features, queue and clea
   const differ = { 'strip:jump1': 'ctrl+x 1', 'strip:jump2': 'ctrl+w 2' }
   const at = (bodyColumns: number) => bandLine(drawBand(view({ chords: differ, entries: everything, bodyColumns }), EL), bodyColumns)
   // The features press would cut into its head, so it has left.
-  expect(at(45)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ✓   ▤…')
-  expect(at(44)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ✓   ▤…')
-  expect(at(41)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ✓   ▤…')
-  expect(at(40)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ✓')
-  expect(at(36)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ✓')
+  expect(at(45)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ●   ▤…')
+  expect(at(44)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ●   ▤…')
+  expect(at(41)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ●   ▤…')
+  expect(at(40)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ●')
+  expect(at(36)).toBe('  ctrl+x 1   ctrl+w 2 · clean chat ●')
   // The clean chat key leaves, and the two chords take their words back.
   expect(at(35)).toBe('  ctrl+x 1 rotate   ctrl+w 2 wrap')
 })
 
 test('an unbound chord has no key to fall back to: the clean chat press before it leaves whole, then the last chord cuts its word to end in `…`, and leaves when not a cell of it fits', () => {
   const at = (bodyColumns: number) => bandLine(drawBand(view({ chords: {}, entries: buildBandEntries({ ...quiet, rotating: true, wrapping: true, cleanChat: { on: true, color: OWN, onPress: noPress } }), bodyColumns }), EL), bodyColumns)
-  expect(at(30)).toBe('  rotate   wrap · clean chat ✓')
+  expect(at(30)).toBe('  rotate   wrap · clean chat ●')
   expect(at(29)).toBe('  rotate   wrap')
   expect(at(14)).toBe('  rotate   wr…')
   expect(at(11)).toBe('  rotate')
@@ -3967,24 +3967,24 @@ const enableCleanChat = () => {
   bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
 }
 
-test('the clean chat key toggles this session, answers no chord, and colours its check with the keys', async () => {
+test('the clean chat key toggles this session, answers no chord, and colours its dot with the keys only while on', async () => {
   enableCleanChat()
   files['/work/.cs/local/clean-chat'] = 'off\n'
   percent = 40
   const tree = await band()
-  expect(cleanChatKey(tree)?.props.label).toBe('clean chat')
-  expect(buttons(tree).find(button => button.props.label === 'clean chat')?.props.key).toBe('cs-clean-chat')
+  expect(cleanChatKey(tree)?.props.label).toBe('clean chat ○')
+  expect(buttons(tree).find(button => button.props.label === 'clean chat ○')?.props.key).toBe('cs-clean-chat')
   expect(cleanChatKey(tree).props.action).toBeUndefined()
-  expect(words(tree)).toEqual(['ctrl+x', '1', '   ', '2', ' · '])
+  expect(words(tree)).toEqual(['ctrl+x', '1', '   ', '2', ' · ', '○'])
   await cleanChatKey(tree).props.onPress()
   const on = await band()
-  expect(cleanChatKey(on).props.label).toBe('clean chat ✓')
+  expect(cleanChatKey(on).props.label).toBe('clean chat ●')
   expect(files['/work/.cs/local/clean-chat']).toBe('on\n')
-  expect(texts(cleanChatKey(on)).map(text => [textOf(text), text.props.color])).toEqual([['✓', 'rgb(220,38,38)']])
+  expect(texts(cleanChatKey(on)).map(text => [textOf(text), text.props.color])).toEqual([['●', 'rgb(220,38,38)']])
   expect(ran).toEqual([])
   expect(invalidated).toEqual(['ui.render'])
   await cleanChatKey(on).props.onPress()
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   expect(files['/work/.cs/local/clean-chat']).toBe('off\n')
   expect(ran).toEqual([])
   expect(invalidated).toEqual(['ui.render', 'ui.render'])
@@ -3995,9 +3995,9 @@ test('the band shares the prefix of bound chords and leaves unbound labels unkey
   files['/work/.cs/local/clean-chat'] = 'off\n'
   percent = 40
   bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
-  expect(bandWords(await band())).toEqual(['ctrl+x', '1', 'rotate', '   ', '2', 'wrap', ' · ', 'clean chat'])
+  expect(bandWords(await band())).toEqual(['ctrl+x', '1', 'rotate', '   ', '2', 'wrap', ' · ', 'clean chat ○'])
   bindKeys({ 'ctrl+x 2': 'strip:jump2' })
-  expect(bandWords(await band())).toEqual(['rotate', '   ', 'ctrl+x', '2', 'wrap', ' · ', 'clean chat'])
+  expect(bandWords(await band())).toEqual(['rotate', '   ', 'ctrl+x', '2', 'wrap', ' · ', 'clean chat ○'])
 })
 
 test('a clean chat press refuses a session whose control files are tracked', async () => {
@@ -4005,7 +4005,7 @@ test('a clean chat press refuses a session whose control files are tracked', asy
   files['/work/.cs/local/clean-chat'] = 'on\n'
   runResult = tracked
   await cleanChatKey(await band()).props.onPress()
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   expect(files['/work/.cs/local/clean-chat']).toBe('on\n')
   expect(written).toEqual({})
   expect(runs.map(run => run.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work']])
@@ -4014,10 +4014,10 @@ test('a clean chat press refuses a session whose control files are tracked', asy
   runResult = VETTED
   await cleanChatKey(await band()).props.onPress()
   expect(files['/work/.cs/local/clean-chat']).toBe('off\n')
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   await cleanChatKey(await band()).props.onPress()
   expect(files['/work/.cs/local/clean-chat']).toBe('on\n')
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat ✓')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ●')
 })
 
 // A prompt clears the handoff's refusal so its toast says it again, but cs's
@@ -4029,18 +4029,18 @@ test('a refused session keeps the clean chat key off across prompts, whichever v
   runResult = tracked
   await startSession()
   expect(runs.map(run => run.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work']])
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   await promptSubmit()
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   await cleanChatKey(await band()).props.onPress()
   await promptSubmit()
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   expect(files['/work/.cs/local/clean-chat']).toBe('on\n')
   runResult = VETTED
   await cleanChatKey(await band()).props.onPress()
   expect(files['/work/.cs/local/clean-chat']).toBe('off\n')
   await cleanChatKey(await band()).props.onPress()
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat ✓')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ●')
 })
 
 test('a clean chat press survives clearing the conversation and loading the band again', async () => {
@@ -4050,23 +4050,23 @@ test('a clean chat press survives clearing the conversation and loading the band
   sessionId = 'uuid-next'
   files['/work/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
   register(on as any, OPTIONS)
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat ✓')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ●')
   expect(files['/work/.cs/local/clean-chat']).toBe('on\n')
   for (const content of ['', 'o', 'on', 'off\n', 'on\njunk', ' on\n', 'on\r\n']) {
     files['/work/.cs/local/clean-chat'] = content
-    expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+    expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   }
   delete files['/work/.cs/local/clean-chat']
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat ✓')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ●')
   await cleanChatKey(await band()).props.onPress()
   expect(files['/work/.cs/local/clean-chat']).toBe('off\n')
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
 })
 
 test('a torn clean chat write redraws its off state and allows another press', async () => {
   enableCleanChat()
   files['/work/.cs/local/clean-chat'] = 'on\n'
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat ✓')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ●')
   const write = $.fs.write
   $.fs.write = async path => {
     files[path] = ''
@@ -4075,14 +4075,14 @@ test('a torn clean chat write redraws its off state and allows another press', a
   try {
     await cleanChatKey(await band()).props.onPress()
     expect(invalidated).toEqual(['ui.render'])
-    expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+    expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
     expect(files['/work/.cs/local/clean-chat']).toBe('')
     expect(toasts).toEqual(['clean chat update failed: EACCES /work/.cs/local/clean-chat'])
   } finally {
     $.fs.write = write
   }
   await cleanChatKey(await band()).props.onPress()
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat ✓')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ●')
   expect(invalidated).toEqual(['ui.render', 'ui.render'])
 })
 
@@ -4108,11 +4108,11 @@ test('duplicate clean chat presses both wait until the one write is ready', asyn
     await settle()
     expect(duplicateFinished).toBe(false)
     expect(writes).toEqual([['/work/.cs/local/clean-chat', 'on\n']])
-    expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+    expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
     expect(invalidated).toEqual([])
     finish()
     expect(await Promise.all([press, duplicate])).toEqual(['on\n', 'on\n'])
-    expect(cleanChatKey(await band()).props.label).toBe('clean chat ✓')
+    expect(cleanChatKey(await band()).props.label).toBe('clean chat ●')
     expect(invalidated).toEqual(['ui.render'])
     expect(ran).toEqual([])
   } finally {
@@ -4140,7 +4140,7 @@ test('a non-session redraw does not discover the clean chat command', async () =
 test('the clean chat key follows command availability and the band ownership gates', async () => {
   enableCleanChat()
   files['/work/.cs/local/clean-chat'] = 'off\n'
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   expect(cleanChatKey(await band({ isWorking: true }))).toBeUndefined()
   expect(cleanChatKey(await band({ hasSurvey: true }))).toBeUndefined()
   sessionId = 'uuid-teammate'
@@ -4162,9 +4162,9 @@ test('clean chat state stays with its session across registration and stale butt
   const stale = cleanChatKey(await band())
   await stale.props.onPress()
   register(on as any, OPTIONS)
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat ✓')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ●')
   await stale.props.onPress()
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   expect(ran).toEqual([])
   await cleanChatKey(await band()).props.onPress()
   sessionId = 'uuid-next'
@@ -4175,7 +4175,7 @@ test('clean chat state stays with its session across registration and stale butt
   files['/other/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
   files['/other/.cs/local/clean-chat'] = 'off\n'
   register(on as any, OPTIONS)
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   expect(files['/work/.cs/local/clean-chat']).toBe('on\n')
 })
 
@@ -4183,13 +4183,13 @@ test('a companion clean chat file change appears on the next redraw without relo
   enableCleanChat()
   const stale = cleanChatKey(await band())
   files['/work/.cs/local/clean-chat'] = 'on\n'
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat ✓')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ●')
   files['/work/.cs/local/clean-chat'] = 'off\n'
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   files['/work/.cs/local/clean-chat'] = 'on\n'
   await stale.props.onPress()
   expect(files['/work/.cs/local/clean-chat']).toBe('off\n')
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   expect(ran).toEqual([])
 })
 
@@ -4209,12 +4209,12 @@ test('an unreadable clean chat file leaves the band visible and reports each rea
   }
   try {
     for (let redraw = 0; redraw < 2; redraw++) {
-      expect(buttons(await band()).map(button => button.props.label)).toEqual(['rotate', 'wrap', 'clean chat'])
+      expect(buttons(await band()).map(button => button.props.label)).toEqual(['rotate', 'wrap', 'clean chat ○'])
     }
     expect(logs).toEqual(['the clean chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/clean-chat) failed: EACCES'])
     error = 'cs: $.fs.read(/ENOENT/.cs/local/clean-chat) failed: EISDIR'
-    expect(cleanChatKey(await band()).props.label).toBe('clean chat')
-    expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+    expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
+    expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
     expect(logs).toEqual([
       'the clean chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/clean-chat) failed: EACCES',
       'the clean chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/clean-chat) failed: EISDIR',
@@ -4233,7 +4233,7 @@ test('clean chat presses use the local directory even when private storage exist
   existing.add('/work/.cs/private')
   files['/work/.cs/private/clean-chat'] = 'on\n'
   files['/work/.cs/local/clean-chat'] = 'off\n'
-  expect(cleanChatKey(await band()).props.label).toBe('clean chat')
+  expect(cleanChatKey(await band()).props.label).toBe('clean chat ○')
   await cleanChatKey(await band()).props.onPress()
   await cleanChatKey(await band()).props.onPress()
   expect(files['/work/.cs/local/clean-chat']).toBe('off\n')

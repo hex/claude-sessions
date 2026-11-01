@@ -331,7 +331,8 @@ export function buildBandEntries(facts: BandFacts): BandEntry[] {
   if (facts.countdown !== undefined) entries.push({ key: 'cs-countdown', kind: 'word', label: `in ${facts.countdown.seconds}s`, ink: { color: facts.countdown.ink } })
   if (facts.wrapping) entries.push({ key: 'cs-wrap', kind: 'chord', label: 'wrap', action: WRAP_ACTION, onPress: facts.wrap })
   // The clean chat key and the queue have no chord: a click or Enter under the band's focus presses them.
-  if (facts.cleanChat !== undefined) entries.push({ key: 'cs-clean-chat', kind: 'press', label: facts.cleanChat.on ? 'clean chat ✓' : 'clean chat', onPress: facts.cleanChat.onPress, ink: facts.cleanChat.on ? { tail: '✓', color: facts.cleanChat.color } : undefined })
+  // Its tail is a switch dot: ● in the session's colour while on, ○ in the line's ink while off.
+  if (facts.cleanChat !== undefined) entries.push({ key: 'cs-clean-chat', kind: 'press', label: facts.cleanChat.on ? 'clean chat ●' : 'clean chat ○', onPress: facts.cleanChat.onPress, ink: { tail: facts.cleanChat.on ? '●' : '○', color: facts.cleanChat.on ? facts.cleanChat.color : undefined } })
   if (facts.waiting > 0) entries.push({ key: 'cs-queue', kind: 'press', label: `${QUEUE_GLYPH} run ${facts.waiting} queued ${facts.waiting === 1 ? 'task' : 'tasks'}`, onPress: facts.queue, ink: { lead: QUEUE_GLYPH, color: facts.queueInk } })
   // The features word leads what the session is; only a ready feature can be pressed.
   if (facts.featured !== undefined) {

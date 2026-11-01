@@ -658,14 +658,15 @@ after it describe the band beside cs-clean-chat. The band reads the command
 list without running a status command. The key is a press, as the queue's
 start button is: it answers no chord, only a click and Ctrl+X Tab, and its
 label draws bare after the keys' dim `·`:
-`ctrl+x 1 rotate   2 wrap · clean chat ✓`. On a line too narrow for every
+`ctrl+x 1 rotate   2 wrap · clean chat ●`. On a line too narrow for every
 entry it never shortens: it leaves whole, after the queue's start button and
 before the chords.
 
-The key reads `clean chat` while off and `clean chat ✓` while on, the check
-in the session's colour. A press asks `cs -vet-session` before it writes, as
-the other band writers do. A refusal leaves the file alone and draws clean
-chat as off. The key reads `clean chat ✓` only while the file holds `on\n` or
+The key ends in a switch dot: `clean chat ●` while on, the dot in the
+session's colour, and `clean chat ○` while off, the dot in the line's ink. A
+press asks `cs -vet-session` before it writes, as the other band writers do.
+A refusal leaves the file alone and draws clean chat as off. The key reads
+`clean chat ●` only while the file holds `on\n` or
 is absent, and the band's last `cs -vet-session` answer in this load was not a
 refusal. The band asks at session start in a cs session with `.cs/local`, and
 at every step that acts on the control files, such as a press of the clear,
