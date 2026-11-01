@@ -185,14 +185,10 @@ const soft = (columns: number) => '─'.repeat(columns)
 // A group's headline: its name, one space and a rule to the body's edge.
 const group = (name: string, columns = 58) => `${name} ${'─'.repeat(columns - name.length - 1)}`
 
-// tui/src/theme.rs's two palettes, which the pane takes by CS_TERM_THEME.
-const TUI = {
-  dark: { ink: 'rgb(245,230,211)', mut: 'rgb(161,136,127)', faint: 'rgb(120,104,96)', soft: 'rgb(56,50,46)', teal: 'rgb(45,212,191)',
-    green: 'rgb(139,195,74)', amber: 'rgb(246,154,0)', hero: ['rgb(221,80,20)', 'rgb(237,128,0)', 'rgb(246,154,0)', 'rgb(214,162,30)'], rail: ['rgb(221,80,20)', 'rgb(246,154,0)', 'rgb(250,180,60)'] },
-  light: { ink: 'rgb(43,33,24)', mut: 'rgb(122,106,88)', faint: 'rgb(168,151,130)', soft: 'rgb(226,213,196)', teal: 'rgb(15,118,110)',
-    green: 'rgb(92,140,84)', amber: 'rgb(242,167,53)', hero: ['rgb(143,50,28)', 'rgb(216,90,36)', 'rgb(242,167,53)', 'rgb(214,162,30)'], rail: ['rgb(193,58,29)', 'rgb(228,91,34)', 'rgb(232,167,46)'] },
-}
-const DARK = TUI.dark
+// Claude Code's theme keys the pane draws in, which the engine resolves to
+// the person's theme, and tui/src/theme.rs's accents, drawn on every theme.
+const COLOURS = { ink: 'text', mut: 'inactive', faint: 'subtle', soft: 'subtle', teal: 'planMode', green: 'success', amber: 'rgb(246,154,0)',
+  hero: ['rgb(221,80,20)', 'rgb(237,128,0)', 'rgb(246,154,0)', 'rgb(214,162,30)'], rail: ['rgb(221,80,20)', 'rgb(246,154,0)', 'rgb(250,180,60)'] }
 
 // The masthead's first line and the column header with its rule at the dock's
 // 58 columns: 46 settings
@@ -467,8 +463,8 @@ test('filtered, the masthead keeps its counts, the window counts the rows shown,
 // ── The look ─────────────────────────────────────────────────────────────
 
 // install.sh.in's show_banner: the wordmark's letters, rust #e64a19 to gold
-// #ffc107. On a light terminal lib/05-term.sh's muted rust and gold end it.
-const WORDMARK_DARK = [[230, 74, 25], [232, 83, 24], [234, 91, 22], [235, 100, 21], [237, 108, 20], [239, 117, 19], [241, 125, 17], [243, 134, 16],
+// #ffc107, on every theme.
+const WORDMARK = [[230, 74, 25], [232, 83, 24], [234, 91, 22], [235, 100, 21], [237, 108, 20], [239, 117, 19], [241, 125, 17], [243, 134, 16],
   [245, 142, 15], [246, 151, 14], [248, 159, 12], [250, 168, 11], [252, 176, 10], [254, 185, 9], [255, 193, 7]].map(([r, g, b]) => `rgb(${r},${g},${b})`)
 const LIGHT = GOLDEN.replace('applies at the next repaint\tdark\tlaunch', 'applies at the next repaint\tlight\tlaunch')
 // The golden with three settings set (Layout by the machine's file, No scope
@@ -495,54 +491,45 @@ test('the masthead is ▌ and the wordmark, then settings, how many settings, ho
   expect(await first({ columns: 16 })).toBe('▌ claude-session')
   const parts = async (over: Partial<PanelView> & { porcelain?: string }) => ((((await draw(viewOf(over))).tree as Node).children?.[0] as Node).children ?? [])
     .map(child => [textOf(child), (child as Node).props.color, (child as Node).props.weight]).filter(([text]) => String(text).length > 1)
-  const dot = (p: typeof DARK) => ['  ·  ', p.mut, undefined]
-  expect(await parts({ porcelain: THREE, columns: 80 })).toEqual([['▌ ', DARK.rail[0], undefined], ['  settings', DARK.ink, 'bold'], dot(DARK), ['46 settings', DARK.ink, undefined],
-    dot(DARK), ['3 changed', DARK.teal, undefined], dot(DARK), ['alpha', DARK.mut, undefined]])
-  expect((await parts({ porcelain: NONE, columns: 80 }))[5]).toEqual(['0 changed', DARK.mut, undefined])
-  expect(await parts({ porcelain: LIGHT, columns: 80 })).toEqual([['▌ ', TUI.light.rail[0], undefined], ['  settings', TUI.light.ink, 'bold'], dot(TUI.light),
-    ['46 settings', TUI.light.ink, undefined], dot(TUI.light), ['5 changed', TUI.light.teal, undefined], dot(TUI.light), ['alpha', TUI.light.mut, undefined]])
-  const letters = async (porcelain: string) => {
-    const masthead = ((await draw(viewOf({ porcelain }))).tree as Node).children?.[0]
-    return nodesOf(masthead).filter(n => n.type === 'Text' && textOf(n).length === 1).slice(0, 15).map(n => [textOf(n), n.props.color])
-  }
-  expect(await letters(GOLDEN)).toEqual([...'claude-sessions'].map((letter, i) => [letter, WORDMARK_DARK[i]]))
-  const light = await letters(LIGHT)
-  expect([light[0], light[14]]).toEqual([['c', 'rgb(166,86,60)'], ['s', 'rgb(156,118,56)']])
+  const dot = ['  ·  ', COLOURS.mut, undefined]
+  expect(await parts({ porcelain: THREE, columns: 80 })).toEqual([['▌ ', COLOURS.rail[0], undefined], ['  settings', COLOURS.ink, 'bold'], dot, ['46 settings', COLOURS.ink, undefined],
+    dot, ['3 changed', COLOURS.teal, undefined], dot, ['alpha', COLOURS.mut, undefined]])
+  expect((await parts({ porcelain: NONE, columns: 80 }))[5]).toEqual(['0 changed', COLOURS.mut, undefined])
+  const masthead = ((await draw(viewOf())).tree as Node).children?.[0]
+  const letters = nodesOf(masthead).filter(n => n.type === 'Text' && textOf(n).length === 1).slice(0, 15).map(n => [textOf(n), n.props.color])
+  expect(letters).toEqual([...'claude-sessions'].map((letter, i) => [letter, WORDMARK[i]]))
 })
 
 test('under it, a rule of ━ the body wide along the TUI\'s four-stop hero gradient, its first stop on the first cell and its last on the last', async ($, on) => {
   const draw = drawer($, on)
-  const cells = async (over: Partial<PanelView> & { porcelain?: string }) => {
+  const cells = async (over: Partial<PanelView>) => {
     const rule = ((await draw(viewOf(over))).tree as Node).children?.[1] as Node
     return { text: textOf(rule), colours: (rule.children ?? []).flatMap(child => [...textOf(child)].map(() => (child as Node).props.color)) }
   }
   for (const columns of [24, 40, 58, 60, 80]) {
     const { text, colours } = await cells({ columns })
-    expect([text, colours.length, colours[0], colours.at(-1)], `the rule at ${columns}`).toEqual([hero(columns), columns, DARK.hero[0], DARK.hero[3]])
+    expect([text, colours.length, colours[0], colours.at(-1)], `the rule at ${columns}`).toEqual([hero(columns), columns, COLOURS.hero[0], COLOURS.hero[3]])
   }
   // At 58 cells the four stops fall on cells 0, 19, 38 and 57; at 7, cell 3
   // is halfway from the second stop to the third, each channel truncated as
   // the TUI's ramp does (241.5 draws 241).
   const at58 = (await cells({ columns: 58 })).colours
-  expect([0, 19, 38, 57].map(i => at58[i])).toEqual(DARK.hero)
+  expect([0, 19, 38, 57].map(i => at58[i])).toEqual(COLOURS.hero)
   expect((await cells({ columns: 7 })).colours[3]).toBe('rgb(241,141,0)')
-  const light = await cells({ porcelain: LIGHT, columns: 80 })
-  expect([light.colours[0], light.colours[79], (await cells({ porcelain: LIGHT, columns: 7 })).colours[3]]).toEqual([TUI.light.hero[0], TUI.light.hero[3], 'rgb(229,128,44)'])
 })
 
 test('the rows sit under a column header in muted bold, setting, value, from and when over their columns, then a soft rule the body wide; from 80 columns a name has 26 cells and when the rest', async ($, on) => {
   const draw = drawer($, on)
-  const head = async (over: Partial<PanelView> & { porcelain?: string }) => {
+  const head = async (over: Partial<PanelView>) => {
     const parts = ((await draw(viewOf(over))).tree as Node).children as Node[]
     const at = parts.findIndex(part => textOf(part).startsWith('  setting'))
     if (at < 0) throw new Error(`no column header in the drawing: ${parts.map(textOf).slice(0, 6).join(' | ')}`)
     return [parts[at], parts[at + 1]].map(part => [textOf(part), part?.props.color, part?.props.weight])
   }
-  expect(await head({ columns: 58 })).toEqual([['  setting              value           from     when      ', DARK.mut, 'bold'], [soft(58), DARK.soft, undefined]])
+  expect(await head({ columns: 58 })).toEqual([['  setting              value           from     when      ', COLOURS.mut, 'bold'], [soft(58), COLOURS.soft, undefined]])
   expect((await head({ columns: 80 }))[0]?.[0]).toBe(`  ${'setting'.padEnd(26)}  ${'value'.padEnd(14)}  ${'from'.padEnd(7)}  ${'when'.padEnd(25)}`)
   expect((await head({ columns: 40 }))[0]?.[0]).toBe(`  ${'setting'.padEnd(13)}  ${'value'.padEnd(14)}  ${'from'.padEnd(7)}`)
   expect((await head({ columns: 24 }))[0]?.[0]).toBe('  setting    value      ')
-  expect((await head({ porcelain: LIGHT })).map(([, color]) => color)).toEqual([TUI.light.mut, TUI.light.soft])
   const row = textOf(rowOf((await draw(viewOf({ columns: 80, porcelain: CLEARED }))).tree, 'cs:CS_NO_ROTATION_WAKE'))
   expect(row).toBe(`  ${'No wake after /clear'.padEnd(26)}  ${'● on'.padEnd(14)}  session  ${'/clear'.padEnd(25)}`)
 })
@@ -552,8 +539,7 @@ test('a group\'s headline is its name in bold ink, then one space and a soft ─
   const { lines, tree } = await draw(viewOf())
   const headline = (drawn: unknown, name: string) => nodesOf(drawn).filter(n => n.type === 'Text' && textOf(n).startsWith(`${name} ─`))
     .map(n => (n.children ?? []).map(run => [textOf(run), (run as Node).props.color, (run as Node).props.weight]))
-  expect(headline(tree, 'Prompts')).toEqual([[['Prompts', DARK.ink, 'bold'], [` ${'─'.repeat(50)}`, DARK.soft, undefined]]])
-  expect(headline((await draw(viewOf({ porcelain: LIGHT }))).tree, 'Mods')).toEqual([[['Mods', TUI.light.ink, 'bold'], [` ${'─'.repeat(53)}`, TUI.light.soft, undefined]]])
+  expect(headline(tree, 'Prompts')).toEqual([[['Prompts', COLOURS.ink, 'bold'], [` ${'─'.repeat(50)}`, COLOURS.soft, undefined]]])
   const groups = ['Mods', 'Status line', 'Prompts', 'Turn end', 'Rotation', 'Rewriter (ctrl+g)', 'Terminal', 'Launch']
   expect(groups.map(name => lines[lines.indexOf(group(name)) - 1]?.trimEnd())).toEqual([soft(58), '', '', '', '', '', '', ''])
   // At 24 columns: 7 cells of name and 16 of rule; 17 and 6.
@@ -564,45 +550,41 @@ test('a group\'s headline is its name in bold ink, then one space and a soft ─
 test('a toggle draws ● on, the dot in green, or ○ off muted; a word the shell pins a flag to draws as it is', async ($, on) => {
   const draw = drawer($, on)
   const { tree } = await draw(viewOf())
-  expect(runsOf(tree, 'cs:CS_SCOPE_DISABLE').slice(2, 5)).toEqual([{ text: '  ' }, { text: '●', color: DARK.green }, { text: ' on'.padEnd(13), color: DARK.ink }])
-  expect(runsOf(tree, 'cs:CS_NERD_FONTS').slice(2, 4)).toEqual([{ text: '  ' }, { text: '○ off'.padEnd(14), color: DARK.mut }])
-  expect(runsOf(tree, 'mod:cs-update.showReleaseNotes').slice(3, 5)).toEqual([{ text: '●', color: DARK.green }, { text: ' on'.padEnd(13), color: DARK.ink }])
-  expect(runsOf((await draw(viewOf({ porcelain: LIGHT }))).tree, 'cs:CS_SCOPE_DISABLE')[3]).toEqual({ text: '●', color: TUI.light.green })
+  expect(runsOf(tree, 'cs:CS_SCOPE_DISABLE').slice(2, 5)).toEqual([{ text: '  ' }, { text: '●', color: COLOURS.green }, { text: ' on'.padEnd(13), color: COLOURS.ink }])
+  expect(runsOf(tree, 'cs:CS_NERD_FONTS').slice(2, 4)).toEqual([{ text: '  ' }, { text: '○ off'.padEnd(14), color: COLOURS.mut }])
+  expect(runsOf(tree, 'mod:cs-update.showReleaseNotes').slice(3, 5)).toEqual([{ text: '●', color: COLOURS.green }, { text: ' on'.padEnd(13), color: COLOURS.ink }])
   const row = 'CS_NERD_FONTS\tTerminal\tNerd Font glyphs\tflag\t-\toff\tnow\tapplies at the next cs command\t'
   const pinned = await draw(viewOf({ porcelain: GOLDEN.replace(`${row}-\tdefault\t-`, `${row}0\tshell\t-`) }))
-  expect(runsOf(pinned.tree, 'cs:CS_NERD_FONTS').slice(2, 4)).toEqual([{ text: '  ' }, { text: '0'.padEnd(14), color: DARK.ink }])
+  expect(runsOf(pinned.tree, 'cs:CS_NERD_FONTS').slice(2, 4)).toEqual([{ text: '  ' }, { text: '0'.padEnd(14), color: COLOURS.ink }])
 })
 
 test('a percent row draws a ten-cell gauge before its number where the value column holds both, all faint at the default, else filled in amber and empty faint; else the number alone', async ($, on) => {
   const draw = drawer($, on)
   const at58 = await draw(viewOf())
   expect(at58.lines.map(line => line.trimEnd())).toContain('  Context warning %    ▰▰▰▰▱▱▱▱▱▱ 40')
-  expect(runsOf(at58.tree, 'cs:CS_CTX_WARN_CTX').slice(3, 6)).toEqual([{ text: '▰▰▰▰', color: DARK.faint }, { text: '▱▱▱▱▱▱', color: DARK.faint }, { text: ' 40 ', color: DARK.mut }])
+  expect(runsOf(at58.tree, 'cs:CS_CTX_WARN_CTX').slice(3, 6)).toEqual([{ text: '▰▰▰▰', color: COLOURS.faint }, { text: '▱▱▱▱▱▱', color: COLOURS.faint }, { text: ' 40 ', color: COLOURS.mut }])
   expect(at58.lines.map(line => line.trimEnd())).toContain('  Context warn %       ▰▰▰▰▰▱▱▱▱▱ 50   session')
-  expect(runsOf(at58.tree, 'cs:CS_STATUSLINE_CTX_WARN').slice(3, 6)).toEqual([{ text: '▰▰▰▰▰', color: DARK.amber }, { text: '▱▱▱▱▱', color: DARK.faint }, { text: ' 50 ', color: DARK.ink }])
+  expect(runsOf(at58.tree, 'cs:CS_STATUSLINE_CTX_WARN').slice(3, 6)).toEqual([{ text: '▰▰▰▰▰', color: COLOURS.amber }, { text: '▱▱▱▱▱', color: COLOURS.faint }, { text: ' 50 ', color: COLOURS.ink }])
   expect(at58.lines.map(line => line.trimEnd())).toContain('  Rotate button from…  the warn %')
   expect(at58.lines.map(line => line.trimEnd())).toContain('  Width in columns     measured')
-  expect(runsOf((await draw(viewOf({ columns: 24 }))).tree, 'cs:CS_CTX_WARN_CTX').slice(1)).toEqual([{ text: 'Context …', color: DARK.ink }, { text: '  ' }, { text: '40'.padEnd(11), color: DARK.mut }])
-  expect(runsOf((await draw(viewOf({ porcelain: LIGHT }))).tree, 'cs:CS_STATUSLINE_CTX_WARN')[3]).toEqual({ text: '▰▰▰▰▰', color: TUI.light.amber })
+  expect(runsOf((await draw(viewOf({ columns: 24 }))).tree, 'cs:CS_CTX_WARN_CTX').slice(1)).toEqual([{ text: 'Context …', color: COLOURS.ink }, { text: '  ' }, { text: '40'.padEnd(11), color: COLOURS.mut }])
 })
 
 test('only what is set reads: a default row draws its value muted and leaves from and when empty; a set row draws its value in ink, from in its colour, and when, muted, unless it is now', async ($, on) => {
   const draw = drawer($, on)
   const { tree } = await draw(viewOf())
-  expect(runsOf(tree, 'cs:CS_STATUSLINE_DISABLE').slice(3)).toEqual([{ text: '○ off'.padEnd(14), color: DARK.mut }, { text: '  ' }, { text: ' '.repeat(7) }, { text: '  ' }, { text: ' '.repeat(10) }])
-  expect(runsOf(tree, 'cs:CS_STATUSLINE_SEGMENTS').slice(3)).toEqual([{ text: 'logo,session,…', color: DARK.mut }, { text: '  ' }, { text: ' '.repeat(7) }, { text: '  ' }, { text: ' '.repeat(10) }])
-  expect(runsOf(tree, 'cs:CS_STATUSLINE_LAYOUT').slice(3)).toEqual([{ text: 'band'.padEnd(14), color: DARK.ink }, { text: '  ' }, { text: 'machine', color: DARK.green }, { text: '  ' }, { text: ' '.repeat(10) }])
-  expect(runsOf(tree, 'cs:CS_STATUSLINE_CTX_WARN')[7]).toEqual({ text: 'session', color: DARK.teal })
-  expect(runsOf(tree, 'cs:CS_STATUSLINE_FRAME')[5]).toEqual({ text: 'shell  ', color: DARK.amber })
-  expect(runsOf(tree, 'cs:CS_TERM_THEME')[5]).toEqual({ text: 'launch ', color: DARK.faint })
-  expect(runsOf(tree, 'mod:cs.bandPrompt').slice(3)).toEqual([{ text: 'latest'.padEnd(14), color: DARK.ink }, { text: '  ' }, { text: 'mod    ', color: DARK.mut }, { text: '  ' }, { text: ' '.repeat(10) }])
-  expect(runsOf((await draw(viewOf({ rows: LOCKED }))).tree, 'mod:cs-mermaid.drawDiagrams')[6]).toEqual({ text: 'locked ', color: DARK.mut })
-  const light = (await draw(viewOf({ porcelain: LIGHT }))).tree
-  expect([runsOf(light, 'cs:CS_STATUSLINE_FRAME')[5], runsOf(light, 'cs:CS_STATUSLINE_CTX_WARN')[7]]).toEqual([{ text: 'shell  ', color: TUI.light.amber }, { text: 'session', color: TUI.light.teal }])
+  expect(runsOf(tree, 'cs:CS_STATUSLINE_DISABLE').slice(3)).toEqual([{ text: '○ off'.padEnd(14), color: COLOURS.mut }, { text: '  ' }, { text: ' '.repeat(7) }, { text: '  ' }, { text: ' '.repeat(10) }])
+  expect(runsOf(tree, 'cs:CS_STATUSLINE_SEGMENTS').slice(3)).toEqual([{ text: 'logo,session,…', color: COLOURS.mut }, { text: '  ' }, { text: ' '.repeat(7) }, { text: '  ' }, { text: ' '.repeat(10) }])
+  expect(runsOf(tree, 'cs:CS_STATUSLINE_LAYOUT').slice(3)).toEqual([{ text: 'band'.padEnd(14), color: COLOURS.ink }, { text: '  ' }, { text: 'machine', color: COLOURS.green }, { text: '  ' }, { text: ' '.repeat(10) }])
+  expect(runsOf(tree, 'cs:CS_STATUSLINE_CTX_WARN')[7]).toEqual({ text: 'session', color: COLOURS.teal })
+  expect(runsOf(tree, 'cs:CS_STATUSLINE_FRAME')[5]).toEqual({ text: 'shell  ', color: COLOURS.amber })
+  expect(runsOf(tree, 'cs:CS_TERM_THEME')[5]).toEqual({ text: 'launch ', color: COLOURS.faint })
+  expect(runsOf(tree, 'mod:cs.bandPrompt').slice(3)).toEqual([{ text: 'latest'.padEnd(14), color: COLOURS.ink }, { text: '  ' }, { text: 'mod    ', color: COLOURS.mut }, { text: '  ' }, { text: ' '.repeat(10) }])
+  expect(runsOf((await draw(viewOf({ rows: LOCKED }))).tree, 'mod:cs-mermaid.drawDiagrams')[6]).toEqual({ text: 'locked ', color: COLOURS.mut })
   expect(CLEARED).not.toBe(GOLDEN)
   const cleared = await draw(viewOf({ porcelain: CLEARED }))
   expect(cleared.lines.map(line => line.trimEnd())).toContain('  No wake after /cle…  ● on            session  /clear')
-  expect(runsOf(cleared.tree, 'cs:CS_NO_ROTATION_WAKE').slice(-1)).toEqual([{ text: '/clear'.padEnd(10), color: DARK.mut }])
+  expect(runsOf(cleared.tree, 'cs:CS_NO_ROTATION_WAKE').slice(-1)).toEqual([{ text: '/clear'.padEnd(10), color: COLOURS.mut }])
 })
 
 test('the selected row is a row Box the body wide of the marker Text, the label Button and the columns Text: ▌ in the rail\'s second colour and the label bold in ink; every other row two spaces; no row has a background, and every label is in ink', async ($, on) => {
@@ -612,28 +594,22 @@ test('the selected row is a row Box the body wide of the marker Text, the label 
   const [marker, button, columns] = (row.children ?? []) as Node[]
   expect(textOf(row).length).toBe(58)
   expect((row.children ?? []).map(child => (child as Node).type)).toEqual(['Text', 'Button', 'Text'])
-  expect([textOf(marker), marker?.props.color]).toEqual(['▌ ', DARK.rail[1]])
+  expect([textOf(marker), marker?.props.color]).toEqual(['▌ ', COLOURS.rail[1]])
   expect([button?.props.plain, button?.props.label, button?.props.autoFocus, textOf(button)]).toEqual([true, 'Layout', true, 'Layout'.padEnd(19)])
   expect(textOf(columns)).toBe(`  ${'band'.padEnd(14)}  machine  ${' '.repeat(10)}`)
-  expect(runsOf(tree, 'cs:CS_STATUSLINE_LAYOUT').slice(0, 2)).toEqual([{ text: '▌ ', color: DARK.rail[1] }, { text: 'Layout'.padEnd(19), color: DARK.ink, weight: 'bold' }])
-  expect(runsOf(tree, 'cs:CS_STATUSLINE_DISABLE').slice(0, 2)).toEqual([{ text: '  ' }, { text: 'Hide the status li…', color: DARK.ink }])
+  expect(runsOf(tree, 'cs:CS_STATUSLINE_LAYOUT').slice(0, 2)).toEqual([{ text: '▌ ', color: COLOURS.rail[1] }, { text: 'Layout'.padEnd(19), color: COLOURS.ink, weight: 'bold' }])
+  expect(runsOf(tree, 'cs:CS_STATUSLINE_DISABLE').slice(0, 2)).toEqual([{ text: '  ' }, { text: 'Hide the status li…', color: COLOURS.ink }])
   const other = rowOf(tree, 'cs:CS_STATUSLINE_DISABLE')
   expect(other.children?.map(child => [(child as Node).type, (child as Node).props?.autoFocus])).toEqual([['Text', undefined], ['Button', undefined], ['Text', undefined]])
   expect(rowsOf(tree).filter(line => line.startsWith('▌ '))).toEqual(['▌ Layout               band            machine            '])
-  const lightTree = (await draw(viewOf({ selected: 'cs:CS_STATUSLINE_LAYOUT', porcelain: LIGHT }))).tree
-  expect((rowOf(lightTree, 'cs:CS_STATUSLINE_LAYOUT').children?.[0] as Node).props.color).toBe(TUI.light.rail[1])
-  const labels = (drawn: unknown) => rowBoxes(drawn).map(box => {
+  const labels = rowBoxes(tree).map(box => {
     const key = String(((box.children ?? []).find(c => (c as Node).type === 'Button') as Node).props.key)
-    const label = runsOf(drawn, key)[1]
+    const label = runsOf(tree, key)[1]
     return [label?.color, label?.dimColor]
   })
-  for (const [drawn, p] of [[tree, DARK], [lightTree, TUI.light]] as const) {
-    expect(rowBoxes(drawn).length).toBe(46)
-    expect(rowBoxes(drawn).filter(box => box.props.backgroundColor !== undefined).map(textOf)).toEqual([])
-    expect(labels(drawn)).toEqual(Array.from({ length: 46 }, () => [p.ink, undefined]))
-  }
-  expect(runsOf(lightTree, 'cs:CS_STATUSLINE_DISABLE').slice(1, 4)).toEqual([{ text: 'Hide the status li…', color: TUI.light.ink }, { text: '  ' },
-    { text: '○ off'.padEnd(14), color: TUI.light.mut }])
+  expect(rowBoxes(tree).length).toBe(46)
+  expect(rowBoxes(tree).filter(box => box.props.backgroundColor !== undefined).map(textOf)).toEqual([])
+  expect(labels).toEqual(Array.from({ length: 46 }, () => [COLOURS.ink, undefined]))
 })
 
 test('the field stands between the card and the column header: filter, muted, then an Input keyed filter holding the text, type to filter its placeholder, focused first, Enter labelled first row', async ($, on) => {
@@ -642,43 +618,47 @@ test('the field stands between the card and the column header: filter, muted, th
   const at = parts.findIndex(part => (part.children ?? []).some(child => (child as Node).type === 'Input'))
   expect([textOf(parts[at - 1]), textOf(parts[at + 1]).trimEnd()]).toEqual(['▍ ● on · session · applies at your next prompt', HEAD_AT_58[0]])
   const [word, input] = (parts[at]?.children ?? []) as Node[]
-  expect([parts[at]?.type, parts[at]?.props.flexDirection, textOf(word), word?.props.color]).toEqual(['Box', 'row', 'filter ', DARK.mut])
+  expect([parts[at]?.type, parts[at]?.props.flexDirection, textOf(word), word?.props.color]).toEqual(['Box', 'row', 'filter ', COLOURS.mut])
   expect([input?.type, input?.props.key, input?.props.value, input?.props.placeholder, input?.props.autoFocus, input?.props.submitLabel])
     .toEqual(['Input', 'filter', 'scope', 'type to filter', true, 'first row'])
-  expect((((await draw(viewOf({ porcelain: LIGHT }))).tree as Node).children as Node[]).flatMap(part => (part.children ?? []) as Node[])
-    .find(child => textOf(child) === 'filter ')?.props.color).toBe(TUI.light.mut)
 })
 
 test('each line of the card opens with ▍ in the rail\'s second colour: the label bold in ink and the key muted, then the value as its row draws it, the source in its colour and the note muted', async ($, on) => {
   const draw = drawer($, on)
-  const card = async (selected: RowId, over: Partial<PanelView> & { porcelain?: string; rows?: ConfigRow[] } = {}) => {
+  const card = async (selected: RowId, over: { rows?: ConfigRow[] } = {}) => {
     const parts = ((await draw(viewOf({ selected, ...over }))).tree as Node).children as Node[]
     return parts.slice(2, parts.findIndex((part, i) => i >= 2 && !textOf(part).startsWith('▍'))).map(line => (line.children ?? [])
       .map(run => [textOf(run), (run as Node).props?.color, (run as Node).props?.weight].filter(v => v !== undefined)))
   }
-  const edge = (p: typeof DARK) => ['▍ ', p.rail[1]]
-  const dot = (p: typeof DARK) => [' · ', p.mut]
+  const edge = ['▍ ', COLOURS.rail[1]]
+  const dot = [' · ', COLOURS.mut]
   expect(await card('cs:CS_STATUSLINE_LAYOUT')).toEqual([
-    [edge(DARK), ['Layout', DARK.ink, 'bold'], ['  '], ['CS_STATUSLINE_LAYOUT', DARK.mut]],
-    [edge(DARK), ['band', DARK.ink], dot(DARK), ['machine', DARK.green], dot(DARK), ['applies at the next repaint', DARK.mut]],
+    [edge, ['Layout', COLOURS.ink, 'bold'], ['  '], ['CS_STATUSLINE_LAYOUT', COLOURS.mut]],
+    [edge, ['band', COLOURS.ink], dot, ['machine', COLOURS.green], dot, ['applies at the next repaint', COLOURS.mut]],
   ])
-  expect((await card('cs:CS_STATUSLINE_DISABLE'))[1]).toEqual([edge(DARK), ['○ off', DARK.mut], dot(DARK), ['default', DARK.mut], dot(DARK), ['applies at the next repaint', DARK.mut]])
-  expect((await card('cs:CS_SCOPE_DISABLE'))[1]).toEqual([edge(DARK), ['●', DARK.green], [' on', DARK.ink], dot(DARK), ['session', DARK.teal], dot(DARK),
-    ['applies at your next prompt', DARK.mut]])
-  expect((await card('cs:CS_STATUSLINE_CTX_WARN'))[1]).toEqual([edge(DARK), ['▰▰▰▰▰', DARK.amber], ['▱▱▱▱▱', DARK.faint], [' 50', DARK.ink], dot(DARK),
-    ['session', DARK.teal], dot(DARK), ['applies at the next repaint', DARK.mut]])
-  expect((await card('cs:CS_CTX_WARN_CTX'))[1]?.slice(1, 4)).toEqual([['▰▰▰▰', DARK.faint], ['▱▱▱▱▱▱', DARK.faint], [' 40', DARK.mut]])
-  expect((await card('cs:CS_STATUSLINE_FRAME'))[1]?.slice(1, 4)).toEqual([['6', DARK.ink], dot(DARK), ['shell', DARK.amber]])
-  expect((await card('cs:CS_TERM_THEME'))[1]?.slice(1, 4)).toEqual([['dark', DARK.ink], dot(DARK), ['launch', DARK.faint]])
+  expect((await card('cs:CS_STATUSLINE_DISABLE'))[1]).toEqual([edge, ['○ off', COLOURS.mut], dot, ['default', COLOURS.mut], dot, ['applies at the next repaint', COLOURS.mut]])
+  expect((await card('cs:CS_SCOPE_DISABLE'))[1]).toEqual([edge, ['●', COLOURS.green], [' on', COLOURS.ink], dot, ['session', COLOURS.teal], dot,
+    ['applies at your next prompt', COLOURS.mut]])
+  expect((await card('cs:CS_STATUSLINE_CTX_WARN'))[1]).toEqual([edge, ['▰▰▰▰▰', COLOURS.amber], ['▱▱▱▱▱', COLOURS.faint], [' 50', COLOURS.ink], dot,
+    ['session', COLOURS.teal], dot, ['applies at the next repaint', COLOURS.mut]])
+  expect((await card('cs:CS_CTX_WARN_CTX'))[1]?.slice(1, 4)).toEqual([['▰▰▰▰', COLOURS.faint], ['▱▱▱▱▱▱', COLOURS.faint], [' 40', COLOURS.mut]])
+  expect((await card('cs:CS_STATUSLINE_FRAME'))[1]?.slice(1, 4)).toEqual([['6', COLOURS.ink], dot, ['shell', COLOURS.amber]])
+  expect((await card('cs:CS_TERM_THEME'))[1]?.slice(1, 4)).toEqual([['dark', COLOURS.ink], dot, ['launch', COLOURS.faint]])
   expect(await card('mod:cs.bandPrompt')).toEqual([
-    [edge(DARK), ['Band: named prompt', DARK.ink, 'bold'], ['  '], ['cs.bandPrompt', DARK.mut]],
-    [edge(DARK), ['latest', DARK.ink], dot(DARK), ['mod', DARK.mut], dot(DARK), ['changing it reloads cs (an armed rotation', DARK.mut]],
-    [edge(DARK), ['countdown starts over)', DARK.mut]],
+    [edge, ['Band: named prompt', COLOURS.ink, 'bold'], ['  '], ['cs.bandPrompt', COLOURS.mut]],
+    [edge, ['latest', COLOURS.ink], dot, ['mod', COLOURS.mut], dot, ['changing it reloads cs (an armed rotation', COLOURS.mut]],
+    [edge, ['countdown starts over)', COLOURS.mut]],
   ])
-  expect((await card('mod:cs-mermaid.drawDiagrams', { rows: LOCKED }))[1]?.slice(4, 5)).toEqual([['locked', DARK.mut]])
-  const light = await card('cs:CS_STATUSLINE_CTX_WARN', { porcelain: LIGHT })
-  expect([light[0]?.[0], light[0]?.[1], light[1]?.[1], light[1]?.[5]]).toEqual([edge(TUI.light), ['Context warn %', TUI.light.ink, 'bold'], ['▰▰▰▰▰', TUI.light.amber],
-    ['session', TUI.light.teal]])
+  expect((await card('mod:cs-mermaid.drawDiagrams', { rows: LOCKED }))[1]?.slice(4, 5)).toEqual([['locked', COLOURS.mut]])
+})
+
+test('the pane draws every colour but the brand\'s in a theme key, so the engine follows the person\'s theme; what CS_TERM_THEME reads changes no colour', async ($, on) => {
+  const draw = drawer($, on)
+  const colours = async (over: Partial<PanelView> & { porcelain?: string }) => nodesOf((await draw(viewOf(over))).tree).map(n => [n.props?.color, n.props?.weight])
+  const views: Partial<PanelView>[] = [{},{ columns: 80, selected: 'cs:CS_STATUSLINE_CTX_WARN' }, { columns: 24, filter: 'context' }]
+  for (const view of views) expect(await colours({ ...view, porcelain: LIGHT }), `the view ${JSON.stringify(view)}`).toEqual(await colours(view))
+  const keys = [...new Set((await colours({})).map(([color]) => color).filter(color => color !== undefined && !String(color).startsWith('rgb(')))].sort()
+  expect(keys).toEqual(['inactive', 'planMode', 'subtle', 'success', 'text'])
 })
 
 // ── The hooks, through the engine's own `$` ──────────────────────────────

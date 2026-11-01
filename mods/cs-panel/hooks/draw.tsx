@@ -3,7 +3,7 @@
 /* @jsxFrag Fragment */
 // ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the masthead, the selected row's card, the problem lines, the filter field, the column header and a window of rows fitted to the body.
 // ABOUTME: Pure over its view and exported with its word tables, so the design lab draws a fixture without the engine.
-import type { EngineInterface, RenderElement, TextProps } from 'claude-code'
+import type { EngineInterface, RenderElement, TextProps, ThemeKey } from 'claude-code'
 import { filterLines, keyOf, labelOf, shownOf, type Line, type Pending, type Row, type RowId, type Source } from './settings'
 
 declare const h: any
@@ -66,10 +66,20 @@ export const WORDS = {
 
 type RowLine = Extract<Line, { kind: 'row' }>
 
-// tui/src/theme.rs's palettes and install.sh.in's wordmark (lib/05-term.sh's when light).
+// Claude Code's theme keys, which the engine resolves to the person's theme
+// on each drawing: ink, muted, faint, the soft rules, the session source's
+// teal and the machine source's green (blue in the colour-blind themes).
+const THEME = { ink: 'text', mut: 'inactive', faint: 'subtle', soft: 'subtle', teal: 'planMode', green: 'success' } as const satisfies Record<string, ThemeKey>
+
+// The brand's accents on every theme: tui/src/theme.rs's amber, hero stops and
+// rail, and install.sh.in's wordmark.
 type Rgb = readonly [number, number, number]
 const rgb = (channels: readonly number[]) => `rgb(${channels.join(',')})`
-type Palette = Record<'ink' | 'mut' | 'faint' | 'soft' | 'teal' | 'green' | 'amber', string> & { hero: readonly Rgb[]; rail: readonly string[]; wordmark: readonly string[] }
+const BRAND = {
+  amber: rgb([246, 154, 0]), hero: [[221, 80, 20], [237, 128, 0], [246, 154, 0], [214, 162, 30]] satisfies Rgb[], rail: [[221, 80, 20], [246, 154, 0], [250, 180, 60]].map(rgb),
+  wordmark: [[230, 74, 25], [232, 83, 24], [234, 91, 22], [235, 100, 21], [237, 108, 20], [239, 117, 19], [241, 125, 17], [243, 134, 16], [245, 142, 15], [246, 151, 14],
+    [248, 159, 12], [250, 168, 11], [252, 176, 10], [254, 185, 9], [255, 193, 7]].map(rgb),
+}
 
 // The TUI's ramp: cell `i` of `n` along the stops, each channel truncated.
 function ramp(stops: readonly Rgb[], n: number, i: number): string {
@@ -79,25 +89,11 @@ function ramp(stops: readonly Rgb[], n: number, i: number): string {
   return rgb(([0, 1, 2] as const).map(c => Math.trunc(from[c] + (at - a) * (to[c] - from[c]))))
 }
 
-const PALETTES = {
-  dark: { ink: rgb([245, 230, 211]), mut: rgb([161, 136, 127]), faint: rgb([120, 104, 96]), soft: rgb([56, 50, 46]), teal: rgb([45, 212, 191]),
-    green: rgb([139, 195, 74]), amber: rgb([246, 154, 0]), hero: [[221, 80, 20], [237, 128, 0], [246, 154, 0], [214, 162, 30]], rail: [[221, 80, 20], [246, 154, 0], [250, 180, 60]].map(rgb),
-    wordmark: [[230, 74, 25], [232, 83, 24], [234, 91, 22], [235, 100, 21], [237, 108, 20], [239, 117, 19], [241, 125, 17], [243, 134, 16], [245, 142, 15], [246, 151, 14],
-      [248, 159, 12], [250, 168, 11], [252, 176, 10], [254, 185, 9], [255, 193, 7]].map(rgb) },
-  light: { ink: rgb([43, 33, 24]), mut: rgb([122, 106, 88]), faint: rgb([168, 151, 130]), soft: rgb([226, 213, 196]), teal: rgb([15, 118, 110]),
-    green: rgb([92, 140, 84]), amber: rgb([242, 167, 53]), hero: [[143, 50, 28], [216, 90, 36], [242, 167, 53], [214, 162, 30]], rail: [[193, 58, 29], [228, 91, 34], [232, 167, 46]].map(rgb),
-    wordmark: Array.from(WORDS.brand, (_, i) => ramp([[166, 86, 60], [156, 118, 56]], WORDS.brand.length, i)) },
-} satisfies Record<'dark' | 'light', Palette>
-
-function paletteOf(lines: readonly Line[]): Palette {
-  return lines.some(l => l.kind === 'row' && l.row.kind === 'setting' && l.row.setting.key === 'CS_TERM_THEME' && l.row.setting.value === 'light') ? PALETTES.light : PALETTES.dark
-}
-
 // A run of one style; a line is a row of runs as wide as their texts.
 type Run = { text: string } & Pick<TextProps, 'color' | 'weight'>
 
 // The columns right of the name, dropped from the end by a narrow body.
-type Column = { head: string; cells: number; runs: (line: RowLine, cells: number, p: Palette) => Run[] }
+type Column = { head: string; cells: number; runs: (line: RowLine, cells: number) => Run[] }
 const NAME_MIN = 8
 const NAME_MOST = 26
 const GAP = 2
@@ -107,19 +103,19 @@ const GAUGE_CELLS = 10
 const VALUE_CELLS = { wide: GAUGE_CELLS + 4, narrow: 11 }
 // cs's `when` for a change that applies at once: the when cell leaves it out.
 const AT_ONCE = 'now'
-const VALUE: Column = { head: WORDS.heads.value, cells: VALUE_CELLS.wide, runs: (l, cells, p) => fitRuns(valueRuns(l, cells, p), cells) }
+const VALUE: Column = { head: WORDS.heads.value, cells: VALUE_CELLS.wide, runs: (l, cells) => fitRuns(valueRuns(l, cells), cells) }
 // A default row leaves from and when empty, a mod row its when.
 const REST: readonly Column[] = [
-  { head: WORDS.heads.from, cells: 7, runs: (l, cells, p) => l.row.kind === 'mod'
-    ? [{ text: fit(l.row.mod.isLocked ? WORDS.locked : WORDS.mod, cells), color: p.mut }]
+  { head: WORDS.heads.from, cells: 7, runs: (l, cells) => l.row.kind === 'mod'
+    ? [{ text: fit(l.row.mod.isLocked ? WORDS.locked : WORDS.mod, cells), color: THEME.mut }]
     : l.row.setting.source === 'default' ? [{ text: fit('', cells) }]
-      : [{ text: fit(WORDS.from[l.row.setting.source], cells), color: p[SOURCE_INK[l.row.setting.source]] }] },
-  { head: WORDS.heads.when, cells: 10, runs: (l, cells, p) => l.row.kind === 'setting' && l.row.setting.source !== 'default' && l.row.setting.when !== AT_ONCE
-    ? [{ text: fit(l.row.setting.when, cells), color: p.mut }] : [{ text: fit('', cells) }] },
+      : [{ text: fit(WORDS.from[l.row.setting.source], cells), color: SOURCE_INK[l.row.setting.source] }] },
+  { head: WORDS.heads.when, cells: 10, runs: (l, cells) => l.row.kind === 'setting' && l.row.setting.source !== 'default' && l.row.setting.when !== AT_ONCE
+    ? [{ text: fit(l.row.setting.when, cells), color: THEME.mut }] : [{ text: fit('', cells) }] },
 ]
 
 // A source's colour, the shell's amber as it overrides both files.
-const SOURCE_INK: Record<Source, 'teal' | 'green' | 'amber' | 'faint' | 'mut'> = { session: 'teal', machine: 'green', shell: 'amber', launch: 'faint', default: 'mut' }
+const SOURCE_INK: Record<Source, string> = { session: THEME.teal, machine: THEME.green, shell: BRAND.amber, launch: THEME.faint, default: THEME.mut }
 const CHANGED: ReadonlySet<Source> = new Set(['session', 'machine', 'shell'])
 
 const PERCENT_KEYS: ReadonlySet<string> = new Set(['CS_STATUSLINE_CTX_WARN', 'CS_STATUSLINE_CTX_CRIT', 'CS_CTX_WARN_CTX', 'CS_ROTATE_NUDGE_CTX',
@@ -135,17 +131,17 @@ function valueOf(row: Row): boolean | string {
 
 // A value unpadded: what the row waits on, `● on`, `○ off`, a percentage's gauge where
 // `room` holds it beside the number, else the value; ink when set, muted at the default.
-function valueRuns(l: RowLine, room: number, p: Palette): Run[] {
-  if (l.pending !== undefined) return [{ text: WORDS.pending[l.pending], color: p.mut }]
+function valueRuns(l: RowLine, room: number): Run[] {
+  if (l.pending !== undefined) return [{ text: WORDS.pending[l.pending], color: THEME.mut }]
   const value = valueOf(l.row)
   const isDefault = l.row.kind === 'setting' && l.row.setting.source === 'default'
-  const tone = isDefault ? p.mut : p.ink
-  if (value === true) return [{ text: WORDS.marks.on, color: p.green }, { text: ` ${WORDS.on}`, color: tone }]
-  if (value === false) return [{ text: `${WORDS.marks.off} ${WORDS.off}`, color: p.mut }]
+  const tone = isDefault ? THEME.mut : THEME.ink
+  if (value === true) return [{ text: WORDS.marks.on, color: THEME.green }, { text: ` ${WORDS.on}`, color: tone }]
+  if (value === false) return [{ text: `${WORDS.marks.off} ${WORDS.off}`, color: THEME.mut }]
   const isPercent = l.row.kind === 'setting' && PERCENT_KEYS.has(l.row.setting.key) && /^\d{1,3}$/.test(value) && Number(value) <= 100
   if (!isPercent || room < GAUGE_CELLS + 1 + value.length) return [{ text: value, color: tone }]
   const full = Math.round(Number(value) / 10)
-  return [{ text: WORDS.marks.full.repeat(full), color: isDefault ? p.faint : p.amber }, { text: WORDS.marks.empty.repeat(GAUGE_CELLS - full), color: p.faint },
+  return [{ text: WORDS.marks.full.repeat(full), color: isDefault ? THEME.faint : BRAND.amber }, { text: WORDS.marks.empty.repeat(GAUGE_CELLS - full), color: THEME.faint },
     { text: ` ${value}`, color: tone }].filter(run => run.text !== '')
 }
 
@@ -267,27 +263,27 @@ export function noteOf(row: Row, hasSelf: boolean): string {
 }
 
 // The selected row's label and key, then its whole value, its source and its note.
-function cardOf(l: RowLine, columns: number, most: number, p: Palette, hasSelf: boolean): Run[][] {
+function cardOf(l: RowLine, columns: number, most: number, hasSelf: boolean): Run[][] {
   const row = l.row
-  const from: Run = row.kind === 'mod' ? { text: row.mod.isLocked ? WORDS.locked : WORDS.mod, color: p.mut }
-    : { text: WORDS.from[row.setting.source], color: p[SOURCE_INK[row.setting.source]] }
-  const dot: Run = { text: ` ${WORDS.marks.dot} `, color: p.mut }
+  const from: Run = row.kind === 'mod' ? { text: row.mod.isLocked ? WORDS.locked : WORDS.mod, color: THEME.mut }
+    : { text: WORDS.from[row.setting.source], color: SOURCE_INK[row.setting.source] }
+  const dot: Run = { text: ` ${WORDS.marks.dot} `, color: THEME.mut }
   const room = Math.max(1, columns - MARK_CELLS)
-  return [clip([{ text: labelOf(row), color: p.ink, weight: 'bold' }, { text: '  ' }, { text: keyOf(row), color: p.mut }], room),
-    ...wrapRuns([...valueRuns(l, Infinity, p), dot, from, dot, { text: noteOf(row, hasSelf), color: p.mut }], room, most)]
-    .map(line => [{ text: `${WORDS.marks.edge} `, color: p.rail[1] }, ...line])
+  return [clip([{ text: labelOf(row), color: THEME.ink, weight: 'bold' }, { text: '  ' }, { text: keyOf(row), color: THEME.mut }], room),
+    ...wrapRuns([...valueRuns(l, Infinity), dot, from, dot, { text: noteOf(row, hasSelf), color: THEME.mut }], room, most)]
+    .map(line => [{ text: `${WORDS.marks.edge} `, color: BRAND.rail[1] }, ...line])
 }
 
 // `▌ `, the wordmark, settings, the rows, how many a file or the shell sets (a
 // /config row tells no default) and the session name, dropped from the right.
-function mastheadOf(v: PanelView, p: Palette): Run[] {
-  const brand: Run[] = [{ text: `${WORDS.marks.selected} `, color: p.rail[0] }, ...[...WORDS.brand].slice(0, Math.max(0, v.columns - MARK_CELLS)).map((text, i) => ({ text, color: p.wordmark[i] }))]
+function mastheadOf(v: PanelView): Run[] {
+  const brand: Run[] = [{ text: `${WORDS.marks.selected} `, color: BRAND.rail[0] }, ...[...WORDS.brand].slice(0, Math.max(0, v.columns - MARK_CELLS)).map((text, i) => ({ text, color: BRAND.wordmark[i] }))]
   const rows = (v.lines ?? []).flatMap(l => l.kind === 'row' ? [l.row] : [])
   const changed = rows.filter(row => row.kind === 'setting' && CHANGED.has(row.setting.source)).length
-  const dot: Run = { text: DOT, color: p.mut }
-  const parts: Run[][] = [[{ text: `  ${WORDS.title}`, color: p.ink, weight: 'bold' }],
-    ...(v.lines === undefined ? [] : [[dot, { text: WORDS.settings(rows.length), color: p.ink }], [dot, { text: WORDS.changed(changed), color: changed > 0 ? p.teal : p.mut }]]),
-    ...(v.session === undefined ? [] : [[dot, { text: v.session, color: p.mut }]])]
+  const dot: Run = { text: DOT, color: THEME.mut }
+  const parts: Run[][] = [[{ text: `  ${WORDS.title}`, color: THEME.ink, weight: 'bold' }],
+    ...(v.lines === undefined ? [] : [[dot, { text: WORDS.settings(rows.length), color: THEME.ink }], [dot, { text: WORDS.changed(changed), color: changed > 0 ? THEME.teal : THEME.mut }]]),
+    ...(v.session === undefined ? [] : [[dot, { text: v.session, color: THEME.mut }]])]
   const cells = (runs: readonly Run[]) => runs.reduce((sum, run) => sum + run.text.length, 0)
   const room = v.columns - cells(brand)
   const ends = parts.map((_, i) => cells(parts.slice(0, i + 1).flat()))
@@ -303,7 +299,6 @@ const rowsIn = (lines: readonly BodyLine[]) => lines.filter(l => l.kind === 'row
 // the field and the column header once any row is listed; a group's name
 // stands for `+0 above`.
 function layoutOf(v: PanelView) {
-  const p = paletteOf(v.lines ?? [])
   const isListed = (v.lines ?? []).length > 0
   const lines = filterLines(v.lines ?? [], v.filter).flatMap((l, i): BodyLine[] => l.kind === 'group' && i > 0 ? [{ kind: 'gap' }, l] : [l])
   const listed = lines.findIndex(l => l.kind === 'row' && l.row.id === v.selected)
@@ -315,10 +310,10 @@ function layoutOf(v: PanelView) {
   // The masthead and its rule, the problems, the notice; the field, the header, its rule; the no-match line.
   const top = 2 + v.problems.length + (notice === undefined ? 0 : 1) + (isListed ? 3 : 0) + (noMatch === undefined ? 0 : 1)
   // The card's wrapped lines leave a line for its label and one for the window.
-  const card = selected === undefined ? [] : cardOf(selected, v.columns, Math.max(1, v.bodyRows - top - 2), p, v.session !== undefined)
+  const card = selected === undefined ? [] : cardOf(selected, v.columns, Math.max(1, v.bodyRows - top - 2), v.session !== undefined)
   const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - top - card.length))
   const isEmptyAbove = shown.above && rowsIn(lines.slice(0, shown.from)) === 0
-  return { p, isListed, lines, selected, card, notice, noMatch, ...shown, ...(isEmptyAbove ? { from: 0, above: false } : {}) }
+  return { isListed, lines, selected, card, notice, noMatch, ...shown, ...(isEmptyAbove ? { from: 0, above: false } : {}) }
 }
 
 // The keys of the elements drawPane draws for a view, in the order the focus
@@ -341,43 +336,43 @@ export function ringBack(ring: { key: string; at: number }, next: { keys: readon
 }
 
 // A group's name in bold ink, then a soft rule to the body's edge.
-function headingOf(title: string, columns: number, p: Palette): Run[] {
+function headingOf(title: string, columns: number): Run[] {
   const name = cut(title, Math.max(1, columns - 2))
-  return [{ text: name, color: p.ink, weight: 'bold' }, { text: ` ${WORDS.marks.rule.repeat(Math.max(1, columns - name.length - 1))}`, color: p.soft }]
+  return [{ text: name, color: THEME.ink, weight: 'bold' }, { text: ` ${WORDS.marks.rule.repeat(Math.max(1, columns - name.length - 1))}`, color: THEME.soft }]
 }
 
 // A row's Button holds the label alone (the focus marks it) and never shrinks,
 // so every line is measured. Enter in the field sends the ring to the rows.
 export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['resolve']>, on: Handlers): RenderElement {
   const { Box, Text, Button } = el
-  const { p, isListed, lines, selected, card, notice, noMatch, from, to, above, below } = layoutOf(v)
+  const { isListed, lines, selected, card, notice, noMatch, from, to, above, below } = layoutOf(v)
   const { nameCells, cols } = tableOf(v.columns)
   const runs = (line: readonly Run[]) => line.map(({ text, ...style }) => <Text {...style}>{text}</Text>)
   const Input = v.hasField && 'Input' in el ? el.Input : undefined
   return (
     <Box flexDirection="column">
-      <Text>{runs(mastheadOf(v, p))}</Text>
-      <Text>{runs(Array.from({ length: v.columns }, (_, i) => ({ text: WORDS.marks.hero, color: ramp(p.hero, v.columns, i) })))}</Text>
+      <Text>{runs(mastheadOf(v))}</Text>
+      <Text>{runs(Array.from({ length: v.columns }, (_, i) => ({ text: WORDS.marks.hero, color: ramp(BRAND.hero, v.columns, i) })))}</Text>
       {card.map(line => <Text>{runs(line)}</Text>)}
-      {v.problems.map(problem => <Text color={p.mut}>{cut(problem, v.columns)}</Text>)}
-      {notice !== undefined && <Text color={p.mut}>{cut(notice, v.columns)}</Text>}
-      {isListed && (Input === undefined ? <Text>{' '}</Text> : <Box flexDirection="row"><Text color={p.mut}>{`${WORDS.filter} `}</Text>
+      {v.problems.map(problem => <Text color={THEME.mut}>{cut(problem, v.columns)}</Text>)}
+      {notice !== undefined && <Text color={THEME.mut}>{cut(notice, v.columns)}</Text>}
+      {isListed && (Input === undefined ? <Text>{' '}</Text> : <Box flexDirection="row"><Text color={THEME.mut}>{`${WORDS.filter} `}</Text>
         <Input key={FILTER} placeholder={WORDS.find} value={v.filter} submitLabel={WORDS.toRows} autoFocus onInput={on.filter} onSubmit={text => { on.filter(text); on.toRows() }} /></Box>)}
-      {isListed && <Text color={p.mut} weight="bold">
+      {isListed && <Text color={THEME.mut} weight="bold">
         {`${fit(`${' '.repeat(MARK_CELLS)}${WORDS.heads.name}`, MARK_CELLS + nameCells)}${cols.map(c => `${' '.repeat(GAP)}${fit(c.head, c.cells)}`).join('')}`}</Text>}
-      {isListed && <Text color={p.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
-      {noMatch !== undefined && <Text color={p.mut}>{cut(noMatch, v.columns)}</Text>}
-      {above && <Text color={p.faint}>{WORDS.above(rowsIn(lines.slice(0, from)))}</Text>}
-      {lines.slice(from, to).map(l => l.kind === 'gap' ? <Text>{' '}</Text> : l.kind === 'group' ? <Text>{runs(headingOf(l.title, v.columns, p))}</Text> : (
+      {isListed && <Text color={THEME.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
+      {noMatch !== undefined && <Text color={THEME.mut}>{cut(noMatch, v.columns)}</Text>}
+      {above && <Text color={THEME.faint}>{WORDS.above(rowsIn(lines.slice(0, from)))}</Text>}
+      {lines.slice(from, to).map(l => l.kind === 'gap' ? <Text>{' '}</Text> : l.kind === 'group' ? <Text>{runs(headingOf(l.title, v.columns))}</Text> : (
         <Box flexDirection="row">
-          {runs([l === selected ? { text: `${WORDS.marks.selected} `, color: p.rail[1] } : { text: ' '.repeat(MARK_CELLS) }])}
+          {runs([l === selected ? { text: `${WORDS.marks.selected} `, color: BRAND.rail[1] } : { text: ' '.repeat(MARK_CELLS) }])}
           <Button key={l.row.id} plain label={labelOf(l.row)} {...(l === selected ? { autoFocus: true } : {})} onPress={() => on.change(l.row.id)}>
-            {runs([{ text: fit(labelOf(l.row), nameCells), color: p.ink, ...(l === selected ? { weight: 'bold' } as const : {}) }])}
+            {runs([{ text: fit(labelOf(l.row), nameCells), color: THEME.ink, ...(l === selected ? { weight: 'bold' } as const : {}) }])}
           </Button>
-          <Text>{runs(cols.flatMap(c => [{ text: ' '.repeat(GAP) }, ...c.runs(l, c.cells, p)]))}</Text>
+          <Text>{runs(cols.flatMap(c => [{ text: ' '.repeat(GAP) }, ...c.runs(l, c.cells)]))}</Text>
         </Box>
       ))}
-      {below && <Text color={p.faint}>{WORDS.below(rowsIn(lines.slice(to)))}</Text>}
+      {below && <Text color={THEME.faint}>{WORDS.below(rowsIn(lines.slice(to)))}</Text>}
     </Box>
   )
 }
