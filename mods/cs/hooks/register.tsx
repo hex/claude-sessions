@@ -1776,8 +1776,10 @@ export const ROTATE_ACTION = 'strip:jump1'
 export const WRAP_ACTION = 'strip:jump2'
 export const FEED_ACTION = 'strip:jump3'
 
+// The feed is on by default: no file reads on, as cs-feed reads it (KEEP IN
+// SYNC with feedState in mods/cs-feed/hooks/settings.ts).
 async function readFeed($: EngineInterface): Promise<boolean> {
-  let complaint: string | undefined
+  let complaint: string
   try {
     // Writes are non-atomic: only the whole on line counts. Trimming would
     // accept a torn write without its newline; every other value is off.
@@ -1786,9 +1788,13 @@ async function readFeed($: EngineInterface): Promise<boolean> {
     return text === 'on\n'
   } catch (err) {
     const message = String(err instanceof Error ? err.message : err)
-    if (!message.endsWith(' failed: ENOENT')) complaint = LOGS.feedUnread(message)
+    if (message.endsWith(' failed: ENOENT')) {
+      feedComplaint = undefined
+      return true
+    }
+    complaint = LOGS.feedUnread(message)
   }
-  if (complaint !== undefined && complaint !== feedComplaint) $.ui.log(complaint)
+  if (complaint !== feedComplaint) $.ui.log(complaint)
   feedComplaint = complaint
   return false
 }

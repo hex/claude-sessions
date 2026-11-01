@@ -3459,7 +3459,7 @@ const bandViews: (readonly [string, () => void | Promise<void>, { isWorking?: bo
   ['rotate due', () => { percent = 40 }, {}, view({ entries: buildBandEntries({ ...quiet, rotating: true, wrapping: true }) })],
   ['armed', () => { arm() }, {}, view({ entries: buildBandEntries({ ...quiet, rotating: true, armed: true }) })],
   ['countdown', async () => { arm(); await turnComplete() }, {}, view({ entries: buildBandEntries({ ...quiet, countdown: { seconds: GRACE_SECONDS, ink: OWN }, rotating: true, armed: true }) })],
-  ['feed off', () => { enableFeed() }, {}, view({ entries: buildBandEntries({ ...quiet, feed: { on: false, color: OWN, onPress: noPress } }) })],
+  ['feed off', () => { enableFeed(); files['/work/.cs/local/feed'] = 'off\n' }, {}, view({ entries: buildBandEntries({ ...quiet, feed: { on: false, color: OWN, onPress: noPress } }) })],
   ['feed on', () => { enableFeed(); files['/work/.cs/local/feed'] = 'on\n' }, {}, view({ entries: buildBandEntries({ ...quiet, feed: { on: true, color: OWN, onPress: noPress } }) })],
   ['queue', () => { queueTasks(2) }, {}, view({ entries: buildBandEntries({ ...quiet, waiting: 2 }) })],
   ['running queue', () => { queueTasks(2); files['/work/.cs/local/queue.state'] = 'draining\n' }, {}, view({ entries: buildBandEntries({ ...quiet, queued: 2, queueRunning: true }) })],
@@ -3961,6 +3961,7 @@ const enableFeed = () => {
 
 test('the feed chord toggles this session and colours its check with the keys', async () => {
   enableFeed()
+  files['/work/.cs/local/feed'] = 'off\n'
   percent = 40
   const tree = await band()
   expect(feedKey(tree)?.props.label).toBe('feed')
@@ -3983,6 +3984,7 @@ test('the feed chord toggles this session and colours its check with the keys', 
 
 test('the band shares the prefix of bound chords and leaves unbound labels unkeyed', async () => {
   enableFeed()
+  files['/work/.cs/local/feed'] = 'off\n'
   percent = 40
   bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
   expect(bandWords(await band())).toEqual(['ctrl+x', '1', 'rotate', '   ', '2', 'wrap', '   ', 'feed'])
@@ -4035,6 +4037,7 @@ test('a refused session keeps the feed key off across prompts, whichever vet ref
 
 test('a feed press survives clearing the conversation and loading the band again', async () => {
   enableFeed()
+  files['/work/.cs/local/feed'] = 'off\n'
   await feedKey(await band()).props.onPress()
   sessionId = 'uuid-next'
   files['/work/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
@@ -4046,9 +4049,10 @@ test('a feed press survives clearing the conversation and loading the band again
     expect(feedKey(await band()).props.label).toBe('feed')
   }
   delete files['/work/.cs/local/feed']
-  expect(feedKey(await band()).props.label).toBe('feed')
-  files['/work/.cs/local/feed'] = 'on\n'
   expect(feedKey(await band()).props.label).toBe('feed ✓')
+  await feedKey(await band()).props.onPress()
+  expect(files['/work/.cs/local/feed']).toBe('off\n')
+  expect(feedKey(await band()).props.label).toBe('feed')
 })
 
 test('a torn feed write redraws its off state and allows another press', async () => {
@@ -4076,6 +4080,7 @@ test('a torn feed write redraws its off state and allows another press', async (
 
 test('duplicate feed presses both wait until the one write is ready', async () => {
   enableFeed()
+  files['/work/.cs/local/feed'] = 'off\n'
   const write = $.fs.write
   let finish = () => {}
   const writes: [string, string][] = []
@@ -4126,6 +4131,7 @@ test('a non-session redraw does not discover feed commands', async () => {
 
 test('the feed control follows command availability and the band ownership gates', async () => {
   enableFeed()
+  files['/work/.cs/local/feed'] = 'off\n'
   expect(feedKey(await band()).props.label).toBe('feed')
   expect(feedKey(await band({ isWorking: true }))).toBeUndefined()
   expect(feedKey(await band({ hasSurvey: true }))).toBeUndefined()
@@ -4144,6 +4150,7 @@ test('the feed control follows command availability and the band ownership gates
 
 test('feed state stays with its session across registration and stale button presses', async () => {
   enableFeed()
+  files['/work/.cs/local/feed'] = 'off\n'
   const stale = feedKey(await band())
   await stale.props.onPress()
   register(on as any, OPTIONS)
@@ -4158,6 +4165,7 @@ test('feed state stays with its session across registration and stale button pre
   realPaths['/other'] = '/other'
   realPaths['/home/.claude-sessions/other'] = '/other'
   files['/other/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
+  files['/other/.cs/local/feed'] = 'off\n'
   register(on as any, OPTIONS)
   expect(feedKey(await band()).props.label).toBe('feed')
   expect(files['/work/.cs/local/feed']).toBe('on\n')
@@ -4216,6 +4224,7 @@ test('feed presses use the local directory even when private storage exists', as
   enableFeed()
   existing.add('/work/.cs/private')
   files['/work/.cs/private/feed'] = 'on\n'
+  files['/work/.cs/local/feed'] = 'off\n'
   expect(feedKey(await band()).props.label).toBe('feed')
   await feedKey(await band()).props.onPress()
   await feedKey(await band()).props.onPress()
