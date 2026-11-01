@@ -652,7 +652,10 @@ export function register(on: On, options: PluginOptions) {
     // The features word leads what the session is, at the line's right; a
     // running gate already names the feature it lands.
     let featured = !e.props.hasSurvey && gate === undefined ? featuresWord : undefined
-    let chatOnlyEligible = bandIdle && !armed
+    // The chat only key draws mid-turn too: the switch works while a turn
+    // runs, and a reader wants it where it was. A survey or an armed handoff
+    // takes the row.
+    let chatOnlyEligible = !e.props.hasSurvey && !armed
     if ((rotating || waiting > 0 || queued > 0 || mail > 0 || railing || featured || chatOnlyEligible) && !(await ownsRotation($))) { rotating = false; waiting = 0; queued = 0; mail = 0; railing = false; featured = undefined; chatOnlyEligible = false }
     // The named tick is remembered on every path, drawn or not, so a row's
     // report that moves nothing visible schedules no redraw.

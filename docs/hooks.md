@@ -650,8 +650,7 @@ session launched before `keybindings.json` existed gets the file at its next
 launch.
 
 The chat only key draws after wrap when cs-chat-only advertises
-`/chat-only`, while the lead session is idle, with no survey or armed
-handoff. The installer does not deploy cs-chat-only, which is experimental
+`/chat-only`, while a turn runs too, with no survey or armed handoff. The installer does not deploy cs-chat-only, which is experimental
 (see [cs-chat-only](#cs-chat-only-not-a-hook-script--a-claude-code-mod)),
 so an installed band draws no chat only key; this paragraph and the ones
 after it describe the band beside cs-chat-only. The band reads the command
@@ -1297,7 +1296,8 @@ The switch is per session:
 
 - `chat only`, the cs band's chat only key (see the band above), pressed by
   a click or Ctrl+X Tab, never a chord: this session
-  on or off. It shows while the lead session is idle and no handoff is armed.
+  on or off. It shows during a turn too, and leaves the row to a survey or
+  an armed handoff.
 - `/chat-only` alone flips this session's switch: it reads the file and
   writes the other value. `/chat-only on` and `/chat-only off` set it.
   `/chat-only` is an immediate command, so it runs mid-turn too.

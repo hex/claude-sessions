@@ -4136,11 +4136,11 @@ test('a non-session redraw does not discover the chat only command', async () =>
   }
 })
 
-test('the chat only key follows command availability and the band ownership gates', async () => {
+test('the chat only key draws idle and mid-turn, follows command availability and the band ownership gates', async () => {
   enableChatOnly()
   files['/work/.cs/local/chat-only'] = 'off\n'
   expect(chatOnlyKey(await band()).props.label).toBe('chat only ○')
-  expect(chatOnlyKey(await band({ isWorking: true }))).toBeUndefined()
+  expect(chatOnlyKey(await band({ isWorking: true })).props.label).toBe('chat only ○')
   expect(chatOnlyKey(await band({ hasSurvey: true }))).toBeUndefined()
   sessionId = 'uuid-teammate'
   expect(chatOnlyKey(await band())).toBeUndefined()
