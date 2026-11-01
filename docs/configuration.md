@@ -374,6 +374,30 @@ $ cs my-session -config set CS_SCOPE_DISABLE 1
 CS_SCOPE_DISABLE=1 in my-session/.cs/local/config: applies at your next prompt
 ```
 
+**For tools.** `cs -config list --porcelain` prints one line per setting, in
+the order `cs -config list` uses, with twelve tab-separated fields. A `-`
+means none, and the last field is never `-`.
+
+1. The key.
+2. Its group.
+3. Its label.
+4. How the settings pane changes it: `flag` toggles, `choice` offers the
+   choices, `text` takes typed text, and `shell` takes no change, since you
+   change it from a shell. `flagoff` and `shelloff` act as `flag` and `shell`
+   for a key that turns something off. Its label names the feature the key
+   turns off, so the pane shows the feature on while the key is off.
+5. Its choices, comma-separated.
+6. Its default.
+7. When a change applies: `now`, `/clear`, `launch` or `now+launch`.
+8. When a change applies, in words.
+9. The value readers see. For a `flagoff` key this is the key's own value:
+   `CS_SCOPE_DISABLE=1` is `1`, and the pane shows Scope grounding off.
+10. Where that value comes from: `default`, `machine`, `session`, `shell` or
+    `launch`.
+11. A file's value that readers skip and that would otherwise apply: `session`
+    or `machine`, then the line number, the line and why.
+12. What the setting does, in one sentence.
+
 `set` refuses a key the files never hold, a key that is no cs setting and a
 value the setting's readers would not take, each by name. When your shell
 also exports the key, `set` still writes the file and says on stderr that the
