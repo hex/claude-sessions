@@ -50,50 +50,10 @@ export type Load = {
   reads: { started: number; applied: number }
   /** Whether the /config theme is a light one, read once per load by cleanChatRecord; the inks follow it. A theme changed mid-load is followed at the next load. */
   light: boolean
-  /** Whether the main loop's turn is open (turn.start to turn.complete, agents' runs left out): the typing clock runs only then. */
-  turn: boolean
-  /** Whether the typing clock is scheduled; cleared by the period that stops. startTyping is idempotent on it, so two renders in one turn never double it. */
-  typing: boolean
 }
 
 export function newLoad(): Load {
-  return { reads: { started: 0, applied: 0 }, light: false, turn: false, typing: false }
-}
-
-/** The typing counter's ref, a literal of this file as the engine's scan of state writes wants it. KEEP IN SYNC with TYPING in register.tsx and hooks/state.d.ts. */
-const TYPING = { plugin: 'cs-clean-chat', key: 'typing' } as const
-/** One typing frame per period. */
-export const TYPING_MS = 400
-
-/**
- * Bumps TYPING every TYPING_MS while the main turn is open and clean chat is
- * on, so the working line, which reads TYPING while it draws, redraws with
- * the next frame and nothing else does. Each period rechecks both, so a
- * turn's end or a switch off ends the clock at its next period with no
- * write. A refused write or wait ends it too, logged once; the next turn
- * starts it again.
- */
-export function startTyping(load: Load, $: $): void {
-  if (!load.turn || load.on !== true || load.typing) return
-  load.typing = true
-  $.clock.after(TYPING_MS, async function period() {
-    if (!load.turn || load.on !== true) { load.typing = false; return }
-    try {
-      const { value = 0 } = await $.state.get(TYPING)
-      await $.state.set(TYPING, value + 1)
-      if (!load.turn || load.on !== true) { load.typing = false; return }
-      $.clock.after(TYPING_MS, period)
-    } catch (error) {
-      load.typing = false
-      await $.ui.log(logs.typingStopped(error instanceof Error ? error.message : String(error)))
-    }
-  })
-}
-
-/** Records the main turn's state and starts the typing clock when a turn opens. */
-export function noteTurn(load: Load, $: $, open: boolean): void {
-  load.turn = open
-  if (open) startTyping(load, $)
+  return { reads: { started: 0, applied: 0 }, light: false }
 }
 
 /**

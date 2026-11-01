@@ -147,25 +147,18 @@ test('the work draws nothing while on: a call, a group, a result, the progress h
   expect(engine).toEqual(['call', 'group', 'result', 'hint ctrl+b to run in background', 'duration'])
 })
 
-test('the working line is the typing line on the terminal: the frame\'s dots, dim, at the margin, and the engine\'s row on the desktop', async ($, on) => {
+test('the working line draws nothing on the terminal and the engine\'s row on the desktop', async ($, on) => {
   session(on)
-  let frame = 0
-  on('state.get', { plugin: 'cs-clean-chat', key: 'typing' }, () => ({ value: { value: frame, version: frame } }))
   let calls = 0
   on('ui.render', { component: 'Spinner' }, ($, e) => { calls++; return $.ui.resolve(e).Text({ children: `${e.props.word}${e.props.suffix}` }) })
   const props = { word: 'Sauteing', message: null, suffix: '…', mode: 'tool-use' } as const
   const line = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'Spinner', props })
-  expect((await line.findAll({ type: 'Text' })).map(text => [text.text, text.props.dimColor])).toEqual([['·', true]])
-  expect(await line.find({ text: 'Sauteing…' })).toBeUndefined()
+  expect(await line.findAll({ type: 'Text' })).toEqual([])
   await line.unmount()
-  frame = 4
-  const later = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'Spinner', requestId: 'later', props })
-  expect((await later.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['· ·'])
-  await later.unmount()
   const desktop = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'desktop', component: 'Spinner', requestId: 'desktop', props })
   expect((await desktop.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['Sauteing…'])
   await desktop.unmount()
-  expect(calls).toBe(3)
+  expect(calls).toBe(2)
 })
 
 test('SessionMode appends the clean chat mode while preserving the engine modes', async ($, on) => {

@@ -9,7 +9,7 @@ const RUN = { origin: { kind: 'composer' }, presentation: { columns: 80, isFulls
 /** The row cs's band draws in, which clean chat leaves to cs. */
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 90, scroll: { offset: 0, bodyRows: 6 }, view: {} } as const
 
-test('register installs the command, the band press, both ends of the turn and every clean chat render site, and no other hook', () => {
+test('register installs the command, the band press and every clean chat render site, and no other hook', () => {
   const seen: { event: string; matcher: unknown }[] = []
   const record = (event: string, matcher: unknown) => { seen.push({ event, matcher: typeof matcher === 'function' ? undefined : matcher }) }
   register(record as unknown as On)
@@ -18,8 +18,6 @@ test('register installs the command, the band press, both ends of the turn and e
     { event: 'session.start', matcher: undefined },
     { event: 'command.run', matcher: { command: 'clean-chat' } },
     { event: 'ui.press', matcher: { plugin: 'cs', element: 'cs-clean-chat' } },
-    { event: 'turn.start', matcher: undefined },
-    { event: 'turn.complete', matcher: undefined },
     ...['UserMessage', 'AssistantMessage', 'ToolUse', 'ToolGroup', 'ToolResult', 'ToolProgress', 'TurnDuration', 'CommandOutput', 'SessionMode', 'Spinner'].map(component => ({ event: 'ui.render', matcher: { component } })),
   ])
   expect(seen.filter(entry => entry.event === 'ui.render').map(entry => typeof entry.matcher === 'object' && entry.matcher !== null && 'component' in entry.matcher ? entry.matcher.component : undefined)).toEqual(Object.keys(PAINTERS))

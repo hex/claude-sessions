@@ -4,7 +4,7 @@ import type { EngineInterface, RenderElement } from 'claude-code'
 
 import type { UserVerdict } from './verdict'
 import type { ErrorLine } from './words'
-import { labels, marks, slashCommand, typingFrames } from './words'
+import { labels, marks, slashCommand } from './words'
 
 type Elements = ReturnType<EngineInterface['ui']['resolve']>
 
@@ -49,14 +49,6 @@ export function drawUser(v: Extract<UserVerdict, { draw: 'you' }>, pen: Pen): Re
 export function drawReply(engine: RenderElement, pen: Pen): RenderElement {
   const { Box } = pen.el
   return <Box paddingLeft={pen.pad} flexDirection="column">{engine}</Box>
-}
-
-/** The typing line in the working line's place: the frame's dots, dim, at the margin, with nothing of the engine's word, elapsed time or tokens. */
-export function drawTyping(frame: number, pen: Pen): RenderElement {
-  const { Box, Text } = pen.el
-  const dots = typingFrames[frame % typingFrames.length]
-  if (dots === undefined) throw new Error(`typing frame ${frame} names no dots`)
-  return <Box paddingLeft={pen.pad}><Text dimColor>{dots}</Text></Box>
 }
 
 /** The error line in a failed reply's place, coloured by who acts (§6): violet for a safeguard stop, red when you must act, amber when Claude Code handles it. */

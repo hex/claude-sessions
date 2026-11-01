@@ -11,9 +11,9 @@ teardown() { :; }
 
 # The one shape every session registers (rationale decision 1): its exact
 # inventory, as `claude plugin validate` prints it.
-HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=clean-chat}, ui.press{plugin=cs, element=cs-clean-chat}, turn.start, turn.complete, ui.render{component=UserMessage}, ui.render{component=AssistantMessage}, ui.render{component=ToolUse}, ui.render{component=ToolGroup}, ui.render{component=ToolResult}, ui.render{component=ToolProgress}, ui.render{component=TurnDuration}, ui.render{component=CommandOutput}, ui.render{component=SessionMode}, ui.render{component=Spinner}'
+HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=clean-chat}, ui.press{plugin=cs, element=cs-clean-chat}, ui.render{component=UserMessage}, ui.render{component=AssistantMessage}, ui.render{component=ToolUse}, ui.render{component=ToolGroup}, ui.render{component=ToolResult}, ui.render{component=ToolProgress}, ui.render{component=TurnDuration}, ui.render{component=CommandOutput}, ui.render{component=SessionMode}, ui.render{component=Spinner}'
 
-test_mod_manifest_names_the_plugin_its_module_and_its_one_state_key() {
+test_mod_manifest_names_the_plugin_and_its_module_and_declares_no_state() {
     local manifest="$MOD/.claude-plugin/plugin.json"
     assert_eq "cs-clean-chat" "$(jq -r .name "$manifest")" "plugin name" || return 1
     local module
@@ -21,10 +21,8 @@ test_mod_manifest_names_the_plugin_its_module_and_its_one_state_key() {
     assert_eq "./register.tsx" "$module" "hooks.json names the register module" || return 1
     assert_eq "1" "$(jq '.modules | length' "$MOD/hooks/hooks.json")" "one hooks module" || return 1
     assert_file_exists "$MOD/hooks/$module" "the named module exists" || return 1
-    # The switch is a file the mod reads, never $.state. The one state key is the
-    # typing counter the working line reads, declared in hooks/state.d.ts.
-    assert_eq "./hooks/state.d.ts" "$(jq -r .types "$manifest")" "the state types file" || return 1
-    assert_file_contains "$MOD/hooks/state.d.ts" "'cs-clean-chat': { typing: number }" "the typing counter is the one state key" || return 1
+    # The switch is a file the mod reads, never $.state: no state types to declare.
+    assert_eq "false" "$(jq 'has("types")' "$manifest")" "no state types" || return 1
     # No install switch (ruling 1): the on/off is the session's .cs/local/clean-chat, never a /config row.
     assert_eq "false" "$(jq 'has("userConfig")' "$manifest")" "no userConfig" || return 1
 }
@@ -118,7 +116,7 @@ test_mod_unit_tests_pass_under_the_engine_test_kit() {
     assert_output_not_contains "$out" " 0 pass" "the suite ran something" || return 1
 }
 
-run_test test_mod_manifest_names_the_plugin_its_module_and_its_one_state_key
+run_test test_mod_manifest_names_the_plugin_and_its_module_and_declares_no_state
 run_test test_mod_is_kept_out_of_the_installer
 run_test test_mod_source_never_spells_the_refused_events_or_command_run
 run_test test_mod_validate_inventories_the_one_shape

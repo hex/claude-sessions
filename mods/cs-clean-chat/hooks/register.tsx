@@ -2,12 +2,12 @@
 // ABOUTME: On/off comes from cs's band key (a ui.press hook reads the file after next) or /clean-chat. PAINTERS is the one table of render sites; site() is the one caller of next().
 import type { EngineInterface, On, RenderComponent, RenderElement, RenderInput } from 'claude-code'
 
-import { applyCleanChat, cleanChatRecord, newLoad, noteTurn, readCleanChat, startTyping, writeCleanChat } from './session'
+import { applyCleanChat, cleanChatRecord, newLoad, readCleanChat, writeCleanChat } from './session'
 import type { Load } from './session'
 import { parseCleanChatArgs } from './settings'
 import type { CleanChatCommand } from './settings'
 import { decideCommandOutput, decideUser, sessionModes } from './verdict'
-import { NOTHING, drawCommandOutput, drawError, drawReply, drawTyping, drawUser, inks } from './draw'
+import { NOTHING, drawCommandOutput, drawError, drawReply, drawUser, inks } from './draw'
 import type { Pen } from './draw'
 import { commands, errorLine, replies } from './words'
 
@@ -18,10 +18,6 @@ type $ = EngineInterface
 // old module keeps its own until its in-flight dispatches settle (spike Q1).
 // A per-session toggle is not a reload: it is a file this load reads.
 let load: Load = newLoad()
-
-// The typing counter's ref, a literal of this file as the engine's scan of
-// state reads wants it. KEEP IN SYNC with TYPING in session.ts and hooks/state.d.ts.
-const TYPING = { plugin: 'cs-clean-chat', key: 'typing' } as const
 
 /** No install switch: register() always registers the one shape, and each render hook returns the engine's drawing while clean chat is off in this session. */
 export function register(on: On) {
@@ -122,18 +118,6 @@ function registerCleanChat(on: On) {
     return result
   })
 
-  // The main loop's turn, open from its start to its end: the typing clock
-  // runs only then (session.startTyping). An agent's run (e.agentId) is not
-  // the user's turn and never starts or ends it.
-  on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) noteTurn(load, $, true)
-    return next(e)
-  })
-  on('turn.complete', async ($, e, next) => {
-    if (e.agentId === undefined) noteTurn(load, $, false)
-    return next(e)
-  })
-
   sites(on, PAINTERS)
 }
 
@@ -144,8 +128,8 @@ function registerCleanChat(on: On) {
 /**
  * The sites clean chat draws. AskUserQuestion, InfoNotice and PromptHint stay
  * the engine's (ruling §20.13), and so does the row above the prompt
- * (AbovePrompt, cs's band). The working line (Spinner) becomes the typing
- * line on the terminal. Pane is no site: clean chat opens none.
+ * (AbovePrompt, cs's band). The working line (Spinner) draws nothing on the
+ * terminal. Pane is no site: clean chat opens none.
  */
 type Hooked = Exclude<RenderComponent, 'AskUserQuestion' | 'InfoNotice' | 'PromptHint' | 'Pane' | 'AbovePrompt'>
 type Props<C extends RenderComponent> = Partial<RenderInput<C>['props']>
@@ -165,8 +149,8 @@ export type Drawn<C extends RenderComponent> =
   | { readonly kind: 'tree'; readonly tree: RenderElement }
   | { readonly kind: 'nothing' }
 
-/** A painter sees its row, a pen and the typing frame. It has no `$` and no `next`: it cannot write, and it cannot skip the engine. */
-export type Painter<C extends RenderComponent, D extends Drawn<C> = Drawn<C>> = (e: RenderInput<C>, pen: Pen, frame: number) => D
+/** A painter sees its row and a pen. It has no `$` and no `next`: it cannot write, and it cannot skip the engine. */
+export type Painter<C extends RenderComponent, D extends Drawn<C> = Drawn<C>> = (e: RenderInput<C>, pen: Pen) => D
 
 /** The engine draws the row; we may only change its props. */
 export type RewriteOnly<C extends RenderComponent> = Extract<Drawn<C>, { kind: 'engine' | 'rewrite' }>
@@ -198,10 +182,10 @@ export const PAINTERS = {
     return verdict === 'nothing' ? { kind: 'nothing' } : { kind: 'tree', tree: drawCommandOutput(verdict, pen) }
   },
   SessionMode: (e) => ({ kind: 'rewrite', props: { modes: sessionModes(e.props.modes) } }),
-  // The typing line under your message while Claude works: the frame's dots
-  // in place of the engine's word, elapsed time and tokens. The desktop's row
-  // carries the turn's mark, so it stays the engine's there.
-  Spinner: (e, pen, frame) => e.surface === 'terminal' ? { kind: 'tree', tree: drawTyping(frame, pen) } : { kind: 'engine' },
+  // Nothing under your message while Claude works: no word, elapsed time or
+  // tokens. The desktop's row carries the turn's mark, so it stays the
+  // engine's there.
+  Spinner: (e) => e.surface === 'terminal' ? { kind: 'nothing' } : { kind: 'engine' },
 } satisfies PainterTable
 
 /**
@@ -237,11 +221,7 @@ async function site<C extends Hooked>($: $, e: RenderInput<C>, next: (e: RenderI
     const on = load.on ?? await cleanChatRecord(load, $)
     if (!on) return await engine()
     const pen: Pen = { el: $.ui.resolve(e), ink: inks(load.light), pad: e.surface === 'terminal' ? 2 : 0 }
-    // Reading TYPING while the working line draws subscribes that instance to
-    // the clock's bumps; a turn open before the record settled starts it here.
-    const frame = e.component === 'Spinner' ? (await $.state.get(TYPING)).value ?? 0 : 0
-    if (e.component === 'Spinner') startTyping(load, $)
-    const decision = paint(e, pen, frame)
+    const decision = paint(e, pen)
     switch (decision.kind) {
       case 'engine': return await engine()
       case 'rewrite': return await engine(decision.props)
