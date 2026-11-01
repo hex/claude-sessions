@@ -72,11 +72,12 @@ type RowLine = Extract<Line, { kind: 'row' }>
 // teal and the machine source's green (blue in the colour-blind themes).
 const THEME = { ink: 'text', mut: 'inactive', faint: 'subtle', soft: 'subtle', teal: 'planMode', green: 'success' } as const satisfies Record<string, ThemeKey>
 
-// The brand's accents on every theme: tui/src/theme.rs's amber and hero stops,
-// and the band's ink, black, at 5.2:1 or more against every stop.
+// The brand's accents on every theme: tui/src/theme.rs's amber; the band's
+// stops, its hero stops rust to gold scaled by 0.77, 0.62, 0.56 and 0.57; and
+// the band's ink, the TUI's dark-theme ink, at 5:1 or more on every cell.
 type Rgb = readonly [number, number, number]
 const rgb = (channels: readonly number[]) => `rgb(${channels.join(',')})`
-const BRAND = { amber: rgb([246, 154, 0]), hero: [[221, 80, 20], [237, 128, 0], [246, 154, 0], [214, 162, 30]] satisfies Rgb[], ink: rgb([0, 0, 0]) }
+const BRAND = { amber: rgb([246, 154, 0]), band: [[170, 62, 15], [147, 79, 0], [138, 86, 0], [122, 92, 17]] satisfies Rgb[], ink: rgb([245, 230, 211]) }
 
 // The TUI's ramp: cell `i` of `n` along the stops, each channel truncated.
 function ramp(stops: readonly Rgb[], n: number, i: number): string {
@@ -276,23 +277,25 @@ function cardOf(l: RowLine, columns: number, most: number, hasSelf: boolean): Ru
 // The band: the wordmark in bold, cs's version, the rows, how many a file or
 // the shell sets (a /config row tells no default) and the session name, then,
 // while cs is short of the version an update waits at, that version and what
-// installs it. A line runs from under the rows' labels to a cell short of the
-// edge, its first part cut to fit and the rest dropped from the right, one
-// Text per cell in the band's ink on the hero ramp.
+// installs it, between an empty band line above and one below. A line runs
+// from under the rows' labels to a cell short of the edge, its first part cut
+// to fit and the rest dropped from the right, one Text per cell in the band's
+// ink on the band's ramp.
 function bandOf(v: PanelView): Run[][] {
   const width = (runs: readonly Run[]) => runs.reduce((sum, run) => sum + run.text.length, 0)
   const room = Math.max(1, v.columns - MARK_CELLS - 1)
   const line = (first: readonly Run[], rest: readonly Run[][]): Run[] => {
     const kept = [...clip(first, room), ...rest.slice(0, rest.filter((_, i) => width(first) + width(rest.slice(0, i + 1).flat()) <= room).length).flat()]
     return [{ text: ' '.repeat(MARK_CELLS) }, ...kept, { text: ' '.repeat(Math.max(0, v.columns - MARK_CELLS - width(kept))) }]
-      .flatMap(run => [...run.text].map(text => ({ ...run, text }))).map((cell, i) => ({ ...cell, color: BRAND.ink, backgroundColor: ramp(BRAND.hero, v.columns, i) }))
+      .flatMap(run => [...run.text].map(text => ({ ...run, text }))).map((cell, i) => ({ ...cell, color: BRAND.ink, backgroundColor: ramp(BRAND.band, v.columns, i) }))
   }
   const after = (gap: string, text: string | undefined): Run[][] => text === undefined ? [] : [[{ text: `${gap}${text}` }]]
   const rows = (v.lines ?? []).flatMap(l => l.kind === 'row' ? [l.row] : [])
   const changed = rows.filter(row => row.kind === 'setting' && CHANGED.has(row.setting.source)).length
   const counts = v.lines === undefined ? [] : [...after(DOT, WORDS.settings(rows.length)), ...after(DOT, WORDS.changed(changed))]
   const band = line([{ text: WORDS.brand, weight: 'bold' }], [...after(' ', v.version), ...counts, ...after(DOT, v.session)])
-  return v.update === undefined || v.update === v.version ? [band] : [band, line([{ text: WORDS.update(v.update) }], after(DOT, WORDS.toUpdate))]
+  const update = v.update === undefined || v.update === v.version ? [] : [line([{ text: WORDS.update(v.update) }], after(DOT, WORDS.toUpdate))]
+  return [line([], []), band, ...update, line([], [])]
 }
 
 // A Line, or the empty line above every heading but the first.
