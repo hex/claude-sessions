@@ -29,12 +29,12 @@ _config_session_name() {
 }
 
 # The fields of <key>'s record, in _CF_GROUP, _CF_LABEL, _CF_EDIT, _CF_CHECK,
-# _CF_CHOICES, _CF_DEFAULT, _CF_WHEN and _CF_WHENTEXT.
+# _CF_CHOICES, _CF_DEFAULT, _CF_WHEN, _CF_WHENTEXT and _CF_DESCRIBE.
 _config_fields() {  # key
     local rec
     for rec in "${_CS_CONFIG_SPEC[@]}"; do
         [ "${rec%%|*}" = "$1" ] || continue
-        IFS='|' read -r _ _CF_GROUP _CF_LABEL _CF_EDIT _CF_CHECK _CF_CHOICES _CF_DEFAULT _CF_WHEN _CF_WHENTEXT <<< "$rec"
+        IFS='|' read -r _ _CF_GROUP _CF_LABEL _CF_EDIT _CF_CHECK _CF_CHOICES _CF_DEFAULT _CF_WHEN _CF_WHENTEXT _CF_DESCRIBE <<< "$rec"
         return 0
     done
     error "_config_fields: $1 is not in the allow-list"
@@ -115,10 +115,10 @@ _config_ignored_field() {  # key
     fi
 }
 
-# One record per allowed key, in table order, eleven tab-separated fields:
-# key group label edit choices default when whenText value source ignored,
-# - for none. The cs-panel and cs mods parse it; tests/fixtures/
-# config-porcelain.txt pins it.
+# One record per allowed key, in table order, twelve tab-separated fields:
+# key group label edit choices default when whenText value source ignored
+# describe, - for none (describe is never -). The cs-panel and cs mods parse
+# it; tests/fixtures/config-porcelain.txt pins it.
 _config_list_porcelain() {
     local rec key value
     for rec in "${_CS_CONFIG_SPEC[@]}"; do
@@ -128,8 +128,8 @@ _config_list_porcelain() {
         value=${value//[[:cntrl:]]/?}
         cs_config_source "$key"
         _config_ignored_field "$key"
-        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$key" "$_CF_GROUP" "$_CF_LABEL" "$_CF_EDIT" \
-            "$_CF_CHOICES" "$_CF_DEFAULT" "$_CF_WHEN" "$_CF_WHENTEXT" "${value:--}" "$_CS_CFG_SOURCE" "$_CONFIG_IGNORED_FIELD"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$key" "$_CF_GROUP" "$_CF_LABEL" "$_CF_EDIT" \
+            "$_CF_CHOICES" "$_CF_DEFAULT" "$_CF_WHEN" "$_CF_WHENTEXT" "${value:--}" "$_CS_CFG_SOURCE" "$_CONFIG_IGNORED_FIELD" "$_CF_DESCRIBE"
     done
 }
 

@@ -302,7 +302,7 @@ test_list_hides_the_value_of_a_key_no_file_keeps() {
 }
 
 # The porcelain is the one record the panel and the cs mod parse: one line per
-# allowed key, table order, eleven tab-separated fields, nothing else.
+# allowed key, table order, twelve tab-separated fields, nothing else.
 _porcelain_world() {
     local dir
     dir=$(create_test_session alpha)
@@ -318,7 +318,27 @@ test_list_porcelain_equals_the_golden_record() {
     assert_eq "0" "$rc" "list --porcelain exits 0" || return 1
     assert_eq "" "$(cat "$TEST_TMPDIR/err")" "and says nothing on stderr" || return 1
     assert_eq "$(cat "$SCRIPT_DIR/fixtures/config-porcelain.txt")" "$out" "stdout is the golden record" || return 1
-    assert_eq "41" "$(printf '%s\n' "$out" | awk -F'\t' 'NF == 11' | wc -l | tr -d ' ')" "41 records of 11 fields" || return 1
+    assert_eq "41" "$(printf '%s\n' "$out" | awk -F'\t' 'NF == 12' | wc -l | tr -d ' ')" "41 records of 12 fields" || return 1
+}
+
+# A key that turns something off (*_NO_*, *_DISABLE) has an inverted edit
+# kind, flagoff, or shelloff where the pane takes no change, and a label that
+# names the feature, so the pane shows the feature on while the key is off.
+# Every record's last field says what the setting does, short enough for the
+# pane's footer.
+test_porcelain_names_features_and_describes_each() {
+    local out rc=0
+    out=$("$CS_BIN" -config list --porcelain 2>&1) || rc=$?
+    assert_eq "0" "$rc" "list --porcelain exits 0: $out" || return 1
+    assert_eq "" "$(printf '%s\n' "$out" | awk -F'\t' '$4 !~ /^(flag|flagoff|choice|text|shell|shelloff)$/ { print $1 ": " $4 }')" \
+        "every edit kind is one of the six" || return 1
+    assert_eq "" "$(printf '%s\n' "$out" | awk -F'\t' '
+        { off = ($1 ~ /_NO_|_DISABLE$/); inverted = ($4 == "flagoff" || $4 == "shelloff") }
+        off != inverted { print $1 ": " $4 }')" "every key that turns something off, and no other, has an inverted kind" || return 1
+    assert_eq "" "$(printf '%s\n' "$out" | awk -F'\t' '($4 == "flagoff" || $4 == "shelloff") && $3 ~ /^(No|Hide) / { print $1 ": " $3 }')" \
+        "an inverted key's label names the feature" || return 1
+    assert_eq "" "$(printf '%s\n' "$out" | awk -F'\t' '$12 == "" || $12 == "-" || length($12) > 110 { print $1 ": " length($12) }')" \
+        "every record describes its setting in 1 to 110 characters" || return 1
 }
 
 # The human listing: every group, every key with its value, source and when,
@@ -342,11 +362,11 @@ test_list_prints_the_table_and_the_skipped_lines() {
 Ignored in alpha/.cs/local/config
   line 4: CS_ROTATE_FORCE_CTX=101: not off, 0 or a percentage from 1 to 100" \
         "$(printf '%s\n' "$out" | sed -n '/^Ignored in /,$p')" "the skipped lines, file by file, at the end" || return 1
-    assert_eq "Status line|Prompts|Turn end|Rotation|Rewriter (ctrl+g)|Terminal|Launch|Ignored in ~/.config/cs/config|Ignored in alpha/.cs/local/config" \
-        "$(printf '%s\n' "$out" | grep '^[A-Z]' | paste -sd '|' -)" "the seven groups in table order, then the two files' skips" || return 1
+    assert_eq "Status line|Prompts|Rotation|Rewriter (ctrl+g)|Terminal|Mail|Launch|Queue|Narrative|Ignored in ~/.config/cs/config|Ignored in alpha/.cs/local/config" \
+        "$(printf '%s\n' "$out" | grep '^[A-Z]' | paste -sd '|' -)" "the nine groups in table order, each once, then the two files' skips" || return 1
     local rc=0
     out=$(cs_plain -config list) || rc=$?
-    assert_eq "0|Status line|Prompts|Turn end|Rotation|Rewriter (ctrl+g)|Terminal|Launch|Ignored in ~/.config/cs/config" \
+    assert_eq "0|Status line|Prompts|Rotation|Rewriter (ctrl+g)|Terminal|Mail|Launch|Queue|Narrative|Ignored in ~/.config/cs/config" \
         "$rc|$(printf '%s\n' "$out" | grep '^[A-Z]' | paste -sd '|' -)" "outside any session: the machine's file alone" || return 1
 }
 
@@ -681,6 +701,7 @@ run_test test_a_key_that_is_not_a_name_runs_nothing
 run_test test_a_named_verb_reads_the_target_sessions_file
 run_test test_list_hides_the_value_of_a_key_no_file_keeps
 run_test test_list_porcelain_equals_the_golden_record
+run_test test_porcelain_names_features_and_describes_each
 run_test test_list_prints_the_table_and_the_skipped_lines
 run_test test_concurrent_sets_both_land
 run_test test_verb_runs_under_bash_32
