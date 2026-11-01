@@ -3293,7 +3293,8 @@ Commands:
   -config get <KEY>   The value readers see now; empty when nothing sets it
   -config set <KEY> <value>  Keep a setting in this machine's ~/.config/cs/config (your environment still wins)
   -config unset <KEY>  Remove a setting from this machine's file
-  <name> -config list|get|set|unset  The same for <name>'s own .cs/local/config, which outranks this machine's
+  -config reset [--yes]  Remove every setting from this machine's file; asks first unless --yes
+  <name> -config list|get|set|unset|reset  The same for <name>'s own .cs/local/config, which outranks this machine's
   -detect-theme       Show the detected terminal theme (light|dark)
   -tui                Open the interactive session manager (bare 'cs' does too)
   -list, -ls          List sessions (--tag <tag> filters; --archived shows only archived)
