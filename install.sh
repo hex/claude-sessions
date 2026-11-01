@@ -1440,9 +1440,9 @@ CS_PAYLOAD_SHA256=(
     "c591644117d9a870c4631ecb40c7fc47f7cbab7b74849feb07b318784ba85367  mods/cs-mermaid/skills/show-me/SKILL.md"
     "8aaadea0975e0ccbeadb995515245a9b3a2651f84626c9ba6806a57da3b5ac53  mods/cs-panel/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
-    "28ef5a0e174f9de88039c35bb245c5cbe0d0e389a680465bed6948d25e039f43  mods/cs-panel/hooks/register.tsx"
-    "a9532724ef8d7e6881e62dfc4a796cd7bf09497303053e4761b7567fd0edc5d4  mods/cs-panel/hooks/settings.ts"
-    "16054e9ed52f90c80c1a7c2b62824b03904e65bf1cacb9e523370a6687e3b010  mods/cs-panel/hooks/draw.tsx"
+    "b69ec73634316b1b62c2a592b7547363e833256fff10009e9ce2e30768d3c16c  mods/cs-panel/hooks/register.tsx"
+    "35955fd0b96e897c45f1f5b014093d1688de9167329fc725b7f79c424694eb44  mods/cs-panel/hooks/settings.ts"
+    "e53e34b7c622320d083cdf18abe4c4a4a881c1703cbab4b5710554e9e25c3046  mods/cs-panel/hooks/draw.tsx"
     "3595bfd6c3e3e266456eee69eb552ba28294cbb9d7a447ac4e6cb9b297cae178  completions/cs.bash"
     "b34174fb73e20a6cf00db1c59bdb0905bec55154da11bb6ec15b49a580dfcd00  completions/_cs"
 )
