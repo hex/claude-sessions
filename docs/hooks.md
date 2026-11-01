@@ -1371,26 +1371,34 @@ notifications and hook feedback draw nothing too. A message Claude Code did
 not stamp draws as yours when it names no sender and is not hook feedback (a
 channel the engine cannot attest, a message stored before stamps), and
 nothing otherwise. A message from a source clean chat has no rule for,
-such as a channel or a plugin, keeps Claude Code's drawing. Questions, info
-notices, the prompt hint, the working line and the row above the prompt stay
-Claude Code's: its own spinner says a turn is running. A row that reports
-itself expanded (ctrl+o, `--verbose`) draws Claude Code's own, so the detailed
-view still shows everything. The inks follow the `/config` theme, read once
-per load.
+such as a channel or a plugin, keeps Claude Code's drawing. While a turn runs,
+the working line (`✳ Sauteing… (9s · ↓ 444 tokens)`) is a typing line on the
+terminal: three dots filling in under your message, `·`, `· ·`, `· · ·`, dim
+at the margin, one frame per 400 ms, with none of the engine's word, elapsed
+time or tokens; on the desktop the row keeps Claude Code's drawing, since it
+carries the turn's mark there. The frame is the mod's one `$.state` key,
+`typing`, a counter a `$.clock.after` loop bumps from `turn.start` to
+`turn.complete` of the main loop (an agent's run never starts it) while clean
+chat is on; the working line reads it while it draws, so each bump redraws
+that line alone, and a turn's end or a switch off ends the loop at its next
+period with no write. Questions, info notices, the prompt hint and the row
+above the prompt stay Claude Code's. A row that reports itself expanded
+(ctrl+o, `--verbose`) draws Claude Code's own, so the detailed view still
+shows everything. The inks follow the `/config` theme, read once per load.
 
 Off costs a little, because every hook stays registered: there is no install
 switch. A session that is off starts no `cs -vet-session` process, and the
 mod keeps no transcript, runs no clock and writes no state.
 
-The mod has eight files (`.claude-plugin/plugin.json`, `hooks/hooks.json`,
+The mod has nine files (`.claude-plugin/plugin.json`, `hooks/hooks.json`,
 `hooks/register.tsx`, `hooks/session.ts`, `hooks/settings.ts`,
-`hooks/verdict.ts`, `hooks/words.ts` and `hooks/draw.tsx`).
+`hooks/state.d.ts`, `hooks/verdict.ts`, `hooks/words.ts` and `hooks/draw.tsx`).
 `CS_MODS_KEPT_OUT` in `lib/01-manifests.sh` keeps it out of the installer, so
 `install.sh` deploys none of them and `cs -doctor`'s drift scan skips it. The
 mod writes no heartbeat, so `cs -doctor` has no "last ran" row for it.
 
-Tests: `tests/test_mod_clean_chat.sh` pins the manifest, which declares no state
-types and no `userConfig`, checks that the installer lists none of the mod's
+Tests: `tests/test_mod_clean_chat.sh` pins the manifest, which declares the one
+state key in `hooks/state.d.ts` and no `userConfig`, checks that the installer lists none of the mod's
 files, checks that the source never names the events and calls the mod must
 not use (`tool.call`, `turn.step`, `classic.*`, `prompt.compose`,
 `config.set`, `$.command.run`), runs `claude plugin validate` and pins its

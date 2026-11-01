@@ -4,6 +4,8 @@ import type { CleanChatProblem } from './settings'
 
 export const labels = { you: '❯', mode: 'clean chat · /clean-chat to switch' } as const
 export const marks = { dot: '·' } as const
+/** The typing line's frames under your message while Claude works, one per clock period: three dots filling in, then from the start. */
+export const typingFrames = ['·', '· ·', '· · ·'] as const
 
 // The lines clean chat hands the engine to draw on surfaces of the engine's
 // own: its transcript notices (the engine leads each with `cs-clean-chat: `),
@@ -13,6 +15,7 @@ export const logs = {
   unusable: (path: string, problem: CleanChatProblem, text: string) => `could not use ${path}: ${problem === 'torn' ? 'it is torn, with no closing newline' : `it holds ${JSON.stringify(text.slice(0, 40))}, neither on nor off`}; clean chat is off until /clean-chat or the band's clean chat key writes the file again`,
   cleanChatOff: (refusal: string) => `clean chat is off in this session: ${refusal}`,
   themeUnread: (reason: string) => `could not read the theme: ${reason}; clean chat draws in its dark-theme colours`,
+  typingStopped: (reason: string) => `the typing line stopped: ${reason}; it starts again at the next turn`,
 } as const
 export const replies = {
   notASession: 'this directory is not a cs session (no .cs/local), so nothing changed.',

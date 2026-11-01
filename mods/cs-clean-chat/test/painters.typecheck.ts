@@ -16,5 +16,5 @@ export const hiding: ModePainter = () => ({ kind: 'nothing' })
 // @ts-expect-error a table missing a hooked site is refused.
 export const partial: PainterTable = { SessionMode: rewriting }
 
-// @ts-expect-error the working line is no site: Claude Code's own spinner is the liveness signal.
-export const spinner: PainterTable['Spinner'] = () => ({ kind: 'nothing' })
+// @ts-expect-error the row above the prompt is no site: it is cs's band.
+export const above: PainterTable['AbovePrompt'] = () => ({ kind: 'nothing' })
