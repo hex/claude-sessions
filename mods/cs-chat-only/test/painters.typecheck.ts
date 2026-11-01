@@ -1,11 +1,11 @@
 // ABOUTME: Compile-time checks on the painter table: tsc fails if a refused shape stops being refused (each @ts-expect-error must still error).
-// ABOUTME: Not loaded by the engine; run by `tsc -p` in tests/test_mod_clean_chat.sh.
+// ABOUTME: Not loaded by the engine; run by `tsc -p` in tests/test_mod_chat_only.sh.
 import type { PainterTable } from '../hooks/register'
 
 type ModePainter = PainterTable['SessionMode']
 
 // The mode line may rewrite its props.
-export const rewriting: ModePainter = () => ({ kind: 'rewrite', props: { modes: ['clean chat · /clean-chat to switch'] } })
+export const rewriting: ModePainter = () => ({ kind: 'rewrite', props: { modes: ['chat only · /chat-only to switch'] } })
 
 // @ts-expect-error a mode line painter that returns a tree of its own is refused: the engine draws the row.
 export const replacing: ModePainter = () => ({ kind: 'tree', tree: null as never })

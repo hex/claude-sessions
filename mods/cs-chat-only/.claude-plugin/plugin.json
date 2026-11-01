@@ -1,0 +1,8 @@
+{
+  "name": "cs-chat-only",
+  "version": "0.1.0",
+  "description": "Restyles the chat: your messages and Claude's replies, and nothing of the work between them. On in every session by default; the band's chat only key or /chat-only turns it off there.",
+  "author": {
+    "name": "cs"
+  }
+}

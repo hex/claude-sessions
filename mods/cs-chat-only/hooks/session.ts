@@ -1,19 +1,19 @@
-// ABOUTME: cs-clean-chat's per-load switch: the mirror of .cs/local/clean-chat as cs -vet-session vets it, its reads and writes, and the theme the inks follow.
+// ABOUTME: cs-chat-only's per-load switch: the mirror of .cs/local/chat-only as cs -vet-session vets it, its reads and writes, and the theme the inks follow.
 // ABOUTME: A new Load is made by every register(); the mirror is written by the load's one record read and by event hooks, never by a render.
 import type { EngineInterface } from 'claude-code'
 
-import { CLEAN_CHAT_FILE, CS_LOCAL, OFF_LINE, ON_LINE, VET_TIMEOUT_MS, cleanChatState } from './settings'
+import { CHAT_ONLY_FILE, CS_LOCAL, OFF_LINE, ON_LINE, VET_TIMEOUT_MS, chatOnlyState } from './settings'
 import { logs } from './words'
 
 type $ = EngineInterface
 
 export type Load = {
   /**
-   * The mirror: CLEAN_CHAT_FILE says on AND cs trusts this session's control
+   * The mirror: CHAT_ONLY_FILE says on AND cs trusts this session's control
    * files (`vet`, below), so a session cs refuses reads as off. Undefined
-   * until the per-load read settles (cleanChatRecord). Written by
-   * cleanChatRecord (the load's read) and applyCleanChat (every later read);
-   * never by a render except through cleanChatRecord's one per-load promise.
+   * until the per-load read settles (chatOnlyRecord). Written by
+   * chatOnlyRecord (the load's read) and applyChatOnly (every later read);
+   * never by a render except through chatOnlyRecord's one per-load promise.
    */
   on?: boolean
   record?: Promise<boolean>
@@ -23,9 +23,9 @@ export type Load = {
    * cs's answer on this session's control files for the on the mirror last
    * read (§20.22: the writes and the on-read are vetted). Undefined: not
    * asked for the file's current on, or the file reads off. Set from
-   * vetOnRead's answer (by cleanChatRecord at the load's on-read, by
-   * applyCleanChat('status') at an outside flip to on), by applyCleanChat to
-   * 'passed' when a press's write turned the file on (cs's pressCleanChat
+   * vetOnRead's answer (by chatOnlyRecord at the load's on-read, by
+   * applyChatOnly('status') at an outside flip to on), by applyChatOnly to
+   * 'passed' when a press's write turned the file on (cs's pressChatOnly
    * vetted it on the way in), and at a successful write's ticketed read-back.
    * A read that finds the file off clears it, so the next on that no writer
    * of ours vetted is vetted again. Cached for the load otherwise: a session
@@ -33,22 +33,22 @@ export type Load = {
    * the next load (the band labels its key off at cs's next vet).
    */
   vet?: Vetted
-  /** The last read-side refusal logged, so each distinct refusal is logged once per load, as cs's band de-duplicates its clean chat complaint. Cleared by a pass. */
+  /** The last read-side refusal logged, so each distinct refusal is logged once per load, as cs's band de-duplicates its chat only complaint. Cleared by a pass. */
   vetLogged?: string
-  /** The last CLEAN_CHAT_FILE problem logged (readCleanChat), so the same unusable text or read error is logged once per load whichever read finds it. */
+  /** The last CHAT_ONLY_FILE problem logged (readChatOnly), so the same unusable text or read error is logged once per load whichever read finds it. */
   fileLogged?: string
   /**
-   * Read tickets for CLEAN_CHAT_FILE (applyCleanChat): `started` is taken
+   * Read tickets for CHAT_ONLY_FILE (applyChatOnly): `started` is taken
    * when a read begins, `applied` is the ticket of the read the mirror holds.
    * A read whose ticket is below `applied` is dropped when it resolves, so
    * the latest-started read wins even when two reads resolve out of order (a
-   * typed /clean-chat's read-back beside a band press's read). Two quick band
-   * presses do not need it: cs's pressCleanChat is single-flight and hands
+   * typed /chat-only's read-back beside a band press's read). Two quick band
+   * presses do not need it: cs's pressChatOnly is single-flight and hands
    * the second press the first one's in-flight promise, so it writes once and
    * both hooks' reads start after that write.
    */
   reads: { started: number; applied: number }
-  /** Whether the /config theme is a light one, read once per load by cleanChatRecord; the inks follow it. A theme changed mid-load is followed at the next load. */
+  /** Whether the /config theme is a light one, read once per load by chatOnlyRecord; the inks follow it. A theme changed mid-load is followed at the next load. */
   light: boolean
 }
 
@@ -63,19 +63,19 @@ export function newLoad(): Load {
  * before anything else sees the file, not a default.
  *
  *   const cwd = await $.session.cwd()
- *   fileOn = readCleanChat(load, $, cwd)                  // absent in a cs session: on
+ *   fileOn = readChatOnly(load, $, cwd)                  // absent in a cs session: on
  *   load.light = the /config theme is a light one
  *   load.vet = fileOn ? await vetOnRead(load, $, cwd) : undefined   // off: no cs process
  *   on = fileOn && load.vet === 'passed'
  *
  * Vetted once per load when the file reads on (§20.22: the on-read asks the
- * same cs -vet-session as writeCleanChat). Clean chat is on by default, so a
+ * same cs -vet-session as writeChatOnly). Chat only is on by default, so a
  * cs session with no file pays the vet too: one cs process (0.15-0.44 s,
  * cs's measurement; up to VET_TIMEOUT_MS, then refused, if cs hangs). A
  * refused session reads as off: every hook passes the engine's drawing
  * through, nothing is written, and the refusal is logged once (vetOnRead).
  * cs's band labels the key off there too
- * (`!cleanChatVetRefused && readCleanChat`: its last vet refused), so both
+ * (`!chatOnlyVetRefused && readChatOnly`: its last vet refused), so both
  * sides agree and both refuse writes (rationale (e) trace 7).
  *
  * Where it waits: site() awaits this promise before it paints, so the first
@@ -88,15 +88,15 @@ export function newLoad(): Load {
  * no op.
  *
  * A mirror, not a per-draw read. The file can change behind it only through
- * a writer other than cs's band press and /clean-chat (a hand edit, a second
+ * a writer other than cs's band press and /chat-only (a hand edit, a second
  * Claude session in this directory); that is seen at the next press,
- * /clean-chat (/clean-chat status re-reads it first, through applyCleanChat,
+ * /chat-only (/chat-only status re-reads it first, through applyChatOnly,
  * and vets a flip to on), or load.
  */
-export function cleanChatRecord(load: Load, $: $): Promise<boolean> {
+export function chatOnlyRecord(load: Load, $: $): Promise<boolean> {
   return load.record ??= (async () => {
     const cwd = await $.session.cwd()
-    const fileOn = await readCleanChat(load, $, cwd)
+    const fileOn = await readChatOnly(load, $, cwd)
     load.light = await themeIsLight($)
     load.vet = fileOn ? await vetOnRead(load, $, cwd) : undefined
     load.on = fileOn && load.vet === 'passed'
@@ -105,7 +105,7 @@ export function cleanChatRecord(load: Load, $: $): Promise<boolean> {
 }
 
 /**
- * What CLEAN_CHAT_FILE says (settings.cleanChatState), logged where it cannot be used:
+ * What CHAT_ONLY_FILE says (settings.chatOnlyState), logged where it cannot be used:
  *
  *   absent, and CS_LOCAL exists   on (the default)
  *   absent, no CS_LOCAL           off: this directory is no cs session, so no vet and no log
@@ -114,11 +114,11 @@ export function cleanChatRecord(load: Load, $: $): Promise<boolean> {
  *   a read error but ENOENT       off, logged with the path and the error
  *
  * Each log line is written once per load, whichever read finds it
- * (Load.fileLogged), as the band's readCleanChat writes each distinct
+ * (Load.fileLogged), as the band's readChatOnly writes each distinct
  * complaint once.
  */
-export async function readCleanChat(load: Load, $: $, cwd: string): Promise<boolean> {
-  const path = `${cwd}/${CLEAN_CHAT_FILE}`
+export async function readChatOnly(load: Load, $: $, cwd: string): Promise<boolean> {
+  const path = `${cwd}/${CHAT_ONLY_FILE}`
   let text: string | undefined
   try {
     text = await $.fs.read(path)
@@ -130,7 +130,7 @@ export async function readCleanChat(load: Load, $: $, cwd: string): Promise<bool
     }
     if (!(await $.fs.exists(`${cwd}/${CS_LOCAL}`))) return false
   }
-  const state = cleanChatState(text)
+  const state = chatOnlyState(text)
   if (state.on) return true
   if (state.problem !== undefined && text !== undefined) await logFileProblem(load, $, logs.unusable(path, state.problem, text))
   return false
@@ -154,28 +154,28 @@ async function themeIsLight($: $): Promise<boolean> {
 }
 
 /**
- * Which read applyCleanChat makes, and so whether cs already vetted the file
- * it reads. `press`: after cs's pressCleanChat, which vets before it writes.
- * `write`: writeCleanChat's read-back, after its own vet passed. `status`:
- * /clean-chat status's re-read, after no writer of ours: a flip to on found
+ * Which read applyChatOnly makes, and so whether cs already vetted the file
+ * it reads. `press`: after cs's pressChatOnly, which vets before it writes.
+ * `write`: writeChatOnly's read-back, after its own vet passed. `status`:
+ * /chat-only status's re-read, after no writer of ours: a flip to on found
  * there arrived from outside both writers (a hand edit, a second Claude
- * process in this directory, a pull), so it is vetted before it turns clean
- * chat on.
+ * process in this directory, a pull), so it is vetted before it turns chat
+ * only on.
  */
-export type CleanChatRead = 'press' | 'write' | 'status'
+export type ChatOnlyRead = 'press' | 'write' | 'status'
 
 /**
- * Reads CLEAN_CHAT_FILE and applies it to the mirror (ticketed, see
+ * Reads CHAT_ONLY_FILE and applies it to the mirror (ticketed, see
  * Load.reads). Called after `await next(e)` in the ui.press hook on cs's
- * `cs-clean-chat` Button ('press'), after cs-clean-chat's own write
- * (writeCleanChat, 'write'), and by perform() for /clean-chat status
+ * `cs-chat-only` Button ('press'), after cs-chat-only's own write
+ * (writeChatOnly, 'write'), and by perform() for /chat-only status
  * ('status'), so status reports the file as vetted (off where cs refuses),
  * not a mirror a hand edit or a second Claude process in this directory left
  * stale.
  *
- *   await cleanChatRecord(load, $)            // the load's read first: a press during the load's vet neither finds load.on unset nor outranks its ticket
+ *   await chatOnlyRecord(load, $)            // the load's read first: a press during the load's vet neither finds load.on unset nor outranks its ticket
  *   const ticket = ++load.reads.started
- *   const fileOn = await readCleanChat(...)
+ *   const fileOn = await readChatOnly(...)
  *   let vet = load.vet
  *   if (!fileOn) vet = undefined                                       // the next on is vetted again unless a writer of ours vetted it
  *   else if (after === 'write') vet = 'passed'                         // this writer's fresh answer, committed with its read ticket
@@ -187,23 +187,23 @@ export type CleanChatRead = 'press' | 'write' | 'status'
  *   if (load.on changed) $.ui.invalidate('ui.render')                 // every hooked instance reads the mirror again
  *
  * The press path trusts the file it reads after next(e): cs's refusal is cs's
- * module memory, so an outside on that lands after cs-clean-chat's last read
+ * module memory, so an outside on that lands after cs-chat-only's last read
  * and before a press cs refuses reads as the press's write and turns on.
  * Accepted (ruling §20.22: a press's read is not vetted again); the band
  * labels the key off there, and the next load's vet reads it off.
  *
- * The invalidate is cs-clean-chat's own and comes after the mirror changed
+ * The invalidate is cs-chat-only's own and comes after the mirror changed
  * (spike3 M15: an evaluation in flight is drawn again at once with the new
  * value, never blank). It is also what redraws cs's band after a typed
- * /clean-chat: cs-clean-chat hooks the rows, and cs's band redraws on its own
+ * /chat-only: cs-chat-only hooks the rows, and cs's band redraws on its own
  * next evaluation (the label follows then: inferred, not measured for this
  * pair). Never called from a render.
  */
-export async function applyCleanChat(load: Load, $: $, after: CleanChatRead): Promise<void> {
-  await cleanChatRecord(load, $)
+export async function applyChatOnly(load: Load, $: $, after: ChatOnlyRead): Promise<void> {
+  await chatOnlyRecord(load, $)
   const ticket = ++load.reads.started
   const cwd = await $.session.cwd()
-  const fileOn = await readCleanChat(load, $, cwd)
+  const fileOn = await readChatOnly(load, $, cwd)
   if (ticket < load.reads.applied) return
   let vet = load.vet
   let asked = false
@@ -219,41 +219,41 @@ export async function applyCleanChat(load: Load, $: $, after: CleanChatRead): Pr
   load.vet = vet
   if (vet === 'passed') load.vetLogged = undefined
   const was = load.on
-  if (was === undefined) throw new Error('clean chat record did not settle')
+  if (was === undefined) throw new Error('chat only record did not settle')
   const on = fileOn && vet === 'passed'
   load.on = on
   if (asked && vet !== undefined) await reportVet(load, $, vet)
   if (was !== on) await $.ui.invalidate('ui.render')
 }
 
-/** What a /clean-chat write did: written, nothing (no .cs/local), or nothing because cs refused this session's control files (the reason, for the reply). */
+/** What a /chat-only write did: written, nothing (no .cs/local), or nothing because cs refused this session's control files (the reason, for the reply). */
 export type WriteOutcome = 'written' | 'no-session' | { readonly refused: string }
 
 /**
- * Writes this session's switch, from a typed /clean-chat only, and only
+ * Writes this session's switch, from a typed /chat-only only, and only
  * where cs trusts this session's control files, as cs's band press does
  * (§20.22):
  *
  *   if (!(await $.fs.exists(`${cwd}/${CS_LOCAL}`))) return 'no-session'   // never create .cs/local; no vet spawned
  *   const refusal = await vetRefusal($, cwd)
  *   if (refusal !== undefined) return { refused: refusal }                   // nothing written, the mirror and load.vet untouched
- *   await $.fs.write(`${cwd}/${CLEAN_CHAT_FILE}`, on ? ON_LINE : OFF_LINE)
- *   await applyCleanChat(load, $, 'write')                                  // read back and commit this write's pass with its ticket; no second vet
+ *   await $.fs.write(`${cwd}/${CHAT_ONLY_FILE}`, on ? ON_LINE : OFF_LINE)
+ *   await applyChatOnly(load, $, 'write')                                  // read back and commit this write's pass with its ticket; no second vet
  *
  * The vet comes after the directory test, so a directory with no .cs/local
  * spawns no cs process, and before the write, so a refused session gets
- * nothing. Its cost is one cs process per writing /clean-chat (0.15-0.44 s,
+ * nothing. Its cost is one cs process per writing /chat-only (0.15-0.44 s,
  * measured by cs), awaited inside the immediate command, mid-turn included.
  * Non-atomic, as the band's: a write torn by a crash leaves a file that reads
  * as off on both sides.
  */
-export async function writeCleanChat(load: Load, $: $, on: boolean): Promise<WriteOutcome> {
+export async function writeChatOnly(load: Load, $: $, on: boolean): Promise<WriteOutcome> {
   const cwd = await $.session.cwd()
   if (!(await $.fs.exists(`${cwd}/${CS_LOCAL}`))) return 'no-session'
   const refused = await vetRefusal($, cwd)
   if (refused !== undefined) return { refused }
-  await $.fs.write(`${cwd}/${CLEAN_CHAT_FILE}`, on ? ON_LINE : OFF_LINE)
-  await applyCleanChat(load, $, 'write')
+  await $.fs.write(`${cwd}/${CHAT_ONLY_FILE}`, on ? ON_LINE : OFF_LINE)
+  await applyChatOnly(load, $, 'write')
   return 'written'
 }
 
@@ -269,7 +269,7 @@ export async function writeCleanChat(load: Load, $: $, on: boolean): Promise<Wri
  *   throws (a timeout too) -> `cs -vet-session did not run: ${message}`
  *
  * Returns the refusal or undefined. It reports nothing itself: each caller
- * says the refusal its own way. writeCleanChat's caller (perform) puts it in
+ * says the refusal its own way. writeChatOnly's caller (perform) puts it in
  * the command's reply, once, to the person who typed it; vetOnRead logs it
  * once per distinct text. cs's band asks again at its next acting step, so
  * the two answer the same rule, not the same call.
@@ -290,12 +290,12 @@ export async function vetRefusal($: $, cwd: string): Promise<string | undefined>
 export type Vetted = 'passed' | { readonly refused: string }
 
 /**
- * The read-side vet (§20.22: a file that reads on is vetted before clean
- * chat turns on). Asked by cleanChatRecord at the load's read when
- * CLEAN_CHAT_FILE reads on; applyCleanChat('status') asks vetRefusal itself
+ * The read-side vet (§20.22: a file that reads on is vetted before chat
+ * only turns on). Asked by chatOnlyRecord at the load's read when
+ * CHAT_ONLY_FILE reads on; applyChatOnly('status') asks vetRefusal itself
  * for a flip to on no writer of ours vetted, and reports through reportVet.
- * A refusal is logged once per distinct text, as cs's readCleanChat does
- * with its clean chat complaint.
+ * A refusal is logged once per distinct text, as cs's readChatOnly does
+ * with its chat only complaint.
  */
 export async function vetOnRead(load: Load, $: $, cwd: string): Promise<Vetted> {
   const refused = await vetRefusal($, cwd)
@@ -311,6 +311,6 @@ async function reportVet(load: Load, $: $, vet: Vetted): Promise<void> {
   }
   if (vet.refused !== load.vetLogged) {
     load.vetLogged = vet.refused
-    await $.ui.log(logs.cleanChatOff(vet.refused))
+    await $.ui.log(logs.chatOnlyOff(vet.refused))
   }
 }

@@ -177,14 +177,14 @@ CS_SKILL_FILES=(
 )
 
 # Mod directories under mods/ the installer keeps out: experimental, their
-# source and tests in the checkout only. cs-clean-chat is one, so the cs band,
-# which draws its clean chat key only beside cs-clean-chat's /clean-chat, draws
+# source and tests in the checkout only. cs-chat-only is one, so the cs band,
+# which draws its chat only key only beside cs-chat-only's /chat-only, draws
 # none. Every file under mods/ outside these and their test/ is in
 # CS_MOD_FILES below (tests/test_install.sh holds the two lists to that), and
 # cs -doctor's drift scan skips them.
 # shellcheck disable=SC2034  # read by cs -doctor and tests/test_install.sh
 CS_MODS_KEPT_OUT=(
-    cs-clean-chat
+    cs-chat-only
 )
 
 # Mods cs ships: Claude Code function-hooks plugins, deployed file by file as

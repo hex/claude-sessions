@@ -123,14 +123,14 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_output_contains "$out" '$.process.run, $.prompt.submit (via offerToStart), $.session.compact (via offerToStart), $.session.cwd' "/queue runs cs from its own hook and its start offer, which alone submits a prompt and compacts; the rotation asks cs -vet-session before it arms; the /finish watch runs kill -0 to ask after cs's pid" || return 1
     assert_output_contains "$out" '$.command.list, $.command.register, $.command.run (via askToWrap, clearAndContinue, noteConversation, pressFinish, rotate)' "the band discovers commands; the wrap, clear, finish and rotate keys and conversation colour keep their command routes" || return 1
     assert_output_contains "$out" '$.clock.after, $.clock.every (via readFeatures, startCountdown, watchFinish), $.clock.now (via gateWord)' "the forced /rotate, the next-step toast and the rail's redraw are one-shot timers, the grace, the /finish watch and the idle features read tickers, and the gate word alone reads the time" || return 1
-    local src="$MOD/hooks/register.tsx" scroll_lines jump_range clean_chat_range
+    local src="$MOD/hooks/register.tsx" scroll_lines jump_range chat_only_range
     # The validator cuts its calls line at a fixed length (`… [+N chars]`);
     # every assert on it must name something before the cut. $.ui.log and
     # selected later calls are checked on the source instead.
-    assert_eq "6" "$(grep -c '\$\.ui\.log' "$src")" "six calls log a features word read failure, a features complaint, a transcript read failure, a /color that did not run, a clean chat read failure and a settings read complaint" || return 1
-    clean_chat_range=$(awk '/^async function pressCleanChat\(/ { start = NR } start && !end && /^}/ { end = NR } END { print start, end }' "$src")
-    set -- $clean_chat_range
-    assert_eq "1" "$(awk -v start="$1" -v end="$2" 'NR > start && NR < end && /\$\.fs\.write/ { count++ } END { print count + 0 }' "$src")" "one call inside pressCleanChat writes the clean chat file" || return 1
+    assert_eq "6" "$(grep -c '\$\.ui\.log' "$src")" "six calls log a features word read failure, a features complaint, a transcript read failure, a /color that did not run, a chat only read failure and a settings read complaint" || return 1
+    chat_only_range=$(awk '/^async function pressChatOnly\(/ { start = NR } start && !end && /^}/ { end = NR } END { print start, end }' "$src")
+    set -- $chat_only_range
+    assert_eq "1" "$(awk -v start="$1" -v end="$2" 'NR > start && NR < end && /\$\.fs\.write/ { count++ } END { print count + 0 }' "$src")" "one call inside pressChatOnly writes the chat only file" || return 1
     assert_output_contains "$out" '$.session.id, $.session.usage, $.ui.ask (via askToWrap, offerToStart)' "the visible inventory includes the session and dialog calls" || return 1
     assert_file_contains "$src" '\$\.ui\.invalidate(.ui\.render.)' "the band redraws itself through \$.ui.invalidate" || return 1
     scroll_lines=$(grep -n '\$\.ui\.scroll' "$src" | cut -d: -f1 | tr '\n' ' ')
@@ -144,7 +144,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_eq "0" "$(grep -c '\$\.ui\.close' "$src")" "and closes none" || return 1
     assert_eq "0" "$(grep -c '\$\.ui\.panes' "$src")" "and lists none" || return 1
     assert_output_contains "$out" '$.fs.list (via hasFeatureDirs, queueLength, unreadMail)' "the band counts the queue's tasks and the mailbox's unread mail by listing their directories, and looks for a base's feature directories at the sessions root before asking cs; nothing else lists one" || return 1
-    assert_output_contains "$out" '$.fs.read (via armedHandoff, boundChords, clearPressed, csSessionName, forceRotation, queueRunning, readCleanChat, readFinish, readState, readWrapped, refreshRail)' "the wrap marker, the press marker, the state (for the session's recorded name too), the queue's state, the clean chat file, the /finish record, keybindings.json and the transcript are read" || return 1
+    assert_output_contains "$out" '$.fs.read (via armedHandoff, boundChords, clearPressed, csSessionName, forceRotation, queueRunning, readChatOnly, readFinish, readState, readWrapped, refreshRail)' "the wrap marker, the press marker, the state (for the session's recorded name too), the queue's state, the chat only file, the /finish record, keybindings.json and the transcript are read" || return 1
     assert_output_contains "$out" '$.fs.stat (via refreshRail, resolvedPath)' "stat resolves where a path lands, to prove the cwd is the sessions root's entry, and gates the transcript's re-read on its size and mtime; no other rule hangs on a modification time" || return 1
 }
 

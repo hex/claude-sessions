@@ -1,14 +1,14 @@
-// ABOUTME: Checks each clean chat painter's visible words through real mounted engine render chains: your line, Claude's reply, its error line, and nothing for the work.
-// ABOUTME: Test hooks supply the session's switch and theme and retain an observable engine drawing beneath clean chat.
+// ABOUTME: Checks each chat only painter's visible words through real mounted engine render chains: your line, Claude's reply, its error line, and nothing for the work.
+// ABOUTME: Test hooks supply the session's switch and theme and retain an observable engine drawing beneath chat only.
 import { expect, test } from 'claude-code/testing'
 import type { On, PromptOrigin } from 'claude-code'
 
 const THEME = { key: 'theme', label: 'Theme', kind: 'choice', value: 'light', options: ['dark', 'light'], provider: { plugin: 'engine', tier: 'core' }, isLocked: false } as const
 
-/** A cs session whose clean chat file says on and which cs trusts; `light` puts a light theme in /config. */
+/** A cs session whose chat only file says on and which cs trusts; `light` puts a light theme in /config. */
 function session(on: On, light = false) {
   on('session.cwd', () => ({ value: '/session' }))
-  on('fs.read', ($, e) => e.path.endsWith('/clean-chat') ? { value: 'on\n' } : { deny: 'ENOENT: no such file or directory' })
+  on('fs.read', ($, e) => e.path.endsWith('/chat-only') ? { value: 'on\n' } : { deny: 'ENOENT: no such file or directory' })
   on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
   on('config.list', () => ({ value: light ? [THEME] : [] }))
@@ -18,12 +18,12 @@ test('UserMessage draws the terminal you margin and leaves the desktop engine bo
   session(on)
   let calls = 0
   on('ui.render', { component: 'UserMessage' }, ($, e) => { calls++; return $.ui.resolve(e).Text({ children: 'engine prompt' }) })
-  const terminal = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
+  const terminal = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
   expect((await terminal.find({ type: 'Text', text: '❯' }))?.text).toBe('❯')
   expect((await terminal.find({ type: 'Text', text: '❯' }))?.props.color).toBe('#9fb4c8')
   expect((await terminal.find({ type: 'Text', text: 'Read the notes' }))?.text).toBe('Read the notes')
   expect(await terminal.find({ text: 'engine prompt' })).toBeUndefined()
-  const desktop = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'desktop', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
+  const desktop = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'desktop', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
   expect((await desktop.find({ type: 'Text' }))?.text).toBe('engine prompt')
   expect(calls).toBe(2)
   await terminal.unmount()
@@ -33,13 +33,13 @@ test('UserMessage draws the terminal you margin and leaves the desktop engine bo
 test('UserMessage draws your line in the light theme\'s you ink when /config names a light theme', async ($, on) => {
   session(on, true)
   on('ui.render', { component: 'UserMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine prompt' }))
-  const row = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
+  const row = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
   expect((await row.find({ type: 'Text', text: '❯' }))?.props.color).toBe('#2f4f6f')
   expect((await row.find({ type: 'Text', text: 'Read the notes' }))?.props.color).toBe('#2f4f6f')
   await row.unmount()
 })
 
-test('UserMessage keeps the engine row for an origin clean chat has no rule for, envelope text included', async ($, on) => {
+test('UserMessage keeps the engine row for an origin chat only has no rule for, envelope text included', async ($, on) => {
   session(on)
   on('ui.render', { component: 'UserMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine prompt' }))
   const origins: PromptOrigin[] = [
@@ -49,7 +49,7 @@ test('UserMessage keeps the engine row for an origin clean chat has no rule for,
     { kind: 'auto-continuation' },
   ]
   for (const [index, origin] of origins.entries()) {
-    const row = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'UserMessage', requestId: `row-${index}`, props: { text: '<teammate-message teammate_id="alice">Ready</teammate-message>', origin, isExpanded: false } })
+    const row = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', requestId: `row-${index}`, props: { text: '<teammate-message teammate_id="alice">Ready</teammate-message>', origin, isExpanded: false } })
     expect((await row.find({ type: 'Text' }))?.text).toBe('engine prompt')
     await row.unmount()
   }
@@ -67,11 +67,11 @@ test('UserMessage draws nothing for a peer, a sent message, a task notification,
     { text: 'Stop hook feedback:\nTests need another pass', origin: { kind: 'unclassified' } },
   ]
   for (const [index, props] of rows.entries()) {
-    const row = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'UserMessage', requestId: `row-${index}`, props: { ...props, isExpanded: false } })
+    const row = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', requestId: `row-${index}`, props: { ...props, isExpanded: false } })
     expect(await row.findAll({ type: 'Text' })).toEqual([])
     await row.unmount()
   }
-  const unstamped = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'UserMessage', requestId: 'unstamped', props: { text: 'Read the notes', origin: { kind: 'unclassified' }, isExpanded: false } })
+  const unstamped = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', requestId: 'unstamped', props: { text: 'Read the notes', origin: { kind: 'unclassified' }, isExpanded: false } })
   expect((await unstamped.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['❯', 'Read the notes'])
   await unstamped.unmount()
   expect(calls).toBe(rows.length + 1)
@@ -80,12 +80,12 @@ test('UserMessage draws nothing for a peer, a sent message, a task notification,
 test('UserMessage draws your text in the you ink, and a slash command with its name in that ink and its arguments dim', async ($, on) => {
   session(on)
   on('ui.render', { component: 'UserMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine prompt' }))
-  const plain = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'UserMessage', requestId: 'plain', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
+  const plain = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', requestId: 'plain', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
   expect((await plain.find({ type: 'Text', text: 'Read the notes' }))?.props.color).toBe('#9fb4c8')
-  const command = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'UserMessage', requestId: 'command', props: { text: '/clean-chat status now', origin: { kind: 'composer' }, isExpanded: false } })
-  const name = await command.find({ type: 'Text', text: '/clean-chat' })
+  const command = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', requestId: 'command', props: { text: '/chat-only status now', origin: { kind: 'composer' }, isExpanded: false } })
+  const name = await command.find({ type: 'Text', text: '/chat-only' })
   const args = await command.find({ type: 'Text', text: 'status now' })
-  expect([name?.text, name?.props.color, name?.props.dimColor]).toEqual(['/clean-chat', '#9fb4c8', undefined])
+  expect([name?.text, name?.props.color, name?.props.dimColor]).toEqual(['/chat-only', '#9fb4c8', undefined])
   expect([args?.text, args?.props.dimColor]).toEqual(['status now', true])
   await plain.unmount()
   await command.unmount()
@@ -95,8 +95,8 @@ test('an expanded row (ctrl+o, --verbose) keeps the engine drawing', async ($, o
   session(on)
   on('ui.render', { component: 'UserMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine prompt' }))
   on('ui.render', { component: 'ToolGroup' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine group' }))
-  const prompt = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'UserMessage', props: { text: 'Ready', origin: { kind: 'peer' }, isExpanded: true } })
-  const group = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'ToolGroup', props: { calls: [], isActive: false, isExpanded: true } })
+  const prompt = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', props: { text: 'Ready', origin: { kind: 'peer' }, isExpanded: true } })
+  const group = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'ToolGroup', props: { calls: [], isActive: false, isExpanded: true } })
   expect((await prompt.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['engine prompt'])
   expect((await group.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['engine group'])
   await prompt.unmount()
@@ -107,7 +107,7 @@ test('AssistantMessage frames the engine markdown once under the terminal margin
   session(on)
   const flags: boolean[] = []
   on('ui.render', { component: 'AssistantMessage' }, ($, e) => { flags.push(e.props.isFirstOfReply); return $.ui.resolve(e).Text({ children: 'engine markdown' }) })
-  const row = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'AssistantMessage', props: { text: 'Here is the answer.', isFirstOfReply: true } })
+  const row = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'AssistantMessage', props: { text: 'Here is the answer.', isFirstOfReply: true } })
   expect(await row.find({ type: 'Text', text: 'claude' })).toBeUndefined()
   expect((await row.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['engine markdown'])
   expect((await row.findAll({ type: 'Box' })).some(box => box.props.paddingLeft === 2 && JSON.stringify(box.children).includes('engine markdown'))).toBe(true)
@@ -118,7 +118,7 @@ test('AssistantMessage frames the engine markdown once under the terminal margin
 test('AssistantMessage draws a failed reply as one line in the colour of who acts, with its remedies dim, in the reply\'s place', async ($, on) => {
   session(on)
   on('ui.render', { component: 'AssistantMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine markdown' }))
-  const row = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'AssistantMessage', props: { text: 'API Error: Connection error.', isFirstOfReply: true } })
+  const row = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'AssistantMessage', props: { text: 'API Error: Connection error.', isFirstOfReply: true } })
   const texts = await row.findAll({ type: 'Text' })
   expect(texts.map(text => [text.text, text.props.color, text.props.dimColor])).toEqual([['Connection lost', '#d8b36a', undefined], ['check your internet', undefined, true], ['send again to retry', undefined, true]])
   await row.unmount()
@@ -134,11 +134,11 @@ test('the work draws nothing while on: a call, a group, a result, the progress h
   on('ui.render', { component: 'TurnDuration' }, ($, e) => { engine.push('duration'); return $.ui.resolve(e).Text({ children: 'engine duration' }) })
   const read = { tool_use_id: 'notes', tool: 'Read', input: { file_path: '/repo/notes.md' }, isRunning: false, isErrored: false, isInterrupted: false, output: 'the notes' }
   const rows = [
-    await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'ToolUse', requestId: 'notes', props: read }),
-    await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'ToolGroup', props: { calls: [read, { ...read, tool_use_id: 'more' }], isActive: true, isExpanded: false } }),
-    await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'ToolResult', props: { tool_use_id: 'notes', tool: 'Read', output: 'the notes', isErrored: false } }),
-    await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'ToolProgress', props: { tool_use_id: 'notes', kind: 'background_hint', hint: 'ctrl+b to run in background' } }),
-    await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'TurnDuration', props: { word: 'Worked', durationMs: 4000 } }),
+    await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'ToolUse', requestId: 'notes', props: read }),
+    await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'ToolGroup', props: { calls: [read, { ...read, tool_use_id: 'more' }], isActive: true, isExpanded: false } }),
+    await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'ToolResult', props: { tool_use_id: 'notes', tool: 'Read', output: 'the notes', isErrored: false } }),
+    await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'ToolProgress', props: { tool_use_id: 'notes', kind: 'background_hint', hint: 'ctrl+b to run in background' } }),
+    await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'TurnDuration', props: { word: 'Worked', durationMs: 4000 } }),
   ]
   for (const row of rows) {
     expect(await row.findAll({ type: 'Text' })).toEqual([])
@@ -152,27 +152,27 @@ test('the working line draws nothing on the terminal and the engine\'s row on th
   let calls = 0
   on('ui.render', { component: 'Spinner' }, ($, e) => { calls++; return $.ui.resolve(e).Text({ children: `${e.props.word}${e.props.suffix}` }) })
   const props = { word: 'Sauteing', message: null, suffix: '…', mode: 'tool-use' } as const
-  const line = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'Spinner', props })
+  const line = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'Spinner', props })
   expect(await line.findAll({ type: 'Text' })).toEqual([])
   await line.unmount()
-  const desktop = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'desktop', component: 'Spinner', requestId: 'desktop', props })
+  const desktop = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'desktop', component: 'Spinner', requestId: 'desktop', props })
   expect((await desktop.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['Sauteing…'])
   await desktop.unmount()
   expect(calls).toBe(2)
 })
 
-test('SessionMode appends the clean chat mode while preserving the engine modes', async ($, on) => {
+test('SessionMode appends the chat only mode while preserving the engine modes', async ($, on) => {
   session(on)
   on('ui.render', { component: 'SessionMode' }, ($, e) => $.ui.resolve(e).Text({ children: e.props.modes.join(' | ') }))
-  const row = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'SessionMode', props: { modes: ['auto mode on'] } })
-  expect((await row.find({ type: 'Text' }))?.text).toBe('auto mode on | clean chat · /clean-chat to switch')
+  const row = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'SessionMode', props: { modes: ['auto mode on'] } })
+  expect((await row.find({ type: 'Text' }))?.text).toBe('auto mode on | chat only · /chat-only to switch')
   await row.unmount()
 })
 
 test('CommandOutput draws the cleaned command answer beside a dim dot', async ($, on) => {
   session(on)
   on('ui.render', { component: 'CommandOutput' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine command' }))
-  const row = await $.ui.mount({ plugin: 'cs-clean-chat', surface: 'terminal', component: 'CommandOutput', props: { command: 'clean-chat', args: 'status', text: 'cs-clean-chat: on', isErrored: false } })
+  const row = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'CommandOutput', props: { command: 'chat-only', args: 'status', text: 'cs-chat-only: on', isErrored: false } })
   expect((await row.find({ type: 'Text', text: 'on' }))?.text).toBe('on')
   expect((await row.find({ type: 'Text', text: '·' }))?.text).toBe('·')
   expect((await row.find({ type: 'Text', text: 'on' }))?.props.dimColor).toBe(true)

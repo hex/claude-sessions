@@ -1,8 +1,0 @@
-{
-  "name": "cs-clean-chat",
-  "version": "0.1.0",
-  "description": "Restyles the chat: your messages and Claude's replies, and nothing of the work between them. On in every session by default; the band's clean chat key or /clean-chat turns it off there.",
-  "author": {
-    "name": "cs"
-  }
-}

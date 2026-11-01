@@ -185,7 +185,7 @@ export const TOASTS = {
   clearFailed: (err: string) => `/clear did not run: ${err}`,
   nextStep: (line: string) => `next step: ${line}`,
   noRotation: (refusal: string) => `no rotation in this session: ${refusal}`,
-  cleanChatFailed: (err: string) => `clean chat update failed: ${err}`,
+  chatOnlyFailed: (err: string) => `chat only update failed: ${err}`,
   finishFailed: (task: string, err: string) => `/finish${task === '' ? '' : ` ${task}`} did not run: ${err}`,
   pressedNotEmptied: (err: string) => `could not empty ${PRESSED}: ${err}`,
   wrapFailed: (err: string) => `/wrap did not run: ${err}`,
@@ -206,7 +206,7 @@ export const LOGS = {
   featuresNoAnswer: (base: string, err: string) => `cs ${base} -features did not answer: ${err}`,
   transcriptUnread: (err: string) => `the transcript could not be read: ${err}`,
   colorFailed: (color: string, err: string) => `/color ${color} did not run: ${err}`,
-  cleanChatUnread: (message: string) => `the clean chat setting could not be read: ${message}`,
+  chatOnlyUnread: (message: string) => `the chat only setting could not be read: ${message}`,
   settingsExited: (code: number, line: string) => `cs -config list exited ${code}: ${line}`,
   settingsUnreadable: (record: string) => `cs -config list gave a record the band cannot read: ${record}`,
   settingsUnread: (err: string) => `cs's settings could not be read: ${err}`,
@@ -254,11 +254,11 @@ let clearing = false
 // asks on every render while a handoff is armed.
 let lastRefusal: string | undefined
 // Whether cs's last answer on this session's control files was a refusal. Set
-// and cleared by every vet (sessionVetted), so the session start's and a clean
-// chat press's alike; only a passed vet or a reload clears it, never a prompt.
-// The clean chat key reads off while it is set: the band's label says what
-// cs-clean-chat draws, and cs-clean-chat reads a refused session as off.
-let cleanChatVetRefused = false
+// and cleared by every vet (sessionVetted), so the session start's and a chat
+// only press's alike; only a passed vet or a reload clears it, never a prompt.
+// The chat only key reads off while it is set: the band's label says what
+// cs-chat-only draws, and cs-chat-only reads a refused session as off.
+let chatOnlyVetRefused = false
 // Counts presses of the clear button: a press acts only if no later press or
 // prompt came while cs was answering it.
 let pressCount = 0
@@ -307,7 +307,7 @@ type BandFacts = {
   rotating: boolean
   armed: boolean
   wrapping: boolean
-  cleanChat?: { on: boolean; color: string | undefined; onPress: BandPress }
+  chatOnly?: { on: boolean; color: string | undefined; onPress: BandPress }
   waiting: number
   gate?: string
   queued: number
@@ -330,9 +330,9 @@ export function buildBandEntries(facts: BandFacts): BandEntry[] {
   // The grace follows the clear key whose press stops it.
   if (facts.countdown !== undefined) entries.push({ key: 'cs-countdown', kind: 'word', label: `in ${facts.countdown.seconds}s`, ink: { color: facts.countdown.ink } })
   if (facts.wrapping) entries.push({ key: 'cs-wrap', kind: 'chord', label: 'wrap', action: WRAP_ACTION, onPress: facts.wrap })
-  // The clean chat key and the queue have no chord: a click or Enter under the band's focus presses them.
+  // The chat only key and the queue have no chord: a click or Enter under the band's focus presses them.
   // Its tail is a switch dot: ● in the session's colour while on, ○ in the line's ink while off.
-  if (facts.cleanChat !== undefined) entries.push({ key: 'cs-clean-chat', kind: 'press', label: facts.cleanChat.on ? 'clean chat ●' : 'clean chat ○', onPress: facts.cleanChat.onPress, ink: { tail: facts.cleanChat.on ? '●' : '○', color: facts.cleanChat.on ? facts.cleanChat.color : undefined } })
+  if (facts.chatOnly !== undefined) entries.push({ key: 'cs-chat-only', kind: 'press', label: facts.chatOnly.on ? 'chat only ●' : 'chat only ○', onPress: facts.chatOnly.onPress, ink: { tail: facts.chatOnly.on ? '●' : '○', color: facts.chatOnly.on ? facts.chatOnly.color : undefined } })
   if (facts.waiting > 0) entries.push({ key: 'cs-queue', kind: 'press', label: `${QUEUE_GLYPH} run ${facts.waiting} queued ${facts.waiting === 1 ? 'task' : 'tasks'}`, onPress: facts.queue, ink: { lead: QUEUE_GLYPH, color: facts.queueInk } })
   // The features word leads what the session is; only a ready feature can be pressed.
   if (facts.featured !== undefined) {
@@ -399,8 +399,8 @@ type BandOptions = { prompts: boolean; prompt: 'latest' | 'read'; bars: number }
 let bandOptions: BandOptions | undefined
 let bandProblem: string | undefined
 let bandProblemSaid = false
-let cleanChatPressPending: Promise<void> | undefined
-let cleanChatComplaint: string | undefined
+let chatOnlyPressPending: Promise<void> | undefined
+let chatOnlyComplaint: string | undefined
 
 // What is wrong with a value for one of the band's rows, by field name;
 // undefined when the band can draw it, or the field is not the band's.
@@ -419,13 +419,13 @@ export function register(on: On, options: PluginOptions) {
     ? { prompts: options.bandPrompts as boolean, prompt: options.bandPrompt as BandOptions['prompt'], bars: options.bandBars as number }
     : undefined
   bandProblemSaid = false
-  cleanChatPressPending = undefined
-  cleanChatComplaint = undefined
+  chatOnlyPressPending = undefined
+  chatOnlyComplaint = undefined
   // A (re)load has no countdown: the engine cancelled the old one's timers.
   left = undefined; ticker = undefined; bandIdle = false; turnRunning = false; stepToastedFor = undefined; adopted = undefined; clearSeen = false; clearing = false; birth = undefined; startPercent = undefined; registered = false
   finishWatch = undefined; finishTurnOver = false; finishShown = new Set(); finishGate = undefined; finishProblemShown = false
   lastRefusal = undefined
-  cleanChatVetRefused = false
+  chatOnlyVetRefused = false
   featuresWord = undefined; featuresReading = false; featuresClock = undefined; featuresComplaint = undefined
   fileSettings = new Map(); settingsInFlight = undefined; settingsComplaint = undefined
   railFile = undefined; prompts = []; drawnRows = new Map(); shown = new Map(); denied = new Set(); denySaid = false; notYetSaid = false; tailSaid = false; drawnRead = -1; redrawPending = false
@@ -652,17 +652,17 @@ export function register(on: On, options: PluginOptions) {
     // The features word leads what the session is, at the line's right; a
     // running gate already names the feature it lands.
     let featured = !e.props.hasSurvey && gate === undefined ? featuresWord : undefined
-    let cleanChatEligible = bandIdle && !armed
-    if ((rotating || waiting > 0 || queued > 0 || mail > 0 || railing || featured || cleanChatEligible) && !(await ownsRotation($))) { rotating = false; waiting = 0; queued = 0; mail = 0; railing = false; featured = undefined; cleanChatEligible = false }
+    let chatOnlyEligible = bandIdle && !armed
+    if ((rotating || waiting > 0 || queued > 0 || mail > 0 || railing || featured || chatOnlyEligible) && !(await ownsRotation($))) { rotating = false; waiting = 0; queued = 0; mail = 0; railing = false; featured = undefined; chatOnlyEligible = false }
     // The named tick is remembered on every path, drawn or not, so a row's
     // report that moves nothing visible schedules no redraw.
     const named = namedIndex()
     drawnRead = named
     const hasContent = rotating || waiting > 0 || queued > 0 || mail > 0 || gate !== undefined || railing || featured !== undefined
-    if (!hasContent && !cleanChatEligible) return drawn
-    // Listing /clean-chat reads availability without queuing a command or adding a status row.
-    const offersCleanChat = cleanChatEligible && (await $.command.list()).some(command => command.name === 'clean-chat' && command.source === 'plugin' && command.plugin === 'cs-clean-chat')
-    if (!hasContent && !offersCleanChat) return drawn
+    if (!hasContent && !chatOnlyEligible) return drawn
+    // Listing /chat-only reads availability without queuing a command or adding a status row.
+    const offersChatOnly = chatOnlyEligible && (await $.command.list()).some(command => command.name === 'chat-only' && command.source === 'plugin' && command.plugin === 'cs-chat-only')
+    if (!hasContent && !offersChatOnly) return drawn
     const wrapped = rotating && !armed && (await wrapFinished($))
     const chords = await boundChords($)
     const own = paletteColor(await sessionColor($))
@@ -675,7 +675,7 @@ export function register(on: On, options: PluginOptions) {
       countdown: armed && left !== undefined ? { seconds: left, ink: await rampColor($, left) } : undefined,
       rotating, armed, wrapping, waiting, gate, queued, queueRunning: queueStarted, mail,
       queueInk: amberColor(bg, theme),
-      cleanChat: offersCleanChat ? { on: !cleanChatVetRefused && await readCleanChat($), color: own, onPress: () => pressCleanChat($) } : undefined,
+      chatOnly: offersChatOnly ? { on: !chatOnlyVetRefused && await readChatOnly($), color: own, onPress: () => pressChatOnly($) } : undefined,
       rotate: armed ? () => pressClear($) : () => pressRotate($),
       wrap: () => askToWrap($),
       queue: () => pressQueueStart($),
@@ -719,7 +719,7 @@ const DROP_ORDER = ['cs-mail', 'cs-queued', 'cs-features', 'cs-gate']
 // right edge beside the rail. The line's free cells stand between the two.
 type Zone = 'actions' | 'status'
 const ZONES = new Map<string, Zone>([
-  ['cs-rotate', 'actions'], ['cs-countdown', 'actions'], ['cs-wrap', 'actions'], ['cs-clean-chat', 'actions'], ['cs-queue', 'actions'], ['cs-queued', 'actions'],
+  ['cs-rotate', 'actions'], ['cs-countdown', 'actions'], ['cs-wrap', 'actions'], ['cs-chat-only', 'actions'], ['cs-queue', 'actions'], ['cs-queued', 'actions'],
   ['cs-features', 'status'], ['cs-gate', 'status'], ['cs-mail', 'status'],
 ])
 // The cells between two entries of a zone, and the fewest between the zones.
@@ -789,9 +789,9 @@ const SHORTEST_CELLS = 2
 
 // The entries that leave whole, first to last, once the words are short and
 // every bound chord is its key: the countdown's free text before the actions,
-// the presses before the chords, the clean chat key the last press to go.
+// the presses before the chords, the chat only key the last press to go.
 // Only chords are left after them.
-const LEAVE_ORDER = ['cs-countdown', 'cs-features', 'cs-queue', 'cs-clean-chat']
+const LEAVE_ORDER = ['cs-countdown', 'cs-features', 'cs-queue', 'cs-chat-only']
 
 // The entries a line of `room` cells draws, and whether it spells the chord
 // prefix. The engine's Buttons never shrink, so a line wider than its room
@@ -1714,7 +1714,7 @@ async function armedHandoff($: EngineInterface): Promise<string | undefined> {
 // is a no. Each new refusal is toasted once. Each answer starts a cs process
 // (0.15-0.44 s measured), so only the steps that act ask: the session start's
 // heartbeat, a countdown's start and zero, a forced /rotate, a press of the
-// clear, rotate or clean chat button, and the emptying of the wrap marker
+// clear, rotate or chat only button, and the emptying of the wrap marker
 // (clearWrapped, as a prompt starts a turn) and of the press marker
 // (clearPressed, at a main-loop turn's end or when the engine refuses the
 // press's run).
@@ -1735,7 +1735,7 @@ async function sessionVetted($: EngineInterface, cwd: string): Promise<boolean> 
   }
   if (refusal !== undefined && refusal !== lastRefusal) $.ui.toast(TOASTS.noRotation(refusal))
   lastRefusal = refusal
-  cleanChatVetRefused = refusal !== undefined
+  chatOnlyVetRefused = refusal !== undefined
   return refusal === undefined
 }
 
@@ -1778,48 +1778,48 @@ async function sessionColor($: EngineInterface): Promise<string | undefined> {
 export const ROTATE_ACTION = 'strip:jump1'
 export const WRAP_ACTION = 'strip:jump2'
 
-// Clean chat is on by default: no file reads on, as cs-clean-chat reads it
-// (KEEP IN SYNC with cleanChatState in mods/cs-clean-chat/hooks/settings.ts).
-async function readCleanChat($: EngineInterface): Promise<boolean> {
+// Chat only is on by default: no file reads on, as cs-chat-only reads it
+// (KEEP IN SYNC with chatOnlyState in mods/cs-chat-only/hooks/settings.ts).
+async function readChatOnly($: EngineInterface): Promise<boolean> {
   let complaint: string
   try {
     // Writes are non-atomic: only the whole on line counts. Trimming would
     // accept a torn write without its newline; every other value is off.
-    const text = await $.fs.read(`${await $.session.cwd()}/.cs/local/clean-chat`)
-    cleanChatComplaint = undefined
+    const text = await $.fs.read(`${await $.session.cwd()}/.cs/local/chat-only`)
+    chatOnlyComplaint = undefined
     return text === 'on\n'
   } catch (err) {
     const message = String(err instanceof Error ? err.message : err)
     if (message.endsWith(' failed: ENOENT')) {
-      cleanChatComplaint = undefined
+      chatOnlyComplaint = undefined
       return true
     }
-    complaint = LOGS.cleanChatUnread(message)
+    complaint = LOGS.chatOnlyUnread(message)
   }
-  if (complaint !== cleanChatComplaint) $.ui.log(complaint)
-  cleanChatComplaint = complaint
+  if (complaint !== chatOnlyComplaint) $.ui.log(complaint)
+  chatOnlyComplaint = complaint
   return false
 }
 
-async function pressCleanChat($: EngineInterface) {
-  if (cleanChatPressPending !== undefined) return cleanChatPressPending
+async function pressChatOnly($: EngineInterface) {
+  if (chatOnlyPressPending !== undefined) return chatOnlyPressPending
   const pending = (async () => {
     try {
       const cwd = await $.session.cwd()
       if (!(await sessionVetted($, cwd))) return
-      const on = !(await readCleanChat($))
-      await $.fs.write(`${cwd}/.cs/local/clean-chat`, on ? 'on\n' : 'off\n')
+      const on = !(await readChatOnly($))
+      await $.fs.write(`${cwd}/.cs/local/chat-only`, on ? 'on\n' : 'off\n')
     } catch (err) {
-      $.ui.toast(TOASTS.cleanChatFailed(String(err instanceof Error ? err.message : err)))
+      $.ui.toast(TOASTS.chatOnlyFailed(String(err instanceof Error ? err.message : err)))
     } finally {
       $.ui.invalidate('ui.render')
     }
   })()
-  cleanChatPressPending = pending
+  chatOnlyPressPending = pending
   try {
     await pending
   } finally {
-    if (cleanChatPressPending === pending) cleanChatPressPending = undefined
+    if (chatOnlyPressPending === pending) chatOnlyPressPending = undefined
   }
 }
 

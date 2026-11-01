@@ -1,4 +1,4 @@
-// ABOUTME: cs-clean-chat's trees: turns a verdict into elements from $.ui.resolve(e), with the inks (§13) and the engine's own 2-column margin: ❯ before your line, nothing before Claude's.
+// ABOUTME: cs-chat-only's trees: turns a verdict into elements from $.ui.resolve(e), with the inks (§13) and the engine's own 2-column margin: ❯ before your line, nothing before Claude's.
 // ABOUTME: No decisions and no $ calls but resolve; a Button never sits inside a Text (the engine refuses the whole tree).
 import type { EngineInterface, RenderElement } from 'claude-code'
 
@@ -9,7 +9,7 @@ import { labels, marks, slashCommand } from './words'
 type Elements = ReturnType<EngineInterface['ui']['resolve']>
 
 export type Inks = { readonly you: string; readonly violet: string; readonly red: string; readonly amber: string }
-/** §13 table; `light` from the /config theme, read once per load (session.cleanChatRecord). */
+/** §13 table; `light` from the /config theme, read once per load (session.chatOnlyRecord). */
 export function inks(light: boolean): Inks {
   return light
     ? { you: '#2f4f6f', violet: '#5b3fb5', red: '#b42318', amber: '#8a5a00' }

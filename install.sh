@@ -230,14 +230,14 @@ CS_SKILL_FILES=(
 )
 
 # Mod directories under mods/ the installer keeps out: experimental, their
-# source and tests in the checkout only. cs-clean-chat is one, so the cs band,
-# which draws its clean chat key only beside cs-clean-chat's /clean-chat, draws
+# source and tests in the checkout only. cs-chat-only is one, so the cs band,
+# which draws its chat only key only beside cs-chat-only's /chat-only, draws
 # none. Every file under mods/ outside these and their test/ is in
 # CS_MOD_FILES below (tests/test_install.sh holds the two lists to that), and
 # cs -doctor's drift scan skips them.
 # shellcheck disable=SC2034  # read by cs -doctor and tests/test_install.sh
 CS_MODS_KEPT_OUT=(
-    cs-clean-chat
+    cs-chat-only
 )
 
 # Mods cs ships: Claude Code function-hooks plugins, deployed file by file as
@@ -1391,7 +1391,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "c6a04c60bb822365272fe4a686ac1a1fe9e68e0e792a92201bce406c1a1360f2  bin/cs"
+    "8556ea06f999ac16261bc76545c9bc6d7e6270d710a9c0bab298ecc13626ee9f  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "d8c282be6bf96631ec6e458c0389cedefdf58fb60a96f4fac49778f051d5e801  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
@@ -1425,7 +1425,7 @@ CS_PAYLOAD_SHA256=(
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
     "8ffa3249cadb8017e5e0809326fc22f3ec0e2c1f9e3dd70c049782888190727f  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
-    "1fcddb6ff68a8dc2a19c72b92a194df00743e544c6c4847fb8af1816c70b5a25  mods/cs/hooks/register.tsx"
+    "d0edc3bfe2f4977f638d5f922779f3809ccb0af670ea73c48df84970e1ef6a7f  mods/cs/hooks/register.tsx"
     "6986a18d6c82df9f80579e651cc1c83e1002ebc558415379f4b285c1640c845f  mods/cs/tips.json"
     "7a97c18b6ae755d8ec7862532eb15bbf627170a1fab8cc90dd2f8f77a57164be  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
