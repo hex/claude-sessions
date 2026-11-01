@@ -1191,6 +1191,8 @@ these lines, each of the first four opening with `▍` in the soft rule colour:
 4. The row's key, muted: the `CS_*` name, or a `/config` row's
    `<plugin>.<field>`.
 5. Two cells in and muted, the keys: `↑↓ move · Enter change · Esc close`. On
+   a row Enter flips with no dialog asking the value, an on/off setting no
+   file holds or a `/config` toggle, the middle part reads `Enter flip`. On
    a row Enter cannot change, the middle part says why: `shell sets it`,
    `shell only`, `managed` or `no session name`. At the line's right end
    sits the reset control, `reset all…`, muted, and the keys give up their
@@ -1246,16 +1248,22 @@ follow the selection. The footer says what the selected row is and does, and
 when a change takes hold.
 
 Enter or a click on a row opens one `$.ui.ask` dialog with every change the
-row takes. A change goes where the value lives: cs writes a value from this
-session's file there and anything else to this machine's file, so a change
-always moves what the row shows. No dialog offers the value the row already
-has. An answer you type under Other is the new value, and cs's own checker
-judges it. When no second dialog asks where the change goes, the question
-says it: `It writes this machine's file.` or `It writes this session's
-file.`
+row takes, or flips an on/off setting no file holds. A change goes where the
+value lives: cs writes a value from this session's file there and anything
+else to this machine's file, so a change always moves what the row shows. No
+dialog offers the value the row already has. An answer you type under Other
+is the new value, and cs's own checker judges it. When no second dialog asks
+where the change goes, the question says it: `It writes this machine's file.`
+or `It writes this session's file.`
 
-- An on/off setting offers `Turn on` or `Turn off`, then `Default (<default>)`
-  while a file holds the value, `This session only: on` or `off`, and `Keep`.
+- An on/off setting no file holds flips at once: no dialog asks its value,
+  and cs writes 1, which turns a flag's feature on and an off flag's feature
+  off. The write goes to this machine's file, or under a session name to the
+  file the dialog below asks for. As after any write, cs's line is the toast
+  and the pane reads cs again.
+- An on/off setting a file holds offers `Turn on` or `Turn off`, then
+  `Default (<default>)`, `This session only: on` or `off`, and `Keep`, since
+  the default and the file matter there.
   A flag that turns its feature off at 1 says these in the feature's words:
   `Turn off` writes 1, `Turn on` writes 0, which cs reads as unset, and its
   default is `on`. Its question says which value the Turn label writes:
@@ -1272,10 +1280,12 @@ value falls back to the machine's and the machine's to the default. `This
 session only` writes this session's own file: `cs <name> -config set`,
 `<name>` being `CLAUDE_SESSION_NAME`. Under a session name, a choice or a
 typed value for a setting this session's file does not set opens a second
-dialog that asks where it goes: `This machine` or `This session only`. An
-on/off setting this session's file already sets offers no `This session
-only`, since `Turn on` or `Turn off` already writes there. Without a session
-name, no dialog offers this session and none asks where.
+dialog that asks where it goes: `This machine` or `This session only`. A flip
+opens that dialog alone, naming the feature's state: `Where should Status
+line (CS_STATUSLINE_DISABLE) be off?` An on/off setting this session's file
+already sets offers no `This session only`, since `Turn on` or `Turn off`
+already writes there. Without a session name, no dialog offers this session
+and none asks where.
 
 The toast is cs's own reply: the line naming the file and when the change
 applies, or the line refusing the value (`not changed: exited 1: Error: …`).
@@ -1287,10 +1297,10 @@ the new value, which for a `cs.*` row starts an armed rotation countdown over;
 the footer's note says so. A `/config` row's dialog has no `Default`, since the
 panel cannot see a `userConfig` default.
 
-On some rows Enter opens no dialog. It toasts the row's label and the reason,
-which the footer's note also shows, and its keys' line names in short. A
-setting your environment pins reads `CS_X=v in your environment wins; unset it
-there to change it here`.
+On some rows Enter opens no dialog and changes nothing. It toasts the row's
+label and the reason, which the footer's note also shows, and its keys' line
+names in short. A setting your environment pins reads `CS_X=v in your
+environment wins; unset it there to change it here`.
 `CS_NO_FUNCTION_HOOKS` opens no dialog either: you change it from a terminal,
 since `cs -config set CS_NO_FUNCTION_HOOKS 1` loads no mod from the next
 launch, this panel included. A `/config` row a managed setting owns reads
@@ -1298,9 +1308,16 @@ launch, this panel included. A `/config` row a managed setting owns reads
 session name, reads `this session's file sets it, and this conversation has no
 cs session name to write it with`.
 
+The pane opens one dialog at a time. Claude Code draws one `AskUserQuestion`
+dialog at a time and queues the next, so while any of the pane's dialogs is
+open, Enter on any row or on `reset all…` opens nothing and toasts `answer the
+open dialog first (Esc closes it)`. Once you answer or close it, the next
+Enter asks. While cs still writes a row's change, a second Enter on that row
+toasts `<key> is still changing, or no longer listed; try again`.
+
 Enter or a click on `reset all…` opens one `$.ui.ask` dialog that names how
-many settings each file overrides, as the rows' sources say: `Reset every cs
-setting to its default? This removes 1 override from this machine's file, or 3
+many settings each file overrides, as the rows' sources say: `Remove every
+override from this file? This removes 1 override from this machine's file, or 3
 overrides from this session's file.` It adds `Your shell's exports stay.`
 while the shell sets a setting, and `Mod rows keep their values.` while the
 pane lists a `/config` row, since a reset changes neither. It offers `This
