@@ -74,9 +74,6 @@ async function performNow($: $, cmd: FeedCommand): Promise<string> {
  * The one shape. Nothing registered here awaits across a tool call or a
  * stream. Every hook is registered whatever this session's switch says; the
  * switch decides what they draw, never what is registered.
- *
- * Every hook body is a block (`=> { … }`), never an expression body, so a
- * counting statement can be inserted at the top of each.
  */
 function registerFeed(on: On) {
   // Commands do not survive a reload (spike Q2, measured): every load registers it.

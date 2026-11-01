@@ -1391,14 +1391,6 @@ not use (`tool.call`, `turn.step`, `classic.*`, `prompt.compose`,
 exact hook inventory, type-checks the mod against the engine's contract, and
 runs the tests under `mods/cs-feed/test/` with `claude plugin test` when
 `claude` is on `PATH`.
-`mods/cs-feed/test/dispatch-count.sh` is the cost oracle, never deployed and
-not in the suite: real sessions under a throwaway home directory, a local
-stand-in API and their own tmux servers count the feed's own callbacks with an
-instrumented copy and its worker hops on the shipped plugin, standalone and
-beside cs's three mods, under both renderers. It takes about half an hour and
-exits non-zero on any mismatch. Its probe build expects state types in the
-manifest and source lines this mod does not have, so a run stops there and
-exits 2 (void).
 
 ## Hook Configuration
 
