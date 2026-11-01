@@ -1143,8 +1143,8 @@ muted at 0) and the session name, muted, with a muted `·` between the parts.
 Where the pane is too narrow, these parts drop from the right, down to the
 wordmark alone. A `/config` row never counts as changed, since the panel cannot
 see its default. The second line is a `━` rule across the pane in the TUI's
-hero gradient. Right under it comes the selected row's card, then the filter
-field between two empty lines. Each line of the card opens with `▍` in the
+hero gradient. Right under it comes the selected row's card, then the search
+box. Each line of the card opens with `▍` in the
 rail's second colour. The first line names the row: its label in bold ink,
 then its key, muted (a
 `/config` row's `<plugin>.<field>`). The second line holds the whole value as
@@ -1170,17 +1170,19 @@ when set, all faint at the default. The selected row has `▌` in the rail's sec
 bold, on no background, and the focus marks the label alone. Every row's label
 is in ink, selected or not, at its default or set.
 
-The pane opens with the focus ring in the filter field: `filter` in bold ink,
-a `▏` mark in the rail's second colour, then a one-line Input that reads
-`type to filter` while empty. As you type,
+The pane opens with the focus ring in the search box: a one-line Input inside
+a round border in the soft rule colour, as wide as the pane, that reads
+`search settings` while empty. As you type,
 the pane shows only the rows whose label, key or group holds the text, in any
 case. A group with no row left goes, and `no setting matches <text>` stands in
 for an empty list. The masthead keeps its counts, and `+N above` and `+N
 below` count the rows shown. An empty field shows every row again, and
-closing the pane forgets the text. Enter in the field selects the first row
-shown and moves the ring there. The mobile app draws no Input, so there an
-empty line stands in the field's place, between the same two empty lines, and
-the pane shows every row. The rows start on the same line on every surface.
+closing the pane forgets the text. Enter in the field, labelled `select`,
+selects the first row shown and moves the ring there. On the terminal the box
+takes three lines: its border above, the field, its border below. The mobile
+app draws no Input, so there three empty lines stand in the box's place, and
+the pane shows every row. The rows start on the same line on the terminal and
+the mobile app.
 
 Tab or a click selects a row (`ui.focus`). The arrows, the wheel, the page
 keys, Home and End move the selection by the rows they ask for among the rows
