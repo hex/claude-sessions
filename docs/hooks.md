@@ -1125,9 +1125,10 @@ cs's groups and order from `cs -config list --porcelain`, run through `CS_BIN`
 (the path the launch exported) with no shell. The panel holds no list of
 settings and no copy of their checks: labels, choices, defaults, when a change
 applies, where each value comes from and a sentence on what the setting does
-all arrive in that record. The panel reads a record of eleven fields, or of
-twelve with that sentence last. A row shows its label and its value (cs's name
-for the default when nothing sets it). From 72 columns it also shows where the
+all arrive in that record, twelve fields with that sentence last. The panel
+refuses a whole answer that holds a record of any other length, and says so
+above the rows. A row shows its label and its value (cs's name for the default
+when nothing sets it). From 72 columns it also shows where the
 value comes from (`shell`, `launch`, `session` or `machine`; `mod` or `locked`
 for a `/config` row) and when a change applies (`/clear`, `launch` or
 `now+launch`). A row at its default leaves the last two empty, and a change
