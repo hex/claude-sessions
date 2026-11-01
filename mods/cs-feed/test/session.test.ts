@@ -48,19 +48,13 @@ test('an off feed reads once per load without asking cs to vet it', async ($, on
 })
 
 test('an absent feed file in a cs session reads on: one vet, then the reply draws at the margin', async ($, on) => {
-  const runs: unknown[] = []
-  on('session.cwd', () => ({ value: '/session' }))
-  on('fs.read', () => ({ deny: 'ENOENT: no such file or directory' }))
-  on('fs.exists', ($, e) => ({ value: e.path === '/session/.cs/local' }))
-  on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
-  on('process.run', ($, e) => { runs.push(e.argv); return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } } })
-  on('config.list', () => ({ value: [] }))
-  on('ui.render', { component: 'AssistantMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine reply' }))
+  const seen = session(on, new Map())
   const row = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'AssistantMessage', props: { text: 'answer', isFirstOfReply: true } })
   expect((await row.findAll({ type: 'Box' })).some(box => box.props.paddingLeft === 2 && JSON.stringify(box.children).includes('engine reply'))).toBe(true)
-  expect(runs).toEqual([['/bin/cs', '-vet-session', '/session']])
+  expect(seen.runs).toEqual([VET])
   expect(await $.command.run(STATUS)).toEqual({ text: 'on' })
-  expect(runs).toEqual([['/bin/cs', '-vet-session', '/session']])
+  expect(seen.runs).toEqual([VET])
+  expect(seen.logs).toEqual([])
   await row.unmount()
 })
 
