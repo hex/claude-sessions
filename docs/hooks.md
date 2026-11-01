@@ -1133,26 +1133,37 @@ The pane draws in the cs TUI's look. Ink, muted, faint, soft, teal and green
 are Claude Code's own theme keys: `text`, `inactive`, `subtle` for both faint
 and soft, `planMode` and `success`. Claude Code resolves them to your theme at
 each redraw, so the pane follows it (auto, dark or light) with no setting, and
-`CS_TERM_THEME` changes none of its colours. Only the brand's accents stay the
-same on every theme: the amber, hero gradient and rail of `tui/src/theme.rs`,
-and the installer's wordmark. The pane's masthead is two
-lines, as in the TUI. The first is `▌`, the `claude-sessions` wordmark in the
-installer's rust-to-gold gradient, `settings` in bold ink, the number of rows
-in ink, the number of settings a file or the shell sets (`3 changed`, teal, or
-muted at 0) and the session name, muted, with a muted `·` between the parts.
-Where the pane is too narrow, these parts drop from the right, down to the
-wordmark alone. A `/config` row never counts as changed, since the panel cannot
-see its default. The second line is a `━` rule across the pane in the TUI's
-hero gradient. Right under it comes the selected row's card, then the search
-box. Each line of the card opens with `▍` in the
-rail's second colour. The first line names the row: its label in bold ink,
-then its key, muted (a
+`CS_TERM_THEME` changes none of its colours. Only the brand's colours stay the
+same on every theme: the amber and the hero gradient of `tui/src/theme.rs`, and
+the band's black ink.
+
+The pane opens on the band: a line as wide as the pane on the hero gradient,
+rust to gold, each cell on its own stop. Its words are black, at a contrast of
+5.2:1 or more against every stop, and start under the rows' labels: the
+`claude-sessions` wordmark in bold, cs's version, the number of rows, the
+number of settings a file or the shell sets (`3 changed`) and the session name,
+with a `·` between the counts and the name. Where the pane is too narrow, these
+parts drop from the right, down to the wordmark alone, cut short on the
+narrowest pane. A `/config` row never counts as changed, since the panel cannot
+see its default. The version is what `cs -version` prints, asked once each
+time the mod loads, when the pane first opens or a reload finds it open; until
+cs answers, the band goes on without it. A run that fails, or prints anything but `cs <version>`, writes
+`cs -version <why>` to the transcript, and the next open asks again. When the
+launch found a newer cs (`CS_UPDATE_AVAILABLE`), a second band line on the same
+gradient reads `cs <version> available · run cs -update`, dropped from the
+right the same way. That line goes once the band's version is that version,
+as when a reload after an update installed from this conversation reads it
+again. The problem
+lines and the reading words sit right under the band.
+
+Under the band comes the search box, then the selected row's card. Each line
+of the card opens with `▍` in the soft rule colour. The first line names the
+row: its label in bold ink, then its key, muted (a
 `/config` row's `<plugin>.<field>`). The second line holds the whole value as
 the row draws it, a toggle, a gauge with its number, or the default's word
 muted, then where the value comes from in that source's colour (`default`
 muted) and when a change applies, muted. Where the pane is too narrow, it
-wraps by words onto more lines, as many as leave the selected row drawn. With
-no row to select, the reading or problem words stand in its place. The
+wraps by words onto more lines, as many as leave the selected row drawn. The
 rows sit under a muted bold column header (`setting`, `value`, `from`,
 `when`) and a soft rule. Each group's headline is its name in bold ink, one
 space and a soft `─` rule to the pane's edge, with an empty line above every
@@ -1166,7 +1177,7 @@ its source word in the colour of where the value lives: `session` teal,
 `launch` faint. Its when word is muted. A toggle reads `● on`, the dot green,
 or `○ off`. A percent setting (its label ends in `%`) draws a ten-cell gauge
 before its number where the value column has room for both: filled in amber
-when set, all faint at the default. The selected row has `▌` in the rail's second colour and its label
+when set, all faint at the default. The selected row has `▌` in amber and its label
 bold, on no background, and the focus marks the label alone. Every row's label
 is in ink, selected or not, at its default or set.
 
@@ -1175,7 +1186,7 @@ a round border in the soft rule colour, as wide as the pane, that reads
 `search settings` while empty. As you type,
 the pane shows only the rows whose label, key or group holds the text, in any
 case. A group with no row left goes, and `no setting matches <text>` stands in
-for an empty list. The masthead keeps its counts, and `+N above` and `+N
+for an empty list. The band keeps its counts, and `+N above` and `+N
 below` count the rows shown. An empty field shows every row again, and
 closing the pane forgets the text. Enter in the field, labelled `select`,
 selects the first row shown and moves the ring there. On the terminal the box
