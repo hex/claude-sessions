@@ -1124,12 +1124,16 @@ nothing and the pane draws the label without it. Under it, cs's own settings com
 cs's groups and order from `cs -config list --porcelain`, run through `CS_BIN`
 (the path the launch exported) with no shell. The panel holds no list of
 settings and no copy of their checks: labels, choices, defaults, when a change
-applies and where each value comes from all arrive in that record. A row shows
-its label, its value (cs's name for the default when nothing sets it), where the
+applies, where each value comes from and a sentence on what the setting does
+all arrive in that record. The panel reads a record of eleven fields, or of
+twelve with that sentence last. A row shows its label and its value (cs's name
+for the default when nothing sets it). From 72 columns it also shows where the
 value comes from (`shell`, `launch`, `session` or `machine`; `mod` or `locked`
 for a `/config` row) and when a change applies (`/clear`, `launch` or
 `now+launch`). A row at its default leaves the last two empty, and a change
-that applies at once (`now`) leaves the last one empty.
+that applies at once (`now`) leaves the last one empty. Below 72 columns, as
+in the 58-column dock, the row ends at its value and the footer says the
+rest.
 
 The pane draws in the cs TUI's look. Ink, muted, faint, soft, teal and green
 are Claude Code's own theme keys: `text`, `inactive`, `subtle` for both faint
@@ -1146,12 +1150,12 @@ rust, `rgb(230,74,25)`, and its right side and bottom border in its gold,
 `rgb(255,193,7)`. Inside, a cell in from the left side, come the
 `claude-sessions` wordmark in bold, each letter one step of the installer's
 gradient from rust to gold, then cs's version, the number of rows, the number
-of settings a file or the shell sets (`3 changed`) and the session name, with a
+of settings a file or the shell overrides (`3 overrides`, `1 override`) and the session name, with a
 `·` between the counts and the name. The counts draw in ink, and the version,
 the dots and the session name draw muted. Where the pane is too narrow, these
 parts drop from the right, down to the wordmark alone, cut short on the
 narrowest pane, and at least a cell stays before the right side. A `/config`
-row never counts as changed, since the panel cannot see its default. The
+row never counts as an override, since the panel cannot see its default. The
 version is what `cs -version` prints, asked once each time the mod loads, when
 the pane first opens or a reload finds it open; until cs answers, the masthead
 goes on without it. A run that fails, or prints anything but `cs <version>`,
@@ -1164,40 +1168,64 @@ reload after an update installed from this conversation reads it again. The
 problem lines and the reading words sit right under the masthead.
 
 Under the masthead comes the search box, then the column header and the rows.
-The rows sit under a muted bold column header (`setting`, `value`, `from`,
-`when`) and a soft rule. The selected row's card is the pane's footer: under
-the last row drawn, and the `+N below` count when there is one, a soft rule as
-wide as the pane, then the card. Each line of the card opens with `▍` in the
-soft rule colour. The first line names the row: `selected · ` muted, its label
-in bold ink, then its key, muted (a `/config` row's `<plugin>.<field>`), cut
-short where the pane is too narrow. The second line holds the whole value as
-the row draws it, a toggle, a gauge with its number, or the default's word
-muted, then where the value comes from in that source's colour (`default`
-muted) and when a change applies, muted. Where the pane is too narrow, it
-wraps by words onto more lines, as many as leave the selected row drawn above
-the footer. Each group's headline is its name in bold ink, one
-space and a soft `─` rule to the pane's edge, with an empty line above every
-group but the first. A name takes up to 26 cells, and the last column takes
-what a wider pane leaves. The pane draws no key row.
+The rows sit under a muted bold column header and a soft rule. Below 72
+columns the header reads `Setting` and `Value`, and a name takes every cell
+the 14-cell value column leaves, 40 in the 58-column dock. From 72 columns
+`Source` and `Applies` follow, a name takes up to 26 cells, and `Applies`
+takes what a wider pane leaves. Each group's headline is its name in bold
+ink, one space and a soft `─` rule to the pane's edge, with an empty line
+above every group but the first.
 
-Only what something sets stands out. A row at its default draws its value
-muted. A row a file, the shell or the launch sets draws its value in ink, and
-its source word in the colour of where the value lives: `session` teal,
+The selected row's lines are the pane's footer: under the last row drawn, and
+the `+N below` count when there is one, a soft rule as wide as the pane, then
+these lines, each of the first four opening with `▍` in the soft rule colour:
+
+1. `selected · ` muted, then the row's label in bold ink, cut short where the
+   pane is too narrow.
+2. What the setting does, in ink: cs's sentence from the record, or a
+   `/config` row's own description. A row with none has no such line.
+3. The whole value as the row draws it, then where the value comes from in
+   that source's colour (`default` muted), then a note, muted: when a change
+   applies, why cs skipped a file's value, or why Enter opens no dialog.
+4. The row's key, muted: the `CS_*` name, or a `/config` row's
+   `<plugin>.<field>`.
+5. Two cells in and muted, the keys: `↑↓ move · Enter change · Esc close`. On
+   a row Enter cannot change, the middle part says why: `shell sets it`,
+   `shell only`, `managed` or `no session name`. The mobile app draws the
+   same line.
+
+Lines 2 and 3 wrap by words and take three lines at most between them. The
+value line comes first: it takes two of the three where there is a
+description, which keeps one or two and ends in `…` where it runs out. A short
+pane takes back lines in this order, so the window keeps at least one: the
+wrapped lines down to one value line, then the key, then the keys' line.
+
+Every value draws in ink, at its default too. Only the source word says what
+overrides a value, in the colour of where the value lives: `session` teal,
 `machine` green, `shell` amber (the environment overrides both files), and
-`launch` faint. Its when word is muted. A toggle reads `● on`, the dot green,
-or `○ off`. A percent setting (its label ends in `%`) draws a ten-cell gauge
-before its number where the value column has room for both: filled in amber
-when set, all faint at the default. The selected row has `▌` in amber and its label
-bold, on no background, and the focus marks the label alone. Every row's label
-is in ink, selected or not, at its default or set.
+`launch` faint. Its applies word is muted. A toggle reads `● on`, the dot
+green, or `○ off`. Some flags turn off what their label names when they are
+1: cs's `flagoff` and `shelloff` records. cs labels such a row with the
+feature (`Scope grounding` for `CS_SCOPE_DISABLE`), so it reads `● on` while
+the flag is unset and `○ off` at 1. A percent setting (its label ends in `%`)
+draws its number and `%`, `40%`, and a value that is no number, `the warn %`,
+unchanged. Faint is for the `+N` counts and the `launch` source only.
+
+Each row is one plain Button, keyed by the row and named by its label: the
+name and every column are its text, so the focus inverts the whole row. The
+selected row has `▌` in amber outside the Button and its label bold, on no
+background. Every row's label is in ink, selected or not, at its default or
+set.
 
 The pane opens with the focus ring in the search box: a one-line Input inside
 a round border in the soft rule colour, as wide as the pane, that reads
 `search settings` while empty. As you type,
 the pane shows only the rows whose label, key or group holds the text, in any
 case. A group with no row left goes, and `no setting matches <text>` stands in
-for an empty list. The masthead keeps its counts, and `+N above` and `+N
-below` count the rows shown. An empty field shows every row again, and
+for an empty list. While the field holds text, the column header's right end
+says how many rows show out of the total, `3 of 46`, muted, and the heads
+give up their end to leave it room. The masthead keeps its counts, and `+N above` and
+`+N below` count the rows shown. An empty field shows every row again, and
 closing the pane forgets the text. Enter in the field, labelled `select`,
 selects the first row shown and moves the ring there. On the terminal the box
 takes three lines: its border above, the field, its border below. The mobile
@@ -1210,18 +1238,24 @@ keys, Home and End move the selection by the rows they ask for among the rows
 shown (`ui.scroll`). The selection stops at the last row and at the first,
 where Up moves the ring back to the field. The pane draws its own window of
 rows, so the engine's window stays put while the window and the focus ring
-follow the selection. The card says what the selected row is and when a
-change takes hold.
+follow the selection. The footer says what the selected row is and does, and
+when a change takes hold.
 
 Enter or a click on a row opens one `$.ui.ask` dialog with every change the
 row takes. A change goes where the value lives: cs writes a value from this
 session's file there and anything else to this machine's file, so a change
 always moves what the row shows. No dialog offers the value the row already
 has. An answer you type under Other is the new value, and cs's own checker
-judges it.
+judges it. When no second dialog asks where the change goes, the question
+says it: `It writes this machine's file.` or `It writes this session's
+file.`
 
 - An on/off setting offers `Turn on` or `Turn off`, then `Default (<default>)`
   while a file holds the value, `This session only: on` or `off`, and `Keep`.
+  A flag that turns its feature off at 1 says these in the feature's words:
+  `Turn off` writes 1, `Turn on` writes 0, which cs reads as unset, and its
+  default is `on`. Its question says which value the Turn label writes:
+  `Turn off sets CS_SCOPE_DISABLE=1.`
 - A setting with choices offers the other choices that fit beside `Default`
   (while a file holds the value) and `Keep`, four labels at most. When some
   choices do not fit, the question names every value, and you type one under
@@ -1246,15 +1280,16 @@ own `config.set` guard: a toggle flips at once, a choice asks with its options,
 a number or text asks with `Keep <value>` and `Cancel`, and the panel refuses
 an answer a number row cannot read before it writes anything. The owner reloads with
 the new value, which for a `cs.*` row starts an armed rotation countdown over;
-the card says so. A `/config` row's dialog has no `Default`, since the panel
-cannot see a `userConfig` default.
+the footer's note says so. A `/config` row's dialog has no `Default`, since the
+panel cannot see a `userConfig` default.
 
 On some rows Enter opens no dialog. It toasts the row's label and the reason,
-which the card also shows. A setting your environment pins reads `CS_X=v in
-your environment wins; unset it there to change it here`.
+which the footer's note also shows, and its keys' line names in short. A
+setting your environment pins reads `CS_X=v in your environment wins; unset it
+there to change it here`.
 `CS_NO_FUNCTION_HOOKS` opens no dialog either: you change it from a terminal,
-`cs -config set CS_NO_FUNCTION_HOOKS 1`, since on it unloads every mod at the
-next launch, this panel included. A `/config` row a managed setting owns reads
+since `cs -config set CS_NO_FUNCTION_HOOKS 1` loads no mod from the next
+launch, this panel included. A `/config` row a managed setting owns reads
 `a managed setting owns it`. A setting this session's file sets, seen with no
 session name, reads `this session's file sets it, and this conversation has no
 cs session name to write it with`.
