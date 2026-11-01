@@ -60,8 +60,8 @@ export const WORDS = {
   title: 'settings',
   settings: (n: number) => `${n} settings`, changed: (n: number) => `${n} changed`,
   heads: { name: 'setting', value: 'value', from: 'from', when: 'when' },
-  // The bars, a toggle's dots, a gauge's cells, the rules, the dot, the card's edge.
-  marks: { selected: '▌', on: '●', off: '○', full: '▰', empty: '▱', rule: '─', hero: '━', dot: '·', edge: '▍' },
+  // The bars, a toggle's dots, a gauge's cells, the rules, the dot, the card's edge, the field's cursor.
+  marks: { selected: '▌', on: '●', off: '○', full: '▰', empty: '▱', rule: '─', hero: '━', dot: '·', edge: '▍', cursor: '▏' },
 } as const
 
 type RowLine = Extract<Line, { kind: 'row' }>
@@ -307,8 +307,8 @@ function layoutOf(v: PanelView) {
   const selected = found?.kind === 'row' ? found : undefined
   const notice = v.lines === undefined && v.problems.length === 0 ? WORDS.reading : undefined
   const noMatch = isListed && lines.length === 0 ? WORDS.noMatch(v.filter.trim()) : undefined
-  // The masthead and its rule, the problems, the notice; the field, the header, its rule; the no-match line.
-  const top = 2 + v.problems.length + (notice === undefined ? 0 : 1) + (isListed ? 3 : 0) + (noMatch === undefined ? 0 : 1)
+  // The masthead and its rule, the problems, the notice; the field between two empty lines, the header, its rule; the no-match line.
+  const top = 2 + v.problems.length + (notice === undefined ? 0 : 1) + (isListed ? 5 : 0) + (noMatch === undefined ? 0 : 1)
   // The card's wrapped lines leave a line for its label and one for the window.
   const card = selected === undefined ? [] : cardOf(selected, v.columns, Math.max(1, v.bodyRows - top - 2), v.session !== undefined)
   const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - top - card.length))
@@ -356,8 +356,11 @@ export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['res
       {card.map(line => <Text>{runs(line)}</Text>)}
       {v.problems.map(problem => <Text color={THEME.mut}>{cut(problem, v.columns)}</Text>)}
       {notice !== undefined && <Text color={THEME.mut}>{cut(notice, v.columns)}</Text>}
-      {isListed && (Input === undefined ? <Text>{' '}</Text> : <Box flexDirection="row"><Text color={THEME.mut}>{`${WORDS.filter} `}</Text>
+      {isListed && <Text>{' '}</Text>}
+      {isListed && (Input === undefined ? <Text>{' '}</Text> : <Box flexDirection="row">
+        {runs([{ text: `${WORDS.filter} `, color: THEME.ink, weight: 'bold' }, { text: `${WORDS.marks.cursor} `, color: BRAND.rail[1] }])}
         <Input key={FILTER} placeholder={WORDS.find} value={v.filter} submitLabel={WORDS.toRows} autoFocus onInput={on.filter} onSubmit={text => { on.filter(text); on.toRows() }} /></Box>)}
+      {isListed && <Text>{' '}</Text>}
       {isListed && <Text color={THEME.mut} weight="bold">
         {`${fit(`${' '.repeat(MARK_CELLS)}${WORDS.heads.name}`, MARK_CELLS + nameCells)}${cols.map(c => `${' '.repeat(GAP)}${fit(c.head, c.cells)}`).join('')}`}</Text>}
       {isListed && <Text color={THEME.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
