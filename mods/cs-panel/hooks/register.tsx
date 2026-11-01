@@ -36,13 +36,11 @@ export const REPLIES = {
 } as const
 
 // `values` is every value a choice takes when the labels cannot hold them, so
-// one past the labels can be typed.
+// one past the labels can be typed. A setting and a /config row ask alike.
+const what = (label: string, key: string, values: readonly string[]) =>
+  `What should ${label} (${key}) be?${values.length === 0 ? '' : ` It takes ${values.join(', ')}.`} Pick one, or type a value under Other.`
 export const ASKS = {
-  header: 'cs',
-  setting: (label: string, key: string, values: readonly string[]) =>
-    `What should ${label} (${key}) be?${values.length === 0 ? '' : ` It takes ${values.join(', ')}.`} Pick one, or type a value under Other.`,
-  mod: (label: string, key: string, values: readonly string[]) =>
-    `What should ${label} (${key}) be?${values.length === 0 ? '' : ` It takes ${values.join(', ')}.`} Pick one, or type a value under Other.`,
+  header: 'cs', setting: what, mod: what,
   where: (label: string, key: string, value: string) => `Where should ${label} (${key}) be ${value}?`,
 } as const
 
@@ -66,15 +64,16 @@ export const PROBLEMS = {
   modsUnread: (why: string) => `the /config rows could not be read: ${why}`,
 } as const
 
-// Work a press or a timer starts and nothing awaits.
+// Work a press or a timer starts and nothing awaits; a version cs did not tell.
 export const LOGS = {
   failed: (err: string) => `the panel's background work failed: ${err}`,
+  noVersion: (why: string) => `cs -version ${why}`,
 } as const
 
-// What the launch exported: where cs is, and the session name this
-// conversation runs under. Read once per load; the environment does not change
-// under a process.
-type Launch = { bin: string; self: string | undefined }
+// What the launch exported: where cs is, the session name this conversation
+// runs under, and the version a newer cs was found at. Read once per load; the
+// environment does not change under a process.
+type Launch = { bin: string; self: string | undefined; update: string | undefined }
 
 // A name cs gives a session (validate_session_name, and `<base>@<task>` for a
 // feature): no leading dot or hyphen, so cs never reads it as a verb.
@@ -83,6 +82,7 @@ const SESSION_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]*(@[A-Za-z0-9._-]+)?$/
 // Module state. Reset in register(): a reload drops it and the engine cancels
 // its timers; a /clear keeps it.
 let launch: Launch | undefined
+let version: string | undefined
 let settings: Setting[] | undefined
 // The porcelain text `settings` was parsed from: an identical answer redraws
 // nothing.
@@ -104,7 +104,7 @@ let drawn: readonly string[] = []
 let ring: { key: string; at: number } | undefined
 
 export function register(on: On) {
-  launch = undefined; settings = undefined; answered = undefined; mods = undefined; settingsProblem = undefined; modsProblem = undefined
+  launch = undefined; version = undefined; settings = undefined; answered = undefined; mods = undefined; settingsProblem = undefined; modsProblem = undefined
   selected = undefined; filter = ''; pending = new Map(); reading = false; readAgain = false; isOpen = false; registered = false; drawn = []; ring = undefined
 
   // /cs-panel, once per load. Nothing opens here: the panel opens only when
@@ -139,8 +139,8 @@ export function register(on: On) {
     if (!isOpen) $.clock.after(0, () => inBackground($, resume($)))
     launch ??= await readLaunch($)
     // The mobile app's element table holds an Input at run time, but the app draws none.
-    const view: PanelView = { lines: currentLines(), selected, problems: problems(), session: launch?.self, columns: e.props.bodyColumns, bodyRows: e.props.scroll.bodyRows,
-      filter, hasField: e.surface !== 'mobile' }
+    const view: PanelView = { lines: currentLines(), selected, problems: problems(), session: launch?.self, version, update: launch?.update, columns: e.props.bodyColumns,
+      bodyRows: e.props.scroll.bodyRows, filter, hasField: e.surface !== 'mobile' }
     const next = ringOf(view)
     drawn = next.keys
     if (!e.props.isFocused) ring = undefined
@@ -216,6 +216,7 @@ async function openPanel($: EngineInterface): Promise<{ text: string }> {
       isOpen = wasOpen
       throw err
     })
+    await readVersion($)
     await refresh($)
     return { text: opened.isPlaced ? REPLIES.opened : REPLIES.notPlaced(opened.reason) }
   } catch (err) {
@@ -223,13 +224,25 @@ async function openPanel($: EngineInterface): Promise<{ text: string }> {
   }
 }
 
-// CS_BIN and CLAUDE_SESSION_NAME; undefined without CS_BIN. A name cs would
-// not give a session counts as no session name.
+// CS_BIN, CLAUDE_SESSION_NAME and CS_UPDATE_AVAILABLE; undefined without
+// CS_BIN. A name cs would not give a session counts as no session name.
 async function readLaunch($: EngineInterface): Promise<Launch | undefined> {
   const bin = await $.env.get('CS_BIN')
   if (!bin) return undefined
   const name = await $.env.get('CLAUDE_SESSION_NAME')
-  return { bin, self: name !== undefined && SESSION_NAME.test(name) ? name : undefined }
+  return { bin, self: name !== undefined && SESSION_NAME.test(name) ? name : undefined, update: (await $.env.get('CS_UPDATE_AVAILABLE')) || undefined }
+}
+
+// cs's version, once a load at the first open (a reload after an update
+// installed from this conversation reads the new one): `cs -version` prints
+// `cs <version>`. Any other answer leaves it unread and says why in the
+// transcript; the next open asks again.
+async function readVersion($: EngineInterface): Promise<void> {
+  if (version !== undefined) return
+  const run = await runCs($, ['-version'], { timeoutMs: LIST_TIMEOUT_MS })
+  version = run.ok ? /^cs (\S+)$/.exec(run.stdout.trim())?.[1] : undefined
+  if (version !== undefined) $.ui.invalidate('ui.render')
+  else $.ui.log(LOGS.noVersion(run.ok ? `printed ${run.stdout.trim() || 'nothing'}` : run.why))
 }
 
 // Reads again for a pane that outlived a reload, once $.ui.panes shows it open.
@@ -238,6 +251,7 @@ async function resume($: EngineInterface): Promise<void> {
   if (isOpen || launch === undefined) return
   if (!(await $.ui.panes()).some(p => p.id === PANE) || isOpen) return
   isOpen = true
+  await readVersion($)
   await refresh($)
 }
 

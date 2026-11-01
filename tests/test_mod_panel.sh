@@ -122,7 +122,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_output_contains "$out" '$.config.list (via refreshMods)' "the mod rows come from \$.config.list" || return 1
     assert_output_contains "$out" '$.config.set (via changeMod)' "a mod row is written through \$.config.set" || return 1
     assert_output_contains "$out" '$.process.run (via runCs)' "every cs run goes through runCs" || return 1
-    assert_output_contains "$out" 'env reads: CLAUDE_SESSION_NAME, CS_BIN$' "the launch's two exports, nothing else" || return 1
+    assert_output_contains "$out" 'env reads: CLAUDE_SESSION_NAME, CS_BIN, CS_UPDATE_AVAILABLE$' "the launch's three exports, nothing else" || return 1
     assert_output_contains "$out" 'env writes: nothing$' "the mod sets no environment variable" || return 1
     assert_output_not_contains "$out" '$.env.set' "no \$.env.set" || return 1
     assert_output_not_contains "$out" '$.fs.' "the mod reads and writes no file: cs owns the settings files" || return 1
