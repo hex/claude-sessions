@@ -523,7 +523,7 @@ colour: `ctrl+x 1 rotate   2 wrap   #4 say four   │││┃` on the narrowest
 that holds it. Chords that differ are spelled whole. In order, and each
 only when it applies, the actions are `rotate` (or `/clear now` once a
 handoff is armed, then `in Ns`, the armed handoff's count, which leaves the
-line before `/clear now` would shrink to its bare key), `wrap`, `feed`
+line before `/clear now` would shrink to its bare key), `wrap`, `clean chat`
 and the queue's start press, `▤ run N queued tasks` (`▤ run 1 queued task`
 for one), or in its place the queue count below: `ctrl+x 1 rotate   2 wrap · ▤ run 2 queued tasks`.
 The queue's `▤` draws in the amber the status line gives its queue count. The right edge carries the features
@@ -637,10 +637,10 @@ The mod queues `/color` when a conversation begins inside the running Claude Cod
 
 The band's keys are chords, never a bare digit: a digit typed to answer a
 numbered question belongs to the prompt and to other mods. Each Button answers
-an engine action, `strip:jump1` for the rotate (or `/clear`) key,
-`strip:jump2` for the wrap key and `strip:jump3` for feed.
+an engine action, `strip:jump1` for the rotate (or `/clear`) key and
+`strip:jump2` for the wrap key.
 The installer binds Ctrl+X 1 and Ctrl+X 2
-to the first two in `keybindings.json` (see
+to them in `keybindings.json` (see
 [configuration.md](configuration.md#rotate-and-wrap-keys)). The band spells,
 bold in the session's colour, whatever chord that file binds to each action,
 as written there, and nothing where none does; the Buttons still answer a click
@@ -649,29 +649,33 @@ chord bound after launch works at once (measured on 2.1.292). An encrypted
 session launched before `keybindings.json` existed gets the file at its next
 launch.
 
-The feed key draws after wrap when cs-feed advertises `/feed`, while the lead
-session is idle, with no survey or armed handoff. The installer does not deploy
-cs-feed, which is experimental (see [cs-feed](#cs-feed-not-a-hook-script--a-claude-code-mod)),
-so an installed band draws no feed key; this paragraph and the ones after it
-describe the band beside cs-feed. The band reads the command list without
-running a status command. The installer binds no chord to `strip:jump3`, so
-the feed label draws bare and the other keys keep their shared prefix:
-`ctrl+x 1 rotate   2 wrap   feed`. With a chord you bind to `strip:jump3`
-yourself, the shared prefix draws once: `ctrl+x 1 rotate   2 wrap   3 feed`.
+The clean chat key draws after wrap when cs-clean-chat advertises
+`/clean-chat`, while the lead session is idle, with no survey or armed
+handoff. The installer does not deploy cs-clean-chat, which is experimental
+(see [cs-clean-chat](#cs-clean-chat-not-a-hook-script--a-claude-code-mod)),
+so an installed band draws no clean chat key; this paragraph and the ones
+after it describe the band beside cs-clean-chat. The band reads the command
+list without running a status command. The key is a press, as the queue's
+start button is: it answers no chord, only a click and Ctrl+X Tab, and its
+label draws bare after the keys' dim `·`:
+`ctrl+x 1 rotate   2 wrap · clean chat ✓`. On a line too narrow for every
+entry it never shortens: it leaves whole, after the queue's start button and
+before the chords.
 
-The key reads `feed` while off and `feed ✓` while on, the check in the
-session's colour. A press asks `cs -vet-session` before it writes, as the
-other band writers do. A refusal leaves the file alone and draws feed as off.
-The key reads `feed ✓` only while the file holds `on\n` or is absent, and the
-band's last `cs -vet-session` answer in this load was not a refusal. The band asks
-at session start in a cs session with `.cs/local`, and at every step that
-acts on the control files, such as a press of the clear, rotate or feed key.
+The key reads `clean chat` while off and `clean chat ✓` while on, the check
+in the session's colour. A press asks `cs -vet-session` before it writes, as
+the other band writers do. A refusal leaves the file alone and draws clean
+chat as off. The key reads `clean chat ✓` only while the file holds `on\n` or
+is absent, and the band's last `cs -vet-session` answer in this load was not a
+refusal. The band asks at session start in a cs session with `.cs/local`, and
+at every step that acts on the control files, such as a press of the clear,
+rotate or clean chat key.
 A prompt does not clear a refusal. A vet that passes, or a reload, does.
 Before the band's first vet in a load, it reads the file unvetted.
 An accepted press
-flips `.cs/local/feed` under the session's working
+flips `.cs/local/clean-chat` under the session's working
 directory, then invalidates the band. The file holds `on\n` or `off\n` and
-survives `/clear`, reload and resume. The feed is on by default, so an absent
+survives `/clear`, reload and resume. Clean chat is on by default, so an absent
 file means on, and a press there writes `off\n`. The writer is non-atomic, so
 of the content only the whole value `on\n` means on. Empty, torn and other
 content means off; readers must not trim it. Read errors also mean off; the band logs
@@ -681,15 +685,15 @@ Duplicate presses wait for the same write and redraw.
 The file is machine-local, under the gitignored `.cs/local`, never committed,
 and written only after `cs -vet-session` accepts the session.
 
-The Button's stable element key is `cs-feed`, its action `strip:jump3`.
-cs-feed must hook `ui.press` with `{ plugin: 'cs', element: 'cs-feed' }`, await
+The Button's stable element key is `cs-clean-chat`; it carries no action.
+cs-clean-chat must hook `ui.press` with `{ plugin: 'cs', element: 'cs-clean-chat' }`, await
 `next(e)`, then read the file the band's handler wrote. The band sends no
-command. When cs-feed writes the file directly, the band reads the new value
+command. When cs-clean-chat writes the file directly, the band reads the new value
 on its next redraw. Spike 3 measured immediate cross-plugin press hooks with
 no transcript rows, while command delivery queued until idle and host state
 reset on `/clear` and resume.
 
-The [feed design and alternatives](superpowers/specs/2026-10-24-band-feed-toggle-design.md)
+The [clean chat key's design and alternatives](superpowers/specs/2026-10-24-band-feed-toggle-design.md)
 records those measurements and compares session activation options and layouts for more toggles.
 
 Ctrl+X 1 runs `/rotate`, as if typed: the `rotate` skill draws the purpose from
@@ -864,7 +868,7 @@ The mods hand Claude Code every toast, `$.ui.ask` dialog, `$.ui.log` notice,
 slash-command reply and command registration from tables they export: cs and
 cs-update in `register.tsx` (`TOASTS`, `ASKS`, `LOGS`, `REPLIES`, `COMMANDS`),
 cs-panel in `register.tsx`, `draw.tsx` (`WORDS`) and `settings.ts`
-(`LABELS`), cs-feed in
+(`LABELS`), cs-clean-chat in
 `words.ts`. `tests/test_mod_tables.sh` fails when a call site writes
 such a line inline. Claude Code leads a toast, a notice and a command reply with
 the plugin's name, so no line starts with it. Exported functions draw the
@@ -1276,70 +1280,70 @@ pins the manifest, the installer listing and the validate inventory;
 `tests/test_config.sh` holds the porcelain to
 `tests/fixtures/config-porcelain.txt`, which the kit reads as `test/golden.ts`.
 
-## cs-feed (not a hook script — a Claude Code mod)
+## cs-clean-chat (not a hook script — a Claude Code mod)
 
-`mods/cs-feed/` is a Claude Code function-hooks plugin. It is experimental:
+`mods/cs-clean-chat/` is a Claude Code function-hooks plugin. It is experimental:
 the installer does not deploy it (it is not in `CS_MOD_FILES`), and its source
 and tests stay in this repository. It is gated
 the same way as the `cs` mod: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, which every
-`cs <name>` launch exports and `CS_NO_FUNCTION_HOOKS=1` withholds. While the
-feed is on, the chat shows what you type and what Claude answers, and nothing
-of the work between them. The feed is on in every session by default, and it
-draws only in a session that `cs -vet-session` accepts. While a session is off, every hook
+`cs <name>` launch exports and `CS_NO_FUNCTION_HOOKS=1` withholds. While
+clean chat is on, the chat shows what you type and what Claude answers, and
+nothing of the work between them. Clean chat is on in every session by
+default, and it draws only in a session that `cs -vet-session` accepts. While a session is off, every hook
 passes Claude Code's own drawing through.
 
 The switch is per session:
 
-- `feed`, the cs band's feed key (see the band above), pressed by a click,
-  Ctrl+X Tab, or a chord you bind to `strip:jump3`: this session
+- `clean chat`, the cs band's clean chat key (see the band above), pressed by
+  a click or Ctrl+X Tab, never a chord: this session
   on or off. It shows while the lead session is idle and no handoff is armed.
-- `/feed` alone flips this session's switch: it reads the file and writes the
-  other value. `/feed on` and `/feed off` set it. `/feed` is an immediate
-  command, so it runs mid-turn too.
-- `/feed status` reads the file again and replies `on` or `off`. It writes
-  nothing.
+- `/clean-chat` alone flips this session's switch: it reads the file and
+  writes the other value. `/clean-chat on` and `/clean-chat off` set it.
+  `/clean-chat` is an immediate command, so it runs mid-turn too.
+- `/clean-chat status` reads the file again and replies `on` or `off`. It
+  writes nothing.
 - Any other word replies with the usage line.
 
-While the feed is on, the mode line under the prompt adds
-`feed · /feed to switch`. A switch redraws in place: no reload, no notice row,
+While clean chat is on, the mode line under the prompt adds
+`clean chat · /clean-chat to switch`. A switch redraws in place: no reload, no notice row,
 and no other session changes.
 
-The switch lives in `.cs/local/feed` under the session's working directory,
+The switch lives in `.cs/local/clean-chat` under the session's working directory,
 in the gitignored `.cs/local`, so it survives `/clear`, a rotation,
 `--resume` and a relaunch. cs's band writes it too (see the band above). Both
 mods read it the same way, and neither trims it:
 
 - No file means on, the default, in a directory with `.cs/local`. In a
-  directory without one, which is no cs session, no file means off: cs-feed
-  starts no process and logs nothing.
+  directory without one, which is no cs session, no file means off:
+  cs-clean-chat starts no process and logs nothing.
 - `on\n` means on, and `off\n` means off.
 - Any other content means off, an empty file and a write torn before its
-  newline included. cs-feed logs the path and the problem, each problem once
-  per load.
-- A read error other than a missing file means off. cs-feed logs the path and
-  the error, each error once per load.
+  newline included. cs-clean-chat logs the path and the problem, each problem
+  once per load.
+- A read error other than a missing file means off. cs-clean-chat logs the
+  path and the error, each error once per load.
 
-Every write asks cs first. `/feed` runs `$CS_BIN -vet-session <cwd>` (10 s
+Every write asks cs first. `/clean-chat` runs `$CS_BIN -vet-session <cwd>` (10 s
 timeout), the same rule cs's band asks before its own writes:
 
-- In a directory with no `.cs/local`, `/feed` writes nothing, starts no
-  process and replies `cs-feed: this directory is not a cs session (no
+- In a directory with no `.cs/local`, `/clean-chat` writes nothing, starts no
+  process and replies `cs-clean-chat: this directory is not a cs session (no
   .cs/local), so nothing changed.`
 - Where cs refuses the session, or the launch did not set `CS_BIN`, it writes
-  nothing and replies `cs-feed: no feed change in this session:` with cs's
-  refusal.
-- cs-feed vets the read that turns the feed on, too. At the first draw of each
+  nothing and replies `cs-clean-chat: no clean chat change in this session:`
+  with cs's refusal.
+- cs-clean-chat vets the read that turns clean chat on, too. At the first draw of each
   load, a file that reads on, a missing one included, costs one
   `cs -vet-session` process (0.15-0.44 s), and the hooked rows wait for its
-  answer before they draw. A session cs refuses reads as off: the feed draws
-  nothing, and the log says `cs-feed: the feed is off in this session:` with
+  answer before they draw. A session cs refuses reads as off: clean chat draws
+  nothing, and the log says `cs-clean-chat: clean chat is off in this session:` with
   the refusal, once per distinct refusal. A file that says off starts no
   process.
-- `/feed status` picks up a hand edit or a second Claude process in the
+- `/clean-chat status` picks up a hand edit or a second Claude process in the
   directory, and vets a flip to on that neither writer made before it turns
-  the feed on. `/feed status` on an unchanged file and the usage line start
-  no process of their own.
-- A band press needs no second vet: cs-feed reads the file once cs's press
+  clean chat on. `/clean-chat status` on an unchanged file and the usage line
+  start no process of their own.
+- A band press needs no second vet: cs-clean-chat reads the file once cs's press
   handler has finished, and cs vetted before it wrote.
 
 What it draws while on:
@@ -1366,7 +1370,7 @@ row). Messages from other sessions, helpers and teammates, task
 notifications and hook feedback draw nothing too. A message Claude Code did
 not stamp draws as yours when it names no sender and is not hook feedback (a
 channel the engine cannot attest, a message stored before stamps), and
-nothing otherwise. A message from a source the feed has no rule for,
+nothing otherwise. A message from a source clean chat has no rule for,
 such as a channel or a plugin, keeps Claude Code's drawing. Questions, info
 notices, the prompt hint, the working line and the row above the prompt stay
 Claude Code's: its own spinner says a turn is running. A row that reports
@@ -1385,13 +1389,13 @@ The mod has eight files (`.claude-plugin/plugin.json`, `hooks/hooks.json`,
 `install.sh` deploys none of them and `cs -doctor`'s drift scan skips it. The
 mod writes no heartbeat, so `cs -doctor` has no "last ran" row for it.
 
-Tests: `tests/test_mod_feed.sh` pins the manifest, which declares no state
+Tests: `tests/test_mod_clean_chat.sh` pins the manifest, which declares no state
 types and no `userConfig`, checks that the installer lists none of the mod's
 files, checks that the source never names the events and calls the mod must
 not use (`tool.call`, `turn.step`, `classic.*`, `prompt.compose`,
 `config.set`, `$.command.run`), runs `claude plugin validate` and pins its
 exact hook inventory, type-checks the mod against the engine's contract, and
-runs the tests under `mods/cs-feed/test/` with `claude plugin test` when
+runs the tests under `mods/cs-clean-chat/test/` with `claude plugin test` when
 `claude` is on `PATH`.
 
 ## Hook Configuration
