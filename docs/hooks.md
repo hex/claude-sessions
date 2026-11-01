@@ -1355,7 +1355,7 @@ timeout), the same rule cs's band asks before its own writes:
 What it draws while on:
 
 - Folded turns. In `clean`, a turn's tool calls fold into one line under
-  Claude's reply, `3 steps this turn` (`1 step this turn`), with a chevron
+  Claude's reply, `· 3 steps` (`· 1 step`), with a chevron
   that opens the run lines; while the turn runs, the working line names the
   live call instead. In `normal`, each run of calls is one line with counts,
   such as `Ran 2 shell commands · read 1 file`. A call reads in plain words

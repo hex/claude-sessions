@@ -92,7 +92,7 @@ test('a tool row draws its mark, words, each chip and its chevron one cell apart
 test('the steps line draws its chevron one cell after its words', async ($, on) => {
   session(on, WORK)
   on('ui.render', { component: 'ToolUse' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine tool' }))
-  expect(await rowLines($, { ...TOOL, tool_use_id: 'tests', tool: 'Bash', input: { command: 'npm test' }, output: 'ok\nok' })).toEqual(['3 steps this turn ›'])
+  expect(await rowLines($, { ...TOOL, tool_use_id: 'tests', tool: 'Bash', input: { command: 'npm test' }, output: 'ok\nok' })).toEqual(['· 3 steps ›'])
 })
 
 test('a pressable chevron draws as the bare glyph, dim like the one that cannot be pressed', async ($, on) => {
@@ -118,8 +118,8 @@ test('UserMessage draws the terminal you margin and leaves the desktop engine bo
   let calls = 0
   on('ui.render', { component: 'UserMessage' }, ($, e) => { calls++; return $.ui.resolve(e).Text({ children: 'engine prompt' }) })
   const terminal = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
-  expect((await terminal.find({ type: 'Text', text: 'you' }))?.text).toBe('you')
-  expect((await terminal.find({ type: 'Text', text: 'you' }))?.props.color).toBe('#9fb4c8')
+  expect((await terminal.find({ type: 'Text', text: '❯' }))?.text).toBe('❯')
+  expect((await terminal.find({ type: 'Text', text: '❯' }))?.props.color).toBe('#9fb4c8')
   expect((await terminal.find({ type: 'Text', text: 'Read the notes' }))?.text).toBe('Read the notes')
   expect(await terminal.find({ text: 'engine prompt' })).toBeUndefined()
   const desktop = await $.ui.mount({ plugin: 'cs-feed', surface: 'desktop', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
@@ -167,13 +167,12 @@ test('UserMessage keeps hook feedback as a quiet circle line', async ($, on) => 
   await row.unmount()
 })
 
-test('AssistantMessage frames the engine markdown once with the terminal claude margin', async ($, on) => {
+test('AssistantMessage frames the engine markdown once under the terminal margin, with no name', async ($, on) => {
   session(on)
   const flags: boolean[] = []
   on('ui.render', { component: 'AssistantMessage' }, ($, e) => { flags.push(e.props.isFirstOfReply); return $.ui.resolve(e).Text({ children: 'engine markdown' }) })
   const row = await $.ui.mount({ plugin: 'cs-feed', surface: 'terminal', component: 'AssistantMessage', props: { text: 'Here is the answer.', isFirstOfReply: true } })
-  expect((await row.find({ type: 'Text', text: 'claude' }))?.text).toBe('claude')
-  expect((await row.find({ type: 'Text', text: 'claude' }))?.props.color).toBe('#e3c4a2')
+  expect(await row.find({ type: 'Text', text: 'claude' })).toBeUndefined()
   expect((await row.find({ type: 'Text', text: 'engine markdown' }))?.text).toBe('engine markdown')
   expect(flags).toEqual([false])
   await row.unmount()
@@ -294,7 +293,7 @@ test('an opened burst shows each of its messages as its own indented line, once'
   expect(headTexts[1]).toBe('⇄ another session · First update')
   expect((await tail.findAll({ type: 'Text' })).map(text => text.text)).toEqual(['⇄ another session · Second update'])
   const indent = async (row: typeof tail, text: string) => (await row.findAll({ type: 'Box' })).find(box => box.props.paddingLeft !== undefined && JSON.stringify(box.children).includes(text))?.props.paddingLeft
-  expect(await indent(tail, 'Second update')).toBe(9)
+  expect(await indent(tail, 'Second update')).toBe(4)
   await head.unmount()
   await tail.unmount()
 })

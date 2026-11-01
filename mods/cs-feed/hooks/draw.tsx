@@ -1,4 +1,4 @@
-// ABOUTME: cs-feed's trees: turns a verdict into elements from $.ui.resolve(e), with the inks (§13) and the 7-column name margin.
+// ABOUTME: cs-feed's trees: turns a verdict into elements from $.ui.resolve(e), with the inks (§13) and the engine's own 2-column margin: ❯ before your line, nothing before Claude's.
 // ABOUTME: No decisions and no $ calls but resolve; a Button never sits inside a Text (the engine refuses the whole tree).
 import type { EngineInterface, RenderElement } from 'claude-code'
 
@@ -7,7 +7,7 @@ import type { FeedCommand, FieldSpec, Session, View } from './settings'
 import { FIELDS, KINDS, parseFeedArgs } from './settings'
 import type { FrameLine } from './words'
 import { helperNowLine, helperPaneHead, helpersPaneWords, kindChip, settingCommand, settingValue, settingsWords, slashCommand } from './words'
-import { backgroundLine, backgroundTail, braille, breathing, burstLine, callChips, callWords, fit, frameBody, frameHead, helperCounts, helperFraction, helperLine, helperNoteLine, hhmm, hookNotice, labels, marks, moreKinds, outputLines, peerLine, pillLabel, questionLines, runChips, runWords, stepsLine, usageLabel, usagePeriods } from './words'
+import { backgroundLine, backgroundTail, braille, breathing, burstLine, callChips, callWords, fit, frameBody, frameHead, helperCounts, helperFraction, helperLine, helperNoteLine, hookNotice, labels, marks, moreKinds, outputLines, peerLine, pillLabel, questionLines, runChips, runWords, stepsLine, usageLabel, usagePeriods } from './words'
 
 type Elements = ReturnType<EngineInterface['ui']['resolve']>
 
@@ -27,7 +27,7 @@ export type Pen = {
   readonly el: Elements
   readonly ink: Inks
   readonly room: number
-  readonly pad: number // 7 on the terminal, 0 on desktop
+  readonly pad: number // 2 on the terminal, 0 on desktop
   readonly clickable: boolean
   readonly press: (key: string) => Promise<void> // session.toggle
   readonly helpers: () => Promise<void>
@@ -89,7 +89,7 @@ export function drawUser(v: Exclude<UserVerdict, { draw: 'engine' }>, pen: Pen):
       const text = command
         ? <Box flexGrow={1} flexDirection="row" gap={1}><Text color={pen.ink.you}>{command.name}</Text>{command.args ? <Text dimColor>{command.args}</Text> : null}</Box>
         : <Box flexGrow={1}><Text color={pen.ink.you}>{v.text}</Text></Box>
-      return <Box flexDirection="column" marginTop={1}><Box flexDirection="row"><Box width={pen.pad}><Text color={pen.ink.you} dimColor>{labels.you}</Text></Box>{text}{v.at === undefined ? null : <Text dimColor>{hhmm(v.at)}</Text>}</Box></Box>
+      return <Box flexDirection="column" marginTop={1}><Box flexDirection="row"><Box width={pen.pad}><Text color={pen.ink.you}>{labels.you}</Text></Box>{text}</Box></Box>
     }
     case 'hookText': return <Box paddingLeft={pen.pad}><Text dimColor>{hookNotice(v.line)}</Text></Box>
     case 'peer': return <Box paddingLeft={pen.pad + (v.nested ? 2 : 0)}><Text color={pen.ink.peer}>{peerLine(v.sender, v.headline)}</Text></Box>
@@ -133,7 +133,7 @@ export function drawReply(v: ReplyVerdict, engine: RenderElement, pen: Pen): Ren
   const body = typeof v.body === 'object'
     ? <Box flexDirection="column" paddingLeft={pen.pad}><Text color={v.body.error.tone === 'red' ? pen.ink.red : v.body.error.tone === 'amber' ? pen.ink.amber : pen.ink.peer}>{v.body.error.head}</Text>{v.body.error.rest.map(line => <Text dimColor>{line}</Text>)}</Box>
     : v.body === 'nothing' ? NOTHING(pen)
-      : <Box flexDirection="row"><Box width={pen.pad}>{v.name ? <Text color={pen.ink.claude} dimColor>{labels.claude}</Text> : null}</Box><Box flexGrow={1} flexDirection="column">{engine}</Box></Box>
+      : <Box paddingLeft={pen.pad} flexDirection="column">{engine}</Box>
   return <Box flexDirection="column">{body}{v.stepsLine ? drawCall(v.stepsLine, pen) : null}</Box>
 }
 /** Ours above `beneath` (what next(e) drew: cs's band, or the engine's), in one column. */

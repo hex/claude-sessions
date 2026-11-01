@@ -5,7 +5,7 @@ import type { CallView } from './verdict'
 
 export type Tense = 'present' | 'past'
 
-export const labels = { you: 'you', claude: 'claude', backgroundUpdate: 'background task update', reportHint: 'ctrl+o shows the whole report' } as const
+export const labels = { you: '❯', backgroundUpdate: 'background task update', reportHint: 'ctrl+o shows the whole report' } as const
 export const marks = { dot: '·', live: '●', idle: '○', peer: '⇄', closed: '›', opened: '⌄', question: '?', failed: '✕', working: '◐' } as const
 export const braille = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const
 export const breathing = ['·', '•', '●', '•'] as const
@@ -278,9 +278,9 @@ function lineChip(lines: number): readonly string[] {
   return lines ? [`+${lines} ${lines === 1 ? 'line' : 'lines'}`] : []
 }
 
-/** "1 step this turn" / "{n} steps this turn". */
+/** "· 1 step" / "· {n} steps": the work under a reply, folded. */
 export function stepsLine(done: number): string {
-  return `${done} ${done === 1 ? 'step' : 'steps'} this turn`
+  return `${marks.dot} ${done} ${done === 1 ? 'step' : 'steps'}`
 }
 
 /** §4.6 fit: cut to room-1 (at least 4) at a space in the second half, trim separators, add "…". */

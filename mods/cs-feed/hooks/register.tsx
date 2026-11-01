@@ -482,7 +482,7 @@ async function site<C extends Hooked>($: $, e: RenderInput<C>, next: (e: RenderI
       const cx = await context($, e, session)
       const pen: Pen = {
         el: $.ui.resolve(e), ink: inks(load.light), room: cx.room,
-        pad: e.surface === 'terminal' ? 7 : 0, clickable: cx.clickable,
+        pad: e.surface === 'terminal' ? 2 : 0, clickable: cx.clickable,
         press: key => toggle(load, $, key),
         helpers: async () => { await $.ui.open({ id: HELPERS_PANE, title: 'Helpers', focus: true }) }, cx,
       }

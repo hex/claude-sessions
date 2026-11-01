@@ -94,8 +94,8 @@ test('run summaries count kinds and chips without counting refused calls as fail
 })
 
 test('compact labels preserve singular counts and bounded time and text', () => {
-  expect(stepsLine(1)).toBe('1 step this turn')
-  expect(stepsLine(3)).toBe('3 steps this turn')
+  expect(stepsLine(1)).toBe('· 1 step')
+  expect(stepsLine(3)).toBe('· 3 steps')
   expect(elapsed(-1000)).toBe('0s')
   expect(elapsed(8000)).toBe('8s')
   expect(elapsed(72000)).toBe('1m 12s')

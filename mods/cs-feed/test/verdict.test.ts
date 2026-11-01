@@ -178,7 +178,7 @@ function call(id = 'a', tool = 'Bash', running = false): CallView {
 test('rule 1 folds a live turn onto its first machinery call and counts only completed steps', () => {
   const cx = context()
   expect(decideCall(call(), cx)).toEqual({ verdict: { draw: 'turn', turn: 'a', done: 2, opened: false, body: [] }, live: true })
-  expect(stepsLine(2)).toBe('2 steps this turn')
+  expect(stepsLine(2)).toBe('· 2 steps')
   expect(decideCall(call('b'), cx)).toEqual({ verdict: { draw: 'nothing' }, live: true })
   expect(decideCall(call(), { ...cx, view: { ...cx.view, hide: ['tool'] } }).verdict).toEqual({ draw: 'turn', turn: 'a', done: 2, opened: false, body: [] })
 })
