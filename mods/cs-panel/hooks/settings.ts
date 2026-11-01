@@ -16,8 +16,11 @@ export type SettingKey = string & { readonly __settingKey: unique symbol }
 export type Source = 'shell' | 'launch' | 'session' | 'machine' | 'default'
 
 // What a row offers: a toggle, a pick, a typed value, or nothing (changed from
-// a shell).
-export type Edit = 'flag' | 'choice' | 'text' | 'shell'
+// a shell). The `off` forms are flags whose 1 turns off what the label names:
+// `Scope grounding` is on while CS_SCOPE_DISABLE is unset.
+export type Edit = 'flag' | 'flagoff' | 'choice' | 'text' | 'shell' | 'shelloff'
+
+export const turnsOff = (edit: Edit): boolean => edit === 'flagoff' || edit === 'shelloff'
 
 // One record of the porcelain. Unknown is undefined.
 export type Setting = {
@@ -38,13 +41,15 @@ export type Setting = {
   source: Source
   // A file value cs skipped that would otherwise apply, with its line and why.
   ignored: string | undefined
+  // cs's sentence for what the setting does; '' when cs gives none.
+  describe: string
 }
 
 // The line that refused the answer; '' when the answer held no line at all.
 export type Unreadable = { unreadable: string }
 
 const KEY = /^CS_[A-Z0-9_]+$/
-const EDITS: readonly string[] = ['flag', 'choice', 'text', 'shell'] satisfies readonly Edit[]
+const EDITS: readonly string[] = ['flag', 'flagoff', 'choice', 'text', 'shell', 'shelloff'] satisfies readonly Edit[]
 const SOURCES: readonly string[] = ['shell', 'launch', 'session', 'machine', 'default'] satisfies readonly Source[]
 // The porcelain's word for none.
 const NONE = '-'
@@ -52,10 +57,11 @@ const NONE = '-'
 const noneOf = (field: string): string | undefined => field === NONE ? undefined : field
 
 // Parse, not validate: eleven tab fields per line (key group label edit
-// choices default when whenText value source ignored), or the whole answer is
-// refused with its first bad line, so a strict reader never draws shifted
-// columns. A closed word (edit, source) outside its set refuses too: a cs
-// change the panel does not know is a drawn problem, not a wrong row.
+// choices default when whenText value source ignored), or twelve with the
+// description after them, or the whole answer is refused with its first bad
+// line, so a strict reader never draws shifted columns. A closed word (edit,
+// source) outside its set refuses too: a cs change the panel does not know is
+// a drawn problem, not a wrong row.
 // tests/fixtures/config-porcelain.txt pins the wire.
 export function parseSettings(stdout: string): Setting[] | Unreadable {
   const lines = stdout.split('\n').filter(line => line !== '')
@@ -71,14 +77,14 @@ export function parseSettings(stdout: string): Setting[] | Unreadable {
 
 function settingOf(line: string): Setting | undefined {
   const f = line.split('\t')
-  if (f.length !== 11) return undefined
-  const [key, group, label, edit, choices, fallback, when, whenText, value, source, ignored] = f as [string, string, string, string, string, string, string, string, string, string, string]
+  if (f.length !== 11 && f.length !== 12) return undefined
+  const [key, group, label, edit, choices, fallback, when, whenText, value, source, ignored, describe = NONE] = f as [string, string, string, string, string, string, string, string, string, string, string, string?]
   if (!KEY.test(key) || !EDITS.includes(edit) || !SOURCES.includes(source)) return undefined
-  if ([group, label, when, whenText].some(field => field === '' || field === NONE)) return undefined
+  if ([group, label, when, whenText].some(field => field === '' || field === NONE) || describe === '') return undefined
   if ((edit === 'choice') !== (choices !== NONE)) return undefined
   return {
     key: key as SettingKey, group, label, edit: edit as Edit, choices: choices === NONE ? [] : choices.split(','), fallback: noneOf(fallback),
-    when, whenText, value: noneOf(value), source: source as Source, ignored: noneOf(ignored),
+    when, whenText, value: noneOf(value), source: source as Source, ignored: noneOf(ignored), describe: noneOf(describe) ?? '',
   }
 }
 
@@ -94,6 +100,8 @@ export type ModRow = {
   // A choice's declared options; [] otherwise.
   options: readonly string[]
   isLocked: boolean
+  // What the row does, as its plugin declares it; '' when it declares nothing.
+  description: string
 }
 
 // The plugins whose /config rows the pane lists, by name: a cs-* plugin that
@@ -111,7 +119,7 @@ const MOD_LABEL_MARK = 'cs: '
 export function modRowsOf(rows: readonly ConfigRow[]): ModRow[] {
   return rows.filter(r => isModProvider(r.provider.plugin)).map(r => ({
     key: r.key, plugin: r.provider.plugin, label: r.label.startsWith(MOD_LABEL_MARK) ? r.label.slice(MOD_LABEL_MARK.length) : r.label,
-    kind: r.kind, value: r.value, options: r.options ?? [], isLocked: r.isLocked,
+    kind: r.kind, value: r.value, options: r.options ?? [], isLocked: r.isLocked, description: r.description ?? '',
   }))
 }
 
@@ -130,13 +138,17 @@ export type Row =
 export const labelOf = (row: Row): string => row.kind === 'mod' ? row.mod.label : row.setting.label
 export const keyOf = (row: Row): string => row.kind === 'mod' ? row.mod.key : row.setting.key
 
-// Whether Enter on a row opens its dialog: not on a locked /config row, a
-// setting the shell pins or one changed from a shell, and a setting this
-// session's file sets only under a session name to write that file with.
-export function isEditable(row: Row, hasSelf: boolean): boolean {
-  if (row.kind === 'mod') return !row.mod.isLocked
+// Why Enter on a row opens no dialog: the shell pins the value, it changes
+// from a shell only, a managed setting owns the /config row, or this session's
+// file sets it and no session name writes that file. Undefined: it opens one.
+export type Lock = 'pinned' | 'shellOnly' | 'managed' | 'noSession'
+
+export function lockOf(row: Row, hasSelf: boolean): Lock | undefined {
+  if (row.kind === 'mod') return row.mod.isLocked ? 'managed' : undefined
   const s = row.setting
-  return s.edit !== 'shell' && s.source !== 'shell' && (s.source !== 'session' || hasSelf)
+  if (s.source === 'shell') return 'pinned'
+  if (s.edit === 'shell' || s.edit === 'shelloff') return 'shellOnly'
+  return s.source === 'session' && !hasSelf ? 'noSession' : undefined
 }
 
 // What a row waits on after Enter; while set, another Enter on it is refused,
@@ -180,10 +192,12 @@ export function filterLines(lines: readonly Line[], text: string): Line[] {
 // Where a write lands.
 export type Scope = 'machine' | 'session'
 
+const stateOf = (on: boolean) => on ? 'on' : 'off'
+
 // The option labels the dialogs ask with; free text under Other is a value.
 export const LABELS = {
   turn: (on: boolean) => on ? 'Turn on' : 'Turn off',
-  sessionOnly: (on: boolean) => `This session only: ${on ? 'on' : 'off'}`,
+  sessionOnly: (on: boolean) => `This session only: ${stateOf(on)}`,
   keep: 'Keep',
   keepValue: (value: string) => `Keep ${value}`,
   fallback: (fallback: string | undefined) => fallback === undefined ? 'Default' : `Default (${fallback})`,
@@ -201,30 +215,42 @@ const MOST_OPTIONS = 4
 // file the Where dialog asks.
 export type SettingAnswer = { kind: 'keep' } | { kind: 'write'; scope: Scope; value: string | undefined } | { kind: 'where'; value: string }
 
+// A setting's dialog, and what its question says beside the labels: the file
+// an answer writes unless its label names this session (undefined when a value
+// asks Where), and for an off flag the value its Turn label writes.
+export type SettingAsk = Ask<SettingAnswer> & { writes: Scope | undefined; sets: { label: string; value: string } | undefined }
+
 // A setting's dialog. A change goes where the value lives (this session's file
 // when it sets the value, else this machine's), so it moves what the row shows;
 // with a session name, a value bound for the machine asks Where first. Default
 // (an unset there) is offered when a file holds the value, Keep always, the
 // current value never; an answer no label names is a value typed under Other,
-// which cs's checker judges.
+// which cs's checker judges. An off flag's labels name its feature: Turn off
+// writes 1, and its default, the flag unset, is on.
 //   flag   -> Turn on|off, Default, This session only: on|off, Keep
 //   choice -> the other choices that fit beside Default and Keep (the question
 //             names every value when some do not), Default, Keep
 //   text   -> Keep <value> and Default, always: an ask takes two labels
-export function settingChange(s: Setting, hasSelf: boolean): Ask<SettingAnswer> {
-  if (s.edit === 'shell') throw new Error(`settingChange: ${s.key} is changed from a shell, and the panel offers no change for it`)
+export function settingChange(s: Setting, hasSelf: boolean): SettingAsk {
+  if (s.edit === 'shell' || s.edit === 'shelloff') throw new Error(`settingChange: ${s.key} is changed from a shell, and the panel offers no change for it`)
   type Offer = readonly [string, SettingAnswer]
   const home: Scope = s.source === 'session' ? 'session' : 'machine'
   const asksWhere = hasSelf && home === 'machine'
   const typed = (value: string): SettingAnswer => asksWhere ? { kind: 'where', value } : { kind: 'write', scope: home, value }
-  const fallback: Offer[] = s.source === 'session' || s.source === 'machine' || s.edit === 'text' ? [[LABELS.fallback(s.fallback), { kind: 'write', scope: home, value: undefined }]] : []
+  const isFlag = s.edit === 'flag' || s.edit === 'flagoff'
+  const fallback: Offer[] = s.source === 'session' || s.source === 'machine' || s.edit === 'text'
+    ? [[LABELS.fallback(isFlag ? stateOf(turnsOff(s.edit)) : s.fallback), { kind: 'write', scope: home, value: undefined }]] : []
   const keep: Offer = [s.edit === 'text' ? LABELS.keepValue(s.value ?? s.fallback ?? NONE) : LABELS.keep, { kind: 'keep' }]
   let offers: Offer[]
   let values: readonly string[] = []
+  let sets: SettingAsk['sets']
   switch (s.edit) {
-    case 'flag': {
-      const on = s.value !== '1', value = on ? '1' : '0'
-      offers = [[LABELS.turn(on), { kind: 'write', scope: home, value }], ...fallback, ...(asksWhere ? [[LABELS.sessionOnly(on), { kind: 'write', scope: 'session', value }] as const] : []), keep]
+    case 'flag':
+    case 'flagoff': {
+      // The feature is on at 1, or for an off flag at anything but 1.
+      const isOn = (s.value === '1') !== turnsOff(s.edit), value = isOn === turnsOff(s.edit) ? '1' : '0'
+      offers = [[LABELS.turn(!isOn), { kind: 'write', scope: home, value }], ...fallback, ...(asksWhere ? [[LABELS.sessionOnly(!isOn), { kind: 'write', scope: 'session', value }] as const] : []), keep]
+      sets = turnsOff(s.edit) ? { label: LABELS.turn(!isOn), value } : undefined
       break
     }
     case 'choice': {
@@ -237,7 +263,8 @@ export function settingChange(s: Setting, hasSelf: boolean): Ask<SettingAnswer> 
     case 'text':
       offers = [keep, ...fallback]
   }
-  return { kind: 'ask', options: offers.map(([label]) => label), values, read: answer => offers.find(([label]) => label === answer)?.[1] ?? typed(answer) }
+  return { kind: 'ask', options: offers.map(([label]) => label), values, read: answer => offers.find(([label]) => label === answer)?.[1] ?? typed(answer),
+    writes: asksWhere && !isFlag ? undefined : home, sets }
 }
 
 // The Where dialog: this machine's file or this session's; an answer that names

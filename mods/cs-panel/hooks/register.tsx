@@ -6,8 +6,8 @@
 import type { EngineInterface, On } from 'claude-code'
 import { drawPane, FILTER, noteOf, ringBack, ringOf, WORDS, type Handlers, type PanelView } from './draw'
 import {
-  filterLines, isEditable, isModProvider, isRowId, labelOf, linesOf, modChange, modRowsOf, parseSettings, settingChange, shownOf, WHERE, writeArgv,
-  type Ask, type Line, type ModRow, type Pending, type RowId, type Setting,
+  filterLines, isModProvider, isRowId, labelOf, linesOf, lockOf, modChange, modRowsOf, parseSettings, settingChange, shownOf, WHERE, writeArgv,
+  type Ask, type Line, type ModRow, type Pending, type RowId, type Scope, type Setting,
 } from './settings'
 
 declare const h: any
@@ -39,8 +39,12 @@ export const REPLIES = {
 // one past the labels can be typed. A setting and a /config row ask alike.
 const what = (label: string, key: string, values: readonly string[]) =>
   `What should ${label} (${key}) be?${values.length === 0 ? '' : ` It takes ${values.join(', ')}.`} Pick one, or type a value under Other.`
+// After a setting's question: the file its answers write, and what an off
+// flag's Turn label sets.
 export const ASKS = {
   header: 'cs', setting: what, mod: what,
+  writes: (scope: Scope) => `It writes ${scope === 'machine' ? "this machine's" : "this session's"} file.`,
+  sets: (label: string, key: string, value: string) => `${label} sets ${key}=${value}.`,
   where: (label: string, key: string, value: string) => `Where should ${label} (${key}) be ${value}?`,
 } as const
 
@@ -353,7 +357,7 @@ async function change($: EngineInterface, id: RowId): Promise<void> {
   const line = lineOf(id)
   if (line === undefined || line.pending !== undefined) { $.ui.toast(TOASTS.notNow(id.slice(id.indexOf(':') + 1))); return }
   const hasSelf = launch?.self !== undefined
-  if (!isEditable(line.row, hasSelf)) { $.ui.toast(TOASTS.readOnly(labelOf(line.row), noteOf(line.row, hasSelf))); return }
+  if (lockOf(line.row, hasSelf) !== undefined) { $.ui.toast(TOASTS.readOnly(labelOf(line.row), noteOf(line.row, hasSelf))); return }
   select($, id)
   pending.set(id, 'asking')
   $.ui.invalidate('ui.render')
@@ -376,7 +380,9 @@ async function change($: EngineInterface, id: RowId): Promise<void> {
 // of cs's checks.
 async function changeSetting($: EngineInterface, s: Setting, hasSelf: boolean, id: RowId): Promise<void> {
   const plan = settingChange(s, hasSelf)
-  const answer = await asked($, ASKS.setting(s.label, s.key, plan.values), plan)
+  const question = [ASKS.setting(s.label, s.key, plan.values), ...(plan.writes === undefined ? [] : [ASKS.writes(plan.writes)]),
+    ...(plan.sets === undefined ? [] : [ASKS.sets(plan.sets.label, s.key, plan.sets.value)])].join(' ')
+  const answer = await asked($, question, plan)
   if (answer === undefined || answer.kind === 'keep') return
   const scope = answer.kind === 'where' ? await asked($, ASKS.where(s.label, s.key, answer.value), WHERE) : answer.scope
   if (scope === undefined) return
