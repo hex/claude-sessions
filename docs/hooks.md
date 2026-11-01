@@ -1134,42 +1134,46 @@ are Claude Code's own theme keys: `text`, `inactive`, `subtle` for both faint
 and soft, `planMode` and `success`. Claude Code resolves them to your theme at
 each redraw, so the pane follows it (auto, dark or light) with no setting, and
 `CS_TERM_THEME` changes none of its colours. Only the brand's colours stay the
-same on every theme: the amber of `tui/src/theme.rs`, the band's gradient and
-the band's light ink.
+same on every theme: the amber of `tui/src/theme.rs`, and the rust, the gold
+and the wordmark's letters between them of the installer's banner.
 
-The pane opens on the band, a header block of three lines as wide as the pane:
-an empty line, the words, and an empty line. Each cell of the three sits on its
-own stop of one gradient, rust to gold: the hero gradient of `tui/src/theme.rs`
-darkened, its four stops scaled by 0.77, 0.62, 0.56 and 0.57. The words are in
-`rgb(245,230,211)`, the dark-theme ink of `tui/src/theme.rs`, at a contrast of
-5:1 or more on every cell (5.02:1 at the lowest), and start under the rows'
-labels: the `claude-sessions` wordmark in bold, cs's version, the number of rows, the
-number of settings a file or the shell sets (`3 changed`) and the session name,
-with a `·` between the counts and the name. Where the pane is too narrow, these
+The pane opens on the masthead, the installer's banner (`show_banner` in
+`install.sh.in`) as wide as the pane: a round box of three lines on the
+terminal's own background, its top border and left side in the installer's
+rust, `rgb(230,74,25)`, and its right side and bottom border in its gold,
+`rgb(255,193,7)`. Inside, a cell in from the left side, come the
+`claude-sessions` wordmark in bold, each letter one step of the installer's
+gradient from rust to gold, then cs's version, the number of rows, the number
+of settings a file or the shell sets (`3 changed`) and the session name, with a
+`·` between the counts and the name. The counts draw in ink, and the version,
+the dots and the session name draw muted. Where the pane is too narrow, these
 parts drop from the right, down to the wordmark alone, cut short on the
-narrowest pane. A `/config` row never counts as changed, since the panel cannot
-see its default. The version is what `cs -version` prints, asked once each
-time the mod loads, when the pane first opens or a reload finds it open; until
-cs answers, the band goes on without it. A run that fails, or prints anything but `cs <version>`, writes
-`cs -version <why>` to the transcript, and the next open asks again. When the
-launch found a newer cs (`CS_UPDATE_AVAILABLE`), a line under the words, on
-the same gradient and above the lower empty line, reads
-`cs <version> available · run cs -update`, dropped from the right the same
-way. That line goes once the band's version is that version,
-as when a reload after an update installed from this conversation reads it
-again. The problem
-lines and the reading words sit right under the band.
+narrowest pane, and at least a cell stays before the right side. A `/config`
+row never counts as changed, since the panel cannot see its default. The
+version is what `cs -version` prints, asked once each time the mod loads, when
+the pane first opens or a reload finds it open; until cs answers, the masthead
+goes on without it. A run that fails, or prints anything but `cs <version>`,
+writes `cs -version <why>` to the transcript, and the next open asks again.
+When the launch found a newer cs (`CS_UPDATE_AVAILABLE`), a second line inside
+the box reads `cs <version> available · run cs -update`, the version in amber
+and the rest muted, dropped from the right the same way, so the box is four
+lines. That line goes once the masthead's version is that version, as when a
+reload after an update installed from this conversation reads it again. The
+problem lines and the reading words sit right under the masthead.
 
-Under the band comes the search box, then the selected row's card. Each line
-of the card opens with `▍` in the soft rule colour. The first line names the
-row: its label in bold ink, then its key, muted (a
-`/config` row's `<plugin>.<field>`). The second line holds the whole value as
+Under the masthead comes the search box, then the column header and the rows.
+The rows sit under a muted bold column header (`setting`, `value`, `from`,
+`when`) and a soft rule. The selected row's card is the pane's footer: under
+the last row drawn, and the `+N below` count when there is one, a soft rule as
+wide as the pane, then the card. Each line of the card opens with `▍` in the
+soft rule colour. The first line names the row: `selected · ` muted, its label
+in bold ink, then its key, muted (a `/config` row's `<plugin>.<field>`), cut
+short where the pane is too narrow. The second line holds the whole value as
 the row draws it, a toggle, a gauge with its number, or the default's word
 muted, then where the value comes from in that source's colour (`default`
 muted) and when a change applies, muted. Where the pane is too narrow, it
-wraps by words onto more lines, as many as leave the selected row drawn. The
-rows sit under a muted bold column header (`setting`, `value`, `from`,
-`when`) and a soft rule. Each group's headline is its name in bold ink, one
+wraps by words onto more lines, as many as leave the selected row drawn above
+the footer. Each group's headline is its name in bold ink, one
 space and a soft `─` rule to the pane's edge, with an empty line above every
 group but the first. A name takes up to 26 cells, and the last column takes
 what a wider pane leaves. The pane draws no key row.
@@ -1190,7 +1194,7 @@ a round border in the soft rule colour, as wide as the pane, that reads
 `search settings` while empty. As you type,
 the pane shows only the rows whose label, key or group holds the text, in any
 case. A group with no row left goes, and `no setting matches <text>` stands in
-for an empty list. The band keeps its counts, and `+N above` and `+N
+for an empty list. The masthead keeps its counts, and `+N above` and `+N
 below` count the rows shown. An empty field shows every row again, and
 closing the pane forgets the text. Enter in the field, labelled `select`,
 selects the first row shown and moves the ring there. On the terminal the box
