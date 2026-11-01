@@ -1192,8 +1192,9 @@ these lines, each of the first four opening with `▍` in the soft rule colour:
    `<plugin>.<field>`.
 5. Two cells in and muted, the keys: `↑↓ move · Enter change · Esc close`. On
    a row Enter cannot change, the middle part says why: `shell sets it`,
-   `shell only`, `managed` or `no session name`. The mobile app draws the
-   same line.
+   `shell only`, `managed` or `no session name`. At the line's right end
+   sits the reset control, `reset all…`, muted, and the keys give up their
+   end to leave a cell before it. The mobile app draws the same line.
 
 Lines 2 and 3 wrap by words and take three lines at most between them. The
 value line comes first: it takes two of the three where there is a
@@ -1234,7 +1235,9 @@ app draws no Input, so there three empty lines stand in the box's place, and
 the pane shows every row. The rows start on the same line on the terminal and
 the mobile app.
 
-Tab or a click selects a row (`ui.focus`). The arrows, the wheel, the page
+Tab or a click selects a row (`ui.focus`). The focus ring walks the search
+box, the rows drawn, then the reset control, so Tab from the last row drawn
+reaches `reset all…`. The arrows, the wheel, the page
 keys, Home and End move the selection by the rows they ask for among the rows
 shown (`ui.scroll`). The selection stops at the last row and at the first,
 where Up moves the ring back to the field. The pane draws its own window of
@@ -1295,12 +1298,30 @@ launch, this panel included. A `/config` row a managed setting owns reads
 session name, reads `this session's file sets it, and this conversation has no
 cs session name to write it with`.
 
+Enter or a click on `reset all…` opens one `$.ui.ask` dialog that names how
+many settings each file overrides, as the rows' sources say: `Reset every cs
+setting to its default? This removes 1 override from this machine's file, or 3
+overrides from this session's file.` It adds `Your shell's exports stay.`
+while the shell sets a setting, and `Mod rows keep their values.` while the
+pane lists a `/config` row, since a reset changes neither. It offers `This
+machine's file`, `This session's file` under a session name, and `Keep
+everything`. A file's answer runs `cs -config reset --yes`, or `cs <name>
+-config reset --yes` for this session's file, and the toast is cs's line:
+`N settings removed from <path>`, `nothing to reset in <path>` or `no settings
+file at <path>; nothing to reset`. cs can remove more lines than the question
+counts, such as a value it skipped or one the other file overrides, and its
+line gives the real number. A refusal toasts `cs settings not reset: exited
+<code>: <cs's line>`. A press before cs first lists its settings asks nothing
+and toasts `cs has not listed its settings yet, so nothing was reset`. When
+the pane draws no footer, as when the filter matches nothing, or no keys'
+line on a short pane, it draws no reset control either.
+
 Bare `/cs` is a cooperative pair with the `cs` mod's rail: the `cs` mod passes
 the bare form on with `next(e)`, and this mod passes any argument on, so
 `/cs next` and the bare form answer the same whichever plugin's hook runs first.
 `claude plugin validate` lists both hooks as gates.
 
-The mod reads both sources when the pane opens, after each change, at the end of
+The mod reads both sources when the pane opens, after each change or reset, at the end of
 each main-loop turn while the pane is open, and after a `/config` menu change of
 one of those three plugins' rows (a pass-through `config.set` hook whose own
 failure never refuses the row). It runs no clock. It redraws only when an answer
