@@ -1752,6 +1752,20 @@ test('the pane draws on every surface, its rows as Buttons and its field as an I
   }
 })
 
+test('on the mobile app, which draws no Input, a typed setting\'s chooser is its Default and Keep alone and the ring skips the field; a choice\'s Buttons draw and write as on the terminal', async ($, on) => {
+  const { w } = world(on)
+  expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
+  const pane = await $.ui.mount({ plugin: 'cs-panel', surface: 'mobile', component: 'Pane', requestId: 'cs-panel', props: PANE_PROPS })
+  await pane.press({ key: 'cs:CS_STATUSLINE_CTX_WARN' })
+  expect([chooserIn(bodyLines(await pane.drawn())), (await pane.find({ key: 'typed' }))?.type]).toEqual([[options('Default (40)', 'Keep 50')], undefined])
+  expect(ringOf(viewOf({ hasField: false, selected: 'cs:CS_STATUSLINE_CTX_WARN', chooser: opened('cs:CS_STATUSLINE_CTX_WARN', '50') })).keys.filter(key => key.startsWith('option:') || key === 'typed'))
+    .toEqual(['option:Default (40)', 'option:Keep 50'])
+  await pane.press({ key: 'cs:CS_STATUSLINE_LAYOUT' })
+  expect(chooserIn(bodyLines(await pane.drawn()))).toEqual([options('quiet', 'capsules', 'Default (quiet)', 'Keep')])
+  await pane.press({ key: 'option:capsules' })
+  expect(writes(w)).toEqual([[BIN, 'alpha', '-config', 'set', 'CS_STATUSLINE_LAYOUT', 'capsules']])
+})
+
 test('no line the mod hands the engine names the plugin first: the engine prefixes it', () => {
   const call = (f: unknown) => typeof f === 'string' ? f : (f as (...args: string[]) => string)('x', 'y', 'z')
   const lines = [
