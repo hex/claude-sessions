@@ -6,7 +6,7 @@
   "userConfig": {
     "showReleaseNotes": {
       "type": "boolean",
-      "title": "Release notes pane",
+      "title": "cs: Release notes pane",
       "description": "When a newer cs is available, open its release notes once per launch. Off, /cs-update still opens them on demand.",
       "required": false,
       "default": true

@@ -104,9 +104,14 @@ export function isModProvider(plugin: string): boolean {
   return MOD_PROVIDERS.has(plugin)
 }
 
+// The mods title their rows `cs: <label>` so /config marks them as cs's; under
+// the pane's own Mods heading the mark says nothing, so it comes off.
+const MOD_LABEL_MARK = 'cs: '
+
 export function modRowsOf(rows: readonly ConfigRow[]): ModRow[] {
   return rows.filter(r => isModProvider(r.provider.plugin)).map(r => ({
-    key: r.key, plugin: r.provider.plugin, label: r.label, kind: r.kind, value: r.value, options: r.options ?? [], isLocked: r.isLocked,
+    key: r.key, plugin: r.provider.plugin, label: r.label.startsWith(MOD_LABEL_MARK) ? r.label.slice(MOD_LABEL_MARK.length) : r.label,
+    kind: r.kind, value: r.value, options: r.options ?? [], isLocked: r.isLocked,
   }))
 }
 

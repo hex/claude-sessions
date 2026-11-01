@@ -14,12 +14,12 @@ import { filterLines, linesOf, modRowsOf, parseSettings, type RowId, type Settin
 const CS = { plugin: 'cs', tier: 'user' } as const
 const MOD_ROWS: ConfigRow[] = [
   { key: 'theme', label: 'Theme', kind: 'choice', value: 'dark', options: ['dark', 'light'], provider: { plugin: 'engine', tier: 'core' }, isLocked: false },
-  { key: 'cs.bandPrompts', label: 'Band: prompt bars', kind: 'boolean', value: false, provider: CS, isLocked: false },
-  { key: 'cs.bandPrompt', label: 'Band: named prompt', kind: 'choice', value: 'latest', options: ['latest', 'read'], provider: CS, isLocked: false },
-  { key: 'cs.bandBars', label: 'Band: most bars', kind: 'number', value: 10, provider: CS, isLocked: false },
+  { key: 'cs.bandPrompts', label: 'cs: Band: prompt bars', kind: 'boolean', value: false, provider: CS, isLocked: false },
+  { key: 'cs.bandPrompt', label: 'cs: Band: named prompt', kind: 'choice', value: 'latest', options: ['latest', 'read'], provider: CS, isLocked: false },
+  { key: 'cs.bandBars', label: 'cs: Band: most bars', kind: 'number', value: 10, provider: CS, isLocked: false },
   { key: 'cs-feed.digest', label: 'Feed digest', kind: 'boolean', value: true, provider: { plugin: 'cs-feed', tier: 'user' }, isLocked: false },
-  { key: 'cs-update.showReleaseNotes', label: 'Release notes pane', kind: 'boolean', value: true, provider: { plugin: 'cs-update', tier: 'user' }, isLocked: false },
-  { key: 'cs-mermaid.drawDiagrams', label: 'Draw mermaid diagrams', kind: 'boolean', value: true, provider: { plugin: 'cs-mermaid', tier: 'user' }, isLocked: false },
+  { key: 'cs-update.showReleaseNotes', label: 'cs: Release notes pane', kind: 'boolean', value: true, provider: { plugin: 'cs-update', tier: 'user' }, isLocked: false },
+  { key: 'cs-mermaid.drawDiagrams', label: 'cs: Draw mermaid diagrams', kind: 'boolean', value: true, provider: { plugin: 'cs-mermaid', tier: 'user' }, isLocked: false },
 ]
 const LOCKED: ConfigRow[] = MOD_ROWS.map(r => r.key === 'cs-mermaid.drawDiagrams' ? { ...r, isLocked: true } : r)
 

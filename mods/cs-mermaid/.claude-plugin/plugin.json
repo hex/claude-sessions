@@ -6,7 +6,7 @@
   "userConfig": {
     "drawDiagrams": {
       "type": "boolean",
-      "title": "Draw mermaid diagrams",
+      "title": "cs: Draw mermaid diagrams",
       "description": "Draw mermaid flowchart fences in replies as diagrams. Off, fences show as source.",
       "required": false,
       "default": true

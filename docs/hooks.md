@@ -1118,7 +1118,9 @@ transcript, 60 columns wide, in fullscreen from 110 columns.
 
 The rows come from two places. `Mods` lists the `/config` rows of `cs`,
 `cs-update` and `cs-mermaid` (`$.config.list()`, those three plugins by name, so
-another `cs-*` plugin's rows are not drawn). Under it, cs's own settings come in
+another `cs-*` plugin's rows are not drawn). Those mods title each row `cs: `
+and its label, so `/config` marks the row as cs's; under `Mods` the mark says
+nothing and the pane draws the label without it. Under it, cs's own settings come in
 cs's groups and order from `cs -config list --porcelain`, run through `CS_BIN`
 (the path the launch exported) with no shell. The panel holds no list of
 settings and no copy of their checks: labels, choices, defaults, when a change
