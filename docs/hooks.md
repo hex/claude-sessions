@@ -862,7 +862,7 @@ the conversation it meets next unjudged.
 The mods hand Claude Code every toast, `$.ui.ask` dialog, `$.ui.log` notice,
 slash-command reply and command registration from tables they export: cs and
 cs-update in `register.tsx` (`TOASTS`, `ASKS`, `LOGS`, `REPLIES`, `COMMANDS`),
-cs-panel in `register.tsx`, `draw.tsx` (`WORDS`, `KEYS`) and `settings.ts`
+cs-panel in `register.tsx`, `draw.tsx` (`WORDS`) and `settings.ts`
 (`LABELS`), cs-feed in
 `words.ts`. `tests/test_mod_tables.sh` fails when a call site writes
 such a line inline. Claude Code leads a toast, a notice and a command reply with
@@ -1163,9 +1163,9 @@ muted. A row a file, the shell or the launch sets draws its value in ink, and
 its source word in the colour of where the value lives: `session` teal,
 `machine` green, `shell` amber (the environment overrides both files), and
 `launch` faint. Its when word is muted. A toggle reads `● on`, the dot green,
-or `○ off`. A percent setting draws a ten-cell gauge before its number where
-the value column has room for both: filled in amber when set, all faint at the
-default. The selected row has `▌` in the rail's second colour and its label
+or `○ off`. A percent setting (its label ends in `%`) draws a ten-cell gauge
+before its number where the value column has room for both: filled in amber
+when set, all faint at the default. The selected row has `▌` in the rail's second colour and its label
 bold, on no background, and the focus marks the label alone. Every row's label
 is in ink, selected or not, at its default or set.
 
