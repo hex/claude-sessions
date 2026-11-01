@@ -50,7 +50,7 @@ export const ASKS = {
   sets: (label: string, key: string, value: string) => `${label} sets ${key}=${value}.`,
   where: (label: string, key: string, value: string) => `Where should ${label} (${key}) be ${value}?`,
   reset: (files: ResetAsk['files'], hasShell: boolean, hasMods: boolean) => [
-    `Reset every cs setting to its default? This removes ${files.map(f => `${WORDS.overrides(f.overrides)} from ${fileOf(f.scope)}`).join(', or ')}.`,
+    `Remove every override from this file? This removes ${files.map(f => `${WORDS.overrides(f.overrides)} from ${fileOf(f.scope)}`).join(', or ')}.`,
     ...(hasShell ? ["Your shell's exports stay."] : []), ...(hasMods ? ['Mod rows keep their values.'] : [])].join(' '),
 } as const
 

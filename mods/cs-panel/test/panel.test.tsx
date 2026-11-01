@@ -1253,7 +1253,7 @@ test('cs\'s reply is the toast: its line when the write lands, and when cs refus
 const RESET_MACHINE = [BIN, '-config', 'reset', '--yes']
 const RESET_SESSION = [BIN, 'alpha', '-config', 'reset', '--yes']
 const STAYS = " Your shell's exports stay. Mod rows keep their values."
-const resetting = (removes: string, stays = STAYS) => `Reset every cs setting to its default? This removes ${removes}.${stays}`
+const resetting = (removes: string, stays = STAYS) => `Remove every override from this file? This removes ${removes}.${stays}`
 const BOTH_FILES = ["This machine's file", "This session's file", 'Keep everything']
 
 test('the reset control asks which file to empty, naming the overrides each holds and what stays; each file\'s answer runs cs -config reset --yes on it, cs\'s line is the toast and both sources are read again; Keep everything, a typed answer or a dismissal runs nothing', async ($, on) => {
