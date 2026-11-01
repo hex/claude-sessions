@@ -2146,18 +2146,23 @@ test_install_and_uninstall_keep_a_flat_shape_hook_entry() {
 # cs's registration under each event the shape tests below use, as install
 # writes it (jq -c), and the hooks-list shapes that are the user's to keep:
 # no .hooks at all, then false, null, a number, a string, an object, and a
-# list of hooks that are not cs's.
+# list of hooks that are not cs's. Stop holds two entries, in registration
+# order: narrative-reminder.sh, whose blocks continue the turn, then the async
+# stop-notices.sh.
 SESSION_START_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/session-start.sh","timeout":30}]}'
-STOP_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/narrative-reminder.sh","timeout":10}]}'
+STOP_REMINDER_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/narrative-reminder.sh","timeout":10}]}'
+STOP_NOTICES_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/stop-notices.sh","timeout":10,"async":true}]}'
+STOP_REGISTRATION="$STOP_REMINDER_REGISTRATION,$STOP_NOTICES_REGISTRATION"
 USER_HOOK_SHAPES='[{"type":"command","command":"notify"},{"matcher":"a","hooks":false},{"matcher":"b","hooks":null},{"hooks":7},{"hooks":"notify"},{"hooks":{"custom":{"type":"command","command":"notify"}}},{"matcher":"c","hooks":[{"type":"command","command":"notify","timeout":5},{"type":"command","command":"log-it"}]}]'
 
 # Runs install and then uninstall over a HOME whose settings.json holds the
 # entries $3 (a JSON list, written as jq -c prints it) as the whole of event
 # $2. They must come through both exactly as written and in order: after
-# install the event holds them followed by $4, cs's registration there ("" for
-# an event cs registers nothing under, which then holds them alone); after
-# uninstall settings.json is the file it was, byte for byte. $1 names the HOME.
-_install_and_uninstall_keep_hook_entries() {  # label, event, entries, cs's entry
+# install the event holds them followed by $4, cs's registrations there, comma
+# separated ("" for an event cs registers nothing under, which then holds them
+# alone); after uninstall settings.json is the file it was, byte for byte. $1
+# names the HOME.
+_install_and_uninstall_keep_hook_entries() {  # label, event, entries, cs's entries
     local home="$TEST_TMPDIR/$1-home" s rc=0 expected="$3"
     s="$home/.claude/settings.json"
     mkdir -p "$home/.claude"
@@ -2302,7 +2307,7 @@ test_uninstall_leaves_an_event_that_is_not_a_list() {
     mv "$s.new" "$s"
     printf 'y\n' | HOME="$home" "$CS_BIN" -uninstall > "$TEST_TMPDIR/event-object.un" 2>&1 || rc=$?
     assert_eq "0" "$rc" "uninstall exit status" || { cat "$TEST_TMPDIR/event-object.un"; return 1; }
-    assert_eq "{\"hooks\":{\"Stop\":{\"custom\":$STOP_REGISTRATION}}}" "$(jq -c . "$s")" \
+    assert_eq "{\"hooks\":{\"Stop\":{\"custom\":$STOP_REMINDER_REGISTRATION}}}" "$(jq -c . "$s")" \
         "uninstall leaves the object event and strips the rest" || { cat "$TEST_TMPDIR/event-object.un"; return 1; }
 }
 

@@ -256,10 +256,10 @@ test_hooks_decline_when_the_resolver_is_missing() {
     local sh=/bin/bash
     [ -x "$sh" ] || sh=bash
     local h rc out failures=0
-    for h in narrative-reminder session-start autosave-commits; do
+    for h in narrative-reminder stop-notices session-start autosave-commits; do
         cp "$hooks_src/$h.sh" "$fake/"
     done
-    for h in narrative-reminder session-start autosave-commits; do
+    for h in narrative-reminder stop-notices session-start autosave-commits; do
         out=$(env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR -u CLAUDE_PROJECT_DIR \
             "$sh" "$fake/$h.sh" <<< '{"tool_name":"Write","cwd":"/"}' 2>/dev/null)
         rc=$?
@@ -275,6 +275,10 @@ test_hooks_decline_when_the_resolver_is_missing() {
                        failures=$((failures + 1)) ;;
                 esac
                 ;;
+            stop-notices)
+                [ -z "$out" ] || { echo "  FAIL: $h.sh must print nothing outside a session, got [$out]"
+                                   failures=$((failures + 1)); }
+                ;;
         esac
     done
     [ "$failures" -eq 0 ] || return 1
@@ -287,7 +291,7 @@ test_hooks_decline_when_the_resolver_is_corrupt() {
     local fake="$TEST_TMPDIR/badlib" sh=/bin/bash
     [ -x "$sh" ] || sh=bash
     mkdir -p "$fake"
-    cp "$SCRIPT_DIR/../hooks/narrative-reminder.sh" "$fake/"
+    cp "$SCRIPT_DIR/../hooks/narrative-reminder.sh" "$SCRIPT_DIR/../hooks/stop-notices.sh" "$fake/"
     local case_name out rc failures=0
     for case_name in syntax empty; do
         case "$case_name" in
@@ -303,6 +307,11 @@ test_hooks_decline_when_the_resolver_is_corrupt() {
             *) echo "  FAIL: $case_name library suppressed the approve payload, got [$out]"
                failures=$((failures + 1)) ;;
         esac
+        out=$(env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR -u CLAUDE_PROJECT_DIR \
+            "$sh" "$fake/stop-notices.sh" <<< '{}' 2>/dev/null)
+        rc=$?
+        [ "$rc" -eq 0 ] || { echo "  FAIL: $case_name library made stop-notices.sh exit $rc"; failures=$((failures + 1)); }
+        [ -z "$out" ] || { echo "  FAIL: $case_name library: stop-notices.sh must print nothing, got [$out]"; failures=$((failures + 1)); }
     done
     [ "$failures" -eq 0 ] || return 1
 }
@@ -319,7 +328,7 @@ test_hooks_decline_when_the_resolver_fails_at_runtime() {
     local fake="$TEST_TMPDIR/runtimebad" sh=/bin/bash
     [ -x "$sh" ] || sh=bash
     mkdir -p "$fake"
-    cp "$SCRIPT_DIR/../hooks/narrative-reminder.sh" "$fake/"
+    cp "$SCRIPT_DIR/../hooks/narrative-reminder.sh" "$SCRIPT_DIR/../hooks/stop-notices.sh" "$fake/"
     cp "$SCRIPT_DIR/../hooks/cs-resolve.sh" "$fake/"
     printf '=======\n' >> "$fake/cs-resolve.sh"
     "$sh" -n "$fake/cs-resolve.sh" 2>/dev/null \
@@ -333,6 +342,11 @@ test_hooks_decline_when_the_resolver_fails_at_runtime() {
         *approve*) : ;;
         *) echo "  FAIL: approve payload suppressed, got [$out]"; return 1 ;;
     esac
+    out=$(env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR -u CLAUDE_PROJECT_DIR \
+        "$sh" "$fake/stop-notices.sh" <<< '{}' 2>/dev/null)
+    rc=$?
+    [ "$rc" -eq 0 ] || { echo "  FAIL: a runtime-failing library made stop-notices.sh exit $rc"; return 1; }
+    assert_eq "" "$out" "stop-notices.sh prints nothing outside a session" || return 1
 }
 
 run_test test_hooks_decline_when_the_resolver_fails_at_runtime

@@ -1962,6 +1962,13 @@ test_doctor_lists_every_context_injecting_hook_with_its_switch() {
     assert_output_contains "$output" "CS_DATE_REMINDER_DISABLE" "Should name the date reminder off-switch" || return 1
     assert_output_contains "$output" "CS_REWRITE_DISABLE" "Should name the rewriter off-switch" || return 1
     assert_output_contains "$output" ".cs/local/disabled" "Should name the hooks' off-switch" || return 1
+    # The four turn-end notices ride stop-notices.sh; each row names it.
+    local label row hook
+    for label in "narrative" "council nudge" "ctx warning" "rotate nudge"; do
+        row=$(grep -E "^ +(on|off) +$label +[^ ]+ +off: " <<< "$output" | head -1)
+        hook=$(awk '{print $1}' <<< "${row#*"$label"}")
+        assert_eq "stop-notices" "$hook" "the $label row names the hook that carries it" || return 1
+    done
 }
 
 _doctor_diagrams_row() {

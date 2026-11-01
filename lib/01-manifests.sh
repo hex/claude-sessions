@@ -33,6 +33,7 @@ CS_HOOKS=(
     session-start.sh
     autosave-commits.sh
     narrative-reminder.sh
+    stop-notices.sh
     session-end.sh
     subagent-context.sh
     tool-failure-logger.sh

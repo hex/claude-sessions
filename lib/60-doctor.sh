@@ -971,10 +971,10 @@ _doctor_check_hook_authority() {
     _doctor_authority_row "date reminder" "scope-prompt"       'CS_DATE_REMINDER_DISABLE=1'     "${CS_DATE_REMINDER_DISABLE:-}" CS_DATE_REMINDER_DISABLE
     _doctor_authority_row "objective"     "scope-prompt"       'CS_OBJECTIVE_CAPTURE_DISABLE=1' "${CS_OBJECTIVE_CAPTURE_DISABLE:-}" CS_OBJECTIVE_CAPTURE_DISABLE
     _doctor_authority_row "rewrite"       "prompt-rewriter"    'CS_REWRITE_DISABLE=1'           "${CS_REWRITE_DISABLE:-}" CS_REWRITE_DISABLE
-    _doctor_authority_row "narrative"     "narrative-reminder" '.cs/local/disabled'             ""
-    _doctor_authority_row "council nudge" "narrative-reminder" '.cs/local/disabled or uninstall the plugin' ""
-    _doctor_authority_row "ctx warning"   "narrative-reminder" 'CS_CTX_WARN_CTX=101'            ""
-    _doctor_authority_row "rotate nudge"  "narrative-reminder" 'CS_ROTATE_NUDGE_CTX=101'        ""
+    _doctor_authority_row "narrative"     "stop-notices"       '.cs/local/disabled'             ""
+    _doctor_authority_row "council nudge" "stop-notices"       '.cs/local/disabled or uninstall the plugin' ""
+    _doctor_authority_row "ctx warning"   "stop-notices"       'CS_CTX_WARN_CTX=101'            ""
+    _doctor_authority_row "rotate nudge"  "stop-notices"       'CS_ROTATE_NUDGE_CTX=101'        ""
     _doctor_authority_row "subagent ctx"  "subagent-context"   '.cs/local/disabled'             ""
     _doctor_authority_row "session ctx"   "session-start"      '.cs/local/disabled'             ""
     # Local instructions remain in the prompt even when session hooks are disabled.

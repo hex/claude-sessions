@@ -125,6 +125,7 @@ CS_HOOKS=(
     session-start.sh
     autosave-commits.sh
     narrative-reminder.sh
+    stop-notices.sh
     session-end.sh
     subagent-context.sh
     tool-failure-logger.sh
@@ -1391,7 +1392,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "8556ea06f999ac16261bc76545c9bc6d7e6270d710a9c0bab298ecc13626ee9f  bin/cs"
+    "e25fa7930a9e8adcc4aa05a4606b78184076947617417c430e2396d8cdd917fe  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "d8c282be6bf96631ec6e458c0389cedefdf58fb60a96f4fac49778f051d5e801  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
@@ -1407,7 +1408,8 @@ CS_PAYLOAD_SHA256=(
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
     "a4486c60d3db91c0a466fb154602eec888ffeb5a9942d74d2c8aac92b8dd7c32  hooks/session-start.sh"
     "cae9775702513f11b1abff031928047766ab69714e3a9b1db82ff080e186f20b  hooks/autosave-commits.sh"
-    "5d5a289944d88a3b255095d9341172f893690a205fa77f486d3f812967b3133c  hooks/narrative-reminder.sh"
+    "d7b5e10288f767faea97146455ea963f25604e4a268ac062423e636b36edf0cf  hooks/narrative-reminder.sh"
+    "c05c57167c08198ffb1a239b692949831d97ad608a4c380b7815105a9f5e8ea2  hooks/stop-notices.sh"
     "8377b722bd856d5ca918bb9ffea2cfb3e0a0077ee0b9441a1f52461fd7282739  hooks/session-end.sh"
     "81a13835a65f4b4b35bb87493da0df9848de68375ca7ab1525d2d5079cf52bf1  hooks/subagent-context.sh"
     "53b16016dd6d087c3cc3db7e4acf8de6629e149e3b7f326f0731b36809574156  hooks/tool-failure-logger.sh"
@@ -1425,7 +1427,7 @@ CS_PAYLOAD_SHA256=(
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
     "8ffa3249cadb8017e5e0809326fc22f3ec0e2c1f9e3dd70c049782888190727f  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
-    "d0edc3bfe2f4977f638d5f922779f3809ccb0af670ea73c48df84970e1ef6a7f  mods/cs/hooks/register.tsx"
+    "9b471a7ba50ea54d878da374c0cbb31e0e230065b6539e42e94544a61aaa4f65  mods/cs/hooks/register.tsx"
     "6986a18d6c82df9f80579e651cc1c83e1002ebc558415379f4b285c1640c845f  mods/cs/tips.json"
     "7a97c18b6ae755d8ec7862532eb15bbf627170a1fab8cc90dd2f8f77a57164be  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
@@ -2205,10 +2207,17 @@ else
     # answering nothing loses the maildir watch for the rest of the session.
     # Registering FileChanged is itself what opens that path, so the mailbox has
     # to answer the event its own registration enables.
+    #
+    # Stop carries two entries. narrative-reminder.sh's blocks must continue the
+    # turn (the queue drain, the staged retire, the mail wake). stop-notices.sh
+    # is async: a synchronous Stop hook that hands the model text always draws
+    # Claude Code's stop-hook row in the chat, while an async one draws none and
+    # its additionalContext reaches the model with the next prompt.
     _register_cs_hooks() {
         _merge_cs_hook SessionStart       session-start.sh       30
         _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
         _merge_cs_hook Stop               narrative-reminder.sh  10
+        _merge_cs_hook Stop               stop-notices.sh        10 "" true
         _merge_cs_hook SessionEnd         session-end.sh         30
         _merge_cs_hook SubagentStart      subagent-context.sh    10
         _merge_cs_hook PostToolUseFailure tool-failure-logger.sh 10 "" true

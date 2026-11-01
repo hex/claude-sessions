@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: Stop hook for the narrative reminder, walk-away queue drain, rotation
-# ABOUTME: nudge and mail wake; FileChanged wakes when idle, CwdChanged re-arms
+# ABOUTME: Stop hook for the walk-away queue drain, staged feature retire and mail
+# ABOUTME: wake; FileChanged wakes when idle, CwdChanged re-arms the maildir watch
 
 set -euo pipefail
 
@@ -49,7 +49,7 @@ fi
 # before its own decline, silently. When the library is absent the fallback
 # is the env-only check this guard replaced, so the hook behaves as it used to.
 _cs_lib="$(dirname "$0")/cs-resolve.sh"
-# cs-shared.sh is build.sh's copy of lib/02-shared.sh, the narrative budget
+# cs-shared.sh is build.sh's copy of lib/02-shared.sh, the atomic writer
 # among it, one source for cs and its hooks. Same guard, same reasons.
 _cs_shared="$(dirname "$0")/cs-shared.sh"
 # shellcheck source=cs-resolve.sh
@@ -102,11 +102,6 @@ if ! command -v _cs_terminate_jsonl >/dev/null 2>&1; then
         [ -n "$(tail -c 1 "$1" 2>/dev/null)" ] || return 0
         cs_append_inside "$1" printf '\n' || true
     }
-fi
-# A name a clone chose is printed through the library's _cs_plain_name;
-# without it the hook prints no such name, only "?".
-if ! command -v _cs_plain_name >/dev/null 2>&1; then
-    _cs_plain_name() { printf '?'; }
 fi
 # Only run in cs sessions
 if ! cs_resolve_session ""; then
@@ -163,6 +158,7 @@ NL='
 # Printed as decimal: a leading zero would reach the callers' arithmetic as
 # an octal literal, and `08` aborts it. Sixteen digits or more take the default:
 # bash arithmetic wraps past 64 bits, so such a value would arrive silently wrong.
+# stop-notices.sh carries the same helper, for the reason it gives there.
 _num_or() {  # value, default -> prints value if a plain integer, else default
     case "${1:-}" in ''|*[!0-9]*|????????????????*) echo "$2";; *) echo "$((10#$1))";; esac
 }
@@ -458,8 +454,9 @@ fi
 # Claude just finished a turn: raise the machine-local attention flag the
 # statusline shows until the user next interacts. Cleared by scope-prompt.sh
 # on the next prompt and by session-start.sh at launch. Lives in .cs/local/
-# (per-machine state, never git-synced). Raised before the cooldown gates so
-# every turn end signals, not just the ones that remind. A claude started
+# (per-machine state, never git-synced). Raised before the staged retire,
+# the queue drain and the mail wake, any of which can end this Stop, so every
+# turn end signals. A claude started
 # from inside the session and a tmux teammate end no turn of the lead's, so
 # they raise nothing. The guest is told apart as session-start.sh does: a
 # claude shown to be the lead is asked nothing further, since its launch
@@ -490,7 +487,8 @@ fi
 # --- Task queue drain (walk-away mode) ---------------------------------------
 # Hands the agent its next queued task when armed or draining. An idle queue,
 # tasks or not, is left to the person: the cs mod's band offers its start.
-# Wins over the narrative nag (returns early). Queue text is arbitrary -> jq emit.
+# Wins over the mail wake (returns early), and stop-notices.sh stands down
+# for the same armed or draining queue. Queue text is arbitrary -> jq emit.
 QDIR="$CS_FILES"
 # A queue a link carries out of the session is not this session's: the drain
 # would move and delete the files there before any checked write.
@@ -676,7 +674,7 @@ _qpark() {  # kind reading limit remaining note
 # session directory and fires its own top-level Stop, so ungated its every
 # idle turn pops a task: an eight-task queue reads "all tasks complete" after
 # eight reviewer turns with nothing done. A teammate falls through to the
-# narrative reminder like any other Stop.
+# end like any other Stop.
 # --- Staged feature retire ----------------------------------------------------
 # /finish's retire entry stages itself in .cs/local/retire-staged/<task> while
 # the feature conversation still holds its worktree (a directory cannot go from
@@ -915,7 +913,7 @@ $RUN_MODE$SCOPE"
     fi
 
 fi
-# (falls through to the narrative reminder below when not draining)
+# (falls through to the mail wake below when not draining)
 
 # --- Mail wake (Stop) ---------------------------------------------------------
 # The turn-end half. Reached only when the queue is not active: every armed or
@@ -938,213 +936,5 @@ if [ "$MAIL_FRESH" = 1 ]; then
     exit 0
 fi
 
-# --- Rotation nudge -----------------------------------------------------------
-# One-time suggestion to rotate when context runs hot. Delivered as a block
-# (the only Stop-hook surface Claude sees); an armed or draining queue never
-# reaches here (its branches exit above), so the drain's context breaker owns
-# hot-context handling during walk-away runs. Cursor: the conversation UUID
-# last nudged, machine-local.
-NUDGE_CTX=$(_num_or "${CS_ROTATE_NUDGE_CTX:-}" 65)
-NUDGE_UUID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
-NUDGE_PCT=$(cat "$LOCAL/context-pct" 2>/dev/null | tr -d '[:space:]' || true)
-case "$NUDGE_PCT" in ''|*[!0-9]*) NUDGE_PCT="";; esac
-# The file holds the LEAD's reading only: the status line writes it for the
-# launched conversation alone. A teammate's Stop acting on it announces
-# someone else's context as its own, so for any other claude both tiers
-# below see no reading at all.
-_mail_is_lead || NUDGE_PCT=""
-if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] && [ "$NUDGE_PCT" -ge "$NUDGE_CTX" ]; then
-    # Append-only list of nudged conversations: a tmux teammate shares this
-    # directory and runs the same Stop, so a single-slot cursor let each
-    # teammate's stop cancel the lead's notice and re-arm it every turn.
-    if ! grep -qx "$NUDGE_UUID" "$LOCAL/rotate-nudged" 2>/dev/null; then
-        cs_append_inside "$LOCAL/rotate-nudged" printf '%s\n' "$NUDGE_UUID" || true
-        REASON="Context is at ${NUDGE_PCT}% — consider rotating this conversation. Invoke the rotate skill to distill a handoff and arm it; the user then runs /clear to continue in a fresh conversation, without leaving Claude Code. One-time notice for this conversation; if now is a bad time, simply continue."
-        jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
-        exit 0
-    fi
-fi
-
-# --- Context warning ----------------------------------------------------------
-# One-time heads-up when context crosses the wind-down band [warn, nudge).
-# At or above the nudge threshold the rotation nudge above owns the turn;
-# this tier never fires there. Cursor: append-only list of warned UUIDs.
-WARN_CTX=$(_num_or "${CS_CTX_WARN_CTX:-}" 40)
-if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] \
-    && [ "$NUDGE_PCT" -ge "$WARN_CTX" ] && [ "$NUDGE_PCT" -lt "$NUDGE_CTX" ]; then
-    if ! grep -qx "$NUDGE_UUID" "$LOCAL/ctx-warned" 2>/dev/null; then
-        cs_append_inside "$LOCAL/ctx-warned" printf '%s\n' "$NUDGE_UUID" || true
-        REASON="Context is at ${NUDGE_PCT}% — past the comfortable-headroom mark. Briefly let the user know so they can steer toward a natural stopping point or plan a rotation; the rotate nudge follows at ${NUDGE_CTX}%. One-time notice for this conversation; no action needed now."
-        jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
-        exit 0
-    fi
-fi
-
-COOLDOWN_FILE="$META_DIR/.narrative-reminder-cooldown"
-COOLDOWN_SECONDS=300  # 5 minutes
-
-# A claude started from inside the session (a `claude -p` the lead's Bash
-# tool ran) inherits the contract and would be told to update the narrative,
-# which is the lead's job; it would also spend the lead's cooldown. A front
-# end that walked in carries no launch pid and is not a nested child.
-if command -v cs_is_nested_child >/dev/null 2>&1 && cs_is_nested_child; then
-    echo '{"decision": "approve"}'
-    exit 0
-fi
-
-CURRENT_TIME=$(date +%s)
-
-# Cooldown: don't nag if we reminded recently
-if [ -f "$COOLDOWN_FILE" ]; then
-    # The stamp is data whatever wrote it: the Bash tool reaches the .cs root
-    # without the permission hook, and arithmetic runs a command substitution
-    # held in an operand. Anything but a plain number reads as 0, a reminder
-    # long past.
-    LAST_REMINDER=$(_num_or "$(cat "$COOLDOWN_FILE" 2>/dev/null | tr -d '[:space:]')" 0)
-    ELAPSED=$((CURRENT_TIME - LAST_REMINDER))
-    if [ "$ELAPSED" -lt "$COOLDOWN_SECONDS" ]; then
-        echo '{"decision": "approve"}'
-        exit 0
-    fi
-fi
-
-# Per-actor narratives: track the most recently modified narrative.*.md, and
-# note any that has outgrown its byte budget. The same stat pass serves both.
-NARRATIVE_FILE=""
-NARRATIVE_MTIME=0
-# The budget and its validation come from cs-shared.sh; without the library
-# the budget is unknown and the size check is skipped (SessionStart names the
-# missing library; a Stop hook has no channel for it). The mtime pass still runs.
-NARRATIVE_MAX=""
-if command -v _narrative_budget >/dev/null 2>&1; then
-    NARRATIVE_MAX=$(_narrative_budget "${CS_NARRATIVE_MAX_BYTES:-}" "$CS_NARRATIVE_MAX_DEFAULT")
-fi
-NARRATIVE_OVER=""
-for _nf in "$META_DIR"/memory/narrative*.md; do
-    [ -f "$_nf" ] || continue
-    # GNU stat is asked first and BSD second, by which one answers rather than
-    # by OSTYPE: Homebrew's coreutils can put GNU stat ahead of the system's on
-    # a Mac, and GNU `stat -f` prints the file system's details, not the mtime.
-    _m=$(_num_or "$(stat -c %Y "$_nf" 2>/dev/null || stat -f %m "$_nf" 2>/dev/null)" 0)
-    if [ "$_m" -ge "$NARRATIVE_MTIME" ]; then
-        NARRATIVE_MTIME="$_m"
-        NARRATIVE_FILE="$_nf"
-    fi
-    _sz=$(wc -c < "$_nf" 2>/dev/null | tr -d ' ' || echo 0)
-    case "$_sz" in ''|*[!0-9]*) _sz=0 ;; esac
-    if [ -n "$NARRATIVE_MAX" ] && [ "$_sz" -gt "$NARRATIVE_MAX" ]; then
-        NARRATIVE_OVER="${NARRATIVE_OVER} $(_cs_plain_name "$(basename "$_nf")" 160) is $((_sz / 1024)) KB, over the $((NARRATIVE_MAX / 1024)) KB budget — if it is yours, run \`cs -narrative rotate\` before appending."
-    fi
-done
-
-# Nothing to nag about until a narrative file exists
-if [ -z "$NARRATIVE_FILE" ]; then
-    echo '{"decision": "approve"}'
-    exit 0
-fi
-
-# Recently updated — no reminder needed
-NARRATIVE_AGE=$((CURRENT_TIME - NARRATIVE_MTIME))
-if [ "$NARRATIVE_AGE" -lt "$COOLDOWN_SECONDS" ]; then
-    echo '{"decision": "approve"}'
-    exit 0
-fi
-
-# The council advisor nudge rides the narrative reminder rather than taking its
-# own Stop entry: the Stop hook has one emit slot, so a second registration
-# would compete with this one instead of composing with it.
-#
-# It suggests and never sends. A digest of the conversation goes to third-party
-# providers, and nothing a hook can read tells it whose words it holds — inside
-# a subagent the ambient session id names the parent. The consent belongs to a
-# turn that can ask a human, so the nudge asks the model to ask.
-ADVISOR_NUDGE=""
-# .cs/local/, not the session root: this is per-machine state, and every
-# session already gitignores that directory. A stamp at the root would ride
-# into a git-synced session and conflict between machines.
-ADVISOR_COOLDOWN_FILE="$META_DIR/local/.advisor-nudge-cooldown"
-ADVISOR_COOLDOWN_SECONDS=1800  # 30 minutes: a standing reminder, not a nag
-
-# $1 is the installed_plugins.json key prefix, $2 a command file the plugin
-# must still carry on disk.
-_plugin_is_installed() {
-    local record path
-    # HOME can be unset, and a bare expansion under `set -u` aborts the hook
-    # before it emits, losing the reminder entirely.
-    record="${CLAUDE_CONFIG_DIR:-${HOME:-/nonexistent}/.claude}/plugins/installed_plugins.json"
-    [ -r "$record" ] || return 1
-    command -v jq >/dev/null 2>&1 || return 1
-    # Every entry under any marketplace, not just [0] of the hex one: a plugin
-    # carries one record per scope in no guaranteed order, and the docs promise
-    # "when the plugin is present" rather than "when it came from one source".
-    # installPath is read rather than computed — a computed path goes stale on
-    # the next update.
-    while IFS= read -r path; do
-        [ -n "$path" ] || continue
-        # The record outlives an uninstall, so the command file decides, not
-        # the record: naming a command the user cannot run is worse than silence.
-        [ -f "$path/$2" ] && return 0
-    done <<EOF
-$(jq -r --arg k "$1" '(.plugins // {}) | to_entries[]
-         | select(.key | startswith($k))
-         | .value[]?.installPath // empty' "$record" 2>/dev/null | tr -d '\r')
-EOF
-    return 1
-}
-
-# Lead only. A tmux teammate is a full claude in the same directory with its
-# own Stop, and the cooldown is one stamp for the session: an ungated nudge
-# lets a teammate consume the lead's slot, and in a walk-away run the lead can
-# stop seeing the suggestion altogether.
-if _mail_is_lead; then
-    _has_council=0; _has_codex=0
-    _plugin_is_installed "claude-council@" "commands/advise.md" && _has_council=1
-    _plugin_is_installed "codex@" "commands/review.md" && _has_codex=1
-    if [ "$((_has_council + _has_codex))" -gt 0 ]; then
-        _adv_last=0
-        if [ -f "$ADVISOR_COOLDOWN_FILE" ]; then
-            _adv_last=$(_num_or "$(cat "$ADVISOR_COOLDOWN_FILE" 2>/dev/null | tr -d '[:space:]')" 0)
-            _adv_last=$((10#$_adv_last))
-        fi
-        if [ "$((CURRENT_TIME - _adv_last))" -ge "$ADVISOR_COOLDOWN_SECONDS" ]; then
-            cs_write_atomic "$ADVISOR_COOLDOWN_FILE" echo "$CURRENT_TIME" || true
-            # One note and one cooldown slot however many channels are present:
-            # two independent nudges would double the appended text and race
-            # the same stamp.
-            ADVISOR_NUDGE=" Standing note: at a real decision point — about to commit to an approach, stuck after repeated attempts, or about to call the work done — a second opinion is available."
-            if [ "$_has_council" -eq 1 ]; then
-                ADVISOR_NUDGE="$ADVISOR_NUDGE \`/claude-council:advise\` puts this conversation to external models; it sends a digest to third-party providers, so ask the user before running it and show them what would go."
-            fi
-            if [ "$_has_codex" -eq 1 ]; then
-                # review and adversarial-review carry disable-model-invocation,
-                # so they are the user's to type; offer them, never run them.
-                ADVISOR_NUDGE="$ADVISOR_NUDGE Offer \`/codex:review\` before calling built work done — the user runs it, you cannot. \`/codex:rescue\` is yours to invoke when genuinely stuck."
-            fi
-            ADVISOR_NUDGE="$ADVISOR_NUDGE You judge whether the moment qualifies; most turns do not."
-        fi
-    fi
-fi
-
-# Update cooldown marker and remind
-cs_write_atomic "$COOLDOWN_FILE" echo "$CURRENT_TIME" || true
-
-# Sessions whose .cs/ is tracked were committing once per narrative append —
-# 328 such commits in one repo, 74 in a single day, burying the project's own
-# history. The session protocol's cs:session-commits section states the rule
-# (nothing commits files under .cs/ unless the user asks), and it rides on
-# THIS string as well, because the protocol is read
-# once at startup and is a hundred turns stale by the time an append happens;
-# the reminder fires at the append itself. It is
-# unconditional on purpose: testing whether .cs/ is tracked would be cheap here,
-# but the advice is inert rather than wrong where it is gitignored, and a
-# condition the model must evaluate is one it will not.
-COMMIT_CADENCE=" Never commit narrative appends or anything else under .cs/ on your own, not even beside a project change: cs commits files under .cs/ only in the commit that creates a session and the merge /finish makes, and you commit them only when the user asks. Never push a commit that holds narrative appends unless the user asks. Uncommitted appends are safe — autosave snapshots every edit to a shadow ref."
-
-# .cs/memory is tracked, so a clone chooses the narrative's file name: it is
-# printed as a plain name.
-NARRATIVE_SHOWN="$META_DIR/memory/$(_cs_plain_name "${NARRATIVE_FILE##*/}" 160)"
-REASON="Narrative check. Update only your own narrative (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Newest on disk is $NARRATIVE_SHOWN. (1) If recent work disproved or superseded one of your entries, append a dated correction that names it — never rewrite or delete earlier sections. (2) Append any new findings as plain dated notes. If nothing needs changing, say so in one line and stop.${COMMIT_CADENCE}${NARRATIVE_OVER}${ADVISOR_NUDGE}"
-
-jq -nc --arg r "$REASON" '{decision: "block", reason: $r}'
-
+echo '{"decision": "approve"}'
 exit 0

@@ -604,6 +604,21 @@ assert_output_not_contains() {
     fi
 }
 
+# The text of the one notice stop-notices.sh printed: its output must be exactly
+# one {"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":<text>}}
+# and nothing else. Any other output, a block or approve decision among it,
+# prints "not a notice" alone, so neither an exact nor a contains assert on the
+# text can pass on it; the output itself goes to stderr for the failure log.
+stop_notice_text() {  # hook output
+    jq -sre 'if length == 1 and (.[0] | type) == "object"
+                and (.[0] | keys) == ["hookSpecificOutput"]
+                and (.[0].hookSpecificOutput | keys) == ["additionalContext", "hookEventName"]
+                and .[0].hookSpecificOutput.hookEventName == "Stop"
+                and (.[0].hookSpecificOutput.additionalContext | type) == "string"
+             then .[0].hookSpecificOutput.additionalContext else error end' <<< "$1" 2>/dev/null \
+        || { printf 'not a notice'; printf '    hook output: %s\n' "$1" >&2; }
+}
+
 # --- Terminal Helpers ---
 
 # Run a command with a real pty on stdout and stderr, for the code paths gated

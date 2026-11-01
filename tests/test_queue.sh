@@ -1421,16 +1421,20 @@ test_drain_completion_asks_for_debrief() {
 
 
 test_drain_narrative_reminder_scopes_to_own() {
-    # With no queue the hook falls through to the narrative nag. In a shared session
-    # the newest narrative may belong to a teammate, so the reminder must scope edits
-    # to the actor's OWN narrative and never target a teammate's notebook.
+    # With no queue the drain approves the stop and stop-notices.sh, the Stop
+    # hook beside it, hands over the narrative reminder. In a shared session
+    # the newest narrative may belong to a teammate, so the reminder must scope
+    # edits to the actor's OWN narrative and never target a teammate's notebook.
     mkdir -p "$CLAUDE_SESSION_META_DIR/memory"
     printf '# narrative\n' > "$CLAUDE_SESSION_META_DIR/memory/narrative.colleague.md"
     touch -t 202001010000 "$CLAUDE_SESSION_META_DIR/memory/narrative.colleague.md"
-    local out; out=$(drain)
-    assert_output_contains "$out" '"block"' "stale narrative blocks with a reminder" || return 1
-    assert_output_contains "$out" "cs -whoami" "reminder tells the agent how to resolve its own actor" || return 1
-    assert_output_contains "$out" "teammate" "reminder must warn against editing a teammate's narrative" || return 1
+    assert_eq '{"decision": "approve"}' "$(drain)" "with no queue the drain approves the stop" || return 1
+    local text
+    text=$(stop_notice_text "$(printf '{}\n' | CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" \
+        bash "$HOOKS_DIR/stop-notices.sh" 2>/dev/null)")
+    assert_output_contains "$text" "^Narrative check\. " "a stale narrative gets the reminder, as additionalContext" || return 1
+    assert_output_contains "$text" "run \`cs -whoami\` if unsure which actor you are" "reminder tells the agent how to resolve its own actor" || return 1
+    assert_output_contains "$text" "never edit a teammate's narrative" "reminder must warn against editing a teammate's narrative" || return 1
 }
 
 run_test test_drain_works_after_legacy_conversion
