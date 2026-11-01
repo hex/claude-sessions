@@ -4,10 +4,10 @@
 // ABOUTME: cs-panel mod: bare /cs (and /cs-panel) opens a pane of cs's settings, its mods' /config rows and its CS_* settings, under a filter field, and changes one per Enter or resets one file's.
 // ABOUTME: The only effects of the mod: its hooks, its module state, the cs runs, $.config.set, and the tables of every line it hands the engine.
 import type { EngineInterface, On } from 'claude-code'
-import { drawPane, FILTER, noteOf, ringBack, ringOf, WORDS, type Handlers, type PanelView } from './draw'
+import { CONFIRM, drawPane, FILTER, isChooserKey, noteOf, optionKey, RESET, ringBack, ringOf, WORDS, type Chooser, type Handlers, type PanelView } from './draw'
 import {
-  filterLines, isModProvider, isRowId, labelOf, linesOf, lockOf, modChange, modRowsOf, parseSettings, resetArgv, resetChange, settingChange, shownOf, WHERE, writeArgv,
-  type Ask, type Line, type ModRow, type Pending, type ResetAsk, type RowId, type Scope, type Setting,
+  changeOf, filterLines, isModProvider, isRowId, labelOf, linesOf, lockOf, modRowsOf, parseSettings, resetArgv, shownOf, writeArgv, writesTo,
+  type Answer, type Change, type Line, type ModRow, type Pending, type RowId, type Scope, type Setting,
 } from './settings'
 
 declare const h: any
@@ -35,25 +35,6 @@ export const REPLIES = {
   failed: (reason: string) => `The panel did not start: ${reason}`,
 } as const
 
-// `values` is every value a choice takes when the labels cannot hold them, so
-// one past the labels can be typed. A setting and a /config row ask alike.
-const what = (label: string, key: string, values: readonly string[]) =>
-  `What should ${label} (${key}) be?${values.length === 0 ? '' : ` It takes ${values.join(', ')}.`} Pick one, or type a value under Other.`
-const fileOf = (scope: Scope) => scope === 'machine' ? "this machine's file" : "this session's file"
-// After a setting's question: the file its answers write, and what an off
-// flag's Turn label sets. The reset's question: how many settings each file it
-// offers overrides, then what no reset touches, the shell's exports while one
-// overrides a setting and the mod rows while any is listed.
-export const ASKS = {
-  header: 'cs', setting: what, mod: what,
-  writes: (scope: Scope) => `It writes ${fileOf(scope)}.`,
-  sets: (label: string, key: string, value: string) => `${label} sets ${key}=${value}.`,
-  where: (label: string, key: string, value: string) => `Where should ${label} (${key}) be ${value}?`,
-  reset: (files: ResetAsk['files'], hasShell: boolean, hasMods: boolean) => [
-    `Remove every override from this file? This removes ${files.map(f => `${WORDS.overrides(f.overrides)} from ${fileOf(f.scope)}`).join(', or ')}.`,
-    ...(hasShell ? ["Your shell's exports stay."] : []), ...(hasMods ? ['Mod rows keep their values.'] : [])].join(' '),
-} as const
-
 export const TOASTS = {
   // cs's own reply to a write or a reset: what it changed, where, and when it applies.
   written: (line: string) => line,
@@ -63,11 +44,9 @@ export const TOASTS = {
   // `why` is runCs's (`exited <code>: <cs's own line>`) or a config.set deny.
   refused: (key: string, why: string) => `${key} not changed: ${why}`,
   modSaved: (key: string, value: string, plugin: string) => `${key}=${value} in /config: ${plugin} reloads with it`,
-  notNumber: (label: string, answer: string) => `${label} takes a number; got ${answer}`,
+  notNumber: (label: string, text: string) => `${label} takes a number; got ${text}`,
   notNow: (name: string) => `${name} is still changing, or no longer listed; try again`,
   readOnly: (label: string, why: string) => `${label}: ${why}`,
-  // Enter while one of the pane's dialogs waits for an answer.
-  dialogOpen: 'answer the open dialog first (Esc closes it)',
 } as const
 
 // Lines the pane draws above the rows when a source is stale or missing.
@@ -110,9 +89,10 @@ let filter = ''
 let pending = new Map<RowId, Pending>()
 let reading = false
 let readAgain = false
-// Whether one of the pane's dialogs is open: the engine draws one at a time
-// and queues the next, so while it is open Enter opens none.
-let isAsking = false
+// What the pane asks in place, and the file the scope line names; both close
+// with the pane.
+let chooser: Chooser | undefined
+let scope: Scope = 'session'
 let isOpen = false
 let registered = false
 // Where the focus ring is, for ringBack: `drawn` is the last drawing's keys in
@@ -120,10 +100,15 @@ let registered = false
 // undefined while the pane does not hold the keys.
 let drawn: readonly string[] = []
 let ring: { key: string; at: number } | undefined
+// The last drawing's room, so a window move reads the drawing the state makes
+// now, even before the engine draws it.
+type Room = Pick<PanelView, 'columns' | 'bodyRows' | 'hasField'>
+let room: Room | undefined
 
 export function register(on: On) {
   launch = undefined; version = undefined; settings = undefined; answered = undefined; mods = undefined; settingsProblem = undefined; modsProblem = undefined
-  selected = undefined; filter = ''; pending = new Map(); reading = false; readAgain = false; isAsking = false; isOpen = false; registered = false; drawn = []; ring = undefined
+  selected = undefined; filter = ''; pending = new Map(); reading = false; readAgain = false; chooser = undefined; scope = 'session'; isOpen = false; registered = false
+  drawn = []; ring = undefined; room = undefined
 
   // /cs-panel, once per load. Nothing opens here: the panel opens only when
   // asked.
@@ -157,8 +142,8 @@ export function register(on: On) {
     if (!isOpen) $.clock.after(0, () => inBackground($, resume($)))
     launch ??= await readLaunch($)
     // The mobile app's element table holds an Input at run time, but the app draws none.
-    const view: PanelView = { lines: currentLines(), selected, problems: problems(), session: launch?.self, version, update: launch?.update, columns: e.props.bodyColumns,
-      bodyRows: e.props.scroll.bodyRows, filter, hasField: e.surface !== 'mobile' }
+    room = { columns: e.props.bodyColumns, bodyRows: e.props.scroll.bodyRows, hasField: e.surface !== 'mobile' }
+    const view = viewIn(room)
     const next = ringOf(view)
     drawn = next.keys
     if (!e.props.isFocused) ring = undefined
@@ -168,7 +153,8 @@ export function register(on: On) {
   })
 
   // Selection follows the focus ring: Tab or an arrow landing on a row selects
-  // it, so the card names that row before Enter. The ring moves first; a ring
+  // it, so the card names that row before Enter, and one landing on the open
+  // chooser's element marks it the chooser's. The ring moves first; a ring
   // moved to the field keeps the selection. Every move, the mod's own
   // included, records where the ring now is.
   on('ui.focus', { requestId: PANE }, async ($, e, next) => {
@@ -176,13 +162,23 @@ export function register(on: On) {
     if (moved.deny !== undefined) return moved
     ring = e.element === undefined ? undefined : { key: e.element, at: drawn.indexOf(e.element) }
     if (e.element !== undefined && isRowId(e.element) && lineOf(e.element) !== undefined) select($, e.element)
+    const at = e.element === undefined ? -1 : chooserKeys().indexOf(e.element)
+    if (chooser?.kind === 'row' && at >= 0 && at !== chooser.at) { chooser = { ...chooser, at }; $.ui.invalidate('ui.render') }
     return moved
   })
 
-  // An arrow, the wheel or a page key moves the selection `e.by` of the rows the
-  // filter shows (the pane windows its own), Up from the first to the field; the
-  // ring at no place (-1) has the next drawing put it there.
+  // An arrow, the wheel or a page key moves the ring `e.by` of the open
+  // chooser's elements, held to its ends; with none open, the selection `e.by`
+  // of the rows the filter shows (the pane windows its own), Up from the first
+  // to the field. The ring at no place (-1) has the next drawing put it there.
   on('ui.scroll', { requestId: PANE }, async ($, e, next) => {
+    const keys = chooserKeys()
+    if (chooser?.kind === 'row' && keys.length > 0) {
+      const at = Math.min(keys.length - 1, Math.max(0, chooser.at + e.by))
+      const key = keys[at]
+      if (at !== chooser.at && key !== undefined) { chooser = { ...chooser, at }; ring = { key, at: -1 }; $.ui.invalidate('ui.render') }
+      return {}
+    }
     const ids = shownIds()
     if (ids.length === 0) return next(e)
     const at = selected === undefined ? 0 : Math.max(0, ids.indexOf(selected))
@@ -193,12 +189,12 @@ export function register(on: On) {
   })
 
   // Closing the pane (Esc, its mark, a plugin) stops its reads and forgets the
-  // ring and the filter, which close with it; a close another hook refused
-  // leaves them. Rows stay, so a reopen draws the last answer at once and the
-  // first read replaces it.
+  // ring, the filter, what the pane asks in place and the scope line's file,
+  // which close with it; a close another hook refused leaves them. Rows stay,
+  // so a reopen draws the last answer at once and the first read replaces it.
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const closed = await next(e)
-    if (closed.deny === undefined) { isOpen = false; ring = undefined; filter = '' }
+    if (closed.deny === undefined) { isOpen = false; ring = undefined; filter = ''; chooser = undefined; scope = 'session' }
     return closed
   })
 
@@ -332,6 +328,17 @@ function currentLines(): Line[] | undefined {
   return linesOf(mods ?? [], settings ?? [], pending, WORDS.modsGroup)
 }
 
+// The view the state draws in `r`.
+function viewIn(r: Room): PanelView {
+  return { lines: currentLines(), selected, problems: problems(), session: launch?.self, version, update: launch?.update, ...r, filter, chooser, scope }
+}
+
+// The open chooser's elements in ring order as the state draws them now; none
+// before the first drawing or while no chooser is drawn.
+function chooserKeys(): string[] {
+  return room === undefined ? [] : ringOf(viewIn(room)).keys.filter(isChooserKey)
+}
+
 // The rows the filter shows, top to bottom.
 function shownIds(): RowId[] {
   return filterLines(currentLines() ?? [], filter).flatMap(l => l.kind === 'row' ? [l.row.id] : [])
@@ -348,42 +355,88 @@ async function refocus($: EngineInterface, key: string): Promise<void> {
   await $.ui.focus({ requestId: PANE, key })
 }
 
+// A row's chooser draws under the selected row, so selecting another closes it.
 function select($: EngineInterface, id: RowId): void {
   if (id === selected) return
   selected = id
+  if (chooser?.kind === 'row') chooser = undefined
+  $.ui.invalidate('ui.render')
+}
+
+// The ring sent by the next drawing to `key`, and what the pane asks in place.
+function ask($: EngineInterface, next: Chooser | undefined, key: string | undefined): void {
+  chooser = next
+  if (key !== undefined) ring = { key, at: -1 }
   $.ui.invalidate('ui.render')
 }
 
 function handlers($: EngineInterface): Handlers {
   return {
-    change: id => inBackground($, change($, id)),
-    filter: text => { if (text !== filter) { filter = text; $.ui.invalidate('ui.render') } },
+    change: id => inBackground($, change($, id, { kind: 'row' })),
+    pick: (id, key) => inBackground($, change($, id, { kind: 'choice', key })),
+    // Kept so a redraw before Enter keeps what was typed; the field shows it already.
+    type: text => { if (chooser?.kind === 'row') chooser = { ...chooser, text } },
+    submit: (id, text) => inBackground($, change($, id, { kind: 'field', text })),
+    filter: text => { if (text !== filter) { filter = text; if (chooser?.kind === 'row') chooser = undefined; $.ui.invalidate('ui.render') } },
     toRows: () => { const first = shownIds()[0]; if (first !== undefined) { select($, first); inBackground($, refocus($, first)) } },
-    reset: () => inBackground($, resetSettings($)),
+    reset: () => askReset($),
+    confirm: () => inBackground($, resetSettings($)),
+    keep: () => ask($, undefined, RESET),
+    scope: next => { if (next !== scope) { scope = next; $.ui.invalidate('ui.render') } },
   }
 }
 
-// Enter on a row. Enter is refused with a toast while a dialog is open, and
-// when the row, looked up afresh, waits on a change or is gone (a drawing
-// older than the last read or the row's claim), or says why when no dialog
-// changes it. The row is claimed before the first await, so a second Enter
-// finds it waiting; whatever happens, it is released and both sources are
-// read again.
-async function change($: EngineInterface, id: RowId): Promise<void> {
-  if (isAsking) { $.ui.toast(TOASTS.dialogOpen); return }
+// Enter on a row, Enter on one of its chooser's choices, or Enter in its
+// chooser's field.
+type Entry = { kind: 'row' } | { kind: 'choice'; key: string } | { kind: 'field'; text: string }
+
+// What an entry asks of the row's change as it stands: its chooser opened, an
+// answer, or nothing it offers now (a drawing older than the last read).
+function answerOf(change: Change, entry: Entry): Answer | 'choose' | undefined {
+  switch (entry.kind) {
+    case 'row': return change.kind === 'now' ? change.answer : 'choose'
+    case 'choice': return change.kind === 'choose' ? change.choices.find(c => optionKey(c.label) === entry.key)?.answer : undefined
+    case 'field': return change.kind === 'choose' ? change.field?.read(entry.text) : undefined
+  }
+}
+
+// An entry on a row. It is refused with a toast when the row, looked up afresh,
+// waits on a write or is gone, or a choice comes from a chooser no longer open
+// on it (a drawing older than the last read or the row's claim), and says why
+// when nothing changes the row. Enter opens the row's chooser with the ring on
+// its first element, or makes its one change at once; a choice closes the
+// chooser and makes its own. A write claims the row before its first await,
+// so a second Enter finds it waiting; whatever happens, it is released and
+// both sources are read again.
+async function change($: EngineInterface, id: RowId, entry: Entry): Promise<void> {
   const line = lineOf(id)
-  if (line === undefined || line.pending !== undefined) { $.ui.toast(TOASTS.notNow(id.slice(id.indexOf(':') + 1))); return }
+  const isOffered = entry.kind === 'row' || (chooser?.kind === 'row' && chooser.id === id)
+  if (line === undefined || line.pending !== undefined || !isOffered) { $.ui.toast(TOASTS.notNow(id.slice(id.indexOf(':') + 1))); return }
   const hasSelf = launch?.self !== undefined
   if (lockOf(line.row, hasSelf) !== undefined) { $.ui.toast(TOASTS.readOnly(labelOf(line.row), noteOf(line.row, hasSelf))); return }
   select($, id)
-  pending.set(id, 'asking')
+  const plan = changeOf(line.row, writesTo(scope, hasSelf))
+  const answer = answerOf(plan, entry)
+  if (answer === 'choose') {
+    // Set first, so the keys read are the ones it draws.
+    chooser = { kind: 'row', id, text: plan.kind === 'choose' ? plan.field?.value ?? '' : '', at: 0 }
+    ask($, chooser, chooserKeys()[0])
+    return
+  }
+  ask($, undefined, undefined)
+  if (answer === undefined) { $.ui.toast(TOASTS.notNow(id.slice(id.indexOf(':') + 1))); return }
+  switch (answer.kind) {
+    case 'keep': return
+    case 'notNumber': $.ui.toast(TOASTS.notNumber(answer.label, answer.text)); return
+  }
+  pending.set(id, 'writing')
   $.ui.invalidate('ui.render')
   try {
     // A switch, not a table of functions: the engine refuses `$` handed to a
     // callee it cannot name.
-    switch (line.row.kind) {
-      case 'mod': await changeMod($, line.row.mod, id); break
-      case 'setting': await changeSetting($, line.row.setting, hasSelf, id); break
+    switch (answer.kind) {
+      case 'write': await changeSetting($, answer); break
+      case 'set': await changeMod($, answer); break
     }
   } finally {
     pending.delete(id)
@@ -392,67 +445,38 @@ async function change($: EngineInterface, id: RowId): Promise<void> {
   }
 }
 
-// settingChange's dialog answered, or a flip's answer, then the Where dialog
-// when the answer asks it, then one cs write. cs's reply is the toast, so the
-// panel keeps no copy of cs's checks.
-async function changeSetting($: EngineInterface, s: Setting, hasSelf: boolean, id: RowId): Promise<void> {
-  const plan = settingChange(s, hasSelf)
-  const answer = plan.kind === 'now' ? plan.answer : await asked($, [ASKS.setting(s.label, s.key, plan.values), ...(plan.writes === undefined ? [] : [ASKS.writes(plan.writes)]),
-    ...(plan.sets === undefined ? [] : [ASKS.sets(plan.sets.label, s.key, plan.sets.value)])].join(' '), plan)
-  if (answer === undefined || answer.kind === 'keep') return
-  const scope = answer.kind === 'where' ? await asked($, ASKS.where(s.label, s.key, answer.named), WHERE) : answer.scope
-  if (scope === undefined) return
-  pending.set(id, 'writing')
-  $.ui.invalidate('ui.render')
-  const run = await runCs($, writeArgv(scope, launch?.self, s.key, answer.value), { timeoutMs: WRITE_TIMEOUT_MS })
-  $.ui.toast(run.ok ? TOASTS.written(lastLine(run.stdout)) : TOASTS.refused(s.key, run.why))
+// One cs write. cs's reply is the toast, so the panel keeps no copy of cs's
+// checks.
+async function changeSetting($: EngineInterface, write: Extract<Answer, { kind: 'write' }>): Promise<void> {
+  const run = await runCs($, writeArgv(write.scope, launch?.self, write.key, write.value), { timeoutMs: WRITE_TIMEOUT_MS })
+  $.ui.toast(run.ok ? TOASTS.written(lastLine(run.stdout)) : TOASTS.refused(write.key, run.why))
 }
 
-// modChange's plan, answered, then $.config.set: the owner's guard runs (cs's
-// own for cs.*), since this is another plugin's set, and its deny is the
-// toast. The owner reloads with the new value.
-async function changeMod($: EngineInterface, m: ModRow, id: RowId): Promise<void> {
-  const plan = modChange(m)
-  const answer = plan.kind === 'now' ? { kind: 'value', value: plan.value } as const : await asked($, ASKS.mod(m.label, m.key, plan.values), plan)
-  if (answer === undefined || answer.kind === 'keep') return
-  if (answer.kind === 'notNumber') { $.ui.toast(TOASTS.notNumber(m.label, answer.answer)); return }
-  pending.set(id, 'writing')
-  $.ui.invalidate('ui.render')
-  const result = await $.config.set({ key: m.key, value: answer.value })
-  $.ui.toast(result.deny === undefined ? TOASTS.modSaved(m.key, shownOf(result.value), m.plugin) : TOASTS.refused(m.key, result.deny))
+// $.config.set: the owner's guard runs (cs's own for cs.*), since this is
+// another plugin's set, and its deny is the toast. The owner reloads with the
+// new value.
+async function changeMod($: EngineInterface, set: Extract<Answer, { kind: 'set' }>): Promise<void> {
+  const result = await $.config.set({ key: set.key, value: set.value })
+  $.ui.toast(result.deny === undefined ? TOASTS.modSaved(set.key, shownOf(result.value), set.plugin) : TOASTS.refused(set.key, result.deny))
 }
 
-// Enter on the reset control: resetChange's dialog, answered, then one cs run
-// that removes every setting from the file the answer names. Its counts are
-// cs's list's, so before the first list it says so and asks nothing. cs's
-// reply is the toast, and both sources are read again. A press while one runs
-// asks again: cs answers a reset of an emptied file with nothing to reset.
-// While a dialog is open it is refused with a toast, as a row's Enter is.
-async function resetSettings($: EngineInterface): Promise<void> {
-  if (isAsking) { $.ui.toast(TOASTS.dialogOpen); return }
+// Enter on the reset control: its confirmation in the keys' line, the ring
+// sent to confirm. Its counts are cs's list's, so before the first list it
+// says so and asks nothing.
+function askReset($: EngineInterface): void {
   if (settings === undefined) { $.ui.toast(TOASTS.notRead); return }
-  const plan = resetChange(settings, launch?.self !== undefined)
-  const scope = await asked($, ASKS.reset(plan.files, plan.hasShell, mods !== undefined && mods.length > 0), plan)
-  if (scope === undefined) return
-  const run = await runCs($, resetArgv(scope, launch?.self), { timeoutMs: WRITE_TIMEOUT_MS })
+  ask($, { kind: 'reset' }, CONFIRM)
+}
+
+// Enter on confirm: the keys' line back, then one cs run that removes every
+// setting from the file the scope line names. cs's reply is the toast, and
+// both sources are read again. A confirm from a drawing older than the last
+// one runs again: cs answers a reset of an emptied file with nothing to reset.
+async function resetSettings($: EngineInterface): Promise<void> {
+  ask($, undefined, RESET)
+  const run = await runCs($, resetArgv(writesTo(scope, launch?.self !== undefined), launch?.self), { timeoutMs: WRITE_TIMEOUT_MS })
   $.ui.toast(run.ok ? TOASTS.written(lastLine(run.stdout)) : TOASTS.notReset(run.why))
   await refresh($)
-}
-
-// The plan's dialog, read; undefined when dismissed (the person chose to
-// leave it) or when no one can be asked, as in a -p run. Every dialog the
-// pane opens goes through here, so isAsking holds while one is open.
-async function asked<A>($: EngineInterface, question: string, plan: Ask<A>): Promise<A | undefined> {
-  let answer: string
-  isAsking = true
-  try {
-    answer = await $.ui.ask(question, { header: ASKS.header, options: plan.options })
-  } catch {
-    return undefined
-  } finally {
-    isAsking = false
-  }
-  return plan.read(answer)
 }
 
 // Work nothing awaits (a timer's, a press's) reports a failure in the
