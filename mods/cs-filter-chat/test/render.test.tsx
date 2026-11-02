@@ -4,10 +4,19 @@ import { expect, test } from 'claude-code/testing'
 import type { On, PromptOrigin } from 'claude-code'
 import { YOU_INKS } from '../hooks/settings'
 
+/** No pin and no machine file; the launch named this session alpha. */
+function launchEnv(on: On) {
+  on('env.get', { name: 'CS_FILTER_CHAT' }, () => ({ value: undefined }))
+  on('env.get', { name: 'XDG_CONFIG_HOME' }, () => ({ value: undefined }))
+  on('env.get', { name: 'HOME' }, () => ({ value: undefined }))
+  on('env.get', { name: 'CLAUDE_SESSION_NAME' }, () => ({ value: 'alpha' }))
+}
+
 /** A cs session whose filter chat file says on and which cs trusts. */
 function session(on: On) {
-  on('session.cwd', () => ({ value: '/session' }))
-  on('fs.read', ($, e) => e.path.endsWith('/filter-chat') ? { value: 'on\n' } : { deny: 'ENOENT: no such file or directory' })
+  launchEnv(on); on('session.cwd', () => ({ value: '/session' }))
+  on('fs.read', ($, e) => e.path.endsWith('/.cs/local/config') ? { value: 'CS_FILTER_CHAT=1\n' } : { deny: 'ENOENT: no such file or directory' })
+  on('fs.exists', () => ({ value: true }))
   on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
 }

@@ -334,9 +334,8 @@ test_doctor_warns_on_mod_tips_drift() {
         "a tips file the installer never copied is drift" || return 1
 }
 
-# A mod the installer keeps out (CS_MODS_KEPT_OUT, cs-filter-chat) is never deployed,
-# so its source is not drift: no "not deployed" row names it.
-test_doctor_drift_skips_a_kept_out_mod() {
+# cs-filter-chat ships, so its source is drift until the installer has deployed it.
+test_doctor_drift_holds_cs_filter_chat_to_its_deployed_copy() {
     local checkout="$TEST_TMPDIR/keptmodco" deployed="$TEST_TMPDIR/keptmoddep" skills="$TEST_TMPDIR/keptmodskills"
     make_fake_checkout "$checkout" "$deployed"
     mkdir -p "$checkout/mods/cs/hooks" "$checkout/mods/cs-filter-chat/hooks" "$skills/cs/hooks"
@@ -345,8 +344,11 @@ test_doctor_drift_skips_a_kept_out_mod() {
     echo 'export const FILTER_CHAT = 1' > "$checkout/mods/cs-filter-chat/hooks/register.tsx"
     local output
     output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" CS_SKILLS_DIR="$skills" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "Deploy drift" "the scan ran to its verdict" || return 1
-    assert_output_not_contains "$output" "Mod drift" "the kept-out mod is not drift" || return 1
+    assert_output_contains "$output" "Mod drift: not deployed: cs-filter-chat/hooks/register.tsx" "an undeployed filter chat file is drift" || return 1
+    mkdir -p "$skills/cs-filter-chat/hooks"
+    cp "$checkout/mods/cs-filter-chat/hooks/register.tsx" "$skills/cs-filter-chat/hooks/register.tsx"
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" CS_SKILLS_DIR="$skills" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "Mod drift" "the deployed copy is not drift" || return 1
 }
 
 test_doctor_drift_skipped_outside_checkout() {
@@ -1618,7 +1620,7 @@ run_test test_doctor_warns_on_undeployed_hook
 run_test test_doctor_drift_silent_when_in_sync
 run_test test_doctor_warns_on_mod_drift
 run_test test_doctor_warns_on_mod_tips_drift
-run_test test_doctor_drift_skips_a_kept_out_mod
+run_test test_doctor_drift_holds_cs_filter_chat_to_its_deployed_copy
 run_test test_doctor_drift_skipped_outside_checkout
 run_test test_doctor_warns_on_command_drift
 run_test test_doctor_warns_on_skill_script_drift

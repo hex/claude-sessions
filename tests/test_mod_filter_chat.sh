@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Tests for the cs-filter-chat mod under mods/cs-filter-chat (a Claude Code function-hooks plugin that restyles the chat per session).
-# ABOUTME: Pins the manifest, keeps the mod out of the installer, lints the hook source, and runs plugin validate, tsc and the engine test kit when claude is present.
+# ABOUTME: Pins the manifest, holds the installer to the mod's files, lints the hook source, and runs plugin validate, tsc and the engine test kit when claude is present.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
@@ -25,7 +25,7 @@ test_mod_manifest_names_the_plugin_and_its_module_and_declares_no_state() {
     assert_eq "false" "$(jq 'has("types")' "$manifest")" "no state types" || return 1
 }
 
-# No install switch (ruling 1): the on/off is the session's .cs/local/filter-chat,
+# No install switch (ruling 1): the on/off is the cs setting CS_FILTER_CHAT,
 # never a /config row. The one /config row is the you ink, a pick of the theme
 # keys settings.ts YOU_INKS lists (the mod throws on a manifest option it
 # lacks), remember by default.
@@ -38,19 +38,13 @@ test_mod_manifest_declares_one_config_row_the_you_ink() {
     assert_eq "$code" "$(jq -r '.userConfig.youInk.options | join(",")' "$manifest")" "the manifest's options are YOU_INKS, in order" || return 1
 }
 
-# Filter chat is experimental: the mod's source stays here, and the installer,
-# which lists every mod file it deploys (cs-mermaid's among them), lists none
-# of cs-filter-chat's.
-test_mod_is_kept_out_of_the_installer() {
+# The installer lists every mod file it deploys, each of cs-filter-chat's among them.
+test_mod_is_listed_by_the_installer() {
     local file
     for file in .claude-plugin/plugin.json hooks/hooks.json hooks/draw.tsx hooks/register.tsx hooks/session.ts hooks/settings.ts hooks/verdict.ts hooks/words.ts; do
         assert_file_exists "$MOD/$file" "the mod has $file" || return 1
+        assert_file_contains "$SCRIPT_DIR/../install.sh" "cs-filter-chat/$file" "install.sh lists $file" || return 1
     done
-    grep -qF "cs-mermaid/hooks/register.tsx" "$SCRIPT_DIR/../install.sh" \
-        || { echo "  FAIL: install.sh lists no mod files to deploy"; return 1; }
-    if grep -qF "cs-filter-chat/" "$SCRIPT_DIR/../install.sh"; then
-        echo "  FAIL: install.sh deploys cs-filter-chat: $(grep -nF "cs-filter-chat/" "$SCRIPT_DIR/../install.sh" | head -1)"; return 1
-    fi
 }
 
 # Nothing filter chat registers awaits across a tool call or a stream, it never
@@ -129,7 +123,7 @@ test_mod_unit_tests_pass_under_the_engine_test_kit() {
 
 run_test test_mod_manifest_names_the_plugin_and_its_module_and_declares_no_state
 run_test test_mod_manifest_declares_one_config_row_the_you_ink
-run_test test_mod_is_kept_out_of_the_installer
+run_test test_mod_is_listed_by_the_installer
 run_test test_mod_source_never_spells_the_refused_events_or_command_run
 run_test test_mod_validate_inventories_the_one_shape
 run_test test_mod_typechecks_against_the_engine_contract

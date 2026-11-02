@@ -100,6 +100,7 @@ const $ = {
       }
       runs.push({ argv, init })
       const r = nextRuns.length > 0 ? nextRuns.shift()! : runResult
+      if (r instanceof Error === false && r.exitCode === 0 && argv[2] === '-config' && argv[3] === 'set') files[`${cwdPath}/.cs/local/config`] = `${argv[4]}=${argv[5]}\n`
       if (r instanceof Error) throw r
       return r
     },
@@ -3461,8 +3462,8 @@ const bandViews: (readonly [string, () => void | Promise<void>, { isWorking?: bo
   ['rotate due', () => { percent = 40 }, {}, view({ entries: buildBandEntries({ ...quiet, rotating: true, wrapping: true }) })],
   ['armed', () => { arm() }, {}, view({ entries: buildBandEntries({ ...quiet, rotating: true, armed: true }) })],
   ['countdown', async () => { arm(); await turnComplete() }, {}, view({ entries: buildBandEntries({ ...quiet, countdown: { seconds: GRACE_SECONDS, ink: OWN }, rotating: true, armed: true }) })],
-  ['filter chat off', () => { enableFilterChat(); files['/work/.cs/local/filter-chat'] = 'off\n' }, {}, view({ entries: buildBandEntries({ ...quiet, filterChat: { on: false, onPress: noPress } }) })],
-  ['filter chat on', () => { enableFilterChat(); files['/work/.cs/local/filter-chat'] = 'on\n' }, {}, view({ entries: buildBandEntries({ ...quiet, filterChat: { on: true, onPress: noPress } }) })],
+  ['filter chat off', () => { enableFilterChat(); files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n' }, {}, view({ entries: buildBandEntries({ ...quiet, filterChat: { on: false, onPress: noPress } }) })],
+  ['filter chat on', () => { enableFilterChat(); files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n' }, {}, view({ entries: buildBandEntries({ ...quiet, filterChat: { on: true, onPress: noPress } }) })],
   ['queue', () => { queueTasks(2) }, {}, view({ entries: buildBandEntries({ ...quiet, waiting: 2 }) })],
   ['running queue', () => { queueTasks(2); files['/work/.cs/local/queue.state'] = 'draining\n' }, {}, view({ entries: buildBandEntries({ ...quiet, queued: 2, queueRunning: true }) })],
   ['gate', async () => { await gateRuns() }, {}, view({ entries: buildBandEntries({ ...quiet, gate: 'finishing fix-auth · gate 3s' }) })],
@@ -3825,7 +3826,7 @@ test('the rail keeps its least, `…N ┃` three cells after the words, while th
   expect(lineAt(typical, 75, REFUSED)).toBe('  ctrl+x 1 rotate   2 wrap · filter chat ●   ▤ run 2 queued tasks   …11 ┆│┃')
   // With the features press too, the mail word drops and the press, cut into its head, leaves: the actions keep the prefix and the rail keeps three bars.
   expect(lineAt(everything, 75, REFUSED)).toBe('  ctrl+x 1 rotate   2 wrap · filter chat ●   ▤ run 2 queued tasks   …11 ┆│┃')
-  // Without the filter chat key, as an install with no cs-filter-chat draws it (docs/hooks.md), the features press stays, shortened, and the rail keeps its least.
+  // Without the filter chat key, as a band with no cs-filter-chat loaded draws it (docs/hooks.md), the features press stays, shortened, and the rail keeps its least.
   const noFilterChat = buildBandEntries({ ...quiet, featured: { label: '3 features · fix-auth ready', onPress: noPress }, rotating: true, wrapping: true, waiting: 2, mail: 1 })
   expect(lineAt(noFilterChat, 75, REFUSED)).toBe('  1 rotate   2 wrap · ▤ run 2 queued tasks   3 features · fix-auth…   …13 ┃')
   // 38 columns: the features press would cut into its head and leaves, the queue press shortens to a cell and `…`, and the rotate and wrap keys lose their words.
@@ -3975,7 +3976,7 @@ const enableFilterChat = () => {
 
 test('the filter chat key toggles this session, answers no chord, and colours its dot green only while on', async () => {
   enableFilterChat()
-  files['/work/.cs/local/filter-chat'] = 'off\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
   percent = 40
   const tree = await band()
   expect(filterChatKey(tree)?.props.label).toBe('filter chat ○')
@@ -3983,22 +3984,23 @@ test('the filter chat key toggles this session, answers no chord, and colours it
   expect(filterChatKey(tree).props.action).toBeUndefined()
   expect(words(tree)).toEqual(['ctrl+x', '1', '   ', '2', ' · ', '○'])
   await filterChatKey(tree).props.onPress()
+  expect(runs.map(run => run.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work'], ['/opt/cs/bin/cs', 'work', '-config', 'set', 'CS_FILTER_CHAT', '1']])
   const on = await band()
   expect(filterChatKey(on).props.label).toBe('filter chat ●')
-  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
   expect(texts(filterChatKey(on)).map(text => [textOf(text), text.props.color])).toEqual([['●', GREEN]])
   expect(ran).toEqual([])
   expect(invalidated).toEqual(['ui.render'])
   await filterChatKey(on).props.onPress()
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=0\n')
   expect(ran).toEqual([])
   expect(invalidated).toEqual(['ui.render', 'ui.render'])
 })
 
 test('the band shares the prefix of bound chords and leaves unbound labels unkeyed', async () => {
   enableFilterChat()
-  files['/work/.cs/local/filter-chat'] = 'off\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
   percent = 40
   bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
   expect(bandWords(await band())).toEqual(['ctrl+x', '1', 'rotate', '   ', '2', 'wrap', ' · ', 'filter chat ○'])
@@ -4008,21 +4010,21 @@ test('the band shares the prefix of bound chords and leaves unbound labels unkey
 
 test('a filter chat press refuses a session whose control files are tracked', async () => {
   enableFilterChat()
-  files['/work/.cs/local/filter-chat'] = 'on\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
   runResult = tracked
   await filterChatKey(await band()).props.onPress()
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
   expect(written).toEqual({})
   expect(runs.map(run => run.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work']])
   expect(toasts).toEqual([`no rotation in this session: ${TRACKED}`])
   expect(invalidated).toEqual(['ui.render'])
   runResult = VETTED
   await filterChatKey(await band()).props.onPress()
-  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=0\n')
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
   await filterChatKey(await band()).props.onPress()
-  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
   expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
 })
 
@@ -4031,7 +4033,7 @@ test('a filter chat press refuses a session whose control files are tracked', as
 // a refused vet keeps the key off until a vet passes or the mod loads again.
 test('a refused session keeps the filter chat key off across prompts, whichever vet refused it', async () => {
   enableFilterChat()
-  files['/work/.cs/local/filter-chat'] = 'on\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
   runResult = tracked
   await startSession()
   expect(runs.map(run => run.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work']])
@@ -4041,89 +4043,97 @@ test('a refused session keeps the filter chat key off across prompts, whichever 
   await filterChatKey(await band()).props.onPress()
   await promptSubmit()
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
   runResult = VETTED
   await filterChatKey(await band()).props.onPress()
-  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=0\n')
   await filterChatKey(await band()).props.onPress()
   expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
 })
 
 test('a filter chat press survives clearing the conversation and loading the band again', async () => {
   enableFilterChat()
-  files['/work/.cs/local/filter-chat'] = 'off\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
   await filterChatKey(await band()).props.onPress()
   sessionId = 'uuid-next'
   files['/work/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
   register(on as any, OPTIONS)
   expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
-  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
-  for (const content of ['', 'o', 'on', 'off\n', 'on\njunk', ' on\n', 'on\r\n']) {
-    files['/work/.cs/local/filter-chat'] = content
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
+  for (const content of ['', 'CS_FILTER_CHAT=0\n', 'CS_FILTER_CHAT_X=1\n', 'CS_FILTER_CHAT=1\nCS_FILTER_CHAT=0\n', 'CS_FILTER_CHAT=yes\n', ' CS_FILTER_CHAT=1\n', 'CS_FILTER_CHAT=1\r\n']) {
+    files['/work/.cs/local/config'] = content
     expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
   }
-  delete files['/work/.cs/local/filter-chat']
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
-  await filterChatKey(await band()).props.onPress()
-  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
+  delete files['/work/.cs/local/config']
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  await filterChatKey(await band()).props.onPress()
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
 })
 
-test('a torn filter chat write redraws its off state and allows another press', async () => {
+test('a cs write that fails toasts cs\'s words, keeps the setting and allows another press', async () => {
   enableFilterChat()
-  files['/work/.cs/local/filter-chat'] = 'on\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
   expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
-  const write = $.fs.write
-  $.fs.write = async path => {
-    files[path] = ''
-    throw new Error('EACCES /work/.cs/local/filter-chat')
-  }
-  try {
-    await filterChatKey(await band()).props.onPress()
-    expect(invalidated).toEqual(['ui.render'])
-    expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-    expect(files['/work/.cs/local/filter-chat']).toBe('')
-    expect(toasts).toEqual(['filter chat update failed: EACCES /work/.cs/local/filter-chat'])
-  } finally {
-    $.fs.write = write
-  }
+  nextRuns = [VETTED, { exitCode: 2, stdout: '', stderr: 'warming up\nError: not changed\n' }]
   await filterChatKey(await band()).props.onPress()
+  expect(invalidated).toEqual(['ui.render'])
   expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
+  expect(toasts).toEqual(['filter chat update failed: Error: not changed'])
+  await filterChatKey(await band()).props.onPress()
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
   expect(invalidated).toEqual(['ui.render', 'ui.render'])
+})
+
+for (const [name, env, seeded, label] of [
+  ['the environment pins on over the session file', { CS_FILTER_CHAT: '1' }, { '/work/.cs/local/config': 'CS_FILTER_CHAT=0\n' }, 'filter chat ●'],
+  ['the environment pins off over the session file', { CS_FILTER_CHAT: '0' }, { '/work/.cs/local/config': 'CS_FILTER_CHAT=1\n' }, 'filter chat ○'],
+  ['the last accepted line of the session file wins', {}, { '/work/.cs/local/config': 'CS_FILTER_CHAT=0\nCS_FILTER_CHAT=1\nCS_FILTER_CHAT=yes\n' }, 'filter chat ●'],
+  ['this machine\'s file answers where the session file says nothing', { XDG_CONFIG_HOME: '/x' }, { '/x/cs/config': 'CS_FILTER_CHAT=1\n' }, 'filter chat ●'],
+  ['the session file off outranks this machine\'s file', { XDG_CONFIG_HOME: '/x' }, { '/work/.cs/local/config': 'CS_FILTER_CHAT=0\n', '/x/cs/config': 'CS_FILTER_CHAT=1\n' }, 'filter chat ○'],
+  ['no file says, so the key reads off', {}, {}, 'filter chat ○'],
+] as const) test(`the filter chat key reads the setting as cs resolves it: ${name}`, async () => {
+  enableFilterChat()
+  Object.assign(envVars, env)
+  Object.assign(files, seeded)
+  expect(filterChatKey(await band()).props.label).toBe(label)
 })
 
 test('duplicate filter chat presses both wait until the one write is ready', async () => {
   enableFilterChat()
-  files['/work/.cs/local/filter-chat'] = 'off\n'
-  const write = $.fs.write
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
+  const run = $.process.run
   let finish = () => {}
-  const writes: [string, string][] = []
-  $.fs.write = async (path, text) => {
-    writes.push([path, text])
-    await new Promise<void>(resolve => { finish = resolve })
-    await write(path, text)
+  const writes: string[][] = []
+  $.process.run = async (argv: string[], init: any) => {
+    if (argv.includes('-config')) {
+      writes.push(argv)
+      await new Promise<void>(resolve => { finish = resolve })
+    }
+    return run(argv, init)
   }
   try {
     const key = filterChatKey(await band())
     let duplicateFinished = false
-    const press = key.props.onPress().then(() => files['/work/.cs/local/filter-chat'])
+    const press = key.props.onPress().then(() => files['/work/.cs/local/config'])
     const duplicate = key.props.onPress().then(() => {
       duplicateFinished = true
-      return files['/work/.cs/local/filter-chat']
+      return files['/work/.cs/local/config']
     })
     await settle()
     expect(duplicateFinished).toBe(false)
-    expect(writes).toEqual([['/work/.cs/local/filter-chat', 'on\n']])
+    expect(writes).toEqual([['/opt/cs/bin/cs', 'work', '-config', 'set', 'CS_FILTER_CHAT', '1']])
     expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
     expect(invalidated).toEqual([])
     finish()
-    expect(await Promise.all([press, duplicate])).toEqual(['on\n', 'on\n'])
+    expect(await Promise.all([press, duplicate])).toEqual(['CS_FILTER_CHAT=1\n', 'CS_FILTER_CHAT=1\n'])
     expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
     expect(invalidated).toEqual(['ui.render'])
     expect(ran).toEqual([])
   } finally {
     finish()
-    $.fs.write = write
+    $.process.run = run
   }
 })
 
@@ -4145,7 +4155,7 @@ test('a non-session redraw does not discover the filter chat command', async () 
 
 test('the filter chat key draws idle and mid-turn, follows command availability and the band ownership gates', async () => {
   enableFilterChat()
-  files['/work/.cs/local/filter-chat'] = 'off\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
   expect(filterChatKey(await band({ isWorking: true })).props.label).toBe('filter chat ○')
   expect(filterChatKey(await band({ hasSurvey: true }))).toBeUndefined()
@@ -4164,7 +4174,7 @@ test('the filter chat key draws idle and mid-turn, follows command availability 
 
 test('filter chat state stays with its session across registration and stale button presses', async () => {
   enableFilterChat()
-  files['/work/.cs/local/filter-chat'] = 'off\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
   const stale = filterChatKey(await band())
   await stale.props.onPress()
   register(on as any, OPTIONS)
@@ -4179,22 +4189,22 @@ test('filter chat state stays with its session across registration and stale but
   realPaths['/other'] = '/other'
   realPaths['/home/.claude-sessions/other'] = '/other'
   files['/other/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
-  files['/other/.cs/local/filter-chat'] = 'off\n'
+  files['/other/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
   register(on as any, OPTIONS)
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
 })
 
 test('a companion filter chat file change appears on the next redraw without reloading', async () => {
   enableFilterChat()
   const stale = filterChatKey(await band())
-  files['/work/.cs/local/filter-chat'] = 'on\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
   expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
-  files['/work/.cs/local/filter-chat'] = 'off\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-  files['/work/.cs/local/filter-chat'] = 'on\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
   await stale.props.onPress()
-  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=0\n')
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
   expect(ran).toEqual([])
 })
@@ -4208,22 +4218,22 @@ test('an unreadable filter chat file leaves the band visible and reports each re
   realPaths['/home/.claude-sessions/ENOENT'] = '/ENOENT'
   files['/ENOENT/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-lead\n'
   const read = $.fs.read
-  let error = 'cs: $.fs.read(/ENOENT/.cs/local/filter-chat) failed: EACCES'
+  let error = 'cs: $.fs.read(/ENOENT/.cs/local/config) failed: EACCES'
   $.fs.read = async path => {
-    if (path === '/ENOENT/.cs/local/filter-chat') throw new Error(error)
+    if (path === '/ENOENT/.cs/local/config') throw new Error(error)
     return read(path)
   }
   try {
     for (let redraw = 0; redraw < 2; redraw++) {
       expect(buttons(await band()).map(button => button.props.label)).toEqual(['rotate', 'wrap', 'filter chat ○'])
     }
-    expect(logs).toEqual(['the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/filter-chat) failed: EACCES'])
-    error = 'cs: $.fs.read(/ENOENT/.cs/local/filter-chat) failed: EISDIR'
+    expect(logs).toEqual(['the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/config) failed: EACCES'])
+    error = 'cs: $.fs.read(/ENOENT/.cs/local/config) failed: EISDIR'
     expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
     expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
     expect(logs).toEqual([
-      'the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/filter-chat) failed: EACCES',
-      'the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/filter-chat) failed: EISDIR',
+      'the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/config) failed: EACCES',
+      'the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/config) failed: EISDIR',
     ])
     expect(toasts).toEqual([])
     expect(written).toEqual({})
@@ -4237,14 +4247,13 @@ test('an unreadable filter chat file leaves the band visible and reports each re
 test('filter chat presses use the local directory even when private storage exists', async () => {
   enableFilterChat()
   existing.add('/work/.cs/private')
-  files['/work/.cs/private/filter-chat'] = 'on\n'
-  files['/work/.cs/local/filter-chat'] = 'off\n'
+  files['/work/.cs/private/config'] = 'CS_FILTER_CHAT=1\n'
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
   await filterChatKey(await band()).props.onPress()
   await filterChatKey(await band()).props.onPress()
-  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
-  expect(files['/work/.cs/private/filter-chat']).toBe('on\n')
-  expect(written).toEqual({ '/work/.cs/local/filter-chat': 'off\n' })
+  expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=0\n')
+  expect(files['/work/.cs/private/config']).toBe('CS_FILTER_CHAT=1\n')
   expect(ran).toEqual([])
 })
 

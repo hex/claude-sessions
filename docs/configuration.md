@@ -23,7 +23,7 @@ The installer deploys these components:
 | Hooks and wrap passes | `~/.claude/hooks/cs/`, including the memory and summary passes that `/wrap` reads. |
 | Commands | `/checkpoint` and `/wrap` in `~/.claude/commands/`. |
 | Skills | `store-secret`, `prose-hygiene`, `rotate`, `finish`, `feature`, and `write-as-me` in `~/.claude/skills/`. |
-| Mods | `cs`, `cs-update`, `cs-mermaid` and `cs-panel` in `~/.claude/skills/`. |
+| Mods | `cs`, `cs-update`, `cs-mermaid`, `cs-panel` and `cs-filter-chat` in `~/.claude/skills/`. |
 | Spinner tip | `~/.claude/skills/cs/tips.json`, named in `settings.json` as `spinnerTipsOverride.tipsFile`. See [band settings](#band-settings). |
 
 See [hook and mod behavior](hooks.md) and [rotate and wrap keys](#rotate-and-wrap-keys).
@@ -501,6 +501,7 @@ stays with its session.
 | `CS_TERM_BG_RGB` | r;g;b, each 0 to 255 | detected | at the next repaint |
 | `CS_NO_ITERM2` | `1` (on) or `0` (off) | off | the tab title, the bell bounce and the status line's iTerm reads: now; the launch's iTerm tmux path: at the next launch |
 | `CS_NERD_FONTS` | `1` (on) or `0` (off) | off | at the next cs command |
+| `CS_FILTER_CHAT` | `1` (on) or `0` (off) | off | `/filter-chat` and the band key: now. Here or in a shell: the next launch |
 | `CS_NO_TASK_TOOLS` | `1` (on) or `0` (off) | off | at the next launch |
 | `CS_NO_UPDATE_CHECK` | `1` (on) or `0` (off) | off | at the next launch |
 | `CS_NO_FUNCTION_HOOKS` | `1` (on) or `0` (off) | off | at the next launch; on, no mod loads, the cs panel included |
@@ -628,7 +629,7 @@ alone. To get cs's tip back, delete `~/.config/cs/tips-file` and run
 ## In-session switches
 
 Bare `/cs` (or `/cs-panel`) opens a pane of these switches and of cs's settings
-together: the `/config` rows of `cs`, `cs-update` and `cs-mermaid`, then every
+together: the `/config` rows of `cs`, `cs-update`, `cs-mermaid` and `cs-filter-chat`, then every
 setting `cs -config list` names. Type to filter the rows, then press Enter on
 one to open its choices under it: a new value, `Default` (which removes it from
 the file that holds it), or `Keep`; the scope line under the keys says which
@@ -648,6 +649,11 @@ instruction lives under `cs:mermaid-diagrams` in a cs session's `CLAUDE.local.md
 neither this toggle nor `.cs/local/disabled` removes it. To opt out of the
 instruction, delete its prose but keep the `<!-- cs:mermaid-diagrams -->`
 comment so migration does not add it again.
+
+Filter chat is off by default. While it is on, the chat shows what you type and
+what Claude answers, and nothing of the work between them. `/filter-chat`, or
+the band's `filter chat` key, switches it for this session: each runs
+`cs <session> -config set CS_FILTER_CHAT`. See [the filter chat mod](hooks.md#cs-filter-chat-not-a-hook-script--a-claude-code-mod).
 
 ## Environment variables cs sets for you
 

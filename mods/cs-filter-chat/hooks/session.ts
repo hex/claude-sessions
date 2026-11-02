@@ -1,15 +1,15 @@
-// ABOUTME: cs-filter-chat's per-load switch: the mirror of .cs/local/filter-chat as cs -vet-session vets it, and its reads and writes.
+// ABOUTME: cs-filter-chat's per-load switch: the mirror of the setting CS_FILTER_CHAT as cs -vet-session vets it, and its reads and writes.
 // ABOUTME: A new Load is made by every register(); the mirror is written by the load's one record read and by event hooks, never by a render.
 import type { EngineInterface } from 'claude-code'
 
-import { FILTER_CHAT_FILE, CS_LOCAL, OFF_LINE, ON_LINE, VET_TIMEOUT_MS, filterChatState } from './settings'
+import { CONFIG_FILE, CS_LOCAL, FILTER_CHAT_KEY, VET_TIMEOUT_MS, filterChatFlag } from './settings'
 import { logs } from './words'
 
 type $ = EngineInterface
 
 export type Load = {
   /**
-   * The mirror: FILTER_CHAT_FILE says on AND cs trusts this session's control
+   * The mirror: the setting says on AND cs trusts this session's control
    * files (`vet`, below), so a session cs refuses reads as off. Undefined
    * until the per-load read settles (filterChatRecord). Written by
    * filterChatRecord (the load's read) and applyFilterChat (every later read);
@@ -17,28 +17,28 @@ export type Load = {
    */
   on?: boolean
   record?: Promise<boolean>
-  /** Writing commands queue here, so each one reads the file the one before it wrote. */
+  /** Writing commands queue here, so each one reads what the one before it wrote. */
   writes?: Promise<void>
   /**
    * cs's answer on this session's control files for the on the mirror last
    * read (§20.22: the writes and the on-read are vetted). Undefined: not
-   * asked for the file's current on, or the file reads off. Set from
+   * asked for the setting's current on, or the setting reads off. Set from
    * vetOnRead's answer (by filterChatRecord at the load's on-read, by
    * applyFilterChat('status') at an outside flip to on), by applyFilterChat to
-   * 'passed' when a press's write turned the file on (cs's pressFilterChat
+   * 'passed' when a press's write turned the setting on (cs's pressFilterChat
    * vetted it on the way in), and at a successful write's ticketed read-back.
-   * A read that finds the file off clears it, so the next on that no writer
+   * A read that finds the setting off clears it, so the next on that no writer
    * of ours vetted is vetted again. Cached for the load otherwise: a session
-   * cs stops trusting after a pass keeps the pass until the file reads off or
+   * cs stops trusting after a pass keeps the pass until the setting reads off or
    * the next load (the band labels its key off at cs's next vet).
    */
   vet?: Vetted
   /** The last read-side refusal logged, so each distinct refusal is logged once per load, as cs's band de-duplicates its filter chat complaint. Cleared by a pass. */
   vetLogged?: string
-  /** The last FILTER_CHAT_FILE problem logged (readFilterChat), so the same unusable text or read error is logged once per load whichever read finds it. */
+  /** The last settings file read error logged (readFilterChat), so the same error is logged once per load whichever read finds it. */
   fileLogged?: string
   /**
-   * Read tickets for FILTER_CHAT_FILE (applyFilterChat): `started` is taken
+   * Read tickets for the setting (applyFilterChat): `started` is taken
    * when a read begins, `applied` is the ticket of the read the mirror holds.
    * A read whose ticket is below `applied` is dropped when it resolves, so
    * the latest-started read wins even when two reads resolve out of order (a
@@ -58,16 +58,15 @@ export function newLoad(): Load {
  * This session's switch, read once per load and mirrored in `load.on`: one
  * per-load promise, started by whichever caller asks first (a render, a
  * command, a press) and awaited by every render, so a render that lands
- * before anything else sees the file, not a default.
+ * before anything else sees the setting, not a default.
  *
  *   const cwd = await $.session.cwd()
- *   fileOn = readFilterChat(load, $, cwd)                  // absent in a cs session: on
+ *   fileOn = readFilterChat(load, $, cwd)                  // no line: off
  *   load.vet = fileOn ? await vetOnRead(load, $, cwd) : undefined   // off: no cs process
  *   on = fileOn && load.vet === 'passed'
  *
- * Vetted once per load when the file reads on (§20.22: the on-read asks the
- * same cs -vet-session as writeFilterChat). Filter chat is on by default, so a
- * cs session with no file pays the vet too: one cs process (0.15-0.44 s,
+ * Vetted once per load when the setting reads on (§20.22: the on-read asks the
+ * same cs -vet-session as writeFilterChat): one cs process (0.15-0.44 s,
  * cs's measurement; up to VET_TIMEOUT_MS, then refused, if cs hangs). A
  * refused session reads as off: every hook passes the engine's drawing
  * through, nothing is written, and the refusal is logged once (vetOnRead).
@@ -84,9 +83,9 @@ export function newLoad(): Load {
  * stops while a $ call is in flight). After it settles, the off path costs
  * no op.
  *
- * A mirror, not a per-draw read. The file can change behind it only through
- * a writer other than cs's band press and /filter-chat (a hand edit, a second
- * Claude session in this directory); that is seen at the next press,
+ * A mirror, not a per-draw read. The setting can change behind it only through
+ * a writer other than cs's band press and /filter-chat (the /cs pane, a shell,
+ * a second Claude session in this directory); that is seen at the next press,
  * /filter-chat (/filter-chat status re-reads it first, through applyFilterChat,
  * and vets a flip to on), or load.
  */
@@ -101,35 +100,39 @@ export function filterChatRecord(load: Load, $: $): Promise<boolean> {
 }
 
 /**
- * What FILTER_CHAT_FILE says (settings.filterChatState), logged where it cannot be used:
+ * What the setting says, as cs resolves it, and off outside a cs session:
  *
- *   absent, and CS_LOCAL exists   on (the default)
- *   absent, no CS_LOCAL           off: this directory is no cs session, so no vet and no log
- *   on\n / off\n                  on / off
- *   any other text                off, logged with the path and its problem
- *   a read error but ENOENT       off, logged with the path and the error
+ *   CS_FILTER_CHAT in the environment   it pins the value: on only at 1
+ *   else this session's file            settings.filterChatFlag
+ *   else this machine's file            settings.filterChatFlag
+ *   neither says                        off (the default): no vet and no log
+ *   a read error but ENOENT             that file says nothing, logged with the path and the error
  *
  * Each log line is written once per load, whichever read finds it
  * (Load.fileLogged), as the band's readFilterChat writes each distinct
  * complaint once.
  */
 export async function readFilterChat(load: Load, $: $, cwd: string): Promise<boolean> {
-  const path = `${cwd}/${FILTER_CHAT_FILE}`
-  let text: string | undefined
+  const pin = await $.env.get('CS_FILTER_CHAT')
+  const on = pin ? pin === '1' : await flagAt(load, $, `${cwd}/${CONFIG_FILE}`) ?? await machineFlag(load, $) ?? false
+  return on && await $.fs.exists(`${cwd}/${CS_LOCAL}`)
+}
+
+async function machineFlag(load: Load, $: $): Promise<boolean | undefined> {
+  const xdg = await $.env.get('XDG_CONFIG_HOME')
+  const home = await $.env.get('HOME')
+  if (xdg) return flagAt(load, $, `${xdg}/cs/config`)
+  return home ? flagAt(load, $, `${home}/.config/cs/config`) : undefined
+}
+
+async function flagAt(load: Load, $: $, path: string): Promise<boolean | undefined> {
   try {
-    text = await $.fs.read(path)
+    return filterChatFlag(await $.fs.read(path))
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    if (!/\bENOENT\b/.test(message)) {
-      await logFileProblem(load, $, logs.unread(path, message))
-      return false
-    }
-    if (!(await $.fs.exists(`${cwd}/${CS_LOCAL}`))) return false
+    if (!/\bENOENT\b/.test(message)) await logFileProblem(load, $, logs.unread(path, message))
+    return undefined
   }
-  const state = filterChatState(text)
-  if (state.on) return true
-  if (state.problem !== undefined && text !== undefined) await logFileProblem(load, $, logs.unusable(path, state.problem, text))
-  return false
 }
 
 async function logFileProblem(load: Load, $: $, line: string): Promise<void> {
@@ -139,7 +142,7 @@ async function logFileProblem(load: Load, $: $, line: string): Promise<void> {
 }
 
 /**
- * Which read applyFilterChat makes, and so whether cs already vetted the file
+ * Which read applyFilterChat makes, and so whether cs already vetted the setting
  * it reads. `press`: after cs's pressFilterChat, which vets before it writes.
  * `write`: writeFilterChat's read-back, after its own vet passed. `status`:
  * /filter-chat status's re-read, after no writer of ours: a flip to on found
@@ -150,11 +153,11 @@ async function logFileProblem(load: Load, $: $, line: string): Promise<void> {
 export type FilterChatRead = 'press' | 'write' | 'status'
 
 /**
- * Reads FILTER_CHAT_FILE and applies it to the mirror (ticketed, see
+ * Reads the setting and applies it to the mirror (ticketed, see
  * Load.reads). Called after `await next(e)` in the ui.press hook on cs's
  * `cs-filter-chat` Button ('press'), after cs-filter-chat's own write
  * (writeFilterChat, 'write'), and by perform() for /filter-chat status
- * ('status'), so status reports the file as vetted (off where cs refuses),
+ * ('status'), so status reports the setting as vetted (off where cs refuses),
  * not a mirror a hand edit or a second Claude process in this directory left
  * stale.
  *
@@ -171,7 +174,7 @@ export type FilterChatRead = 'press' | 'write' | 'status'
  *   load.on = fileOn && vet === 'passed'                               // a cached refusal keeps a refused press's unchanged on, off
  *   if (load.on changed) $.ui.invalidate('ui.render')                 // every hooked instance reads the mirror again
  *
- * The press path trusts the file it reads after next(e): cs's refusal is cs's
+ * The press path trusts the setting it reads after next(e): cs's refusal is cs's
  * module memory, so an outside on that lands after cs-filter-chat's last read
  * and before a press cs refuses reads as the press's write and turns on.
  * Accepted (ruling §20.22: a press's read is not vetted again); the band
@@ -222,24 +225,39 @@ export type WriteOutcome = 'written' | 'no-session' | { readonly refused: string
  *   if (!(await $.fs.exists(`${cwd}/${CS_LOCAL}`))) return 'no-session'   // never create .cs/local; no vet spawned
  *   const refusal = await vetRefusal($, cwd)
  *   if (refusal !== undefined) return { refused: refusal }                   // nothing written, the mirror and load.vet untouched
- *   await $.fs.write(`${cwd}/${FILTER_CHAT_FILE}`, on ? ON_LINE : OFF_LINE)
+ *   cs <session> -config set CS_FILTER_CHAT 1|0                              // a failure is a refusal, in cs's words
  *   await applyFilterChat(load, $, 'write')                                  // read back and commit this write's pass with its ticket; no second vet
  *
  * The vet comes after the directory test, so a directory with no .cs/local
  * spawns no cs process, and before the write, so a refused session gets
- * nothing. Its cost is one cs process per writing /filter-chat (0.15-0.44 s,
- * measured by cs), awaited inside the immediate command, mid-turn included.
- * Non-atomic, as the band's: a write torn by a crash leaves a file that reads
- * as off on both sides.
+ * nothing. Its cost is two cs processes per writing /filter-chat (the vet at
+ * 0.15-0.44 s, measured by cs), awaited inside the immediate command, mid-turn
+ * included. Off writes 0, as the /cs pane does, so it outranks a machine's 1.
  */
 export async function writeFilterChat(load: Load, $: $, on: boolean): Promise<WriteOutcome> {
   const cwd = await $.session.cwd()
   if (!(await $.fs.exists(`${cwd}/${CS_LOCAL}`))) return 'no-session'
-  const refused = await vetRefusal($, cwd)
+  const refused = await vetRefusal($, cwd) ?? await configSet($, on)
   if (refused !== undefined) return { refused }
-  await $.fs.write(`${cwd}/${FILTER_CHAT_FILE}`, on ? ON_LINE : OFF_LINE)
   await applyFilterChat(load, $, 'write')
   return 'written'
+}
+
+// The launch's session name, as the /cs pane reads it. A name cs could not have given is no name.
+const SESSION_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]*(@[A-Za-z0-9._-]+)?$/
+
+async function configSet($: $, on: boolean): Promise<string | undefined> {
+  const bin = await $.env.get('CS_BIN')
+  const name = await $.env.get('CLAUDE_SESSION_NAME')
+  if (!bin) return 'the launch did not say where cs is (CS_BIN)'
+  if (!name || !SESSION_NAME.test(name)) return 'the launch did not name this session (CLAUDE_SESSION_NAME)'
+  try {
+    const result = await $.process.run([bin, name, '-config', 'set', FILTER_CHAT_KEY, on ? '1' : '0'], { timeoutMs: VET_TIMEOUT_MS })
+    if (result.exitCode === 0) return undefined
+    return result.stderr.split(/\r?\n/).filter(line => line.trim() !== '').at(-1) ?? `cs -config set exited ${result.exitCode}`
+  } catch (error) {
+    return `cs -config set did not run: ${error instanceof Error ? error.message : String(error)}`
+  }
 }
 
 /**
@@ -275,9 +293,9 @@ export async function vetRefusal($: $, cwd: string): Promise<string | undefined>
 export type Vetted = 'passed' | { readonly refused: string }
 
 /**
- * The read-side vet (§20.22: a file that reads on is vetted before chat
+ * The read-side vet (§20.22: a setting that reads on is vetted before chat
  * only turns on). Asked by filterChatRecord at the load's read when
- * FILTER_CHAT_FILE reads on; applyFilterChat('status') asks vetRefusal itself
+ * the setting reads on; applyFilterChat('status') asks vetRefusal itself
  * for a flip to on no writer of ours vetted, and reports through reportVet.
  * A refusal is logged once per distinct text, as cs's readFilterChat does
  * with its filter chat complaint.

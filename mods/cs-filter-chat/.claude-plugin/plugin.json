@@ -1,7 +1,7 @@
 {
   "name": "cs-filter-chat",
   "version": "0.1.0",
-  "description": "Restyles the chat: your messages and Claude's replies, and nothing of the work between them. On in every session by default; the band's filter chat key or /filter-chat turns it off there.",
+  "description": "Restyles the chat: your messages and Claude's replies, and nothing of the work between them. Off by default; the band's filter chat key or /filter-chat turns it on for a session.",
   "author": {
     "name": "cs"
   },

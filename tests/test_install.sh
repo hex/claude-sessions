@@ -958,11 +958,12 @@ test_manifest_arrays_in_sync() {
     for arr in CS_HOOKS CS_HOOK_LIBS RETIRED_HOOKS CS_COMMANDS RETIRED_COMMANDS CS_SKILLS RETIRED_SKILLS CS_SKILL_FILES CS_MOD_FILES CS_MODS_KEPT_OUT; do
         a=$(extract_array "$SCRIPT_DIR/../install.sh" "$arr" | sort)
         b=$(extract_array "$CS_BIN" "$arr" | sort)
-        if [ -z "$a" ]; then
+        # A listed array may hold nothing (CS_MODS_KEPT_OUT), so its opening line says it is there.
+        if ! grep -q "^$arr=(" "$SCRIPT_DIR/../install.sh"; then
             echo "  FAIL: $arr not found in install.sh"
             return 1
         fi
-        if [ -z "$b" ]; then
+        if ! grep -q "^$arr=(" "$CS_BIN"; then
             echo "  FAIL: $arr not found in bin/cs"
             return 1
         fi
@@ -1096,6 +1097,8 @@ test_install_deploys_the_rotate_mod_and_uninstall_removes_it() {
     printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 || { echo "  FAIL: cs -uninstall exited non-zero"; return 1; }
     [ ! -d "$fake_home/.claude/skills/cs" ] \
         || { echo "  FAIL: uninstall left ~/.claude/skills/cs behind"; return 1; }
+    [ ! -d "$fake_home/.claude/skills/cs-filter-chat" ] \
+        || { echo "  FAIL: uninstall left ~/.claude/skills/cs-filter-chat behind"; return 1; }
 }
 
 # The Spinner tips lines in install's output, each without its leading marker.
@@ -2086,6 +2089,24 @@ test_install_removes_the_mod_under_its_old_name() {
     fi
     cmp -s "$SCRIPT_DIR/../mods/cs/hooks/register.tsx" "$fake_home/.claude/skills/cs/hooks/register.tsx" \
         || { echo "  FAIL: the mod was not deployed under ~/.claude/skills/cs"; return 1; }
+}
+
+# cs-filter-chat was cs-chat-only, deployed by hand before it shipped; a copy
+# left under that name keeps drawing the chat beside the mod that replaced it.
+test_install_removes_the_hand_deployed_cs_chat_only() {
+    local fake_home="$TEST_TMPDIR/home-chat-only"
+    mkdir -p "$fake_home/.claude/skills/cs-chat-only/hooks"
+    echo '{"modules":["./register.tsx"]}' > "$fake_home/.claude/skills/cs-chat-only/hooks/hooks.json"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    if [ -d "$fake_home/.claude/skills/cs-chat-only" ]; then
+        echo "  FAIL: the old cs-chat-only directory survived the install"
+        return 1
+    fi
+    cmp -s "$SCRIPT_DIR/../mods/cs-filter-chat/hooks/register.tsx" "$fake_home/.claude/skills/cs-filter-chat/hooks/register.tsx" \
+        || { echo "  FAIL: the mod was not deployed under ~/.claude/skills/cs-filter-chat"; return 1; }
 }
 
 test_install_writes_version_stamp() {
@@ -4343,6 +4364,7 @@ run_test test_a_retired_hook_known_by_its_record_survives_a_run_without_jq
 run_test test_a_retired_hook_replaced_during_a_question_is_kept
 run_test test_a_retired_hook_replaced_by_a_link_to_a_device_is_kept_unread
 run_test test_install_removes_the_mod_under_its_old_name
+run_test test_install_removes_the_hand_deployed_cs_chat_only
 run_test test_install_and_uninstall_remove_retired_commands_cs_wrote
 run_test test_install_deploys_wrap_and_the_passes_it_reads_but_no_pass_command
 run_test test_install_and_uninstall_refuse_a_retired_command_with_a_path

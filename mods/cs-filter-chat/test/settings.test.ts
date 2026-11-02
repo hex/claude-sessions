@@ -1,7 +1,7 @@
 // ABOUTME: Tests the /filter-chat grammar and what the filter chat file's text means.
 // ABOUTME: Expected values come from the switch's contract: on by default, only whole on and off lines count.
 import { expect, test } from 'claude-code/testing'
-import { filterChatState, parseFilterChatArgs, youInkOf } from '../hooks/settings'
+import { filterChatFlag, parseFilterChatArgs, youInkOf } from '../hooks/settings'
 
 test('filter-chat takes no word, on, off or status, whatever the case and spacing, and replies the usage line to anything else', () => {
   expect(['', '   ', 'on', 'off', 'status', ' ON ', 'Off', 'clean', 'raw', 'close', 'hide peer', 'on now', 'status please'].map(parseFilterChatArgs)).toEqual([
@@ -11,11 +11,11 @@ test('filter-chat takes no word, on, off or status, whatever the case and spacin
   ])
 })
 
-test('no filter chat file reads on, only the whole on and off lines count, and any other text reads off with its problem', () => {
-  expect([undefined, 'on\n', 'off\n', 'on', '', 'off', 'on\n\n', ' on\n', 'ON\n', 'on\r\n', 'yes\n'].map(filterChatState)).toEqual([
-    { on: true }, { on: true }, { on: false },
-    { on: false, problem: 'torn' }, { on: false, problem: 'torn' }, { on: false, problem: 'torn' },
-    { on: false, problem: 'other' }, { on: false, problem: 'other' }, { on: false, problem: 'other' }, { on: false, problem: 'other' }, { on: false, problem: 'other' },
+test('a settings file says on at CS_FILTER_CHAT=1 and off at =0, its last accepted line wins, and any other line says nothing', () => {
+  expect(['', 'CS_FILTER_CHAT=1\n', 'CS_FILTER_CHAT=0\n', 'CS_FILTER_CHAT=1', 'CS_FILTER_CHAT=1\nCS_FILTER_CHAT=0\n', 'CS_FILTER_CHAT=0\nCS_FILTER_CHAT=1\n',
+    'CS_FILTER_CHAT=1\nCS_FILTER_CHAT=yes\n', 'CS_NERD_FONTS=1\nCS_FILTER_CHAT=1\n', 'CS_FILTER_CHAT_X=1\n', 'X_CS_FILTER_CHAT=1\n', '#CS_FILTER_CHAT=1\n', ' CS_FILTER_CHAT=1\n', 'CS_FILTER_CHAT =1\n', 'CS_FILTER_CHAT=1 \n', 'CS_FILTER_CHAT=1\r\n', 'CS_FILTER_CHAT=\n', 'CS_FILTER_CHAT\n'].map(filterChatFlag)).toEqual([
+    undefined, true, false, true, false, true,
+    true, true, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
   ])
 })
 

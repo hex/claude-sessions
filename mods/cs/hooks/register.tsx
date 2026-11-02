@@ -1783,27 +1783,41 @@ async function sessionColor($: EngineInterface): Promise<string | undefined> {
 export const ROTATE_ACTION = 'strip:jump1'
 export const WRAP_ACTION = 'strip:jump2'
 
-// Filter chat is on by default: no file reads on, as cs-filter-chat reads it
-// (KEEP IN SYNC with filterChatState in mods/cs-filter-chat/hooks/settings.ts).
+// The cs setting CS_FILTER_CHAT, as cs resolves it: the environment pins it,
+// else this session's file, else this machine's, the last `1` or `0` line of
+// a file winning, and off when none says (KEEP IN SYNC with readFilterChat in
+// mods/cs-filter-chat/hooks/session.ts and _cs_config_read in lib/03-config.sh).
 async function readFilterChat($: EngineInterface): Promise<boolean> {
-  let complaint: string
-  try {
-    // Writes are non-atomic: only the whole on line counts. Trimming would
-    // accept a torn write without its newline; every other value is off.
-    const text = await $.fs.read(`${await $.session.cwd()}/.cs/local/filter-chat`)
-    filterChatComplaint = undefined
-    return text === 'on\n'
-  } catch (err) {
-    const message = String(err instanceof Error ? err.message : err)
-    if (message.endsWith(' failed: ENOENT')) {
-      filterChatComplaint = undefined
-      return true
+  const pin = await $.env.get('CS_FILTER_CHAT')
+  if (pin) return pin === '1'
+  const xdg = await $.env.get('XDG_CONFIG_HOME')
+  const home = await $.env.get('HOME')
+  const machine = xdg ? `${xdg}/cs/config` : home ? `${home}/.config/cs/config` : undefined
+  let complaint: string | undefined
+  let on: boolean | undefined
+  for (const path of [`${await $.session.cwd()}/.cs/local/config`, machine]) {
+    if (path === undefined || on !== undefined) continue
+    try {
+      on = filterChatFlag(await $.fs.read(path))
+    } catch (err) {
+      const message = String(err instanceof Error ? err.message : err)
+      if (!message.endsWith(' failed: ENOENT')) complaint ??= LOGS.filterChatUnread(message)
     }
-    complaint = LOGS.filterChatUnread(message)
   }
-  if (complaint !== filterChatComplaint) $.ui.log(complaint)
+  if (complaint !== undefined && complaint !== filterChatComplaint) $.ui.log(complaint)
   filterChatComplaint = complaint
-  return false
+  return on ?? false
+}
+
+function filterChatFlag(text: string): boolean | undefined {
+  let flag: boolean | undefined
+  for (const line of text.split('\n')) {
+    const at = line.indexOf('=')
+    if (at < 0 || line.slice(0, at) !== 'CS_FILTER_CHAT') continue
+    const value = line.slice(at + 1)
+    if (value === '1' || value === '0') flag = value === '1'
+  }
+  return flag
 }
 
 async function pressFilterChat($: EngineInterface) {
@@ -1812,8 +1826,12 @@ async function pressFilterChat($: EngineInterface) {
     try {
       const cwd = await $.session.cwd()
       if (!(await sessionVetted($, cwd))) return
+      const bin = await $.env.get("CS_BIN")
+      const name = await csSessionName($, cwd)
+      if (!bin || name === undefined) throw new Error('cs named no session for this directory')
       const on = !(await readFilterChat($))
-      await $.fs.write(`${cwd}/.cs/local/filter-chat`, on ? 'on\n' : 'off\n')
+      const result = await $.process.run([bin, name, '-config', 'set', 'CS_FILTER_CHAT', on ? '1' : '0'], { timeoutMs: VET_TIMEOUT_MS })
+      if (result.exitCode !== 0) throw new Error(result.stderr.split('\n').filter(l => l.trim() !== '').slice(-1)[0] ?? `cs -config set exited ${result.exitCode}`)
     } catch (err) {
       $.ui.toast(TOASTS.filterChatFailed(String(err instanceof Error ? err.message : err)))
     } finally {

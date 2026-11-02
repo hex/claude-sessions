@@ -665,10 +665,8 @@ session launched before `keybindings.json` existed gets the file at its next
 launch.
 
 The filter chat key draws after wrap when cs-filter-chat advertises
-`/filter-chat`, while a turn runs too, with no survey or armed handoff. The installer does not deploy cs-filter-chat, which is experimental
-(see [cs-filter-chat](#cs-filter-chat-not-a-hook-script--a-claude-code-mod)),
-so an installed band draws no filter chat key; this paragraph and the ones
-after it describe the band beside cs-filter-chat. The band reads the command
+`/filter-chat`, while a turn runs too, with no survey or armed handoff; a band with no
+[cs-filter-chat](#cs-filter-chat-not-a-hook-script--a-claude-code-mod) loaded draws no filter chat key. The band reads the command
 list without running a status command. The key is a press, as the queue's
 start button is: it answers no chord, only a click and Ctrl+X Tab, and its
 label draws bare after the keys' dim `·`:
@@ -680,26 +678,24 @@ The key ends in a switch dot:
 `filter chat ●` while on, the dot in green, and `filter chat ○`
 while off, the dot in the line's ink. A
 press asks `cs -vet-session` before it writes, as the other band writers do.
-A refusal leaves the file alone and draws filter chat as off. The key reads
-`filter chat ●` only while the file holds `on\n` or
-is absent, and the band's last `cs -vet-session` answer in this load was not a
+A refusal leaves the setting alone and draws filter chat as off. The key reads
+`filter chat ●` only while the setting `CS_FILTER_CHAT` is `1`, and the band's
+last `cs -vet-session` answer in this load was not a
 refusal. The band asks at session start in a cs session with `.cs/local`, and
 at every step that acts on the control files, such as a press of the clear,
 rotate or filter chat key.
 A prompt does not clear a refusal. A vet that passes, or a reload, does.
-Before the band's first vet in a load, it reads the file unvetted.
+Before the band's first vet in a load, it reads the setting unvetted.
 An accepted press
-flips `.cs/local/filter-chat` under the session's working
-directory, then invalidates the band. The file holds `on\n` or `off\n` and
-survives `/clear`, reload and resume. Filter chat is on by default, so an absent
-file means on, and a press there writes `off\n`. The writer is non-atomic, so
-of the content only the whole value `on\n` means on. Empty, torn and other
-content means off; readers must not trim it. Read errors also mean off; the band logs
-each distinct error except a missing file. Each failed write attempt toasts, and
-every completed press invalidates the band, including a failed write.
+runs `cs <session> -config set CS_FILTER_CHAT 1` or `0`, the value flipped, then
+invalidates the band. The setting survives `/clear`, reload and resume. Filter
+chat is off by default. The band reads the setting as cs resolves it: the
+environment pins it, else the session's `.cs/local/config`, else this machine's
+file, the last `1` or `0` line of a file winning. Read errors say nothing of the
+setting; the band logs each distinct error except a missing file. Each failed
+write attempt toasts cs's last line, and every completed press invalidates the
+band, including a failed write.
 Duplicate presses wait for the same write and redraw.
-The file is machine-local, under the gitignored `.cs/local`, never committed,
-and written only after `cs -vet-session` accepts the session.
 
 The Button's stable element key is `cs-filter-chat`; it carries no action.
 cs-filter-chat must hook `ui.press` with `{ plugin: 'cs', element: 'cs-filter-chat' }`, await
@@ -1396,14 +1392,12 @@ hooks and its calls, with no `$.ui.ask` among them;
 
 ## cs-filter-chat (not a hook script — a Claude Code mod)
 
-`mods/cs-filter-chat/` is a Claude Code function-hooks plugin. It is experimental:
-the installer does not deploy it (it is not in `CS_MOD_FILES`), and its source
-and tests stay in this repository. It is gated
+`mods/cs-filter-chat/` is a Claude Code function-hooks plugin, deployed and gated
 the same way as the `cs` mod: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, which every
 `cs <name>` launch exports and `CS_NO_FUNCTION_HOOKS=1` withholds. While
 filter chat is on, the chat shows what you type and what Claude answers, and
-nothing of the work between them. Filter chat is on in every session by
-default, and it draws only in a session that `cs -vet-session` accepts. While a session is off, every hook
+nothing of the work between them. Filter chat is off by default: a session turns
+it on with the switch below, and it draws only in a session that `cs -vet-session` accepts. While a session is off, every hook
 passes Claude Code's own drawing through.
 
 The switch is per session:
@@ -1412,10 +1406,10 @@ The switch is per session:
   a click or Ctrl+X Tab, never a chord: this session
   on or off. It shows during a turn too, and leaves the row to a survey or
   an armed handoff.
-- `/filter-chat` alone flips this session's switch: it reads the file and
+- `/filter-chat` alone flips this session's switch: it reads the setting and
   writes the other value. `/filter-chat on` and `/filter-chat off` set it.
   `/filter-chat` is an immediate command, so it runs mid-turn too.
-- `/filter-chat status` reads the file again and replies `on` or `off`. It
+- `/filter-chat status` reads the setting again and replies `on` or `off`. It
   writes nothing.
 - Any other word replies with the usage line.
 
@@ -1423,20 +1417,25 @@ While filter chat is on, the mode line under the prompt adds
 `filter chat · /filter-chat to switch`. A switch redraws in place: no reload, no notice row,
 and no other session changes.
 
-The switch lives in `.cs/local/filter-chat` under the session's working directory,
-in the gitignored `.cs/local`, so it survives `/clear`, a rotation,
-`--resume` and a relaunch. cs's band writes it too (see the band above). Both
-mods read it the same way, and neither trims it:
+The switch is the cs setting `CS_FILTER_CHAT`, so it lists in `cs -config list`
+and the `/cs` pane like any other, and survives `/clear`, a rotation, `--resume`
+and a relaunch in the session's `.cs/local/config`. `/filter-chat` and cs's band
+write it through `cs <session> -config set`, `0` for off as the pane does, so it
+outranks a `1` in this machine's file. Both mods read it as cs resolves it, and
+neither trims a line:
 
-- No file means on, the default, in a directory with `.cs/local`. In a
-  directory without one, which is no cs session, no file means off:
-  cs-filter-chat starts no process and logs nothing.
-- `on\n` means on, and `off\n` means off.
-- Any other content means off, an empty file and a write torn before its
-  newline included. cs-filter-chat logs the path and the problem, each problem
-  once per load.
-- A read error other than a missing file means off. cs-filter-chat logs the
-  path and the error, each error once per load.
+- `CS_FILTER_CHAT` in the environment pins it: on only at `1`. `/filter-chat`
+  says so instead of claiming a flip that did not take.
+- Else the session's file answers, else this machine's. A file's last line
+  naming the key with `1` or `0` wins.
+- Nothing says: off, the default. cs-filter-chat starts no process and logs
+  nothing. Outside a directory with `.cs/local` it is off whatever is set.
+- A read error other than a missing file says nothing of the setting.
+  cs-filter-chat logs the path and the error, each error once per load.
+
+cs-filter-chat keeps the value in a mirror it reads once per load, not at each
+draw. `/filter-chat` and the band key update it at once. A change from the `/cs`
+pane or a shell reaches the drawing at the next load, or at `/filter-chat status`.
 
 Every write asks cs first. `/filter-chat` runs `$CS_BIN -vet-session <cwd>` (10 s
 timeout), the same rule cs's band asks before its own writes:
@@ -1444,21 +1443,22 @@ timeout), the same rule cs's band asks before its own writes:
 - In a directory with no `.cs/local`, `/filter-chat` writes nothing, starts no
   process and replies `cs-filter-chat: this directory is not a cs session (no
   .cs/local), so nothing changed.`
-- Where cs refuses the session, or the launch did not set `CS_BIN`, it writes
+- Where cs refuses the session, the launch did not set `CS_BIN` or
+  `CLAUDE_SESSION_NAME`, or `cs -config set` fails, it writes
   nothing and replies `cs-filter-chat: no filter chat change in this session:`
   with cs's refusal.
 - cs-filter-chat vets the read that turns filter chat on, too. At the first draw of each
-  load, a file that reads on, a missing one included, costs one
+  load, a setting that reads on costs one
   `cs -vet-session` process (0.15-0.44 s), and the hooked rows wait for its
   answer before they draw. A session cs refuses reads as off: filter chat draws
   nothing, and the log says `cs-filter-chat: filter chat is off in this session:` with
-  the refusal, once per distinct refusal. A file that says off starts no
+  the refusal, once per distinct refusal. A setting that reads off starts no
   process.
-- `/filter-chat status` picks up a hand edit or a second Claude process in the
-  directory, and vets a flip to on that neither writer made before it turns
-  filter chat on. `/filter-chat status` on an unchanged file and the usage line
+- `/filter-chat status` picks up the `/cs` pane, a shell or a second Claude
+  process in the directory, and vets a flip to on that neither writer made before it turns
+  filter chat on. `/filter-chat status` on an unchanged setting and the usage line
   start no process of their own.
-- A band press needs no second vet: cs-filter-chat reads the file once cs's press
+- A band press needs no second vet: cs-filter-chat reads the setting once cs's press
   handler has finished, and cs vetted before it wrote.
 
 What it draws while on:
@@ -1507,16 +1507,17 @@ Off costs a little, because every hook stays registered: there is no install
 switch. A session that is off starts no `cs -vet-session` process, and the
 mod keeps no transcript, runs no clock and writes no state.
 
-The mod has eight files (`.claude-plugin/plugin.json`, `hooks/hooks.json`,
+`install.sh` deploys the mod's eight files (`.claude-plugin/plugin.json`, `hooks/hooks.json`,
 `hooks/register.tsx`, `hooks/session.ts`, `hooks/settings.ts`,
-`hooks/verdict.ts`, `hooks/words.ts` and `hooks/draw.tsx`).
-`CS_MODS_KEPT_OUT` in `lib/01-manifests.sh` keeps it out of the installer, so
-`install.sh` deploys none of them and `cs -doctor`'s drift scan skips it. The
+`hooks/verdict.ts`, `hooks/words.ts` and `hooks/draw.tsx`) under
+`~/.claude/skills/cs-filter-chat/`, `cs -doctor`'s drift scan holds them to the
+checkout, and `cs -uninstall` removes the directory. An install also removes
+a copy left under the old name, `~/.claude/skills/cs-chat-only/`. The
 mod writes no heartbeat, so `cs -doctor` has no "last ran" row for it.
 
 Tests: `tests/test_mod_filter_chat.sh` pins the manifest, which declares no state
 types and one `userConfig` field, the you ink, whose options are the theme keys
-`hooks/settings.ts` lists, in its order, checks that the installer lists none of the mod's
+`hooks/settings.ts` lists, in its order, checks that the installer lists each of the mod's
 files, checks that the source never names the events and calls the mod must
 not use (`tool.call`, `turn.step`, `classic.*`, `prompt.compose`,
 `config.set`, `$.command.run`), runs `claude plugin validate` and pins its

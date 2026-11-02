@@ -141,14 +141,11 @@ CS_SKILL_FILES=(
 )
 
 # Mod directories under mods/ the installer keeps out: experimental, their
-# source and tests in the checkout only. cs-filter-chat is one, so the cs band,
-# which draws its filter chat key only beside cs-filter-chat's /filter-chat, draws
-# none. Every file under mods/ outside these and their test/ is in
+# source and tests in the checkout only. Every file under mods/ outside these and their test/ is in
 # CS_MOD_FILES below (tests/test_install.sh holds the two lists to that), and
 # cs -doctor's drift scan skips them.
 # shellcheck disable=SC2034  # read by cs -doctor and tests/test_install.sh
 CS_MODS_KEPT_OUT=(
-    cs-filter-chat
 )
 
 # Mods cs ships: Claude Code function-hooks plugins, deployed file by file as
@@ -173,6 +170,14 @@ CS_MOD_FILES=(
     cs-panel/hooks/register.tsx
     cs-panel/hooks/settings.ts
     cs-panel/hooks/draw.tsx
+    cs-filter-chat/.claude-plugin/plugin.json
+    cs-filter-chat/hooks/hooks.json
+    cs-filter-chat/hooks/register.tsx
+    cs-filter-chat/hooks/session.ts
+    cs-filter-chat/hooks/settings.ts
+    cs-filter-chat/hooks/verdict.ts
+    cs-filter-chat/hooks/words.ts
+    cs-filter-chat/hooks/draw.tsx
 )
 
 # The cs tips file as install.sh names it in settings.json's

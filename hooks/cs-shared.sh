@@ -1344,6 +1344,7 @@ _CS_CONFIG_SPEC=(
     'CS_TERM_BG_RGB|Terminal|Background r;g;b|text|rgb|-|detected|now|applies at the next repaint|Your terminal background colour, which the status line shades its capsules from.'
     'CS_NO_ITERM2|Terminal|iTerm2 features|flagoff|flag|-|off|now+launch|the tab title, the bell bounce and the iTerm reads of the bar: now. The iTerm tmux path of the launch: the next launch.|Uses iTerm2 for the tab title, a dock bounce when a turn ends and the theme of your profile.'
     'CS_NERD_FONTS|Terminal|Nerd Font glyphs|flag|flag|-|off|now|applies at the next cs command|Shows Nerd Font icons in cs banners and session lists; needs a Nerd Font in the terminal.'
+    'CS_FILTER_CHAT|Terminal|Filter chat|flag|flag|-|off|now+launch|/filter-chat and the band key: now. A change here or in a shell: the next launch.|Shows only your prompts and the replies from Claude in this session; the band key or /filter-chat flips it.'
     'CS_NO_MAIL_WAKE|Mail|Wake on mail|flagoff|flag|-|off|now|applies when the next turn ends|Unread mail from another session takes a turn, so the exchange goes on without you typing.'
     'CS_MAIL_WAKE_MAX|Mail|Wakes in a row|text|num|-|5|now|applies when the next turn ends|How many turns mail may take in a row before it waits for a prompt from you.'
     'CS_NO_TASK_TOOLS|Launch|Task tools|flagoff|flag|-|off|launch|applies at the next launch|Gives Claude its task list tools on every model, for rotation, the queue and handoffs.'

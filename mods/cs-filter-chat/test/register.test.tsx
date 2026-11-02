@@ -5,6 +5,16 @@ import type { On } from 'claude-code'
 import { PAINTERS, register } from '../hooks/register'
 import { BAND_ELEMENT, BAND_PLUGIN } from '../hooks/settings'
 
+/** No pin and no machine file; the launch named this session alpha. */
+function launchEnv(on: On) {
+  on('env.get', { name: 'CS_FILTER_CHAT' }, () => ({ value: undefined }))
+  on('env.get', { name: 'XDG_CONFIG_HOME' }, () => ({ value: undefined }))
+  on('env.get', { name: 'HOME' }, () => ({ value: undefined }))
+  on('env.get', { name: 'CLAUDE_SESSION_NAME' }, () => ({ value: 'alpha' }))
+}
+/** What `cs alpha -config set CS_FILTER_CHAT <v>` leaves in this session's file, or undefined for any other argv. */
+const configSet = (argv: readonly string[]) => argv.includes('-config') ? `CS_FILTER_CHAT=${argv.at(-1)}\n` : undefined
+
 const RUN = { origin: { kind: 'composer' }, presentation: { columns: 80, isFullscreen: false } } as const
 /** The row cs's band draws in, which filter chat leaves to cs. */
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 90, scroll: { offset: 0, bodyRows: 6 }, view: {} } as const
@@ -27,21 +37,22 @@ test('two quick cs button presses share its held write and filter chat reads on 
   plugins: [{ name: 'cs', register(on) {
     let pending: Promise<void> | undefined
     on('ui.render', { component: 'AbovePrompt' }, ($, e) => {
-      const press = () => pending ??= $.fs.write('/session/.cs/local/filter-chat', 'on\n').finally(() => { pending = undefined })
+      const press = () => pending ??= $.fs.write('/session/.cs/local/config', 'CS_FILTER_CHAT=1\n').finally(() => { pending = undefined })
       return $.ui.resolve(e).Button({ key: 'cs-filter-chat', label: 'filter chat', onPress: press })
     })
   } }],
 }, async ($, on) => {
-  let file = 'off\n'
+  let file = 'CS_FILTER_CHAT=0\n'
   let writes = 0
   const reads: string[] = []
   let release: (() => void) | undefined
   let entered: (() => void) | undefined
   const held = new Promise<void>(resolve => { release = resolve })
   const started = new Promise<void>(resolve => { entered = resolve })
-  on('session.cwd', () => ({ value: '/session' }))
+  launchEnv(on); on('session.cwd', () => ({ value: '/session' }))
+  on('fs.exists', () => ({ value: true }))
   on('fs.read', ($, e) => {
-    if (!e.path.endsWith('/filter-chat')) return { deny: 'ENOENT: no such file or directory' }
+    if (!e.path.endsWith('/.cs/local/config')) return { deny: 'ENOENT: no such file or directory' }
     reads.push(file)
     return { value: file }
   })
@@ -50,16 +61,16 @@ test('two quick cs button presses share its held write and filter chat reads on 
   const clock = mock.clock(on)
   const band = await $.ui.mount({ plugin: 'cs', surface: 'terminal', component: 'AbovePrompt', props: BAND })
   const row = await $.ui.mount({ plugin: 'cs-filter-chat', surface: 'terminal', component: 'TurnDuration', props: { word: 'Worked', durationMs: 4000 } })
-  expect(reads).toEqual(['off\n'])
+  expect(reads).toEqual(['CS_FILTER_CHAT=0\n'])
   const first = $.ui.press({ plugin: 'cs', key: 'cs-filter-chat' })
   await started
   const second = $.ui.press({ plugin: 'cs', key: 'cs-filter-chat' })
   await clock.settle()
   expect(writes).toBe(1)
-  expect(reads).toEqual(['off\n'])
+  expect(reads).toEqual(['CS_FILTER_CHAT=0\n'])
   release?.()
   await Promise.all([first, second])
-  expect(reads).toEqual(['off\n', 'on\n', 'on\n'])
+  expect(reads).toEqual(['CS_FILTER_CHAT=0\n', 'CS_FILTER_CHAT=1\n', 'CS_FILTER_CHAT=1\n'])
   expect(await $.command.run({ command: 'filter-chat', args: 'status', ...RUN })).toEqual({ text: 'on' })
   expect(writes).toBe(1)
   await row.unmount()

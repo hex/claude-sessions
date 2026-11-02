@@ -1,6 +1,5 @@
 // ABOUTME: cs-filter-chat's words: every string the engine shows for the mod, from the /filter-chat replies and log lines to the error lines that take a failed reply's place.
 // ABOUTME: Pure. The error strings are the spec's (explore-features §6), pinned by tests.
-import type { FilterChatProblem } from './settings'
 
 export const labels = { you: '❯', mode: 'filter chat · /filter-chat to switch' } as const
 export const marks = { dot: '·' } as const
@@ -10,13 +9,13 @@ export const marks = { dot: '·' } as const
 // the replies of /filter-chat and its slash menu row.
 export const logs = {
   unread: (path: string, reason: string) => `could not read ${path}: ${reason}`,
-  unusable: (path: string, problem: FilterChatProblem, text: string) => `could not use ${path}: ${problem === 'torn' ? 'it is torn, with no closing newline' : `it holds ${JSON.stringify(text.slice(0, 40))}, neither on nor off`}; filter chat is off until /filter-chat or the band's filter chat key writes the file again`,
   filterChatOff: (refusal: string) => `filter chat is off in this session: ${refusal}`,
 } as const
 export const replies = {
   notASession: 'this directory is not a cs session (no .cs/local), so nothing changed.',
   refused: (refusal: string) => `no filter chat change in this session: ${refusal}`,
   status: (on: boolean) => on ? 'on' : 'off',
+  pinned: (on: boolean) => `CS_FILTER_CHAT in your environment wins, so filter chat stays ${on ? 'on' : 'off'} until you unset it there.`,
   switched: (on: boolean) => on ? "filter chat on: your messages and Claude's replies only" : "filter chat off: Claude Code's own drawing",
   usage: '/filter-chat toggles filter chat · /filter-chat on | off | status',
 } as const

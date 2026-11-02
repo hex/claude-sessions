@@ -180,14 +180,11 @@ CS_SKILL_FILES=(
 )
 
 # Mod directories under mods/ the installer keeps out: experimental, their
-# source and tests in the checkout only. cs-filter-chat is one, so the cs band,
-# which draws its filter chat key only beside cs-filter-chat's /filter-chat, draws
-# none. Every file under mods/ outside these and their test/ is in
+# source and tests in the checkout only. Every file under mods/ outside these and their test/ is in
 # CS_MOD_FILES below (tests/test_install.sh holds the two lists to that), and
 # cs -doctor's drift scan skips them.
 # shellcheck disable=SC2034  # read by cs -doctor and tests/test_install.sh
 CS_MODS_KEPT_OUT=(
-    cs-filter-chat
 )
 
 # Mods cs ships: Claude Code function-hooks plugins, deployed file by file as
@@ -212,6 +209,14 @@ CS_MOD_FILES=(
     cs-panel/hooks/register.tsx
     cs-panel/hooks/settings.ts
     cs-panel/hooks/draw.tsx
+    cs-filter-chat/.claude-plugin/plugin.json
+    cs-filter-chat/hooks/hooks.json
+    cs-filter-chat/hooks/register.tsx
+    cs-filter-chat/hooks/session.ts
+    cs-filter-chat/hooks/settings.ts
+    cs-filter-chat/hooks/verdict.ts
+    cs-filter-chat/hooks/words.ts
+    cs-filter-chat/hooks/draw.tsx
 )
 
 # The cs tips file as install.sh names it in settings.json's
@@ -2671,6 +2676,7 @@ _CS_CONFIG_SPEC=(
     'CS_TERM_BG_RGB|Terminal|Background r;g;b|text|rgb|-|detected|now|applies at the next repaint|Your terminal background colour, which the status line shades its capsules from.'
     'CS_NO_ITERM2|Terminal|iTerm2 features|flagoff|flag|-|off|now+launch|the tab title, the bell bounce and the iTerm reads of the bar: now. The iTerm tmux path of the launch: the next launch.|Uses iTerm2 for the tab title, a dock bounce when a turn ends and the theme of your profile.'
     'CS_NERD_FONTS|Terminal|Nerd Font glyphs|flag|flag|-|off|now|applies at the next cs command|Shows Nerd Font icons in cs banners and session lists; needs a Nerd Font in the terminal.'
+    'CS_FILTER_CHAT|Terminal|Filter chat|flag|flag|-|off|now+launch|/filter-chat and the band key: now. A change here or in a shell: the next launch.|Shows only your prompts and the replies from Claude in this session; the band key or /filter-chat flips it.'
     'CS_NO_MAIL_WAKE|Mail|Wake on mail|flagoff|flag|-|off|now|applies when the next turn ends|Unread mail from another session takes a turn, so the exchange goes on without you typing.'
     'CS_MAIL_WAKE_MAX|Mail|Wakes in a row|text|num|-|5|now|applies when the next turn ends|How many turns mail may take in a row before it waits for a prompt from you.'
     'CS_NO_TASK_TOOLS|Launch|Task tools|flagoff|flag|-|off|launch|applies at the next launch|Gives Claude its task list tools on every model, for rotation, the queue and handoffs.'
@@ -13217,7 +13223,7 @@ _doctor_check_session_id_match() {
     fi
 }
 
-# A mod (cs, cs-update; cs-mermaid and cs-panel write no heartbeat) is a Claude Code function-hooks plugin the
+# A mod (cs, cs-update; cs-mermaid, cs-panel and cs-filter-chat write no heartbeat) is a Claude Code function-hooks plugin the
 # installer deploys under ~/.claude/skills. Absent, it is not news. Present, the
 # row reads the heartbeat the mod writes when Claude Code loads it, never the
 # directory: the loader sits behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, which a

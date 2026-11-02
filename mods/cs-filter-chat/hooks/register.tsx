@@ -1,5 +1,5 @@
-// ABOUTME: cs-filter-chat mod: while filter chat is on in this session, the chat shows your messages and Claude's replies and nothing of the work between them. On by default; a session cs -vet-session refuses gets Claude Code's own drawing.
-// ABOUTME: On/off comes from cs's band key (a ui.press hook reads the file after next) or /filter-chat. PAINTERS is the one table of render sites; site() is the one caller of next().
+// ABOUTME: cs-filter-chat mod: while filter chat is on in this session, the chat shows your messages and Claude's replies and nothing of the work between them. Off by default; a session cs -vet-session refuses gets Claude Code's own drawing.
+// ABOUTME: On/off comes from cs's band key (a ui.press hook reads the setting after next) or /filter-chat. PAINTERS is the one table of render sites; site() is the one caller of next().
 import type { EngineInterface, On, PluginOptions, RenderComponent, RenderElement, RenderInput } from 'claude-code'
 
 import { applyFilterChat, filterChatRecord, newLoad, readFilterChat, writeFilterChat } from './session'
@@ -16,7 +16,7 @@ type $ = EngineInterface
 // One Load per module evaluation. A reload (a change of these files, such as a
 // cs update) evaluates the module again and register() makes a new one; the
 // old module keeps its own until its in-flight dispatches settle (spike Q1).
-// A per-session toggle is not a reload: it is a file this load reads.
+// A per-session toggle is not a reload: it is a setting this load reads.
 let load: Load = newLoad()
 
 /**
@@ -39,7 +39,7 @@ export function register(on: On, options: PluginOptions) {
  *   usage                             replies.usage; reads nothing
  *   await filterChatRecord(load, $)    the mirror exists from here on (vetted at the load's on-read)
  *   status                            applyFilterChat(load, $, 'status'), then `on` or `off` as vetted
- *   toggle                            the file's value read again and flipped (not the mirror's: a hand edit is
+ *   toggle                            the setting's value read again and flipped (not the mirror's: a hand edit is
  *                                     followed), then written as `switch` writes it
  *   switch                            writeFilterChat: asks cs -vet-session first (ruling §20.22); refused, nothing is written
  *
@@ -74,7 +74,7 @@ async function performNow($: $, cmd: FilterChatCommand): Promise<string> {
   const result = await writeFilterChat(load, $, on)
   if (result === 'no-session') return replies.notASession
   if (result !== 'written') return replies.refused(result.refused)
-  return replies.switched(on)
+  return load.on === on ? replies.switched(on) : replies.pinned(!on)
 }
 
 /**
@@ -106,14 +106,14 @@ function registerFilterChat(on: On, ink: Inks) {
   // cs's band key (`filter chat`, Button key `cs-filter-chat`, pressed by a
   // click or the band's focus). next(e) resolves only after cs's onPress
   // (pressFilterChat) promise settles (spike5 M16: 64 of 64, idle and
-  // mid-turn, both --plugin-dir orders), so the file read straight after it
+  // mid-turn, both --plugin-dir orders), so the setting read straight after it
   // is the post-press value, with no timer. Band-side precondition:
-  // pressFilterChat awaits its $.fs.write before returning and the Button's
+  // pressFilterChat awaits its cs write before returning and the Button's
   // onPress returns pressFilterChat's promise. A press while one is pending
   // gets that press's in-flight promise (pressFilterChat is single-flight) and
   // writes nothing, so both hooks read the same value. A press pressFilterChat
-  // refuses (session not vetted, a write error) leaves the file as it is or
-  // torn; the read says what both sides now show. This read is not vetted
+  // refuses (session not vetted, a write error) leaves the setting as it is;
+  // the read says what both sides now show. This read is not vetted
   // again (ruling §20.22): pressFilterChat vetted before it wrote, so a flip
   // to on read here is the press's; an on that did not change keeps the
   // load's cached answer, so a session cs refused stays off
@@ -210,9 +210,9 @@ export const PAINTERS = {
  *     check reads the per-load mirror (session.filterChatRecord), not the
  *     file, so off costs the hop and next(e), no op; applyFilterChat()
  *     invalidates on every flip. The mirror says off in a session cs -vet-session refuses,
- *     whatever the file says (ruling §20.22). Until the load's record
- *     settles, every evaluation awaits it here: in a session whose file reads
- *     on, absent included, that wait holds the load's vet (one cs process,
+ *     whatever the setting says (ruling §20.22). Until the load's record
+ *     settles, every evaluation awaits it here: in a session whose setting reads
+ *     on, that wait holds the load's vet (one cs process,
  *     0.15-0.44 s).
  *   - a throw draws the engine's component (IDX:4102); next has already run.
  */

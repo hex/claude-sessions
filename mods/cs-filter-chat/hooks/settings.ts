@@ -1,24 +1,22 @@
-// ABOUTME: cs-filter-chat's switch: the per-session file .cs/local/filter-chat (cs's band writes it too), what its text means, and the /filter-chat grammar; and its one /config row, the you ink.
-// ABOUTME: Pure. Filter chat is on by default: no file reads on, `on\n` on, `off\n` off, and any other text off with its problem named.
+// ABOUTME: cs-filter-chat's switch: the cs setting CS_FILTER_CHAT, what a settings file's text says of it, and the /filter-chat grammar; and its one /config row, the you ink.
+// ABOUTME: Pure. Filter chat is off by default: no line reads off, the last `1` or `0` line wins.
 import type { PluginOptions, ThemeKey } from 'claude-code'
 
 /**
- * The per-session truth, shared with cs's band. Relative to
- * `$.session.cwd()`, which both sides read the same way. cs's band reads it
- * with the same rule (mods/cs/hooks/register.tsx readFilterChat) and writes it
- * from its filter chat key (pressFilterChat). A contract between two plugins:
- * KEEP IN SYNC with readFilterChat and pressFilterChat; a test in each mod pins
- * these literals.
+ * The switch is the cs setting CS_FILTER_CHAT, read as cs reads a setting: the
+ * environment pins it, else this session's file, else this machine's. Only cs
+ * writes those files (`cs <session> -config set`). cs's band reads it by the
+ * same rule. KEEP IN SYNC with readFilterChat in mods/cs/hooks/register.tsx and
+ * _cs_config_read in lib/03-config.sh.
  */
-export const FILTER_CHAT_FILE = '.cs/local/filter-chat'
-export const ON_LINE = 'on\n'
-export const OFF_LINE = 'off\n'
-/** The directory whose presence says "this may be a cs session". /filter-chat never creates it ($.fs.write would), and a missing filter chat file reads as on only where it exists. */
+export const CONFIG_FILE = '.cs/local/config'
+export const FILTER_CHAT_KEY = 'CS_FILTER_CHAT'
+/** The directory whose presence says "this may be a cs session". /filter-chat never creates it ($.fs.write would). */
 export const CS_LOCAL = '.cs/local'
 /**
  * How long `cs -vet-session` may take before its answer counts as a refusal.
  * Every /filter-chat write asks it first, as cs's band press does, and so does
- * a read that finds FILTER_CHAT_FILE on with no answer cached for it (§20.22,
+ * a read that finds the setting on with no answer cached for it (§20.22,
  * session.vetRefusal, session.vetOnRead). KEEP IN SYNC with VET_TIMEOUT_MS
  * in mods/cs/hooks/register.tsx. The env name `CS_BIN` stays a literal at its
  * one read, as cs's is: validate lists the names a module reads.
@@ -28,33 +26,31 @@ export const VET_TIMEOUT_MS = 10000
 export const BAND_PLUGIN = 'cs'
 export const BAND_ELEMENT = 'cs-filter-chat'
 
-/** Why a FILTER_CHAT_FILE text reads as off although it is not `off\n`: a write torn before its newline, or any other text. */
-export type FilterChatProblem = 'torn' | 'other'
-
-export type FilterChatState =
-  | { readonly on: true }
-  | { readonly on: false; readonly problem?: FilterChatProblem }
-
 /**
- * What FILTER_CHAT_FILE's text says. Writes are non-atomic, so only a whole
- * line counts and nothing is trimmed: `undefined` (no file) is on, the
- * default; `on\n` is on; `off\n` is off; anything else is off with its problem.
+ * What a settings file's text says of the key: the last line naming it with a
+ * value cs accepts, `1` or `0`, undefined with none. The key is the text before
+ * the line's first `=`, and nothing is trimmed.
  */
-export function filterChatState(text: string | undefined): FilterChatState {
-  if (text === undefined || text === ON_LINE) return { on: true }
-  if (text === OFF_LINE) return { on: false }
-  return { on: false, problem: text.endsWith('\n') ? 'other' : 'torn' }
+export function filterChatFlag(text: string): boolean | undefined {
+  let flag: boolean | undefined
+  for (const line of text.split('\n')) {
+    const at = line.indexOf('=')
+    if (at < 0 || line.slice(0, at) !== FILTER_CHAT_KEY) continue
+    const value = line.slice(at + 1)
+    if (value === '1' || value === '0') flag = value === '1'
+  }
+  return flag
 }
 
 /**
  * What a typed /filter-chat asks for. Every change is this session's (this
- * directory's FILTER_CHAT_FILE). cs's band key does not come through here: it
- * writes FILTER_CHAT_FILE itself, and cs-filter-chat's ui.press hook reads it
+ * directory's file). cs's band key does not come through here: it runs the
+ * same cs write itself, and cs-filter-chat's ui.press hook reads the setting
  * after next(e).
  *
- *   /filter-chat          toggle: the file's value flipped, written
+ *   /filter-chat          toggle: the setting's value flipped, written
  *   /filter-chat on|off   that value, written
- *   /filter-chat status   nothing written; FILTER_CHAT_FILE read again, the reply `on` or `off` as vetted
+ *   /filter-chat status   nothing written; the setting read again, the reply `on` or `off` as vetted
  *   anything else        the usage line
  */
 export type FilterChatCommand =
