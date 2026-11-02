@@ -913,7 +913,7 @@ test_live_duplicate_refuses_without_force() {
         return 1
     fi
 
-    assert_output_contains "$output" "already running" \
+    assert_output_contains "$output" "is live elsewhere" \
         "error should call out the live duplicate" || return 1
     assert_output_contains "$output" "$uuid" \
         "error should mention the UUID for traceability" || return 1
@@ -932,7 +932,7 @@ test_live_duplicate_force_overrides() {
 
     assert_output_contains "$output" "--resume $uuid" \
         "with --force the spawn should proceed and use --resume <uuid>" || return 1
-    assert_output_not_contains "$output" "already running" \
+    assert_output_not_contains "$output" "is live elsewhere" \
         "with --force the live-duplicate refusal must not fire" || return 1
 }
 
@@ -955,7 +955,7 @@ STUB
     local output
     output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || true
 
-    assert_output_not_contains "$output" "already running" \
+    assert_output_not_contains "$output" "is live elsewhere" \
         "a UUID inside another program's argv is not a live claude" || return 1
     assert_output_contains "$output" "--resume $uuid" \
         "the launch proceeds to resume the recorded conversation" || return 1
@@ -975,7 +975,7 @@ STUB
     local output rc=0
     output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || rc=$?
     [ "$rc" -ne 0 ] || { echo "  FAIL: a claude resumed with -r must count as running"; return 1; }
-    assert_output_contains "$output" "already running" "the short resume flag is a live claude" || return 1
+    assert_output_contains "$output" "is live elsewhere" "the short resume flag is a live claude" || return 1
 }
 
 # A teammate pane carries the lead's UUID as --parent-session-id and nothing
@@ -993,7 +993,7 @@ STUB
     local output rc=0
     output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || rc=$?
     [ "$rc" -ne 0 ] || { echo "  FAIL: a teammate holding the UUID must count as running"; return 1; }
-    assert_output_contains "$output" "already running" "a surviving teammate holds the session" || return 1
+    assert_output_contains "$output" "is live elsewhere" "a surviving teammate holds the session" || return 1
 }
 
 # The hand-typed `--resume=<uuid>` spelling is the same live claude.
@@ -1009,7 +1009,7 @@ STUB
     local output rc=0
     output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || rc=$?
     [ "$rc" -ne 0 ] || { echo "  FAIL: --resume=<uuid> must count as running"; return 1; }
-    assert_output_contains "$output" "already running" "the = spelling is a live claude" || return 1
+    assert_output_contains "$output" "is live elsewhere" "the = spelling is a live claude" || return 1
 }
 
 # Build a ps stub whose argv names a session but carries an unrelated UUID —
@@ -1039,7 +1039,7 @@ test_live_duplicate_detected_on_an_unbound_session() {
     output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || rc=$?
 
     [ "$rc" -ne 0 ] || { echo "  FAIL: a live claude --name must be detected with no recorded UUID"; return 1; }
-    assert_output_contains "$output" "already running" "the --name half of the guard still runs" || return 1
+    assert_output_contains "$output" "is live elsewhere" "the --name half of the guard still runs" || return 1
     assert_output_not_contains "$output" "(UUID " "no UUID to name" || return 1
 }
 
@@ -1058,7 +1058,7 @@ test_live_duplicate_detected_after_clear_rebind() {
         echo "    output: $(echo "$output" | tail -5)"
         return 1
     fi
-    assert_output_contains "$output" "already running" \
+    assert_output_contains "$output" "is live elsewhere" \
         "error should call out the live duplicate" || return 1
 }
 
@@ -1073,7 +1073,7 @@ test_live_duplicate_ignores_a_longer_sibling_name() {
     local output
     output=$(CS_PS_BIN="$stub" "$CS_BIN" test-session <<< "" 2>&1) || true
 
-    assert_output_not_contains "$output" "already running" \
+    assert_output_not_contains "$output" "is live elsewhere" \
         "a longer sibling name must not block the launch" || return 1
 }
 
