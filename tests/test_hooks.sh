@@ -387,6 +387,60 @@ test_stop_hooks_read_numbers_alike() {
     assert_eq "$a" "$b" "the two Stop hooks hold one _num_or" || return 1
 }
 
+# Each hook carries _cs_parses because it runs before any library is sourced.
+test_stop_hooks_parse_libraries_alike() {
+    local a b
+    a=$(sed -n '/^_cs_parses() {/,/^}/p' "$HOOKS_DIR/stop-blocks.sh")
+    b=$(sed -n '/^_cs_parses() {/,/^}/p' "$HOOKS_DIR/stop-notices.sh")
+    [ -n "$a" ] || { echo "  FAIL: no _cs_parses in stop-blocks.sh"; return 1; }
+    assert_eq "$a" "$b" "the two Stop hooks hold one _cs_parses" || return 1
+}
+
+# A library ending in a syntax error, whose line ahead of it leaves a mark when
+# the file is sourced: the mark says the parse check let the file through.
+_library_that_marks_when_sourced() {  # file, mark
+    printf ': > "%s"\nif\n' "$2" > "$1"
+}
+
+# bash -n is memoized per file version. The memo holds while the file is older;
+# a file written since is read again, and a file that fails records nothing.
+test_stop_hooks_parse_a_library_again_once_it_changes() {
+    local hook dir lib mark home old=202001010000
+    for hook in stop-blocks.sh stop-notices.sh; do
+        dir="$TEST_TMPDIR/parse-$hook" lib="$dir/cs-resolve.sh" mark="$dir/sourced" home="$dir/home"
+        mkdir -p "$home"
+        cp "$HOOKS_DIR/$hook" "$HOOKS_DIR/cs-shared.sh" "$dir/"
+
+        _library_that_marks_when_sourced "$lib" "$mark"
+        touch -t "$old" "$lib"
+        echo '{}' | HOME="$home" bash "$dir/$hook" >/dev/null 2>&1 || true
+        echo '{}' | HOME="$home" bash "$dir/$hook" >/dev/null 2>&1 || true
+        assert_file_not_exists "$mark" "$hook: a library that fails the check is not sourced, and the failure records no memo" || return 1
+
+        printf ': sound\n' > "$lib"
+        touch -t "$old" "$lib"
+        echo '{}' | HOME="$home" bash "$dir/$hook" >/dev/null 2>&1 || true
+        _library_that_marks_when_sourced "$lib" "$mark"
+        touch -t "$old" "$lib"
+        echo '{}' | HOME="$home" bash "$dir/$hook" >/dev/null 2>&1 || true
+        assert_file_exists "$mark" "$hook: a file older than its memo is not parsed again" || return 1
+
+        rm -f "$mark"
+        touch "$lib"
+        echo '{}' | HOME="$home" bash "$dir/$hook" >/dev/null 2>&1 || true
+        assert_file_not_exists "$mark" "$hook: a file written since its memo is parsed again" || return 1
+    done
+}
+
+test_path_helpers_print_what_dirname_and_basename_print() {
+    local row path dir base
+    for row in 'a|.|a' '/a|/|a' 'a/b|a|b' '/a/b|/a|b' 'a/b/|a|b' 'a//b|a|b' '/|/|/' '-x|.|-x' './-x|.|-x' '/a/b/c.d|/a/b|c.d'; do
+        path=${row%%|*} base=${row##*|} dir=${row#*|} dir=${dir%|*}
+        assert_eq "$dir" "$(. "$HOOKS_DIR/cs-shared.sh"; _cs_path_dir "$path")" "directory of $path" || return 1
+        assert_eq "$base" "$(. "$HOOKS_DIR/cs-shared.sh"; _cs_path_base "$path")" "name of $path" || return 1
+    done
+}
+
 # The key the verdict handshake turns on is cs-shared.sh's cs_stop_key, and
 # each hook carries a copy for a partial install. A copy that drifts keys the
 # two hooks apart, and every verdict is then nobody's.
@@ -3871,6 +3925,9 @@ run_test test_stop_notices_are_silent_for_a_subagent
 run_test test_stop_notices_are_silent_on_any_other_event
 run_test test_stop_notices_stand_down_while_the_queue_runs
 run_test test_stop_hooks_read_numbers_alike
+run_test test_stop_hooks_parse_libraries_alike
+run_test test_stop_hooks_parse_a_library_again_once_it_changes
+run_test test_path_helpers_print_what_dirname_and_basename_print
 run_test test_stop_hooks_key_a_stop_alike
 
 # --- The verdict handshake between the two Stop hooks -----------------------

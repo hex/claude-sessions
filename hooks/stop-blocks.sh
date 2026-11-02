@@ -14,10 +14,10 @@ INPUT=$(cat 2>/dev/null || echo '{}')
 # Unit separator, not tab: tab is IFS whitespace, so bash collapses runs of it
 # and an absent field (agent_id is empty on every top-level event) would shift
 # every later field one place left.
-HOOK_EVENT=Stop; AGENT_ID=""; FC_PATH=""; FC_EVENT=""
-IFS=$'\037' read -r HOOK_EVENT AGENT_ID FC_PATH FC_EVENT <<EOF
+HOOK_EVENT=Stop; AGENT_ID=""; FC_PATH=""; FC_EVENT=""; TRANSCRIPT=""
+IFS=$'\037' read -r HOOK_EVENT AGENT_ID FC_PATH FC_EVENT TRANSCRIPT <<EOF
 $(printf '%s' "$INPUT" | jq -r '[.hook_event_name // "Stop", .agent_id // "",
-    .file_path // "", .event // ""] | join("\u001f")' 2>/dev/null || printf 'Stop')
+    .file_path // "", .event // "", ((.transcript_path | strings) // "")] | join("\u001f")' 2>/dev/null || printf 'Stop')
 EOF
 [ -n "$HOOK_EVENT" ] || HOOK_EVENT=Stop
 
@@ -48,14 +48,27 @@ fi
 # outright and the || never runs. A partial install would then abort the hook
 # before its own decline, silently. When the library is absent the fallback
 # is the env-only check this guard replaced, so the hook behaves as it used to.
-_cs_lib="$(dirname "$0")/cs-resolve.sh"
+_cs_hook_dir=${0%/*}
+[ "$_cs_hook_dir" != "$0" ] || _cs_hook_dir=.
+_cs_lib="$_cs_hook_dir/cs-resolve.sh"
 # cs-shared.sh is build.sh's copy of lib/02-shared.sh, the atomic writer
 # among it, one source for cs and its hooks. Same guard, same reasons.
-_cs_shared="$(dirname "$0")/cs-shared.sh"
-# shellcheck source=cs-resolve.sh
+_cs_shared="$_cs_hook_dir/cs-shared.sh"
 # Parse-check before sourcing: a truncated or corrupt library is readable,
-# and sourcing it aborts the hook at the syntax error, before the fallback
-# below is even defined. One fork against several the hook already makes.
+# and sourcing it runs what parses and leaves part of the library defined.
+# bash -n is the dearest fork on an ordinary Stop, so a file that passed is
+# asked again only once it is no longer older than its memo, kept per file and
+# per bash under ~/.cache/cs, machine-local and outside the session. Equal
+# times count as changed. A corrupt file given a time older than the memo (a
+# restored backup) is sourced unchecked, and errexit is off across the source.
+_cs_parses() {  # file
+    local memo="${HOME:-/nonexistent}/.cache/cs/parsed/${BASH_VERSION}${1//\//%}"
+    [ ! "$memo" -nt "$1" ] || return 0
+    "${BASH:-/bin/bash}" -n "$1" 2>/dev/null || return 1
+    [ -d "${memo%/*}" ] || mkdir -p "${memo%/*}" 2>/dev/null || return 0
+    : 2>/dev/null > "$memo" || true
+}
+# shellcheck source=cs-resolve.sh
 # errexit is suspended across the source, not just around it: a library that
 # parses clean and fails when RUN (an inserted `=======` conflict marker is a
 # valid-looking command) fails INSIDE the sourced file, where set -e fires
@@ -68,9 +81,9 @@ case $- in *e*) _cs_had_e=1 ;; *) _cs_had_e=0 ;; esac
 # the environment as it loads; without that library this line does.
 unset CS_TRACKED_FILES_NOTICE CS_TRACKED_FILES_META
 set +e
-[ -r "$_cs_lib" ] && "${BASH:-/bin/bash}" -n "$_cs_lib" 2>/dev/null && . "$_cs_lib"
+[ -r "$_cs_lib" ] && _cs_parses "$_cs_lib" && . "$_cs_lib"
 # shellcheck source=cs-shared.sh
-[ -r "$_cs_shared" ] && "${BASH:-/bin/bash}" -n "$_cs_shared" 2>/dev/null && . "$_cs_shared"
+[ -r "$_cs_shared" ] && _cs_parses "$_cs_shared" && . "$_cs_shared"
 if [ "$_cs_had_e" = 1 ]; then set -e; fi
 if ! command -v cs_resolve_session >/dev/null 2>&1; then
     cs_resolve_session() {
@@ -166,11 +179,11 @@ _num_or() {  # value, default -> prints value if a plain integer, else default
 # which says why it is built as it is; the copy serves a partial install
 # without the library, and tests/test_hooks.sh holds the three to one text.
 if ! command -v cs_stop_key >/dev/null 2>&1; then
-cs_stop_key() {  # stop input
-    local c t s=""
-    c=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-    t=$(printf '%s' "$1" | jq -r '.transcript_path // empty' 2>/dev/null) || t=""
-    if [ -n "$t" ] && [ -f "$t" ] && [ -r "$t" ]; then s=$(wc -c < "$t" 2>/dev/null | tr -d ' ') || s=""; fi
+cs_stop_key() {  # stop input, the transcript path it names
+    local c t="$2" s=""
+    c=$(printf '%s' "$1" | cksum)
+    c=${c%% *}
+    if [ -n "$t" ] && [ -f "$t" ] && [ -r "$t" ]; then s=$(wc -c < "$t" 2>/dev/null) || s=""; s=${s//[[:space:]]/}; fi
     case "$s" in ''|*[!0-9]*) printf '%s' "$c" ;; *) printf '%s.%s' "$c" "$s" ;; esac
 }
 fi
@@ -178,7 +191,7 @@ fi
 # and the later it is read the more a slow start lets the two hooks' readings
 # drift apart.
 STOP_KEY=""
-[ "$HOOK_EVENT" != "Stop" ] || STOP_KEY=$(cs_stop_key "$INPUT")
+[ "$HOOK_EVENT" != "Stop" ] || STOP_KEY=$(cs_stop_key "$INPUT" "$TRANSCRIPT")
 
 # The queue is a directory of one file per task (written via tmp+rename by
 # cs -queue add / task-kind mail), so the drain can never read a torn entry.

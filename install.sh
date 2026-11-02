@@ -1393,12 +1393,12 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "d01f7da0bebd3730a5fa52b59a83b54cc06a673b9e5d6c35d6ab02594735cfc3  bin/cs"
+    "a6644c84e561fa376b42316b1b982be77665845adc3c30a8926331e6530b3b74  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "2b4582243e40e9b34638edbaf9327fec2ec9c7ecb09f972d2cfe4a2dfdd7dbf8  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
-    "c94ad4f28e7a63fc0366d4f21460144e68adab3c3f09c25c532407951c96b20c  hooks/cs-shared.sh"
+    "dfd0173f06ef444acb268ded728862afd3590c54ede6e157711c79924a431c9a  hooks/cs-shared.sh"
     "022b2fd0394509be0de564838d3347ff493b4bb750eae1521ff4b341d5571e62  hooks/cs-config.sh"
     "50d63ce0995e68fddd8503700c15f9585d11938c9cd3872a883146de7707c765  hooks/cs-iterm-tab.py"
     "21988bf58bb6fea15c6435445f4abc3a38f4c4a9a7db78c4ff4797650709ba3f  hooks/memory-index-guard.sh"
@@ -1409,8 +1409,8 @@ CS_PAYLOAD_SHA256=(
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
     "4b91a8478721aaefb2863e77638de6d0616db0b528c64a58cc44e73ab836321e  hooks/session-start.sh"
     "cae9775702513f11b1abff031928047766ab69714e3a9b1db82ff080e186f20b  hooks/autosave-commits.sh"
-    "319826f478832ec8553ebc01b37355603d8ef6e6079883f4d8bbec088c84f947  hooks/stop-blocks.sh"
-    "d8a9e00e7569c5dd346da9987942f7cb3683896bae038caf91064b98206d8536  hooks/stop-notices.sh"
+    "59a45222ec8106787e9e97c7c48acc32b754831ecdc5247fdc40d992f36ee009  hooks/stop-blocks.sh"
+    "bb6ac217884ce48777ec7b43813b9375610792b4673bad8b32fa10c953c7cf87  hooks/stop-notices.sh"
     "a96c77d8f13d893e46116b7d61e517f72bba7f8e10b790517934004be21ae43a  hooks/session-end.sh"
     "81a13835a65f4b4b35bb87493da0df9848de68375ca7ab1525d2d5079cf52bf1  hooks/subagent-context.sh"
     "53b16016dd6d087c3cc3db7e4acf8de6629e149e3b7f326f0731b36809574156  hooks/tool-failure-logger.sh"

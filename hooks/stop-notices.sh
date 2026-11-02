@@ -27,9 +27,10 @@ INPUT=$(cat 2>/dev/null || echo '{}')
 # Unit separator, not tab: tab is IFS whitespace, so bash collapses runs of it
 # and an absent field (agent_id is empty on every top-level event) would shift
 # the next field one place left.
-HOOK_EVENT=Stop; AGENT_ID=""
-IFS=$'\037' read -r HOOK_EVENT AGENT_ID <<EOF
-$(printf '%s' "$INPUT" | jq -r '[.hook_event_name // "Stop", .agent_id // ""] | join("\u001f")' 2>/dev/null || printf 'Stop')
+HOOK_EVENT=Stop; AGENT_ID=""; TRANSCRIPT=""; NUDGE_UUID=""
+IFS=$'\037' read -r HOOK_EVENT AGENT_ID TRANSCRIPT NUDGE_UUID <<EOF
+$(printf '%s' "$INPUT" | jq -r '[.hook_event_name // "Stop", .agent_id // "",
+    ((.transcript_path | strings) // ""), ((.session_id | strings) // "")] | join("\u001f")' 2>/dev/null || printf 'Stop')
 EOF
 [ -n "$HOOK_EVENT" ] || HOOK_EVENT=Stop
 [ "$HOOK_EVENT" = "Stop" ] || exit 0
@@ -39,18 +40,28 @@ EOF
 
 # The library source follows stop-blocks.sh, which carries the reasons:
 # test before sourcing (bash 3.2 kills the shell on a `.` of a missing file),
-# parse-check first (a truncated library aborts at its syntax error), and
-# errexit suspended across the source (a library that parses clean can still
-# fail when run). A missing or broken library leaves the fallbacks below.
-_cs_lib="$(dirname "$0")/cs-resolve.sh"
-_cs_shared="$(dirname "$0")/cs-shared.sh"
+# parse-check first, memoized as _cs_parses says there (tests/test_hooks.sh
+# holds the two to one text), and errexit suspended across the source (a
+# library that parses clean can still fail when run). A missing or broken
+# library leaves the fallbacks below.
+_cs_hook_dir=${0%/*}
+[ "$_cs_hook_dir" != "$0" ] || _cs_hook_dir=.
+_cs_lib="$_cs_hook_dir/cs-resolve.sh"
+_cs_shared="$_cs_hook_dir/cs-shared.sh"
+_cs_parses() {  # file
+    local memo="${HOME:-/nonexistent}/.cache/cs/parsed/${BASH_VERSION}${1//\//%}"
+    [ ! "$memo" -nt "$1" ] || return 0
+    "${BASH:-/bin/bash}" -n "$1" 2>/dev/null || return 1
+    [ -d "${memo%/*}" ] || mkdir -p "${memo%/*}" 2>/dev/null || return 0
+    : 2>/dev/null > "$memo" || true
+}
 case $- in *e*) _cs_had_e=1 ;; *) _cs_had_e=0 ;; esac
 unset CS_TRACKED_FILES_NOTICE CS_TRACKED_FILES_META
 set +e
 # shellcheck source=cs-resolve.sh
-[ -r "$_cs_lib" ] && "${BASH:-/bin/bash}" -n "$_cs_lib" 2>/dev/null && . "$_cs_lib"
+[ -r "$_cs_lib" ] && _cs_parses "$_cs_lib" && . "$_cs_lib"
 # shellcheck source=cs-shared.sh
-[ -r "$_cs_shared" ] && "${BASH:-/bin/bash}" -n "$_cs_shared" 2>/dev/null && . "$_cs_shared"
+[ -r "$_cs_shared" ] && _cs_parses "$_cs_shared" && . "$_cs_shared"
 if [ "$_cs_had_e" = 1 ]; then set -e; fi
 if ! command -v cs_resolve_session >/dev/null 2>&1; then
     cs_resolve_session() {
@@ -98,18 +109,18 @@ _num_or() {  # value, default -> prints value if a plain integer, else default
 # install without the library, and tests/test_hooks.sh holds the three to one
 # text.
 if ! command -v cs_stop_key >/dev/null 2>&1; then
-cs_stop_key() {  # stop input
-    local c t s=""
-    c=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-    t=$(printf '%s' "$1" | jq -r '.transcript_path // empty' 2>/dev/null) || t=""
-    if [ -n "$t" ] && [ -f "$t" ] && [ -r "$t" ]; then s=$(wc -c < "$t" 2>/dev/null | tr -d ' ') || s=""; fi
+cs_stop_key() {  # stop input, the transcript path it names
+    local c t="$2" s=""
+    c=$(printf '%s' "$1" | cksum)
+    c=${c%% *}
+    if [ -n "$t" ] && [ -f "$t" ] && [ -r "$t" ]; then s=$(wc -c < "$t" 2>/dev/null) || s=""; s=${s//[[:space:]]/}; fi
     case "$s" in ''|*[!0-9]*) printf '%s' "$c" ;; *) printf '%s.%s' "$c" "$s" ;; esac
 }
 fi
 # Read as soon as the library is in: the key carries the transcript's size,
 # and the later it is read the more a slow start lets the two hooks' readings
 # drift apart.
-STOP_KEY=$(cs_stop_key "$INPUT")
+STOP_KEY=$(cs_stop_key "$INPUT" "$TRANSCRIPT")
 
 # Claude Code registers this hook with a 10 s timeout, past which it kills the
 # process and drops whatever it printed. Everything below runs inside this
@@ -173,7 +184,6 @@ fi
 # holds this file, so the lines holding the attachment's type are read as JSON
 # and the phrase is looked for in the notice they carry. A transcript that
 # cannot be read, or a line of it that is not JSON, records no delivery.
-TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || true)
 _delivered() {  # text the transcript records when the notice was delivered
     [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || return 1
     grep -F -- '"async_hook_response"' "$TRANSCRIPT" 2>/dev/null | jq -n -e --arg p "$1" \
@@ -202,7 +212,6 @@ _cursor() {  # file, uuid
 # transcript records when it was delivered.
 CTX_TEXT=""; CTX_CURSOR=""; CTX_MARK=""
 NUDGE_CTX=$(_num_or "${CS_ROTATE_NUDGE_CTX:-}" 65)
-NUDGE_UUID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
 NUDGE_PCT=$(cat "$LOCAL/context-pct" 2>/dev/null | tr -d '[:space:]' || true)
 case "$NUDGE_PCT" in ''|*[!0-9]*) NUDGE_PCT="";; esac
 # The file holds the LEAD's reading only: the status line writes it for the

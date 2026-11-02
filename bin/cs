@@ -2065,6 +2065,29 @@ _cs_file_mode() {  # path
 # file removed, and returns the failing status. Callers that want a message
 # add it: hooks source this file, and `error` is cs's alone.
 # Usage: cs_write_atomic <dest> <command> [args...]
+# What dirname and basename print for a path, without starting either: every
+# write a hook makes asks both, more than once.
+_cs_path_dir() {  # path
+    local p="$1"
+    while [ "$p" != "${p%/}" ] && [ -n "${p%/}" ]; do p=${p%/}; done
+    case "$p" in
+        /*/*|[!/]*/*) ;;
+        /*) printf '/\n'; return ;;
+        *) printf '.\n'; return ;;
+    esac
+    p=${p%/*}
+    while [ "$p" != "${p%/}" ]; do p=${p%/}; done
+    printf '%s\n' "${p:-/}"
+}
+_cs_path_base() {  # path
+    local p="$1"
+    while [ "$p" != "${p%/}" ] && [ -n "${p%/}" ]; do p=${p%/}; done
+    case "$p" in
+        /|//*) printf '/\n'; return ;;
+    esac
+    printf '%s\n' "${p##*/}"
+}
+
 # Where a write to a path lands: its symlinks followed, 16 hops as
 # cs_write_atomic follows them, and its directory resolved physically, so a
 # linked parent counts too. Fails when that directory does not exist, and
@@ -2085,7 +2108,7 @@ _cs_write_target() {  # path
         link=${link%x}
         case "$link" in
             /*) dest="$link" ;;
-            *) dest="$(dirname -- "$dest")/$link" ;;
+            *) dest="$(_cs_path_dir "$dest")/$link" ;;
         esac
         case "$dest" in *"$nl"/*|*"$nl") return 3 ;; esac
         hops=$((hops + 1))
@@ -2104,9 +2127,9 @@ _cs_write_target() {  # path
     # collapse `link/..` to the link's own parent, not the target's. The x
     # keeps a directory's trailing newline; the name after it keeps it from
     # the caller's $(...).
-    dir=$(cd -P -- "$(dirname -- "$dest")" 2>/dev/null && pwd -P && printf x) || return 1
+    dir=$(cd -P -- "$(_cs_path_dir "$dest")" 2>/dev/null && pwd -P && printf x) || return 1
     dir=${dir%"$nl"x}
-    printf '%s/%s\n' "${dir%/}" "$(basename -- "$dest")"
+    printf '%s/%s\n' "${dir%/}" "$(_cs_path_base "$dest")"
 }
 
 # True when .cs at <root> is a submodule or nested repository, whose files
@@ -2341,14 +2364,15 @@ cs_mkdir_inside() {  # dir
 # takes what the hooks return only after they exit, so its size differs per
 # Stop and both hooks, reading at their start, read one size. A transcript the
 # input does not name, or that cannot be read, leaves the cksum alone as the
-# key, and two such Stops on one input share it. Each hook carries a copy of
+# key, and two such Stops on one input share it. The caller hands in the path
+# from its one read of the input. Each hook carries a copy of
 # this function for a partial install without this library, and
 # tests/test_hooks.sh holds the three to one text.
-cs_stop_key() {  # stop input
-    local c t s=""
-    c=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
-    t=$(printf '%s' "$1" | jq -r '.transcript_path // empty' 2>/dev/null) || t=""
-    if [ -n "$t" ] && [ -f "$t" ] && [ -r "$t" ]; then s=$(wc -c < "$t" 2>/dev/null | tr -d ' ') || s=""; fi
+cs_stop_key() {  # stop input, the transcript path it names
+    local c t="$2" s=""
+    c=$(printf '%s' "$1" | cksum)
+    c=${c%% *}
+    if [ -n "$t" ] && [ -f "$t" ] && [ -r "$t" ]; then s=$(wc -c < "$t" 2>/dev/null) || s=""; s=${s//[[:space:]]/}; fi
     case "$s" in ''|*[!0-9]*) printf '%s' "$c" ;; *) printf '%s.%s' "$c" "$s" ;; esac
 }
 
@@ -2358,15 +2382,15 @@ cs_write_atomic() {  # dest, command [args...]
         local dir tmp mode link hops=0
         ! _cs_refuses_write cs_write_atomic "$dest" || exit 1
         [ -z "${CS_WRITE_QUIET:-}" ] || exec 2>/dev/null
-        # readlink, dirname and basename below take dest without --: a
-        # relative dest starting with a dash fails at them or at mktemp and
-        # writes nothing, so that spelling is accepted, not re-fixed.
+        # readlink and mv below take dest without --: a relative dest
+        # starting with a dash fails at them and writes nothing, so that
+        # spelling is accepted, not re-fixed.
         while [ -L "$dest" ] && [ "$hops" -lt 16 ]; do
             link=$(readlink -n "$dest" && printf x) || exit 1
             link=${link%x}
             case "$link" in
                 /*) dest="$link" ;;
-                *) dest="$(dirname "$dest")/$link" ;;
+                *) dest="$(_cs_path_dir "$dest")/$link" ;;
             esac
             hops=$((hops + 1))
         done
@@ -2374,8 +2398,8 @@ cs_write_atomic() {  # dest, command [args...]
             echo "cs_write_atomic: $dest is a directory" >&2
             exit 1
         fi
-        dir=$(dirname "$dest")
-        tmp=$(mktemp "$dir/.cs-tmp.$(basename "$dest").XXXXXX") || exit 1
+        dir=$(_cs_path_dir "$dest")
+        tmp=$(mktemp "$dir/.cs-tmp.$(_cs_path_base "$dest").XXXXXX") || exit 1
         trap 'rm -f "$tmp"' EXIT
         "$@" > "$tmp" || exit $?
         if [ -f "$dest" ]; then
