@@ -10,7 +10,7 @@ reviewed to the user's standard; it is the mechanical closer, not a review.
 The landing never touches the feature worktree. Retirement (fuse its session
 records into the base, remove the worktree, delete the branch) runs in the
 same ritual. A directory cannot be removed from under a running Claude, so
-while the feature conversation is still open the entry stages the retire in
+while the feature conversation is still live the entry stages the retire in
 the base instead, and this session's Stop hook runs it by itself once that
 conversation closes; the user closes it when they are done there and nothing
 else is asked of them. Abandoning a feature instead is `cs -rm <base>@<task>`,
@@ -160,7 +160,7 @@ what creates them and fold it into the gate: `-- sh -c 'npm ci && npm test'`.
      `/finish <task>` captures them.
 
    The entry answers `retired <task> <sha>`, `staged <task> <sha>: ...`, or
-   refuses. `staged` means the feature conversation is still open in the
+   refuses. `staged` means the feature conversation is still live in the
    worktree: the entry recorded the retire in the base
    (`.cs/local/retire-staged/<task>`), and the base's Stop hook runs it once
    that conversation's lock is gone, with every refusal intact. Relay the
