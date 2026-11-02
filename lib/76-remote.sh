@@ -164,7 +164,7 @@ _remote_refuse_live() {  # session_name, meta_dir, lock_pid, [remote]
         error "Session $1 is served by cs $1 --remote (remote-control PID $spid); stop it first with Ctrl-C in its window, or close the window."
     fi
     [ -z "${4:-}" ] \
-        || error "Session $1 is already open (PID $3); cs $1 --remote serves only a session that is not open. Close it first."
+        || error "Session $1 is live (PID $3); cs $1 --remote serves only a session that is not open. Close it first."
     return 0
 }
 

@@ -252,7 +252,7 @@ for the password.
 `cs -encrypt` refuses, before it writes anything, when:
 
 - the machine is not a Mac, or stdin is not a terminal
-- the session is running, adopted, or a feature worktree (`base@task`)
+- the session is live, adopted, or a feature worktree (`base@task`)
 - any of the four names is already a link, or `.cs/claude-config` or
   `.cs/private` already exists as a folder or file
 - `.cs/local/pre-open` already exists

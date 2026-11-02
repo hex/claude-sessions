@@ -38,7 +38,7 @@ _lock_collision_menu() {
     fi
 
     echo
-    printf '  %b%b%b  %b %bis already open%b %b· PID %s%b\n' \
+    printf '  %b%b%b  %b %bis live%b %b· PID %s%b\n' \
         "$YELLOW" "$ICON_LOCK" "$NC" "$(_session_pill "$session_name" "$color")" \
         "$COMMENT" "$NC" "$DIM" "$lock_pid" "$NC"
     echo
@@ -221,7 +221,7 @@ acquire_session_lock() {
         CS_COLLISION_FORCE=1
         warn "Overriding active session lock (PID $lock_pid)"
     else
-        echo -e "${RED}Error: Session is already open (PID $lock_pid)${NC}" >&2
+        echo -e "${RED}Error: Session is live (PID $lock_pid)${NC}" >&2
         echo -e "${DIM}Use --force to override: cs $session_name --force${NC}" >&2
         exit 1
     fi
