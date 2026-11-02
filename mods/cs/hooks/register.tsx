@@ -307,7 +307,7 @@ type BandFacts = {
   rotating: boolean
   armed: boolean
   wrapping: boolean
-  chatOnly?: { on: boolean; color: string | undefined; onPress: BandPress }
+  chatOnly?: { on: boolean; onPress: BandPress }
   waiting: number
   gate?: string
   queued: number
@@ -323,6 +323,8 @@ type BandFacts = {
 const QUEUE_GLYPH = '\u25a4'
 // The queue press's head: its glyph, its verb and its count.
 const QUEUE_COUNT = /^\u25a4 run \d+/
+// The chat only key's switch dot while on.
+const CHAT_ONLY_ON = paletteColor('green')
 
 export function buildBandEntries(facts: BandFacts): BandEntry[] {
   const entries: BandEntry[] = []
@@ -331,8 +333,8 @@ export function buildBandEntries(facts: BandFacts): BandEntry[] {
   if (facts.countdown !== undefined) entries.push({ key: 'cs-countdown', kind: 'word', label: `in ${facts.countdown.seconds}s`, ink: { color: facts.countdown.ink } })
   if (facts.wrapping) entries.push({ key: 'cs-wrap', kind: 'chord', label: 'wrap', action: WRAP_ACTION, onPress: facts.wrap })
   // The chat only key and the queue have no chord: a click or Enter under the band's focus presses them.
-  // Its tail is a switch dot: ● in the session's colour while on, ○ in the line's ink while off.
-  if (facts.chatOnly !== undefined) entries.push({ key: 'cs-chat-only', kind: 'press', label: facts.chatOnly.on ? 'chat only ●' : 'chat only ○', onPress: facts.chatOnly.onPress, ink: { tail: facts.chatOnly.on ? '●' : '○', color: facts.chatOnly.on ? facts.chatOnly.color : undefined } })
+  // Its tail is a switch dot: ● in green while on, ○ in the line's ink while off.
+  if (facts.chatOnly !== undefined) entries.push({ key: 'cs-chat-only', kind: 'press', label: facts.chatOnly.on ? 'filter chat only ●' : 'filter chat only ○', onPress: facts.chatOnly.onPress, ink: { tail: facts.chatOnly.on ? '●' : '○', color: facts.chatOnly.on ? CHAT_ONLY_ON : undefined } })
   if (facts.waiting > 0) entries.push({ key: 'cs-queue', kind: 'press', label: `${QUEUE_GLYPH} run ${facts.waiting} queued ${facts.waiting === 1 ? 'task' : 'tasks'}`, onPress: facts.queue, ink: { lead: QUEUE_GLYPH, color: facts.queueInk } })
   // The features word leads what the session is; only a ready feature can be pressed.
   if (facts.featured !== undefined) {
@@ -678,7 +680,7 @@ export function register(on: On, options: PluginOptions) {
       countdown: armed && left !== undefined ? { seconds: left, ink: await rampColor($, left) } : undefined,
       rotating, armed, wrapping, waiting, gate, queued, queueRunning: queueStarted, mail,
       queueInk: amberColor(bg, theme),
-      chatOnly: offersChatOnly ? { on: !chatOnlyVetRefused && await readChatOnly($), color: own, onPress: () => pressChatOnly($) } : undefined,
+      chatOnly: offersChatOnly ? { on: !chatOnlyVetRefused && await readChatOnly($), onPress: () => pressChatOnly($) } : undefined,
       rotate: armed ? () => pressClear($) : () => pressRotate($),
       wrap: () => askToWrap($),
       queue: () => pressQueueStart($),
