@@ -6294,3 +6294,39 @@ run_test test_finish_progress_drops_the_record_while_the_vault_is_locked
 run_test test_finish_progress_write_failure_changes_nothing_but_one_warning
 
 report_results
+
+# --- The name claude is given ---
+
+# Claude Code's SendMessage refuses any address with an '@' in it, so a peer
+# could never message a feature session named after its directory. cs hands
+# claude the name with a '+' for the '@' and keeps the '@' form everywhere
+# else: in CLAUDE_SESSION_NAME, on disk, in cs -msg.
+test_worktree_launch_names_claude_with_a_plus_and_keeps_the_at_in_its_env() {
+    create_test_session_with_git "myproj" > /dev/null
+    printf '#!/bin/bash\nprintf "argv=%%s\\n" "$*" > "%s"\nprintf "name=%%s\\n" "${CLAUDE_SESSION_NAME:-}" >> "%s"\n' \
+        "$TEST_TMPDIR/launch" "$TEST_TMPDIR/launch" > "$TEST_TMPDIR/claude"
+    chmod +x "$TEST_TMPDIR/claude"
+    export CLAUDE_CODE_BIN="$TEST_TMPDIR/claude"
+    "$CS_BIN" "myproj@fix-auth" < /dev/null > /dev/null 2>&1 || true
+    assert_file_contains "$TEST_TMPDIR/launch" "^argv=--name myproj+fix-auth --session-id " \
+        "claude is named base+feature" || return 1
+    assert_file_contains "$TEST_TMPDIR/launch" "^name=myproj@fix-auth$" \
+        "CLAUDE_SESSION_NAME keeps the base@feature form" || return 1
+}
+
+# The live-duplicate guard reads the name claude was given back from ps, so
+# it looks for the '+' form.
+test_worktree_open_refuses_a_running_claude_named_with_the_plus() {
+    create_test_session_with_git "myproj" > /dev/null
+    cs_launch "myproj@fix-auth"
+    local ps_stub="$TEST_TMPDIR/ps-stub"
+    printf '#!/bin/sh\nprintf "claude --name myproj+fix-auth\\n"\n' > "$ps_stub"
+    chmod +x "$ps_stub"
+    _make_launch_sentinel
+    local out rc=0
+    out=$(CS_PS_BIN="$ps_stub" "$CS_BIN" "myproj@fix-auth" < /dev/null 2>&1) || rc=$?
+    assert_eq "1" "$rc" "the open refuses" || return 1
+    assert_output_contains "$out" "Session myproj@fix-auth is already running elsewhere" \
+        "the refusal names the session as cs does" || return 1
+    assert_not_exists "$TEST_TMPDIR/launched" "claude never starts" || return 1
+}

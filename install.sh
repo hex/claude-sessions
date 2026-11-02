@@ -1392,12 +1392,12 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "d4e94a65bd09d0d9b3f48a00b64b7d4d4de96474877b46ebef390830f952e844  bin/cs"
+    "9269cfa5bee5d04c3035c4e0e8165e9219e1b4b72f428a2e6e30af9a59698517  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "2148a9cf6df5ff9185fa9392b3e186067ce0b395b73f75ca951aa64c0172c17e  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
-    "55838afd50a85833c5a58da325e49c656b41f21b68a7df6ca0fc2ad9c1c4ab73  hooks/cs-shared.sh"
+    "6d21c394d71a3735796a1fc9780799c8cf95cdb8afd1e867cc323737c3aa9f60  hooks/cs-shared.sh"
     "1afbc021d4755317cb865ce23a776e23f3974a64b655a8a0cb5b8836c1d31279  hooks/cs-config.sh"
     "50d63ce0995e68fddd8503700c15f9585d11938c9cd3872a883146de7707c765  hooks/cs-iterm-tab.py"
     "21988bf58bb6fea15c6435445f4abc3a38f4c4a9a7db78c4ff4797650709ba3f  hooks/memory-index-guard.sh"
