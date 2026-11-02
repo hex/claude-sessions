@@ -30,7 +30,7 @@ test_stop_hook_bounces_dock_in_iterm() {
     _it2_session "bounce"
     unset CS_NO_ITERM2
     export TERM_PROGRAM="iTerm.app"
-    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || true
+    echo '{}' | bash "$HOOKS_DIR/stop-blocks.sh" >/dev/null 2>&1 || true
     [ -f "$IT2_LOG" ] || { echo "  FAIL: it2attention never ran"; return 1; }
     assert_file_contains "$IT2_LOG" "start" "turn end should start the bounce" || return 1
 }
@@ -39,7 +39,7 @@ test_no_bounce_outside_iterm() {
     _it2_session "notiterm"
     unset CS_NO_ITERM2
     export TERM_PROGRAM="Apple_Terminal"
-    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || true
+    echo '{}' | bash "$HOOKS_DIR/stop-blocks.sh" >/dev/null 2>&1 || true
     if [ -f "$IT2_LOG" ]; then
         echo "  FAIL: it2attention fired outside iTerm2: $(cat "$IT2_LOG")"
         return 1
@@ -50,7 +50,7 @@ test_no_bounce_when_disabled() {
     _it2_session "killed"
     export CS_NO_ITERM2=1
     export TERM_PROGRAM="iTerm.app"
-    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || true
+    echo '{}' | bash "$HOOKS_DIR/stop-blocks.sh" >/dev/null 2>&1 || true
     if [ -f "$IT2_LOG" ]; then
         echo "  FAIL: CS_NO_ITERM2 must disable the bounce: $(cat "$IT2_LOG")"
         return 1
@@ -63,7 +63,7 @@ test_missing_it2_tool_is_silent_and_harmless() {
     export TERM_PROGRAM="iTerm.app"
     rm -f "$CS_IT2_DIR/it2attention"
     local ec=0
-    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || ec=$?
+    echo '{}' | bash "$HOOKS_DIR/stop-blocks.sh" >/dev/null 2>&1 || ec=$?
     assert_eq "0" "$ec" "hook must not fail when it2 is absent" || return 1
 }
 

@@ -117,6 +117,7 @@ RETIRED_HOOKS=(
     artifact-tracker.sh       # retired: PreToolUse:Write redirect was inert (updatedInput path rewrite is not honored by the harness); tracking removed entirely
     prose-lint.sh             # retired with the `cs -lint` verb it called; MUST stay listed, because a deployed copy calling the removed verb reads error()'s exit 1 as "violations found" and blocks every turn-end
     bash-logger.sh            # retired: PreToolUse:Bash command log cost every Bash call a hook process (~1.4 s), and nothing read the BASH: lines it wrote
+    narrative-reminder.sh     # retired: renamed stop-blocks.sh, since every answer it gives is a block and the narrative reminder lives in stop-notices.sh; settings.json entries under this name are stripped and registered under the name it has
 )
 
 # Hook scripts cs ships; deployed to ~/.claude/hooks/cs/ and registered in
@@ -124,7 +125,7 @@ RETIRED_HOOKS=(
 CS_HOOKS=(
     session-start.sh
     autosave-commits.sh
-    narrative-reminder.sh
+    stop-blocks.sh
     stop-notices.sh
     session-end.sh
     subagent-context.sh
@@ -1392,12 +1393,12 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "f2c6e1b50ea95ff587b6469ace41c93771f748e30a8026a5cde1861c7e82e658  bin/cs"
+    "d01f7da0bebd3730a5fa52b59a83b54cc06a673b9e5d6c35d6ab02594735cfc3  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "2b4582243e40e9b34638edbaf9327fec2ec9c7ecb09f972d2cfe4a2dfdd7dbf8  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
-    "1d62dc807674084c3b7c32c39c34bf207e7c89b982d9010216841e77ad7962cf  hooks/cs-shared.sh"
+    "c94ad4f28e7a63fc0366d4f21460144e68adab3c3f09c25c532407951c96b20c  hooks/cs-shared.sh"
     "022b2fd0394509be0de564838d3347ff493b4bb750eae1521ff4b341d5571e62  hooks/cs-config.sh"
     "50d63ce0995e68fddd8503700c15f9585d11938c9cd3872a883146de7707c765  hooks/cs-iterm-tab.py"
     "21988bf58bb6fea15c6435445f4abc3a38f4c4a9a7db78c4ff4797650709ba3f  hooks/memory-index-guard.sh"
@@ -1406,15 +1407,15 @@ CS_PAYLOAD_SHA256=(
     "8be7cf198e9e950cb11eeb5d02231bb3e168aa078018495a1a8832186334bbc2  hooks/prompt-rewriter-vendor.sh"
     "1fa475982564ec70f12bf5295b874989dd95f89224f27bb6be4854cc5b8674e3  hooks/wrap-sweep.md"
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
-    "6dd2959b6ce5de8124782bd98e1ed9b0f66d379fa0c827e9c04bbe084a1dd95b  hooks/session-start.sh"
+    "4b91a8478721aaefb2863e77638de6d0616db0b528c64a58cc44e73ab836321e  hooks/session-start.sh"
     "cae9775702513f11b1abff031928047766ab69714e3a9b1db82ff080e186f20b  hooks/autosave-commits.sh"
-    "786f06a2fdcf48299e05fb654549334b5bc317c1776e9ba5e41ff87ae8035386  hooks/narrative-reminder.sh"
-    "aa920977404b19dd136c6f780d219aa929b7ba1be65f60b034e3b6a820bb8528  hooks/stop-notices.sh"
-    "8377b722bd856d5ca918bb9ffea2cfb3e0a0077ee0b9441a1f52461fd7282739  hooks/session-end.sh"
+    "319826f478832ec8553ebc01b37355603d8ef6e6079883f4d8bbec088c84f947  hooks/stop-blocks.sh"
+    "d8a9e00e7569c5dd346da9987942f7cb3683896bae038caf91064b98206d8536  hooks/stop-notices.sh"
+    "a96c77d8f13d893e46116b7d61e517f72bba7f8e10b790517934004be21ae43a  hooks/session-end.sh"
     "81a13835a65f4b4b35bb87493da0df9848de68375ca7ab1525d2d5079cf52bf1  hooks/subagent-context.sh"
     "53b16016dd6d087c3cc3db7e4acf8de6629e149e3b7f326f0731b36809574156  hooks/tool-failure-logger.sh"
     "2736fd914673827102dd9e1ec60b1c385d8cfef56bac3b8579fde953d22fdbcb  hooks/session-auto-approve.sh"
-    "a851781d185ab19f174a265e160044a51a999bd11da522084ff5d29bb5e153a6  hooks/scope-prompt.sh"
+    "68c76099cba2c4cff85321b35745bf148df18f6cc538743a31a424d250ef478d  hooks/scope-prompt.sh"
     "9e06eaa16960dff49881234c8a479c2f8d2dd8d672283056e1591c4528e755ab  commands/checkpoint.md"
     "a0e341d4bdc60072b25354256e751b320733cdcc31b91ac3d4a4f661c73b611e  commands/wrap.md"
     "2520a6d54d75e3e9f1768160826a8b9f21e38e2234538cc62e3ec6337008fc28  skills/store-secret/SKILL.md"
@@ -2208,7 +2209,7 @@ else
     # Registering FileChanged is itself what opens that path, so the mailbox has
     # to answer the event its own registration enables.
     #
-    # Stop carries two entries. narrative-reminder.sh's blocks must continue the
+    # Stop carries two entries. stop-blocks.sh's blocks must continue the
     # turn (the queue drain, the staged retire, the mail wake). stop-notices.sh
     # is async: a synchronous Stop hook that hands the model text always draws
     # Claude Code's stop-hook row in the chat, while an async one draws none and
@@ -2216,15 +2217,15 @@ else
     _register_cs_hooks() {
         _merge_cs_hook SessionStart       session-start.sh       30
         _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
-        _merge_cs_hook Stop               narrative-reminder.sh  10
+        _merge_cs_hook Stop               stop-blocks.sh         10
         _merge_cs_hook Stop               stop-notices.sh        10 "" true
         _merge_cs_hook SessionEnd         session-end.sh         30
         _merge_cs_hook SubagentStart      subagent-context.sh    10
         _merge_cs_hook PostToolUseFailure tool-failure-logger.sh 10 "" true
         _merge_cs_hook PermissionRequest  session-auto-approve.sh 5 "Write|Edit"
         _merge_cs_hook UserPromptSubmit   scope-prompt.sh        10
-        _merge_cs_hook FileChanged        narrative-reminder.sh  10 "" "" true
-        _merge_cs_hook CwdChanged         narrative-reminder.sh   5
+        _merge_cs_hook FileChanged        stop-blocks.sh         10 "" "" true
+        _merge_cs_hook CwdChanged         stop-blocks.sh          5
     }
 
     # Register cs-statusline as the Claude Code status line. A status line the

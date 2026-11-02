@@ -393,9 +393,9 @@ QDIR() { printf '%s' "$CLAUDE_SESSION_META_DIR/local"; }
 # Drive the Stop hook as the session's LEAD conversation: cs's exec arm replaces
 # its own process, so claude carries cs's pid and CS_LEAD_PID equals CLAUDE_PID.
 # A test that models a teammate unsets both first.
-drain() { local input='{}'; [ "$#" -eq 0 ] || input="$1"; printf '%s\n' "$input" | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null; }
+drain() { local input='{}'; [ "$#" -eq 0 ] || input="$1"; printf '%s\n' "$input" | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh" 2>/dev/null; }
 # The same Stop from a tmux teammate: no CS_LEAD_PID in its environment at all.
-teammate_drain() { echo '{}' | env -u CS_LEAD_PID -u CLAUDE_PID bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null; }
+teammate_drain() { echo '{}' | env -u CS_LEAD_PID -u CLAUDE_PID bash "$HOOKS_DIR/stop-blocks.sh" 2>/dev/null; }
 
 # Seed the queue directory with one file per task, in argument order.
 qseed() {
@@ -468,7 +468,7 @@ test_drain_skips_a_done_log_linked_out_of_the_session() {
     qseed "task one" "task two"
     qdraining 0000000001-seed
     ln -s "$o" "$(QDIR)/queue.done"
-    out=$(printf '{}\n' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh" 2>"$err")
+    out=$(printf '{}\n' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh" 2>"$err")
     assert_eq "USER-OWNED" "$(cat "$o")" "nothing is appended outside the session" || return 1
     assert_output_contains "$out" "task two" "the drain still hands out the next task" || return 1
     assert_eq "cs_append_inside: $(QDIR)/queue.done leads to $o, outside the session $CLAUDE_SESSION_DIR" \
@@ -1045,7 +1045,7 @@ test_drain_ignores_an_inherited_tracked_files_answer() {
     printf 'armed\n' > "$(QDIR)/queue.state"
     local out
     out=$(printf '{}\n' | CS_TRACKED_FILES_META="$CLAUDE_SESSION_META_DIR" CS_TRACKED_FILES_NOTICE="x" \
-        CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null)
+        CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh" 2>/dev/null)
     assert_output_contains "$out" "task one" "the user's own queue is handed out" || return 1
     assert_eq "draining" "$(cat "$(QDIR)/queue.state")" "the run starts" || return 1
 }
@@ -1059,7 +1059,7 @@ test_drain_leaves_a_queue_linked_out_of_the_session_alone() {
     printf 'task one\n' > "$o/queue/0000000001-seed"
     printf 'draining\n' > "$o/queue.state"
     ln -s "$o" "$CLAUDE_SESSION_META_DIR/private"
-    out=$(printf '{}\n' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh" 2>"$err")
+    out=$(printf '{}\n' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh" 2>"$err")
     assert_eq "task one" "$(cat "$o/queue/0000000001-seed" 2>/dev/null)" "the task outside is left in place" || return 1
     assert_eq "draining" "$(cat "$o/queue.state")" "the state outside is untouched" || return 1
     assert_eq "cs-queue: $CLAUDE_SESSION_META_DIR/private/queue leads to $o/queue, outside the session $CLAUDE_SESSION_DIR" \

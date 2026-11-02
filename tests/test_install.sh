@@ -1679,6 +1679,34 @@ EOF
         "$(jq -c '.hooks.PreToolUse' "$s")" "the user's own hook is all PreToolUse holds" || return 1
 }
 
+# The sync Stop hook shipped as narrative-reminder.sh before it took the name
+# stop-blocks.sh. An install over the old name removes the deployed copy and all
+# three of its registrations, registers the hook under its name on each event,
+# once, ahead of stop-notices.sh on Stop, and keeps a user's own Stop hook.
+test_install_moves_the_narrative_reminder_registrations_to_stop_blocks() {
+    local home="$TEST_TMPDIR/home-stopblocks" s rc=0 out d
+    d="$home/.claude/hooks/cs"
+    mkdir -p "$d"
+    _cs_shipped_content > "$d/narrative-reminder.sh"
+    s="$home/.claude/settings.json"
+    cat > "$s" << 'EOF'
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"~/bin/my-own-stop.sh","timeout":5}]},{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/narrative-reminder.sh","timeout":10}]},{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/stop-notices.sh","timeout":10,"async":true}]}],"FileChanged":[{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/narrative-reminder.sh","timeout":10,"asyncRewake":true,"rewakeMessage":"cs woke this session:","rewakeSummary":"cs"}]}],"CwdChanged":[{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/narrative-reminder.sh","timeout":5}]}]}}
+EOF
+    out=$(HOME="$home" bash "$INSTALL_SH" 2>&1 < /dev/null) || rc=$?
+    assert_eq "0" "$rc" "install exit status" || { echo "$out"; return 1; }
+    assert_file_not_exists "$d/narrative-reminder.sh" "the deployed copy under the old name is removed" || return 1
+    assert_file_exists "$d/stop-blocks.sh" "the hook is deployed under its name" || return 1
+    assert_eq '["~/bin/my-own-stop.sh","~/.claude/hooks/cs/stop-blocks.sh","~/.claude/hooks/cs/stop-notices.sh"]' \
+        "$(jq -c '[.hooks.Stop[].hooks[].command]' "$s")" \
+        "Stop holds the user's hook, then stop-blocks.sh once, then stop-notices.sh" || return 1
+    assert_eq '["~/.claude/hooks/cs/stop-blocks.sh"]' "$(jq -c '[.hooks.FileChanged[].hooks[].command]' "$s")" \
+        "FileChanged holds stop-blocks.sh once" || return 1
+    assert_eq 'true' "$(jq -c '.hooks.FileChanged[0].hooks[0].asyncRewake' "$s")" \
+        "FileChanged keeps its rewake" || return 1
+    assert_eq '["~/.claude/hooks/cs/stop-blocks.sh"]' "$(jq -c '[.hooks.CwdChanged[].hooks[].command]' "$s")" \
+        "CwdChanged holds stop-blocks.sh once" || return 1
+}
+
 # A retired hook under ~/.claude/hooks/cs/ that cs did not write is kept, and
 # so is its registration, the same rule as for a kept flat hook: install and
 # uninstall leave both, and still strip a cs-written copy's file and entry.
@@ -2147,12 +2175,12 @@ test_install_and_uninstall_keep_a_flat_shape_hook_entry() {
 # writes it (jq -c), and the hooks-list shapes that are the user's to keep:
 # no .hooks at all, then false, null, a number, a string, an object, and a
 # list of hooks that are not cs's. Stop holds two entries, in registration
-# order: narrative-reminder.sh, whose blocks continue the turn, then the async
+# order: stop-blocks.sh, whose blocks continue the turn, then the async
 # stop-notices.sh.
 SESSION_START_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/session-start.sh","timeout":30}]}'
-STOP_REMINDER_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/narrative-reminder.sh","timeout":10}]}'
+STOP_BLOCKS_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/stop-blocks.sh","timeout":10}]}'
 STOP_NOTICES_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/stop-notices.sh","timeout":10,"async":true}]}'
-STOP_REGISTRATION="$STOP_REMINDER_REGISTRATION,$STOP_NOTICES_REGISTRATION"
+STOP_REGISTRATION="$STOP_BLOCKS_REGISTRATION,$STOP_NOTICES_REGISTRATION"
 USER_HOOK_SHAPES='[{"type":"command","command":"notify"},{"matcher":"a","hooks":false},{"matcher":"b","hooks":null},{"hooks":7},{"hooks":"notify"},{"hooks":{"custom":{"type":"command","command":"notify"}}},{"matcher":"c","hooks":[{"type":"command","command":"notify","timeout":5},{"type":"command","command":"log-it"}]}]'
 
 # Runs install and then uninstall over a HOME whose settings.json holds the
@@ -2307,7 +2335,7 @@ test_uninstall_leaves_an_event_that_is_not_a_list() {
     mv "$s.new" "$s"
     printf 'y\n' | HOME="$home" "$CS_BIN" -uninstall > "$TEST_TMPDIR/event-object.un" 2>&1 || rc=$?
     assert_eq "0" "$rc" "uninstall exit status" || { cat "$TEST_TMPDIR/event-object.un"; return 1; }
-    assert_eq "{\"hooks\":{\"Stop\":{\"custom\":$STOP_REMINDER_REGISTRATION}}}" "$(jq -c . "$s")" \
+    assert_eq "{\"hooks\":{\"Stop\":{\"custom\":$STOP_BLOCKS_REGISTRATION}}}" "$(jq -c . "$s")" \
         "uninstall leaves the object event and strips the rest" || { cat "$TEST_TMPDIR/event-object.un"; return 1; }
 }
 
@@ -3725,7 +3753,7 @@ test_filechanged_registration_carries_async_rewake() {
     local inst="$SCRIPT_DIR/../install.sh" reg
     reg=$(grep -E '^ +_merge_cs_hook FileChanged ' "$inst") \
         || { echo "  FAIL: FileChanged is not registered"; return 1; }
-    assert_output_contains "$reg" "narrative-reminder.sh" \
+    assert_output_contains "$reg" "stop-blocks.sh" \
         "FileChanged routes to the hook that owns the mail wake" || return 1
     # 6th positional is the rewake flag; a matcher here would break the event
     # (its matcher is tested against the changed file's basename).
@@ -4305,6 +4333,7 @@ run_test test_statusline_disable_sets_and_enable_clears_declined_marker
 run_test test_uninstall_removes_declined_marker
 run_test test_install_removes_the_retired_hint_mod
 run_test test_install_retires_the_bash_logger
+run_test test_install_moves_the_narrative_reminder_registrations_to_stop_blocks
 run_test test_install_and_uninstall_keep_a_kept_retired_hook_and_its_registration
 run_test test_uninstall_removes_a_cs_written_retired_hook_and_its_registration
 run_test test_install_that_stops_early_keeps_a_registered_retired_hook

@@ -39,7 +39,7 @@ unset CS_CLAUDE_DIR CLAUDE_ENV_FILE 2>/dev/null || true
 # launch takes the lead's claim; inherited from a lead's launch, it would turn
 # the claim on for a test that models a launch without it.
 unset CLAUDE_PID CS_LEAD_PID CS_LEAD_CLAIM 2>/dev/null || true
-# stop-notices.sh waits for narrative-reminder.sh's verdict on the same Stop
+# stop-notices.sh waits for stop-blocks.sh's verdict on the same Stop
 # before it speaks, up to CS_STOP_VERDICT_WAIT seconds. A suite runs the two
 # hooks one at a time, so the verdict never comes and every lead Stop would
 # pay the whole wait; the handshake tests set the wait themselves.

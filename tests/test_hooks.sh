@@ -241,14 +241,14 @@ test_stop_raises_attention_marker() {
     # Turn end raises the machine-local attention flag the statusline shows
     # until the user next interacts. Lives in .cs/local/ (never git-synced).
     rm -rf "$CLAUDE_SESSION_META_DIR/local"
-    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || true
+    echo '{}' | bash "$HOOKS_DIR/stop-blocks.sh" >/dev/null 2>&1 || true
     assert_file_exists "$CLAUDE_SESSION_META_DIR/local/attention" \
         "Stop hook should raise the attention marker" || return 1
 }
 
 test_stop_no_attention_marker_for_subagents() {
     rm -rf "$CLAUDE_SESSION_META_DIR/local"
-    echo '{"agent_id":"sub-1"}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || true
+    echo '{"agent_id":"sub-1"}' | bash "$HOOKS_DIR/stop-blocks.sh" >/dev/null 2>&1 || true
     assert_file_not_exists "$CLAUDE_SESSION_META_DIR/local/attention" \
         "subagent stops must not raise the attention marker" || return 1
 }
@@ -336,7 +336,7 @@ test_stop_notices_are_silent_on_any_other_event() {
         "the same fixture on Stop reminds" || return 1
 }
 
-# A walk-away run owns the turn loop: narrative-reminder.sh hands out the next
+# A walk-away run owns the turn loop: stop-blocks.sh hands out the next
 # task as a block, so the lead's Stop with a task queued and the queue armed
 # or draining gets no notice. An idle, absent or unknown state, an empty queue
 # whatever its state, and a teammate's Stop are not gated.
@@ -376,14 +376,14 @@ test_stop_notices_stand_down_while_the_queue_runs() {
     assert_eq "$expected" "$(stop_notice_text "$output")" "an armed queue with no task in it gates nothing" || return 1
 }
 
-# narrative-reminder.sh and stop-notices.sh each carry _num_or, since a hook
+# stop-blocks.sh and stop-notices.sh each carry _num_or, since a hook
 # runs on a partial install without the shared library. The two must read a
 # number the same way.
 test_stop_hooks_read_numbers_alike() {
     local a b
-    a=$(sed -n '/^_num_or() {/,/^}/p' "$HOOKS_DIR/narrative-reminder.sh")
+    a=$(sed -n '/^_num_or() {/,/^}/p' "$HOOKS_DIR/stop-blocks.sh")
     b=$(sed -n '/^_num_or() {/,/^}/p' "$HOOKS_DIR/stop-notices.sh")
-    [ -n "$a" ] || { echo "  FAIL: no _num_or in narrative-reminder.sh"; return 1; }
+    [ -n "$a" ] || { echo "  FAIL: no _num_or in stop-blocks.sh"; return 1; }
     assert_eq "$a" "$b" "the two Stop hooks hold one _num_or" || return 1
 }
 
@@ -393,10 +393,10 @@ test_stop_hooks_read_numbers_alike() {
 test_stop_hooks_key_a_stop_alike() {
     local lib a b
     lib=$(sed -n '/^cs_stop_key() {/,/^}/p' "$HOOKS_DIR/cs-shared.sh")
-    a=$(sed -n '/^cs_stop_key() {/,/^}/p' "$HOOKS_DIR/narrative-reminder.sh")
+    a=$(sed -n '/^cs_stop_key() {/,/^}/p' "$HOOKS_DIR/stop-blocks.sh")
     b=$(sed -n '/^cs_stop_key() {/,/^}/p' "$HOOKS_DIR/stop-notices.sh")
     [ -n "$lib" ] || { echo "  FAIL: no cs_stop_key in cs-shared.sh"; return 1; }
-    assert_eq "$lib" "$a" "narrative-reminder.sh's copy is the library's" || return 1
+    assert_eq "$lib" "$a" "stop-blocks.sh's copy is the library's" || return 1
     assert_eq "$lib" "$b" "stop-notices.sh's copy is the library's" || return 1
 }
 
@@ -3822,7 +3822,7 @@ test_stop_ignores_an_inherited_tracked_files_notice_without_the_shared_library()
     cp "$HOOKS_DIR"/*.sh "$partial/"
     rm "$partial/cs-shared.sh"
     local hook plain inherited
-    for hook in narrative-reminder.sh stop-notices.sh; do
+    for hook in stop-blocks.sh stop-notices.sh; do
         rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
         plain=$(echo '{}' | CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" bash "$partial/$hook")
         rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
@@ -3830,8 +3830,8 @@ test_stop_ignores_an_inherited_tracked_files_notice_without_the_shared_library()
             CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" bash "$partial/$hook")
         assert_eq "$plain" "$inherited" "$hook: an inherited notice changes nothing" || return 1
     done
-    assert_eq '{"decision": "approve"}' "$(echo '{}' | bash "$partial/narrative-reminder.sh")" \
-        "narrative-reminder.sh approves the stop" || return 1
+    assert_eq '{"decision": "approve"}' "$(echo '{}' | bash "$partial/stop-blocks.sh")" \
+        "stop-blocks.sh approves the stop" || return 1
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.<actor>.md")" \
         "$(stop_notice_text "$(echo '{}' | CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" bash "$partial/stop-notices.sh")")" \
@@ -3874,7 +3874,7 @@ run_test test_stop_hooks_read_numbers_alike
 run_test test_stop_hooks_key_a_stop_alike
 
 # --- The verdict handshake between the two Stop hooks -----------------------
-# narrative-reminder.sh posts its verdict for the Stop to .cs/local/stop-verdict
+# stop-blocks.sh posts its verdict for the Stop to .cs/local/stop-verdict
 # ("<key> <word> <epoch>", the key cs_stop_key's: the cksum of the Stop input,
 # and after a dot the byte size of the transcript it names, when it names one
 # that can be read), and stop-notices.sh stands down on a block. The input
@@ -3923,7 +3923,7 @@ test_stop_notices_stand_down_on_the_sync_hooks_block() {
     # both hooks: the sync hook's verdict for such a Stop still reaches the
     # async one.
     input=$(jq -nc --arg t "$TEST_TMPDIR/no-such-transcript.jsonl" '{transcript_path: $t}')
-    printf '%s' "$input" | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh" > /dev/null
+    printf '%s' "$input" | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh" > /dev/null
     assert_eq "$(_stop_key "$input") approve" "$(cut -d' ' -f1,2 "$CLAUDE_SESSION_META_DIR/local/stop-verdict")" "an unreadable transcript keys on the cksum alone" || return 1
     _post_verdict block "$now" "$(_stop_key "$input")"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
@@ -3950,7 +3950,7 @@ test_sync_hook_posts_pending_then_its_verdict() {
     printf '#!/bin/sh\nn=$(cat "%s" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "%s"\n[ "$n" -lt 2 ] || until [ -f "%s" ]; do sleep 0.05; done\nexec /bin/date "$@"\n' "$count" "$count" "$go" > "$shim/date"
     chmod +x "$shim/date"
     rm -f "$v" "$count" "$go"
-    ( echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ PATH="$shim:$PATH" bash "$HOOKS_DIR/narrative-reminder.sh" > "$TEST_TMPDIR/sync-pending.out" 2>&1 ) &
+    ( echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ PATH="$shim:$PATH" bash "$HOOKS_DIR/stop-blocks.sh" > "$TEST_TMPDIR/sync-pending.out" 2>&1 ) &
     pid=$!
     i=0
     until [ "$(cut -d' ' -f1,2 "$v" 2>/dev/null)" = "$key pending" ] || [ "$i" -ge 100 ]; do sleep 0.1; i=$((i + 1)); done
@@ -3967,12 +3967,12 @@ test_sync_hook_posts_pending_then_its_verdict() {
     mkdir -p "$q"
     printf 'write the docs\n' > "$q/0001-task"
     printf 'armed\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
-    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh")
+    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh")
     assert_eq "block" "$(jq -r '.decision' <<< "$out")" "an armed queue blocks" || return 1
     assert_eq "$key block" "$(cut -d' ' -f1,2 "$v")" "the drain's block is posted" || return 1
     # The last task done: the drain writes idle AND blocks, which the queue
     # state alone could not tell the async hook.
-    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh")
+    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh")
     assert_output_contains "$(jq -r '.reason' <<< "$out")" "^cs task queue: all tasks complete" "the last task ends the drain" || return 1
     assert_eq "idle" "$(cat "$CLAUDE_SESSION_META_DIR/local/queue.state" 2>/dev/null || echo idle)" "the queue reads idle" || return 1
     assert_eq "$key block" "$(cut -d' ' -f1,2 "$v")" "the final drain's block is posted beside idle" || return 1
@@ -3980,12 +3980,12 @@ test_sync_hook_posts_pending_then_its_verdict() {
     rm -f "$CLAUDE_SESSION_META_DIR/local/queue.state"
     mkdir -p "$CLAUDE_SESSION_META_DIR/local/mail/new"
     printf '{"from":"peer","body":"hi"}\n' > "$CLAUDE_SESSION_META_DIR/local/mail/new/1.json"
-    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh")
+    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh")
     assert_eq "block" "$(jq -r '.decision' <<< "$out")" "unread mail blocks" || return 1
     assert_eq "$key block" "$(cut -d' ' -f1,2 "$v")" "the mail wake's block is posted" || return 1
     # A teammate's Stop writes nothing: the file would be the lead's.
     rm -f "$v"
-    out=$(echo '{}' | env -u CS_LEAD_PID -u CLAUDE_PID bash "$HOOKS_DIR/narrative-reminder.sh")
+    out=$(echo '{}' | env -u CS_LEAD_PID -u CLAUDE_PID bash "$HOOKS_DIR/stop-blocks.sh")
     assert_file_not_exists "$v" "a teammate's Stop posts no verdict" || return 1
 }
 
@@ -4001,7 +4001,7 @@ test_sync_hook_posts_approve_when_its_block_fails_to_print() {
     chmod +x "$shim/jq"
     printf 'write the docs\n' > "$q/0001-task"
     printf 'armed\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
-    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ PATH="$shim:$PATH" bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null) || rc=$?
+    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ PATH="$shim:$PATH" bash "$HOOKS_DIR/stop-blocks.sh" 2>/dev/null) || rc=$?
     assert_eq "" "$out" "no block line is printed" || return 1
     [ "$rc" -ne 0 ] || { echo "  FAIL: a block that could not be printed must not exit 0"; return 1; }
     assert_eq "$(_stop_key '{}') approve" "$(cut -d' ' -f1,2 "$v")" "the verdict is approve beside no block" || return 1
@@ -4021,7 +4021,7 @@ test_stop_notices_wait_for_the_mail_wakes_block() {
     export CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins"
     ( echo '{}' | env -u CS_STOP_VERDICT_WAIT bash "$HOOKS_DIR/stop-notices.sh" > "$TEST_TMPDIR/async.out" 2>&1 ) &
     async=$!
-    ( echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" > "$TEST_TMPDIR/sync.out" 2>&1 ) &
+    ( echo '{}' | bash "$HOOKS_DIR/stop-blocks.sh" > "$TEST_TMPDIR/sync.out" 2>&1 ) &
     sync=$!
     wait "$sync" "$async"
     unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR
@@ -5253,7 +5253,7 @@ SEAM
             CS_RESOLVED_FROM=env CS_LEAD_PID=$$ CLAUDE_PID=$$ \
             BASH_ENV="$seam" CS_TEST_REMOVE_AT="$1" CS_TEST_REMOVE_DIR="$w/root/ending" \
             CS_TEST_STEPS_FILE="$w/steps" \
-            "$sh" "$HOOKS_DIR/narrative-reminder.sh" \
+            "$sh" "$HOOKS_DIR/stop-blocks.sh" \
             <<< '{"hook_event_name":"Stop","session_id":"11111111-2222-4333-8444-555555555555"}' \
             > "$w/out" 2>/dev/null
         echo $? > "$w/rc"

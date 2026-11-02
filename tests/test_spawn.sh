@@ -1178,7 +1178,7 @@ run_test test_spawned_window_starts_claude_without_asking_about_an_update
 run_test test_launch_seed_queues_into_the_vault
 
 # Drain harness (same recipe as tests/test_queue_supervision.sh): the Stop
-# hook is narrative-reminder.sh; CLAUDE_SESSION_* env selects the session.
+# hook is stop-blocks.sh; CLAUDE_SESSION_* env selects the session.
 _worker_env() {
     CS_LEAD_PID=$$ CLAUDE_PID=$$ \
     CLAUDE_SESSION_NAME="worker" \
@@ -1187,7 +1187,7 @@ _worker_env() {
     "$@"
 }
 _worker_stop_turn() {
-    echo '{}' | PATH="$SCRIPT_DIR/../bin:$PATH" _worker_env bash "$HOOKS_DIR/narrative-reminder.sh"
+    echo '{}' | PATH="$SCRIPT_DIR/../bin:$PATH" _worker_env bash "$HOOKS_DIR/stop-blocks.sh"
 }
 _arm_worker_queue() {  # tasks...
     create_test_session worker >/dev/null 2>&1 || true

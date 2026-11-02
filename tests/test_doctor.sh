@@ -245,26 +245,26 @@ test_doctor_warns_on_wrap_pass_drift() {
 # ./install.sh replaces a deployed copy cs wrote and keeps one it did not (the
 # user's edit), so the drift row's advice follows what the install will do:
 # run it for cs's own copy; for a copy kept as the user's, move it aside first.
-# The record names session-start.sh as cs's; narrative-reminder.sh is not in
+# The record names session-start.sh as cs's; stop-blocks.sh is not in
 # it and is no content cs ever shipped.
 test_doctor_drift_advice_follows_whose_the_deployed_copy_is() {
     local home="$TEST_TMPDIR/drift-home" checkout="$TEST_TMPDIR/keptco" deployed digest output
     deployed="$home/.claude/hooks/cs"
     make_fake_checkout "$checkout" "$deployed"
     echo 'echo source' > "$checkout/hooks/session-start.sh"
-    echo 'echo source' > "$checkout/hooks/narrative-reminder.sh"
+    echo 'echo source' > "$checkout/hooks/stop-blocks.sh"
     echo 'echo an-older-cs-build' > "$deployed/session-start.sh"
-    echo 'echo the-users-edit' > "$deployed/narrative-reminder.sh"
-    chmod +x "$deployed/session-start.sh" "$deployed/narrative-reminder.sh"
+    echo 'echo the-users-edit' > "$deployed/stop-blocks.sh"
+    chmod +x "$deployed/session-start.sh" "$deployed/stop-blocks.sh"
     digest=$(shasum -a 256 "$deployed/session-start.sh" | cut -d' ' -f1)
     printf '%s  .claude/hooks/cs/session-start.sh\n' "$digest" > "$deployed/.installed"
 
     output=$(cd "$checkout" && HOME="$home" CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "Hook drift: deployed copy differs from source: session-start.sh (run ./install.sh)$" \
         "cs's own copy: run the installer" || { echo "$output"; return 1; }
-    assert_output_contains "$output" "Hook drift: deployed copy differs from source: narrative-reminder.sh (kept as yours, so ./install.sh does not replace it; move it aside, then run ./install.sh to get cs's copy)$" \
+    assert_output_contains "$output" "Hook drift: deployed copy differs from source: stop-blocks.sh (kept as yours, so ./install.sh does not replace it; move it aside, then run ./install.sh to get cs's copy)$" \
         "the user's copy: move it aside first" || { echo "$output"; return 1; }
-    assert_output_not_contains "$output" "narrative-reminder.sh.*(run ./install.sh)$" \
+    assert_output_not_contains "$output" "stop-blocks.sh.*(run ./install.sh)$" \
         "the user's copy is not offered the plain advice" || { echo "$output"; return 1; }
 }
 

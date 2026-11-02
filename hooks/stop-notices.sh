@@ -12,7 +12,7 @@ set -euo pipefail
 # price is that it forces no turn: the model acts on a notice at the next
 # prompt, not at the end of the turn that raised it. Every notice here can wait
 # for that; whatever must continue the turn (the queue drain, the staged
-# retire, the mail wake) stays a block in narrative-reminder.sh.
+# retire, the mail wake) stays a block in stop-blocks.sh.
 #
 # At most one JSON object per run, and nothing when there is nothing to say.
 # The tiers below decide in order and the first that applies takes the slot,
@@ -37,7 +37,7 @@ EOF
 # Skip inside subagents (Stop auto-converts to SubagentStop, but guard anyway)
 [ -z "$AGENT_ID" ] || exit 0
 
-# The library source follows narrative-reminder.sh, which carries the reasons:
+# The library source follows stop-blocks.sh, which carries the reasons:
 # test before sourcing (bash 3.2 kills the shell on a `.` of a missing file),
 # parse-check first (a truncated library aborts at its syntax error), and
 # errexit suspended across the source (a library that parses clean can still
@@ -86,14 +86,14 @@ fi
 # Printed as decimal: a leading zero would reach the callers' arithmetic as
 # an octal literal, and `08` aborts it. Sixteen digits or more take the default:
 # bash arithmetic wraps past 64 bits, so such a value would arrive silently wrong.
-# narrative-reminder.sh carries the same helper, and tests/test_hooks.sh holds
+# stop-blocks.sh carries the same helper, and tests/test_hooks.sh holds
 # the two to one text: a hook runs on a partial install without cs-shared.sh,
 # so a library copy would still need one here.
 _num_or() {  # value, default -> prints value if a plain integer, else default
     case "${1:-}" in ''|*[!0-9]*|????????????????*) echo "$2";; *) echo "$((10#$1))";; esac
 }
 
-# The key narrative-reminder.sh and this hook share for one Stop, from
+# The key stop-blocks.sh and this hook share for one Stop, from
 # cs-shared.sh, which says why it is built as it is; the copy serves a partial
 # install without the library, and tests/test_hooks.sh holds the three to one
 # text.
@@ -135,12 +135,12 @@ fi
 LOCAL="$META_DIR/local"
 
 # Files git tracks where this session keeps its queue and mailbox were written
-# by a repository, not by this session (cs_resolve_session). narrative-reminder.sh
+# by a repository, not by this session (cs_resolve_session). stop-blocks.sh
 # says so on this Stop and runs nothing else; the notices stand down with it.
 [ -z "${CS_TRACKED_FILES_NOTICE:-}" ] || exit 0
 
 # --- Queue gate ---------------------------------------------------------------
-# A walk-away run owns the turn loop: the drain in narrative-reminder.sh hands
+# A walk-away run owns the turn loop: the drain in stop-blocks.sh hands
 # out the next task as a block, and its context breaker owns hot-context
 # handling, so an armed or draining queue gets no notices. The test is the
 # drain's own: the lead's Stop, a queue holding a task, and a queue.state of
@@ -263,7 +263,8 @@ WORK_READ_MAX=4194304
 # Without a transcript to read (none named, none on disk, a session_id that is
 # not a plain id) there is no work to count, and the reminder falls back to
 # the clock: at most once per COOLDOWN_SECONDS, stamped in COOLDOWN_FILE, and
-# only when the narrative is older than that.
+# only when the narrative is older than that. The stamp is named after this
+# reminder, not after any hook file.
 COOLDOWN_FILE="$META_DIR/.narrative-reminder-cooldown"
 COOLDOWN_SECONDS=300  # 5 minutes
 CURRENT_TIME=$(date +%s)
@@ -473,7 +474,7 @@ fi
 # that trips a breaker or hands out its last task leaves idle behind and
 # blocks; the staged retire and the mail wake block without touching the
 # queue at all. A notice beside any such block is noise, so this hook waits
-# for the verdict narrative-reminder.sh posts to .cs/local/stop-verdict:
+# for the verdict stop-blocks.sh posts to .cs/local/stop-verdict:
 # "<key> <word> <epoch>", the key cs_stop_key's for the Stop input both hooks
 # receive, the word pending while that hook runs and approve or block at its
 # exit. Claude Code starts the two hooks together and neither runs first by

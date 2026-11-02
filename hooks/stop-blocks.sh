@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# ABOUTME: Stop hook for the walk-away queue drain, staged feature retire and mail
-# ABOUTME: wake; FileChanged wakes when idle, CwdChanged re-arms the maildir watch
+# ABOUTME: Sync Stop hook whose every answer is a block: walk-away queue drain, staged retire, mail wake,
+# ABOUTME: plus the verdict stop-notices.sh waits for; FileChanged wakes when idle, CwdChanged re-arms the mail watch
 
 set -euo pipefail
 

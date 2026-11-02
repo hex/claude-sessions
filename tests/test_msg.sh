@@ -1973,7 +1973,7 @@ wake() {
         export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
         export CLAUDE_SESSION_META_DIR="$(RCV_META)"
         export CS_LEAD_PID=$$ CLAUDE_PID=$$
-        echo "${1:-{\}}" | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null
+        echo "${1:-{\}}" | bash "$HOOKS_DIR/stop-blocks.sh" 2>/dev/null
     )
 }
 
@@ -1986,7 +1986,7 @@ wake_as_teammate() {
         export CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/receiver"
         export CLAUDE_SESSION_META_DIR="$(RCV_META)"
         unset CS_LEAD_PID CLAUDE_PID
-        echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null
+        echo '{}' | bash "$HOOKS_DIR/stop-blocks.sh" 2>/dev/null
     )
 }
 
@@ -2012,7 +2012,7 @@ filechanged() {  # file_path, [event]
         export CS_LEAD_PID=$$ CLAUDE_PID=$$
         jq -nc --arg p "$1" --arg e "${2:-add}" \
             '{hook_event_name: "FileChanged", file_path: $p, event: $e}' \
-            | bash "$HOOKS_DIR/narrative-reminder.sh"
+            | bash "$HOOKS_DIR/stop-blocks.sh"
     )
 }
 
@@ -2025,7 +2025,7 @@ cwdchanged() {  # old_cwd, new_cwd
         export CS_LEAD_PID=$$ CLAUDE_PID=$$
         jq -nc --arg o "${1:-/tmp}" --arg n "${2:-/}" \
             '{hook_event_name: "CwdChanged", old_cwd: $o, new_cwd: $n}' \
-            | bash "$HOOKS_DIR/narrative-reminder.sh"
+            | bash "$HOOKS_DIR/stop-blocks.sh"
     )
 }
 

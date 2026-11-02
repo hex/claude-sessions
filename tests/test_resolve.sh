@@ -256,10 +256,10 @@ test_hooks_decline_when_the_resolver_is_missing() {
     local sh=/bin/bash
     [ -x "$sh" ] || sh=bash
     local h rc out failures=0
-    for h in narrative-reminder stop-notices session-start autosave-commits; do
+    for h in stop-blocks stop-notices session-start autosave-commits; do
         cp "$hooks_src/$h.sh" "$fake/"
     done
-    for h in narrative-reminder stop-notices session-start autosave-commits; do
+    for h in stop-blocks stop-notices session-start autosave-commits; do
         out=$(env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR -u CLAUDE_PROJECT_DIR \
             "$sh" "$fake/$h.sh" <<< '{"tool_name":"Write","cwd":"/"}' 2>/dev/null)
         rc=$?
@@ -268,7 +268,7 @@ test_hooks_decline_when_the_resolver_is_missing() {
             failures=$((failures + 1))
         fi
         case "$h" in
-            narrative-reminder)
+            stop-blocks)
                 case "$out" in
                     *approve*) : ;;
                     *) echo "  FAIL: $h.sh must still emit its approve payload, got [$out]"
@@ -291,7 +291,7 @@ test_hooks_decline_when_the_resolver_is_corrupt() {
     local fake="$TEST_TMPDIR/badlib" sh=/bin/bash
     [ -x "$sh" ] || sh=bash
     mkdir -p "$fake"
-    cp "$SCRIPT_DIR/../hooks/narrative-reminder.sh" "$SCRIPT_DIR/../hooks/stop-notices.sh" "$fake/"
+    cp "$SCRIPT_DIR/../hooks/stop-blocks.sh" "$SCRIPT_DIR/../hooks/stop-notices.sh" "$fake/"
     local case_name out rc failures=0
     for case_name in syntax empty; do
         case "$case_name" in
@@ -299,7 +299,7 @@ test_hooks_decline_when_the_resolver_is_corrupt() {
             empty)  : > "$fake/cs-resolve.sh" ;;
         esac
         out=$(env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR -u CLAUDE_PROJECT_DIR \
-            "$sh" "$fake/narrative-reminder.sh" <<< '{}' 2>/dev/null)
+            "$sh" "$fake/stop-blocks.sh" <<< '{}' 2>/dev/null)
         rc=$?
         [ "$rc" -eq 0 ] || { echo "  FAIL: $case_name library made the hook exit $rc"; failures=$((failures + 1)); }
         case "$out" in
@@ -328,14 +328,14 @@ test_hooks_decline_when_the_resolver_fails_at_runtime() {
     local fake="$TEST_TMPDIR/runtimebad" sh=/bin/bash
     [ -x "$sh" ] || sh=bash
     mkdir -p "$fake"
-    cp "$SCRIPT_DIR/../hooks/narrative-reminder.sh" "$SCRIPT_DIR/../hooks/stop-notices.sh" "$fake/"
+    cp "$SCRIPT_DIR/../hooks/stop-blocks.sh" "$SCRIPT_DIR/../hooks/stop-notices.sh" "$fake/"
     cp "$SCRIPT_DIR/../hooks/cs-resolve.sh" "$fake/"
     printf '=======\n' >> "$fake/cs-resolve.sh"
     "$sh" -n "$fake/cs-resolve.sh" 2>/dev/null \
         || { echo "  FAIL: fixture must PARSE clean or it tests the wrong thing"; return 1; }
     local out rc
     out=$(env -u CLAUDE_SESSION_NAME -u CLAUDE_SESSION_DIR -u CLAUDE_PROJECT_DIR \
-        "$sh" "$fake/narrative-reminder.sh" <<< '{}' 2>/dev/null)
+        "$sh" "$fake/stop-blocks.sh" <<< '{}' 2>/dev/null)
     rc=$?
     [ "$rc" -eq 0 ] || { echo "  FAIL: a runtime-failing library made the hook exit $rc"; return 1; }
     case "$out" in

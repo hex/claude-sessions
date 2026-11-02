@@ -25,6 +25,7 @@ RETIRED_HOOKS=(
     artifact-tracker.sh       # retired: PreToolUse:Write redirect was inert (updatedInput path rewrite is not honored by the harness); tracking removed entirely
     prose-lint.sh             # retired with the `cs -lint` verb it called; MUST stay listed, because a deployed copy calling the removed verb reads error()'s exit 1 as "violations found" and blocks every turn-end
     bash-logger.sh            # retired: PreToolUse:Bash command log cost every Bash call a hook process (~1.4 s), and nothing read the BASH: lines it wrote
+    narrative-reminder.sh     # retired: renamed stop-blocks.sh, since every answer it gives is a block and the narrative reminder lives in stop-notices.sh; settings.json entries under this name are stripped and registered under the name it has
 )
 
 # Hook scripts cs ships; deployed to ~/.claude/hooks/cs/ and registered in
@@ -32,7 +33,7 @@ RETIRED_HOOKS=(
 CS_HOOKS=(
     session-start.sh
     autosave-commits.sh
-    narrative-reminder.sh
+    stop-blocks.sh
     stop-notices.sh
     session-end.sh
     subagent-context.sh

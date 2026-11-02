@@ -1004,7 +1004,7 @@ cs_mkdir_inside() {  # dir
     done
 }
 
-# The key the two Stop hooks (narrative-reminder.sh, stop-notices.sh) agree
+# The key the two Stop hooks (stop-blocks.sh, stop-notices.sh) agree
 # on for one Stop: the cksum of the Stop input, a dot, and the byte size of the
 # transcript the input names. The input alone repeats across turns (session_id,
 # transcript_path and last_assistant_message can all be the same on two Stops),

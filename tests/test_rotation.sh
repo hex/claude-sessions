@@ -1788,13 +1788,13 @@ test_the_kick_is_rewritten_until_delivered() {
 }
 
 # --- the wake itself ----------------------------------------------------------
-# Drives narrative-reminder's FileChanged branch as this session's lead. The
+# Drives stop-blocks.sh's FileChanged branch as this session's lead. The
 # payload rides on stderr and delivery IS the exit code, so streams pass
 # through untouched.
 _rot_filechanged() {  # file_path, [event]
     jq -nc --arg p "$1" --arg e "${2:-add}" \
         '{hook_event_name: "FileChanged", file_path: $p, event: $e}' \
-        | bash "$HOOKS_DIR/narrative-reminder.sh"
+        | bash "$HOOKS_DIR/stop-blocks.sh"
 }
 
 _arm_kick() {  # returns the kick file path on stdout
@@ -2196,7 +2196,7 @@ test_nudge_threshold_override() {
     assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "a 64-bit-overflowing override falls back to 65" || return 1
 }
 
-# The two Stop hooks run side by side: narrative-reminder.sh drains, and
+# The two Stop hooks run side by side: stop-blocks.sh drains, and
 # stop-notices.sh stands down for the queue whether its state still reads
 # armed or the drain has already moved it to draining.
 test_nudge_yields_to_queue_drain() {
@@ -2207,7 +2207,7 @@ test_nudge_yields_to_queue_drain() {
     local out
     out=$(_stop_with_ctx 80 "$UUID_A") || return 1
     assert_eq "" "$out" "the nudge yields to an armed queue" || return 1
-    out=$(echo "{\"session_id\":\"$UUID_A\"}" | bash "$HOOKS_DIR/narrative-reminder.sh") || return 1
+    out=$(echo "{\"session_id\":\"$UUID_A\"}" | bash "$HOOKS_DIR/stop-blocks.sh") || return 1
     assert_eq "block" "$(jq -r '.decision' <<< "$out")" "the drain takes the turn" || return 1
     assert_output_contains "$(jq -r '.reason' <<< "$out")" "^cs task queue: starting a walk-away run" "queue owns the turn loop" || return 1
     assert_eq "draining" "$(tr -d '[:space:]' < "$CLAUDE_SESSION_META_DIR/local/queue.state")" "the drain started" || return 1

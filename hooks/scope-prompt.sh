@@ -232,7 +232,7 @@ fi
     && rm -f "$_attention_dir/attention" 2>/dev/null
 
 # iTerm2: the bounce raised at turn end stops the moment the user prompts.
-# Mirrors the guard in narrative-reminder.sh (hooks are standalone).
+# Mirrors the guard in stop-blocks.sh (hooks are standalone).
 if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
     _it2="${CS_IT2_DIR:-$HOME/.iterm2}/it2attention"
     { [ -x "$_it2" ] && "$_it2" stop > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true

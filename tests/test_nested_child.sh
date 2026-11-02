@@ -26,7 +26,7 @@ _nested_setup() {
 
 _stop_hook() {  # CS_LEAD_PID CLAUDE_PID
     printf '{"session_id":"s","hook_event_name":"Stop","stop_hook_active":false}' \
-        | CS_RESOLVED_FROM=env CS_LEAD_PID="$1" CLAUDE_PID="$2" bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null
+        | CS_RESOLVED_FROM=env CS_LEAD_PID="$1" CLAUDE_PID="$2" bash "$HOOKS_DIR/stop-blocks.sh" 2>/dev/null
 }
 
 # The same Stop, handed to the hook that carries the narrative reminder. No
@@ -513,7 +513,7 @@ test_a_claim_that_is_a_link_or_a_directory_names_no_lead() {
             | CS_RESOLVED_FROM=env CS_LEAD_PID="$launch" CLAUDE_PID="$1" CS_NO_ROTATION_WAKE=1 CS_NO_ITERM2=1 \
                 bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>>"$3"
         printf '{"session_id":"%s","hook_event_name":"Stop","stop_hook_active":false}' "$2" \
-            | CS_RESOLVED_FROM=env CS_LEAD_PID="$launch" CLAUDE_PID="$1" bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>>"$3"
+            | CS_RESOLVED_FROM=env CS_LEAD_PID="$launch" CLAUDE_PID="$1" bash "$HOOKS_DIR/stop-blocks.sh" >/dev/null 2>>"$3"
         printf '{"session_id":"%s","reason":"other"}\n' "$2" \
             | CS_RESOLVED_FROM=env CS_LEAD_PID="$launch" CLAUDE_PID="$1" bash "$HOOKS_DIR/session-end.sh" >/dev/null 2>>"$3"
     }
