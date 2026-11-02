@@ -1,4 +1,4 @@
-// ABOUTME: cs-chat-only's per-load switch: the mirror of .cs/local/chat-only as cs -vet-session vets it, its reads and writes, and the theme the inks follow.
+// ABOUTME: cs-chat-only's per-load switch: the mirror of .cs/local/chat-only as cs -vet-session vets it, and its reads and writes.
 // ABOUTME: A new Load is made by every register(); the mirror is written by the load's one record read and by event hooks, never by a render.
 import type { EngineInterface } from 'claude-code'
 
@@ -48,12 +48,10 @@ export type Load = {
    * both hooks' reads start after that write.
    */
   reads: { started: number; applied: number }
-  /** Whether the /config theme is a light one, read once per load by chatOnlyRecord; the inks follow it. A theme changed mid-load is followed at the next load. */
-  light: boolean
 }
 
 export function newLoad(): Load {
-  return { reads: { started: 0, applied: 0 }, light: false }
+  return { reads: { started: 0, applied: 0 } }
 }
 
 /**
@@ -64,7 +62,6 @@ export function newLoad(): Load {
  *
  *   const cwd = await $.session.cwd()
  *   fileOn = readChatOnly(load, $, cwd)                  // absent in a cs session: on
- *   load.light = the /config theme is a light one
  *   load.vet = fileOn ? await vetOnRead(load, $, cwd) : undefined   // off: no cs process
  *   on = fileOn && load.vet === 'passed'
  *
@@ -97,7 +94,6 @@ export function chatOnlyRecord(load: Load, $: $): Promise<boolean> {
   return load.record ??= (async () => {
     const cwd = await $.session.cwd()
     const fileOn = await readChatOnly(load, $, cwd)
-    load.light = await themeIsLight($)
     load.vet = fileOn ? await vetOnRead(load, $, cwd) : undefined
     load.on = fileOn && load.vet === 'passed'
     return load.on
@@ -140,17 +136,6 @@ async function logFileProblem(load: Load, $: $, line: string): Promise<void> {
   if (line === load.fileLogged) return
   load.fileLogged = line
   await $.ui.log(line)
-}
-
-/** The /config theme row as $.config.list() returns it; a list that cannot be read is logged and leaves the dark-theme inks. */
-async function themeIsLight($: $): Promise<boolean> {
-  try {
-    const theme = (await $.config.list()).find(row => row.key === 'theme')?.value
-    return typeof theme === 'string' && theme.startsWith('light')
-  } catch (error) {
-    await $.ui.log(logs.themeUnread(error instanceof Error ? error.message : String(error)))
-    return false
-  }
 }
 
 /**

@@ -1,5 +1,5 @@
 // ABOUTME: Exercises the switch's reads, vets and writes through the engine test kit: the default on, the refusals, the logs and the command queue.
-// ABOUTME: Test hooks stand in for the session's files, cs -vet-session and the /config theme; the engine's own drawing sits beneath chat only.
+// ABOUTME: Test hooks stand in for the session's files and cs -vet-session; the engine's own drawing sits beneath chat only.
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
@@ -28,7 +28,6 @@ function session(on: On, files: Map<string, string>, opts: { outside?: true; rea
   on('fs.write', ($, e) => { files.set(e.path, e.text); return { value: undefined } })
   on('env.get', { name: 'CS_BIN' }, () => ({ value: bin }))
   on('process.run', ($, e) => { seen.runs.push(e.argv); return { value: PASSED } })
-  on('config.list', () => ({ value: [] }))
   on('ui.log', ($, e) => { seen.logs.push(e.text); return { value: undefined } })
   on('ui.render', { component: 'AssistantMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine reply' }))
   return seen
@@ -119,7 +118,6 @@ test('two renders share an on-read vet and a refusal keeps both on the engine wi
     return { deny: 'ENOENT: no such file or directory' }
   })
   on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
-  on('config.list', () => ({ value: [] }))
   on('process.run', async ($, e) => {
     calls.push({ argv: e.argv, timeoutMs: e.init?.timeoutMs })
     entered?.()
@@ -168,7 +166,6 @@ test('chat-only on refuses a directory without cs local before asking for the bi
   on('fs.exists', ($, e) => { effects.push(e.path); return { value: false } })
   on('env.get', () => { effects.push('env'); return { value: undefined } })
   on('fs.write', () => { effects.push('write'); return { value: undefined } })
-  on('config.list', () => ({ value: [] }))
   expect(await $.command.run(chatOnly('on'))).toEqual({ text: 'this directory is not a cs session (no .cs/local), so nothing changed.' })
   expect(effects).toEqual(['/session/.cs/local', '/session/.cs/local'])
   expect(await $.command.run(STATUS)).toEqual({ text: 'off' })
@@ -217,7 +214,6 @@ test('a chat only write queued behind one in flight reads the file the first one
   on('fs.exists', () => ({ value: true }))
   on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
   on('process.run', () => ({ value: PASSED }))
-  on('config.list', () => ({ value: [] }))
   on('ui.log', ($, e) => { if (e.text === 'entry ') second?.(); return { value: undefined } })
   on('fs.write', async ($, e) => {
     if (first) { first = false; entered?.(); await held }
@@ -252,7 +248,6 @@ for (const order of ['refusal first', 'write first']) test(`a successful write k
   on('fs.read', ($, e) => e.path.endsWith('/chat-only') ? { value: file } : { deny: 'ENOENT: no such file or directory' })
   on('fs.exists', () => ({ value: true }))
   on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
-  on('config.list', () => ({ value: [] }))
   on('process.run', async () => {
     runs++
     if (runs === 1) {

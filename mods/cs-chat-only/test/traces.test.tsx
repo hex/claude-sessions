@@ -19,7 +19,6 @@ function filesOn(on: On, files: Files) {
   on('fs.read', ($, e) => { const text = files.get(e.path); return text === undefined ? { deny: 'ENOENT: no such file or directory' } : { value: text } })
   on('fs.exists', ($, e) => ({ value: e.path === '/session/.cs/local' }))
   on('fs.write', ($, e) => { files.set(e.path, e.text); return { value: undefined } })
-  on('config.list', () => ({ value: [] }))
 }
 
 for (const [name, answer, refusal] of [

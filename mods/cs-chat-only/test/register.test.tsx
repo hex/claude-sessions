@@ -46,7 +46,6 @@ test('two quick cs button presses share its held write and chat only reads on on
     return { value: file }
   })
   on('fs.write', async ($, e) => { writes++; entered?.(); await held; file = e.text; return { value: undefined } })
-  on('config.list', () => ({ value: [] }))
   on('ui.render', { component: 'TurnDuration' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine duration' }))
   const clock = mock.clock(on)
   const band = await $.ui.mount({ plugin: 'cs', surface: 'terminal', component: 'AbovePrompt', props: BAND })

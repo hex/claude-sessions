@@ -7,7 +7,7 @@ import type { Load } from './session'
 import { parseChatOnlyArgs } from './settings'
 import type { ChatOnlyCommand } from './settings'
 import { decideCommandOutput, decideUser, sessionModes } from './verdict'
-import { NOTHING, drawCommandOutput, drawError, drawReply, drawUser, inks } from './draw'
+import { INKS, NOTHING, drawCommandOutput, drawError, drawReply, drawUser } from './draw'
 import type { Pen } from './draw'
 import { commands, errorLine, replies } from './words'
 
@@ -216,7 +216,7 @@ async function site<C extends Hooked>($: $, e: RenderInput<C>, next: (e: RenderI
     if ('isExpanded' in e.props && e.props.isExpanded) return await engine()
     const on = load.on ?? await chatOnlyRecord(load, $)
     if (!on) return await engine()
-    const pen: Pen = { el: $.ui.resolve(e), ink: inks(load.light), pad: e.surface === 'terminal' ? 2 : 0 }
+    const pen: Pen = { el: $.ui.resolve(e), ink: INKS, pad: e.surface === 'terminal' ? 2 : 0 }
     const decision = paint(e, pen)
     switch (decision.kind) {
       case 'engine': return await engine()

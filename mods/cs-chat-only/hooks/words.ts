@@ -12,7 +12,6 @@ export const logs = {
   unread: (path: string, reason: string) => `could not read ${path}: ${reason}`,
   unusable: (path: string, problem: ChatOnlyProblem, text: string) => `could not use ${path}: ${problem === 'torn' ? 'it is torn, with no closing newline' : `it holds ${JSON.stringify(text.slice(0, 40))}, neither on nor off`}; chat only is off until /chat-only or the band's chat only key writes the file again`,
   chatOnlyOff: (refusal: string) => `chat only is off in this session: ${refusal}`,
-  themeUnread: (reason: string) => `could not read the theme: ${reason}; chat only draws in its dark-theme colours`,
 } as const
 export const replies = {
   notASession: 'this directory is not a cs session (no .cs/local), so nothing changed.',
@@ -31,7 +30,7 @@ export function slashCommand(text: string): { readonly name: string; readonly ar
   return match?.[1] ? { name: match[1], args: (match[2] ?? '').trim() } : undefined
 }
 
-export type Tone = 'violet' | 'red' | 'amber'
+export type Tone = 'violet' | 'red' | 'plain'
 export type ErrorLine = { readonly head: string; readonly rest: readonly string[]; readonly tone: Tone; readonly act: boolean }
 
 /**
@@ -48,7 +47,7 @@ export function errorLine(text: string): ErrorLine | undefined {
   if (/stopped by a safety classifier/i.test(content)) return line('A safeguard cut the reply above', ['Claude continues', 'esc esc goes back to an earlier message'], 'violet')
   if (!prefixed) return undefined
   if (/safeguards|usage policy|\/legal\/aup/i.test(content)) return line(`${who ?? 'The model'}'s safeguards stopped this reply`, ['often a false alarm', 'esc esc to edit your message, or /model to switch'], 'violet', true)
-  if (/529|overloaded/i.test(content)) return line("Claude's servers are busy", ['not your setup', 'Claude Code retries, or send again'], 'amber')
+  if (/529|overloaded/i.test(content)) return line("Claude's servers are busy", ['not your setup', 'Claude Code retries, or send again'], 'plain')
   if (/usage limit|rate limit|429/i.test(content)) {
     const reset = content.match(/resets?\s+([^\n,;]+)/i)?.[1]?.trim()
     return line('Usage limit reached', [...(reset ? [`resets ${reset}`] : []), 'nothing is lost', '/model to switch'], 'red')
@@ -56,8 +55,8 @@ export function errorLine(text: string): ErrorLine | undefined {
   if (/prompt is too long|context length|too many tokens/i.test(content)) return line('This chat is too long for the model', ['run /compact', 'nothing is lost'], 'red')
   if (/401|403|authentication|login|api key|oauth/i.test(content)) return line('Login needed', ['run /login', 'nothing is lost'], 'red')
   if (/credit|billing/i.test(content)) return line('Billing problem on the account', ['nothing is lost'], 'red')
-  if (/connection|network|socket|timeout|timed out/i.test(content)) return line('Connection lost', ['check your internet', 'send again to retry'], 'amber')
-  if (/\b5\d\d\b|server_error|internal/i.test(content)) return line("Server error on Claude's side", ['your work is kept', 'send a message to try again'], 'amber')
+  if (/connection|network|socket|timeout|timed out/i.test(content)) return line('Connection lost', ['check your internet', 'send again to retry'], 'plain')
+  if (/\b5\d\d\b|server_error|internal/i.test(content)) return line("Server error on Claude's side", ['your work is kept', 'send a message to try again'], 'plain')
   if (/400|invalid_request|max_output/i.test(content)) return line('Claude refused this request', ['ctrl+o shows why', 'esc esc to edit your message'], 'red')
-  return line('Claude Code hit an error', ['ctrl+o shows it'], 'amber')
+  return line('Claude Code hit an error', ['ctrl+o shows it'], 'plain')
 }

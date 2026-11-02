@@ -1,17 +1,14 @@
 // ABOUTME: Checks each chat only painter's visible words through real mounted engine render chains: your line, Claude's reply, its error line, and nothing for the work.
-// ABOUTME: Test hooks supply the session's switch and theme and retain an observable engine drawing beneath chat only.
+// ABOUTME: Test hooks supply the session's switch and retain an observable engine drawing beneath chat only.
 import { expect, test } from 'claude-code/testing'
 import type { On, PromptOrigin } from 'claude-code'
 
-const THEME = { key: 'theme', label: 'Theme', kind: 'choice', value: 'light', options: ['dark', 'light'], provider: { plugin: 'engine', tier: 'core' }, isLocked: false } as const
-
-/** A cs session whose chat only file says on and which cs trusts; `light` puts a light theme in /config. */
-function session(on: On, light = false) {
+/** A cs session whose chat only file says on and which cs trusts. */
+function session(on: On) {
   on('session.cwd', () => ({ value: '/session' }))
   on('fs.read', ($, e) => e.path.endsWith('/chat-only') ? { value: 'on\n' } : { deny: 'ENOENT: no such file or directory' })
   on('env.get', { name: 'CS_BIN' }, () => ({ value: '/bin/cs' }))
   on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
-  on('config.list', () => ({ value: light ? [THEME] : [] }))
 }
 
 test('UserMessage draws the terminal you margin and leaves the desktop engine body intact', async ($, on) => {
@@ -20,7 +17,7 @@ test('UserMessage draws the terminal you margin and leaves the desktop engine bo
   on('ui.render', { component: 'UserMessage' }, ($, e) => { calls++; return $.ui.resolve(e).Text({ children: 'engine prompt' }) })
   const terminal = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
   expect((await terminal.find({ type: 'Text', text: '❯' }))?.text).toBe('❯')
-  expect((await terminal.find({ type: 'Text', text: '❯' }))?.props.color).toBe('#9fb4c8')
+  expect((await terminal.find({ type: 'Text', text: '❯' }))?.props.color).toBe('planMode')
   expect((await terminal.find({ type: 'Text', text: 'Read the notes' }))?.text).toBe('Read the notes')
   expect(await terminal.find({ text: 'engine prompt' })).toBeUndefined()
   const desktop = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'desktop', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
@@ -28,15 +25,6 @@ test('UserMessage draws the terminal you margin and leaves the desktop engine bo
   expect(calls).toBe(2)
   await terminal.unmount()
   await desktop.unmount()
-})
-
-test('UserMessage draws your line in the light theme\'s you ink when /config names a light theme', async ($, on) => {
-  session(on, true)
-  on('ui.render', { component: 'UserMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine prompt' }))
-  const row = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
-  expect((await row.find({ type: 'Text', text: '❯' }))?.props.color).toBe('#2f4f6f')
-  expect((await row.find({ type: 'Text', text: 'Read the notes' }))?.props.color).toBe('#2f4f6f')
-  await row.unmount()
 })
 
 test('UserMessage keeps the engine row for an origin chat only has no rule for, envelope text included', async ($, on) => {
@@ -81,11 +69,11 @@ test('UserMessage draws your text in the you ink, and a slash command with its n
   session(on)
   on('ui.render', { component: 'UserMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine prompt' }))
   const plain = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', requestId: 'plain', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
-  expect((await plain.find({ type: 'Text', text: 'Read the notes' }))?.props.color).toBe('#9fb4c8')
+  expect((await plain.find({ type: 'Text', text: 'Read the notes' }))?.props.color).toBe('planMode')
   const command = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', requestId: 'command', props: { text: '/chat-only status now', origin: { kind: 'composer' }, isExpanded: false } })
   const name = await command.find({ type: 'Text', text: '/chat-only' })
   const args = await command.find({ type: 'Text', text: 'status now' })
-  expect([name?.text, name?.props.color, name?.props.dimColor]).toEqual(['/chat-only', '#9fb4c8', undefined])
+  expect([name?.text, name?.props.color, name?.props.dimColor]).toEqual(['/chat-only', 'planMode', undefined])
   expect([args?.text, args?.props.dimColor]).toEqual(['status now', true])
   await plain.unmount()
   await command.unmount()
@@ -118,10 +106,15 @@ test('AssistantMessage frames the engine markdown once under the terminal margin
 test('AssistantMessage draws a failed reply as one line in the colour of who acts, with its remedies dim, in the reply\'s place', async ($, on) => {
   session(on)
   on('ui.render', { component: 'AssistantMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine markdown' }))
-  const row = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'AssistantMessage', props: { text: 'API Error: Connection error.', isFirstOfReply: true } })
-  const texts = await row.findAll({ type: 'Text' })
-  expect(texts.map(text => [text.text, text.props.color, text.props.dimColor])).toEqual([['Connection lost', '#d8b36a', undefined], ['check your internet', undefined, true], ['send again to retry', undefined, true]])
-  await row.unmount()
+  const drawn = async (requestId: string, text: string) => {
+    const row = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'AssistantMessage', requestId, props: { text, isFirstOfReply: true } })
+    const texts = (await row.findAll({ type: 'Text' })).map(text => [text.text, text.props.color, text.props.dimColor])
+    await row.unmount()
+    return texts
+  }
+  expect(await drawn('safeguard', "API Error: Sonnet's safeguards stopped the response above")).toEqual([["Sonnet's safeguards cut the reply above", 'merged', undefined], ['Claude continues', undefined, true], ['esc esc goes back to an earlier message', undefined, true]])
+  expect(await drawn('limit', 'Claude AI usage limit reached, resets 3pm')).toEqual([['Usage limit reached', 'error', undefined], ['resets 3pm', undefined, true], ['nothing is lost', undefined, true], ['/model to switch', undefined, true]])
+  expect(await drawn('connection', 'API Error: Connection error.')).toEqual([['Connection lost', 'text', undefined], ['check your internet', undefined, true], ['send again to retry', undefined, true]])
 })
 
 test('the work draws nothing while on: a call, a group, a result, the progress hint and the turn timing, each still passing through the engine', async ($, on) => {

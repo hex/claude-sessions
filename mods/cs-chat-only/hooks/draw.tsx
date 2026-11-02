@@ -1,20 +1,16 @@
-// ABOUTME: cs-chat-only's trees: turns a verdict into elements from $.ui.resolve(e), with the inks (§13) and the engine's own 2-column margin: ❯ before your line, nothing before Claude's.
+// ABOUTME: cs-chat-only's trees: turns a verdict into elements from $.ui.resolve(e), with the inks (§13, Claude Code theme keys) and the engine's own 2-column margin: ❯ before your line, nothing before Claude's.
 // ABOUTME: No decisions and no $ calls but resolve; a Button never sits inside a Text (the engine refuses the whole tree).
-import type { EngineInterface, RenderElement } from 'claude-code'
+import type { EngineInterface, RenderElement, ThemeKey } from 'claude-code'
 
 import type { UserVerdict } from './verdict'
-import type { ErrorLine } from './words'
+import type { ErrorLine, Tone } from './words'
 import { labels, marks, slashCommand } from './words'
 
 type Elements = ReturnType<EngineInterface['ui']['resolve']>
 
-export type Inks = { readonly you: string; readonly violet: string; readonly red: string; readonly amber: string }
-/** §13 table; `light` from the /config theme, read once per load (session.chatOnlyRecord). */
-export function inks(light: boolean): Inks {
-  return light
-    ? { you: '#2f4f6f', violet: '#5b3fb5', red: '#b42318', amber: '#8a5a00' }
-    : { you: '#9fb4c8', violet: '#a78bfa', red: '#e06c6c', amber: '#d8b36a' }
-}
+/** §13 table as theme keys: the engine resolves each key in the person's theme on every draw, so the inks follow auto, light, dark and the colour-blind and ANSI themes. */
+export const INKS = { you: 'planMode', violet: 'merged', red: 'error', plain: 'text' } as const satisfies Record<'you' | Tone, ThemeKey>
+export type Inks = typeof INKS
 
 /** What every tree needs: elements, inks, and the engine's margin (2 on the terminal, 0 on desktop). */
 export type Pen = {
@@ -51,7 +47,7 @@ export function drawReply(engine: RenderElement, pen: Pen): RenderElement {
   return <Box paddingLeft={pen.pad} flexDirection="column">{engine}</Box>
 }
 
-/** The error line in a failed reply's place, coloured by who acts (§6): violet for a safeguard stop, red when you must act, amber when Claude Code handles it. */
+/** The error line in a failed reply's place, coloured by who acts (§6): violet for a safeguard stop, red when you must act, the theme's text colour when Claude Code handles it. */
 export function drawError(error: ErrorLine, pen: Pen): RenderElement {
   const { Box, Text } = pen.el
   return <Box flexDirection="column" paddingLeft={pen.pad}><Text color={pen.ink[error.tone]}>{error.head}</Text>{error.rest.map(line => <Text dimColor>{line}</Text>)}</Box>
