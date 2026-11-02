@@ -321,8 +321,6 @@ type BandFacts = {
 }
 
 const QUEUE_GLYPH = '\u25a4'
-// The chat only key's lead glyph, ≡ (U+2261), drawn in the line's ink.
-const CHAT_ONLY_GLYPH = '\u2261'
 // The queue press's head: its glyph, its verb and its count.
 const QUEUE_COUNT = /^\u25a4 run \d+/
 // The chat only key's switch dot while on.
@@ -335,8 +333,8 @@ export function buildBandEntries(facts: BandFacts): BandEntry[] {
   if (facts.countdown !== undefined) entries.push({ key: 'cs-countdown', kind: 'word', label: `in ${facts.countdown.seconds}s`, ink: { color: facts.countdown.ink } })
   if (facts.wrapping) entries.push({ key: 'cs-wrap', kind: 'chord', label: 'wrap', action: WRAP_ACTION, onPress: facts.wrap })
   // The chat only key and the queue have no chord: a click or Enter under the band's focus presses them.
-  // It leads with its glyph; its tail is a switch dot: ● in green while on, ○ in the line's ink while off.
-  if (facts.chatOnly !== undefined) entries.push({ key: 'cs-chat-only', kind: 'press', label: facts.chatOnly.on ? `${CHAT_ONLY_GLYPH} filter chat only ●` : `${CHAT_ONLY_GLYPH} filter chat only ○`, onPress: facts.chatOnly.onPress, ink: { tail: facts.chatOnly.on ? '●' : '○', color: facts.chatOnly.on ? CHAT_ONLY_ON : undefined } })
+  // Its tail is a switch dot: ● in green while on, ○ in the line's ink while off.
+  if (facts.chatOnly !== undefined) entries.push({ key: 'cs-chat-only', kind: 'press', label: facts.chatOnly.on ? 'filter chat ●' : 'filter chat ○', onPress: facts.chatOnly.onPress, ink: { tail: facts.chatOnly.on ? '●' : '○', color: facts.chatOnly.on ? CHAT_ONLY_ON : undefined } })
   if (facts.waiting > 0) entries.push({ key: 'cs-queue', kind: 'press', label: `${QUEUE_GLYPH} run ${facts.waiting} queued ${facts.waiting === 1 ? 'task' : 'tasks'}`, onPress: facts.queue, ink: { lead: QUEUE_GLYPH, color: facts.queueInk } })
   // The features word leads what the session is; only a ready feature can be pressed.
   if (facts.featured !== undefined) {
