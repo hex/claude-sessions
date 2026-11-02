@@ -1214,7 +1214,6 @@ run_test test_live_shows_a_served_session_as_remote_with_the_server_pid
 run_test test_doctor_reports_a_live_server_and_removes_a_stale_pid_file
 run_test test_a_remote_pid_another_process_took_over_serves_nothing
 
-report_results
 
 # A feature session's server is named as its conversations are: with a '+'
 # for the '@', the form Claude Code's SendMessage accepts.
@@ -1224,3 +1223,7 @@ test_remote_names_a_feature_sessions_server_with_a_plus() {
     assert_eq "[remote-control][--name][myproj+feat][--permission-mode][default][--spawn=same-dir]" "$(log_value argv)" \
         "remote-control gets base+feature" || return 1
 }
+
+run_test test_remote_names_a_feature_sessions_server_with_a_plus
+
+report_results

@@ -1068,6 +1068,24 @@ test_remove_refuses_a_served_feature_session() {
     assert_dir "$dir" "the session stays" || return 1
 }
 
+# A server started before cs named claude with the '+' still runs as
+# `remote-control --name base@feature`; the served check reads that spelling
+# too, so the upgrade leaves no running server's session removable.
+test_remove_refuses_a_feature_session_served_under_the_at_name() {
+    local dir out rc=0 spid
+    dir=$(create_test_session "myproj@feat")
+    perl -e 'sleep 60' remote-control --name myproj@feat --permission-mode default > /dev/null 2>&1 &
+    spid=$!
+    printf '%s\n' "$spid" > "$dir/.cs/session.lock"
+    printf '%s\n' "$spid" > "$dir/.cs/local/remote.pid"
+    out=$("$CS_BIN" -rm "myproj@feat" --force </dev/null 2>&1) || rc=$?
+    { kill "$spid"; wait "$spid"; } 2>/dev/null
+    assert_eq "1" "$rc" "cs -rm refuses" || return 1
+    assert_eq "Error: Session myproj@feat is served by cs myproj@feat --remote (remote-control PID $spid); stop it first with Ctrl-C in its window, or close the window." \
+        "$out" "naming the server" || return 1
+    assert_dir "$dir" "the session stays" || return 1
+}
+
 # An idle session goes from inside another one exactly as it does today.
 test_remove_idle_other_session_from_inside_a_session() {
     local dir
@@ -1318,5 +1336,8 @@ run_test test_remove_refuses_when_the_mount_table_cannot_be_read
 run_test test_remove_reads_past_a_mount_source_holding_on
 run_test test_remove_refuses_a_mount_whose_source_holds_on
 run_test test_remove_reads_a_macos_mount_point_holding_type
+
+run_test test_remove_refuses_a_served_feature_session
+run_test test_remove_refuses_a_feature_session_served_under_the_at_name
 
 report_results
