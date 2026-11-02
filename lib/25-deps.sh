@@ -46,10 +46,8 @@ validate_session_name() {
         # -uninstall would run that verb rather than open, and -rm would reach
         # remove_session.
         -*) error "Session name cannot start with a hyphen" ;;
-        # The name Claude Code shows for a feature session (cs_claude_name);
-        # the user read it there and typed it here.
-        *+*) error "$name is the name Claude Code shows for feature session ${name//+/@}; cs takes ${name//+/@}" ;;
     esac
+    cs_refuse_claude_name "$name"
 
     if ! [[ "$name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
         error "Session name must contain only alphanumeric characters, hyphens, underscores, and dots"
@@ -67,8 +65,8 @@ validate_session_ref() {  # name
         '') error "Session name cannot be empty" ;;
         .|..) error "Session name cannot be '.' or '..'" ;;
         */*|*\\*) error "Session name cannot contain a path separator: $1" ;;
-        *+*) error "$1 is the name Claude Code shows for feature session ${1//+/@}; cs takes ${1//+/@}" ;;
     esac
+    cs_refuse_claude_name "$1"
 }
 
 # Split a worktree session name <base>@<task> into CS_WT_BASE / CS_WT_TASK.
