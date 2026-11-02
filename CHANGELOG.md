@@ -15,6 +15,9 @@ All notable changes to cs are documented here. Release notes are also available 
 - A feature session's claude is named with a `+` for the `@` (`cs myproj@fix-auth` runs `claude --name myproj+fix-auth`, and `--remote` the same server name). Claude Code's SendMessage refuses any address with an `@` in it, so no peer session could message a feature's conversation, though ListAgents listed it. The `+` form is what Claude Code shows and what the live-duplicate guard and the served check read back from `ps`; the directory, `CLAUDE_SESSION_NAME`, `cs -msg` and every other cs surface keep `base@feature`. The `+` form typed into cs (`cs base+feature`, `cs -rm base+feature`, a mail target) is refused by name with the `@` form and creates nothing; a feature session's context tells the model both addresses; and the duplicate guard and the served check still count a feature or its server launched under the `@` name before this release.
 - `cs -list` prints the cs-tui hint from the listing itself, so `cs -list --bogus` prints only the error.
 
+### Docs
+- [docs/rejected-designs.md](docs/rejected-designs.md) lists the designs cs rejected or declined, each with its reason and date, so a contributor or a later session does not propose one again; the README's Documentation table links it.
+
 ## 2026.10.11
 
 ### Features
