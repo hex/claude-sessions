@@ -2159,7 +2159,7 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         if f.lock == "worktree" {
             lines.push(Line::from(vec![
                 Span::styled("  lock      ", Style::default().fg(p.mut_)),
-                Span::styled("feature session is live", Style::default().fg(p.amber)),
+                Span::styled("worktree session is live", Style::default().fg(p.amber)),
             ]));
         }
 
@@ -4764,7 +4764,7 @@ mod tests {
         app.merge_features[0].lock = "worktree".into();
         let text = render_wide(&mut app);
         assert!(
-            text.contains("lock      feature session is live"),
+            text.contains("lock      worktree session is live"),
             "the detail pane must name the locked side:\n{text}"
         );
     }
