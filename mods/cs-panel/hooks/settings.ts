@@ -225,28 +225,32 @@ export type Field = { kind: 'field'; value: string; placeholder: string | undefi
 
 // A chooser's picker of one of a row's values: every value in its owner's
 // order, each labelled by itself, the one the row holds among them keeping
-// it; and that one, undefined when the row holds none of them.
-export type Picker = { kind: 'picker'; options: readonly Choice[]; current: string | undefined }
+// it; that one, undefined when the row holds none of them; and what a surface
+// that draws no picker offers in its place, a change to each other value.
+export type Picker = { kind: 'picker'; options: readonly Choice[]; current: string | undefined; others: readonly Choice[] }
 
 // What Enter on a row does: one change at once, or a chooser opened under the
 // row, a field first where the row takes a typed value or a picker where it
 // takes one of its values, then its choices, the last one Keep.
-export type Change = { kind: 'now'; answer: Answer } | { kind: 'choose'; control: Field | Picker | undefined; choices: readonly Choice[] }
+export type Change = { kind: 'now'; answer: Answer } | { kind: 'choose'; control: Field | Picker; choices: readonly Choice[] }
 
-// The picker of `values` for a row holding `current`, `pick` what picking another does.
-function pickerOf(values: readonly string[], current: string | undefined, pick: (value: string) => Answer): Picker {
+// The picker of `values` for a row holding `current`, `pick` what picking
+// another does and `name` that change's label where no picker draws.
+function pickerOf(values: readonly string[], current: string | undefined, pick: (value: string) => Answer, name = (value: string) => value): Picker {
   const isHeld = current !== undefined && values.includes(current)
-  return { kind: 'picker', options: values.map(value => ({ label: value, answer: value === current ? KEEP : pick(value) })), current: isHeld ? current : undefined }
+  return { kind: 'picker', options: values.map(value => ({ label: value, answer: value === current ? KEEP : pick(value) })), current: isHeld ? current : undefined,
+    others: values.filter(value => value !== current).map(value => ({ label: name(value), answer: pick(value) })) }
 }
 
 // A setting's change. A value this session's file holds changes there; any
 // other goes to `target`, the file writesTo names, so a change always moves
 // what the row shows. Default, an unset in the file that holds the value, is
 // offered while a file holds it (a typed setting always), Keep always, the
-// current value only in the picker, where picking it keeps the row. An off
-// flag's labels name its feature: Turn off writes 1, and its default, the flag
-// unset, is on.
-//   flag   -> no file holding it: the flip at once; else Turn on|off, Default, Keep
+// current value only in the picker, where picking it keeps the row. A flag's
+// picker holds its feature's states, Turn on|off where no picker draws, so an
+// off flag's off writes 1, and its default, the flag unset, is on.
+//   flag   -> no file holding it: the flip at once; else a picker of on and
+//             off, then Default, Keep
 //   choice -> a picker of every choice, then Default, Keep
 //   text   -> a field holding the value, whose text cs's checker judges, then
 //             Default, Keep <value>
@@ -263,9 +267,9 @@ export function settingChange(s: Setting, target: Scope): Change {
     case 'flag':
     case 'flagoff': {
       // The feature is on at 1, or for an off flag at anything but 1.
-      const isOn = (s.value === '1') !== turnsOff(s.edit), value = isOn === turnsOff(s.edit) ? '1' : '0'
-      if (!isHeld) return { kind: 'now', answer: write(value) }
-      return { kind: 'choose', control: undefined, choices: [{ label: LABELS.turn(!isOn), answer: write(value) }, ...fallback, keep] }
+      const isOn = (s.value === '1') !== turnsOff(s.edit), on = stateOf(true), to = (state: string) => write((state === on) !== turnsOff(s.edit) ? '1' : '0')
+      if (!isHeld) return { kind: 'now', answer: to(stateOf(!isOn)) }
+      return { kind: 'choose', control: pickerOf([on, stateOf(false)], stateOf(isOn), to, state => LABELS.turn(state === on)), choices: [...fallback, keep] }
     }
     case 'choice':
       return { kind: 'choose', control: pickerOf(s.choices, s.value ?? s.fallback, choice => write(choice)), choices: [...fallback, keep] }

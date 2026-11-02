@@ -386,7 +386,7 @@ const PICKER_SHOWN = 8
 // row is locked or Enter changes it at once: its field or its picker on a line
 // of its own where the surface draws one, the picker open while the ring is on
 // it (its first element); then its choices with ` · ` between them, led by the
-// picker's values but the current one where the surface draws no picker, a
+// changes the picker offers in its place where the surface draws no picker, a
 // line holding as many as fit and a choice wider than a line cut with `…`.
 function chooserOf(v: PanelView, l: RowLine): ChooserLine[] {
   const hasSelf = v.session !== undefined
@@ -396,9 +396,9 @@ function chooserOf(v: PanelView, l: RowLine): ChooserLine[] {
   const cells = Math.max(1, v.columns - CHOOSER_CELLS)
   const { control } = change
   const open = (count: number) => 1 + Math.min(PICKER_SHOWN, count) + (count > PICKER_SHOWN ? 1 : 0)
-  const lines: ChooserLine[] = control === undefined || !v.hasField ? [] : control.kind === 'field' ? [{ kind: 'field', field: control }]
+  const lines: ChooserLine[] = !v.hasField ? [] : control.kind === 'field' ? [{ kind: 'field', field: control }]
     : [{ kind: 'picker', picker: control, rows: v.chooser.at === 0 ? open(control.options.length) : 1 }]
-  const choices = control?.kind === 'picker' && !v.hasField ? [...control.options.filter(o => o.label !== control.current), ...change.choices] : change.choices
+  const choices = control.kind === 'picker' && !v.hasField ? [...control.others, ...change.choices] : change.choices
   let width = 0
   for (const choice of choices) {
     const option = { key: optionKey(choice.label), label: choice.label, text: cut(choice.label, cells) }
