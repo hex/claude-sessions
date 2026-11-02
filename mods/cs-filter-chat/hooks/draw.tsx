@@ -1,4 +1,4 @@
-// ABOUTME: cs-chat-only's trees: turns a verdict into elements from $.ui.resolve(e), with the inks (§13, Claude Code theme keys) and the engine's own 2-column margin: ❯ before your line, nothing before Claude's.
+// ABOUTME: cs-filter-chat's trees: turns a verdict into elements from $.ui.resolve(e), with the inks (§13, Claude Code theme keys) and the engine's own 2-column margin: ❯ before your line, nothing before Claude's.
 // ABOUTME: No decisions and no $ calls but resolve; a Button never sits inside a Text (the engine refuses the whole tree).
 import type { EngineInterface, RenderElement, ThemeKey } from 'claude-code'
 

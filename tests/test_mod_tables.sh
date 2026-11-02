@@ -10,15 +10,15 @@ setup() { :; }
 teardown() { :; }
 
 # cs and cs-update keep these lines in register.tsx (TOASTS, ASKS, LOGS,
-# REPLIES, COMMANDS); cs-chat-only keeps its own in words.ts. A line a call site
+# REPLIES, COMMANDS); cs-filter-chat keeps its own in words.ts. A line a call site
 # writes inline reaches the screen but not the exported table, so every call
 # site that hands the engine one names its table instead. Comment lines are
 # skipped.
 WORD_SITES="
 mods/cs/hooks/register.tsx
 mods/cs-update/hooks/register.tsx
-mods/cs-chat-only/hooks/register.tsx
-mods/cs-chat-only/hooks/session.ts
+mods/cs-filter-chat/hooks/register.tsx
+mods/cs-filter-chat/hooks/session.ts
 mods/cs-panel/hooks/register.tsx
 mods/cs-panel/hooks/draw.tsx
 mods/cs-panel/hooks/settings.ts

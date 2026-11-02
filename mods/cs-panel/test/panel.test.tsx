@@ -100,12 +100,12 @@ test('one line outside the record refuses the whole answer, naming that line; an
   expect(parseSettings('')).toEqual({ unreadable: '' })
 })
 
-test('the mod rows are the rows of cs, cs-update, cs-mermaid and cs-chat-only only: an engine row and another cs-* plugin\'s row are left out', () => {
-  const youInk: ConfigRow = { key: 'cs-chat-only.youInk', label: "Chat only: your lines' colour", kind: 'choice', value: 'remember', options: ['remember', 'planMode', 'success', 'merged', 'error', 'text'], provider: { plugin: 'cs-chat-only', tier: 'user' }, isLocked: false }
+test('the mod rows are the rows of cs, cs-update, cs-mermaid and cs-filter-chat only: an engine row and another cs-* plugin\'s row are left out', () => {
+  const youInk: ConfigRow = { key: 'cs-filter-chat.youInk', label: "Filter chat: your lines' colour", kind: 'choice', value: 'remember', options: ['remember', 'planMode', 'success', 'merged', 'error', 'text'], provider: { plugin: 'cs-filter-chat', tier: 'user' }, isLocked: false }
   expect(modRowsOf([...MOD_ROWS, youInk]).map(m => [m.key, m.plugin, m.kind, m.options])).toEqual([
     ['cs.bandPrompts', 'cs', 'boolean', []], ['cs.bandPrompt', 'cs', 'choice', ['latest', 'read']], ['cs.bandBars', 'cs', 'number', []],
     ['cs-update.showReleaseNotes', 'cs-update', 'boolean', []], ['cs-mermaid.drawDiagrams', 'cs-mermaid', 'boolean', []],
-    ['cs-chat-only.youInk', 'cs-chat-only', 'choice', ['remember', 'planMode', 'success', 'merged', 'error', 'text']],
+    ['cs-filter-chat.youInk', 'cs-filter-chat', 'choice', ['remember', 'planMode', 'success', 'merged', 'error', 'text']],
   ])
 })
 

@@ -1,0 +1,18 @@
+{
+  "name": "cs-filter-chat",
+  "version": "0.1.0",
+  "description": "Restyles the chat: your messages and Claude's replies, and nothing of the work between them. On in every session by default; the band's filter chat key or /filter-chat turns it off there.",
+  "author": {
+    "name": "cs"
+  },
+  "userConfig": {
+    "youInk": {
+      "type": "string",
+      "title": "Filter chat: your lines' colour",
+      "description": "The colour filter chat draws your messages in: remember is blue, planMode teal, success green, merged violet, error red, text your theme's text colour. Each follows your theme.",
+      "required": false,
+      "default": "remember",
+      "options": ["remember", "planMode", "success", "merged", "error", "text"]
+    }
+  }
+}

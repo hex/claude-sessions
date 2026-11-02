@@ -1,11 +1,11 @@
-// ABOUTME: cs-chat-only mod: while chat only is on in this session, the chat shows your messages and Claude's replies and nothing of the work between them. On by default; a session cs -vet-session refuses gets Claude Code's own drawing.
-// ABOUTME: On/off comes from cs's band key (a ui.press hook reads the file after next) or /chat-only. PAINTERS is the one table of render sites; site() is the one caller of next().
+// ABOUTME: cs-filter-chat mod: while filter chat is on in this session, the chat shows your messages and Claude's replies and nothing of the work between them. On by default; a session cs -vet-session refuses gets Claude Code's own drawing.
+// ABOUTME: On/off comes from cs's band key (a ui.press hook reads the file after next) or /filter-chat. PAINTERS is the one table of render sites; site() is the one caller of next().
 import type { EngineInterface, On, PluginOptions, RenderComponent, RenderElement, RenderInput } from 'claude-code'
 
-import { applyChatOnly, chatOnlyRecord, newLoad, readChatOnly, writeChatOnly } from './session'
+import { applyFilterChat, filterChatRecord, newLoad, readFilterChat, writeFilterChat } from './session'
 import type { Load } from './session'
-import { parseChatOnlyArgs, youInkOf } from './settings'
-import type { ChatOnlyCommand } from './settings'
+import { parseFilterChatArgs, youInkOf } from './settings'
+import type { FilterChatCommand } from './settings'
 import { decideCommandOutput, decideUser, sessionModes } from './verdict'
 import { INKS, NOTHING, drawCommandOutput, drawError, drawReply, drawUser } from './draw'
 import type { Inks, Pen } from './draw'
@@ -21,40 +21,40 @@ let load: Load = newLoad()
 
 /**
  * No install switch: register() always registers the one shape, and each render
- * hook returns the engine's drawing while chat only is off in this session.
- * `options` carries only the you ink (the /config row cs-chat-only.youInk).
+ * hook returns the engine's drawing while filter chat is off in this session.
+ * `options` carries only the you ink (the /config row cs-filter-chat.youInk).
  * Claude Code reloads the mod when it changes and calls register() again with
  * the new value; the hooks close over each call's inks.
  */
 export function register(on: On, options: PluginOptions) {
   const ink: Inks = { ...INKS, you: youInkOf(options) }
   load = newLoad()
-  registerChatOnly(on, ink)
+  registerFilterChat(on, ink)
 }
 
 /**
- * Carries out a typed /chat-only command for THIS session and returns its
+ * Carries out a typed /filter-chat command for THIS session and returns its
  * reply. It never reloads and runs no command.
  *
  *   usage                             replies.usage; reads nothing
- *   await chatOnlyRecord(load, $)    the mirror exists from here on (vetted at the load's on-read)
- *   status                            applyChatOnly(load, $, 'status'), then `on` or `off` as vetted
+ *   await filterChatRecord(load, $)    the mirror exists from here on (vetted at the load's on-read)
+ *   status                            applyFilterChat(load, $, 'status'), then `on` or `off` as vetted
  *   toggle                            the file's value read again and flipped (not the mirror's: a hand edit is
  *                                     followed), then written as `switch` writes it
- *   switch                            writeChatOnly: asks cs -vet-session first (ruling §20.22); refused, nothing is written
+ *   switch                            writeFilterChat: asks cs -vet-session first (ruling §20.22); refused, nothing is written
  *
  * The texts carry no plugin name: the engine leads a command's output with it
- * (`cs-chat-only: no chat only change ...` on screen). A refusal writes nothing, leaves
+ * (`cs-filter-chat: no filter chat change ...` on screen). A refusal writes nothing, leaves
  * the mirror and the drawing as they were, and says why in the reply: the
  * refusal text is cs's own (session.vetRefusal). The band's press asks the
  * same cs rule with the same argv, so a session cs refuses is refused by both
  * writers.
  *
- * Writing commands queue on load.writes, so a second /chat-only reads the
- * file the first one wrote. /chat-only is `immediate`, so a typed
- * /chat-only runs mid-turn at once (spike3 M12).
+ * Writing commands queue on load.writes, so a second /filter-chat reads the
+ * file the first one wrote. /filter-chat is `immediate`, so a typed
+ * /filter-chat runs mid-turn at once (spike3 M12).
  */
-function perform($: $, cmd: ChatOnlyCommand): Promise<string> {
+function perform($: $, cmd: FilterChatCommand): Promise<string> {
   if (cmd.kind === 'status' || cmd.kind === 'usage') return performNow($, cmd)
   const result = (load.writes ?? Promise.resolve()).then(() => performNow($, cmd))
   // The caller keeps result's rejection; the queue must still admit the next command.
@@ -62,16 +62,16 @@ function perform($: $, cmd: ChatOnlyCommand): Promise<string> {
   return result
 }
 
-async function performNow($: $, cmd: ChatOnlyCommand): Promise<string> {
+async function performNow($: $, cmd: FilterChatCommand): Promise<string> {
   if (cmd.kind === 'usage') return replies.usage
-  await chatOnlyRecord(load, $)
+  await filterChatRecord(load, $)
   if (cmd.kind === 'status') {
-    await applyChatOnly(load, $, 'status')
-    if (load.on === undefined) throw new Error('chat only record did not settle')
+    await applyFilterChat(load, $, 'status')
+    if (load.on === undefined) throw new Error('filter chat record did not settle')
     return replies.status(load.on)
   }
-  const on = cmd.kind === 'switch' ? cmd.on : !(await readChatOnly(load, $, await $.session.cwd()))
-  const result = await writeChatOnly(load, $, on)
+  const on = cmd.kind === 'switch' ? cmd.on : !(await readFilterChat(load, $, await $.session.cwd()))
+  const result = await writeFilterChat(load, $, on)
   if (result === 'no-session') return replies.notASession
   if (result !== 'written') return replies.refused(result.refused)
   return replies.switched(on)
@@ -82,46 +82,46 @@ async function performNow($: $, cmd: ChatOnlyCommand): Promise<string> {
  * stream. Every hook is registered whatever this session's switch says; the
  * switch decides what they draw, never what is registered.
  */
-function registerChatOnly(on: On, ink: Inks) {
+function registerFilterChat(on: On, ink: Inks) {
   // Commands do not survive a reload (spike Q2, measured): every load registers it.
-  // cs's band shows the chat only key only while $.command.list() lists
-  // /chat-only from plugin cs-chat-only, reads it when the band is evaluated
+  // cs's band shows the filter chat key only while $.command.list() lists
+  // /filter-chat from plugin cs-filter-chat, reads it when the band is evaluated
   // (4-5 ms after a reloaded plugin's session.start, spike3 M14), and nothing
   // redraws the band when the command list changes later. So the registration
   // is the FIRST statement, issued before any await, and session.start settles
   // (next) only after it resolved. Not a manifest markdown command: the band
-  // filters `source === 'plugin' && plugin === 'cs-chat-only'`, and
-  // /chat-only must be answered by the command.run hook below. /clear (cs's
+  // filters `source === 'plugin' && plugin === 'cs-filter-chat'`, and
+  // /filter-chat must be answered by the command.run hook below. /clear (cs's
   // rotation) reloads nothing (spike3 M13: same load, no session.start,
-  // /chat-only stays registered).
+  // /filter-chat stays registered).
   on('session.start', async ($, e, next) => {
-    await $.command.register(commands.chatOnly)
+    await $.command.register(commands.filterChat)
     return next(e)
   })
 
-  on('command.run', { command: 'chat-only' }, async ($, e) => {
-    return { text: await perform($, parseChatOnlyArgs(e.args)) }
+  on('command.run', { command: 'filter-chat' }, async ($, e) => {
+    return { text: await perform($, parseFilterChatArgs(e.args)) }
   })
 
-  // cs's band key (`chat only`, Button key `cs-chat-only`, pressed by a
+  // cs's band key (`filter chat`, Button key `cs-filter-chat`, pressed by a
   // click or the band's focus). next(e) resolves only after cs's onPress
-  // (pressChatOnly) promise settles (spike5 M16: 64 of 64, idle and
+  // (pressFilterChat) promise settles (spike5 M16: 64 of 64, idle and
   // mid-turn, both --plugin-dir orders), so the file read straight after it
   // is the post-press value, with no timer. Band-side precondition:
-  // pressChatOnly awaits its $.fs.write before returning and the Button's
-  // onPress returns pressChatOnly's promise. A press while one is pending
-  // gets that press's in-flight promise (pressChatOnly is single-flight) and
-  // writes nothing, so both hooks read the same value. A press pressChatOnly
+  // pressFilterChat awaits its $.fs.write before returning and the Button's
+  // onPress returns pressFilterChat's promise. A press while one is pending
+  // gets that press's in-flight promise (pressFilterChat is single-flight) and
+  // writes nothing, so both hooks read the same value. A press pressFilterChat
   // refuses (session not vetted, a write error) leaves the file as it is or
   // torn; the read says what both sides now show. This read is not vetted
-  // again (ruling §20.22): pressChatOnly vetted before it wrote, so a flip
+  // again (ruling §20.22): pressFilterChat vetted before it wrote, so a flip
   // to on read here is the press's; an on that did not change keeps the
   // load's cached answer, so a session cs refused stays off
-  // (session.applyChatOnly 'press').
+  // (session.applyFilterChat 'press').
   // Matcher literals: KEEP IN SYNC with settings.BAND_PLUGIN / BAND_ELEMENT (a kit test compares them).
-  on('ui.press', { plugin: 'cs', element: 'cs-chat-only' }, async ($, e, next) => {
+  on('ui.press', { plugin: 'cs', element: 'cs-filter-chat' }, async ($, e, next) => {
     const result = await next(e)
-    await applyChatOnly(load, $, 'press')
+    await applyFilterChat(load, $, 'press')
     return result
   })
 
@@ -133,10 +133,10 @@ function registerChatOnly(on: On, ink: Inks) {
 // ---------------------------------------------------------------------------
 
 /**
- * The sites chat only draws. AskUserQuestion, InfoNotice and PromptHint stay
+ * The sites filter chat draws. AskUserQuestion, InfoNotice and PromptHint stay
  * the engine's (ruling §20.13), and so does the row above the prompt
  * (AbovePrompt, cs's band) and the working line (Spinner, Claude Code's own
- * animated sign that a turn runs). Pane is no site: chat only opens none.
+ * animated sign that a turn runs). Pane is no site: filter chat opens none.
  */
 type Hooked = Exclude<RenderComponent, 'AskUserQuestion' | 'InfoNotice' | 'PromptHint' | 'Pane' | 'Spinner' | 'AbovePrompt'>
 type Props<C extends RenderComponent> = Partial<RenderInput<C>['props']>
@@ -206,9 +206,9 @@ export const PAINTERS = {
  *   - the row's own isExpanded (ctrl+o, --verbose) returns the engine's
  *     drawing with props untouched (§10, per row: no module flag), so the
  *     detailed view still shows everything.
- *   - chat only off in this session returns the engine's drawing too. The
- *     check reads the per-load mirror (session.chatOnlyRecord), not the
- *     file, so off costs the hop and next(e), no op; applyChatOnly()
+ *   - filter chat off in this session returns the engine's drawing too. The
+ *     check reads the per-load mirror (session.filterChatRecord), not the
+ *     file, so off costs the hop and next(e), no op; applyFilterChat()
  *     invalidates on every flip. The mirror says off in a session cs -vet-session refuses,
  *     whatever the file says (ruling §20.22). Until the load's record
  *     settles, every evaluation awaits it here: in a session whose file reads
@@ -221,7 +221,7 @@ async function site<C extends Hooked>($: $, e: RenderInput<C>, next: (e: RenderI
   const engine = (props?: Props<C>) => drawn ??= next(props ? { ...e, props: { ...e.props, ...props } } : e)
   try {
     if ('isExpanded' in e.props && e.props.isExpanded) return await engine()
-    const on = load.on ?? await chatOnlyRecord(load, $)
+    const on = load.on ?? await filterChatRecord(load, $)
     if (!on) return await engine()
     const pen: Pen = { el: $.ui.resolve(e), ink, pad: e.surface === 'terminal' ? 2 : 0 }
     const decision = paint(e, pen)

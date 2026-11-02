@@ -1,27 +1,27 @@
-// ABOUTME: cs-chat-only's words: every string the engine shows for the mod, from the /chat-only replies and log lines to the error lines that take a failed reply's place.
+// ABOUTME: cs-filter-chat's words: every string the engine shows for the mod, from the /filter-chat replies and log lines to the error lines that take a failed reply's place.
 // ABOUTME: Pure. The error strings are the spec's (explore-features §6), pinned by tests.
-import type { ChatOnlyProblem } from './settings'
+import type { FilterChatProblem } from './settings'
 
-export const labels = { you: '❯', mode: 'chat only · /chat-only to switch' } as const
+export const labels = { you: '❯', mode: 'filter chat · /filter-chat to switch' } as const
 export const marks = { dot: '·' } as const
 
-// The lines chat only hands the engine to draw on surfaces of the engine's
-// own: its transcript notices (the engine leads each with `cs-chat-only: `),
-// the replies of /chat-only and its slash menu row.
+// The lines filter chat hands the engine to draw on surfaces of the engine's
+// own: its transcript notices (the engine leads each with `cs-filter-chat: `),
+// the replies of /filter-chat and its slash menu row.
 export const logs = {
   unread: (path: string, reason: string) => `could not read ${path}: ${reason}`,
-  unusable: (path: string, problem: ChatOnlyProblem, text: string) => `could not use ${path}: ${problem === 'torn' ? 'it is torn, with no closing newline' : `it holds ${JSON.stringify(text.slice(0, 40))}, neither on nor off`}; chat only is off until /chat-only or the band's chat only key writes the file again`,
-  chatOnlyOff: (refusal: string) => `chat only is off in this session: ${refusal}`,
+  unusable: (path: string, problem: FilterChatProblem, text: string) => `could not use ${path}: ${problem === 'torn' ? 'it is torn, with no closing newline' : `it holds ${JSON.stringify(text.slice(0, 40))}, neither on nor off`}; filter chat is off until /filter-chat or the band's filter chat key writes the file again`,
+  filterChatOff: (refusal: string) => `filter chat is off in this session: ${refusal}`,
 } as const
 export const replies = {
   notASession: 'this directory is not a cs session (no .cs/local), so nothing changed.',
-  refused: (refusal: string) => `no chat only change in this session: ${refusal}`,
+  refused: (refusal: string) => `no filter chat change in this session: ${refusal}`,
   status: (on: boolean) => on ? 'on' : 'off',
-  switched: (on: boolean) => on ? "chat only on: your messages and Claude's replies only" : "chat only off: Claude Code's own drawing",
-  usage: '/chat-only toggles chat only · /chat-only on | off | status',
+  switched: (on: boolean) => on ? "filter chat on: your messages and Claude's replies only" : "filter chat off: Claude Code's own drawing",
+  usage: '/filter-chat toggles filter chat · /filter-chat on | off | status',
 } as const
 export const commands = {
-  chatOnly: { name: 'chat-only', description: "Show only your messages and Claude's replies in this session: toggle, on, off or status", argumentHint: 'on | off | status', immediate: true },
+  filterChat: { name: 'filter-chat', description: "Show only your messages and Claude's replies in this session: toggle, on, off or status", argumentHint: 'on | off | status', immediate: true },
 } as const
 
 /** §3.1: a message that starts with a slash command: its name, then its arguments (empty when it has none). */

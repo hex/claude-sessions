@@ -3445,7 +3445,7 @@ const KEYED = { 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' }
 const CHORDS = { 'strip:jump1': 'ctrl+x 1', 'strip:jump2': 'ctrl+x 2' }
 // The queue glyph's amber on a light terminal, or one that says nothing of its background.
 const AMBER = 'rgb(180,83,9)'
-// The chat only key's dot while on: the palette's green.
+// The filter chat key's dot while on: the palette's green.
 const GREEN = 'rgb(22,163,74)'
 const quiet = { rotating: false, armed: false, wrapping: false, waiting: 0, queued: 0, queueRunning: false, queueInk: AMBER, mail: 0, rotate: noPress, wrap: noPress, queue: noPress }
 const FOUR = [{ uuid: 'u1', text: 'say one' }, { uuid: 'u2', text: 'say two' }, { uuid: 'u3', text: 'say three' }, { uuid: 'u4', text: 'say four' }]
@@ -3461,8 +3461,8 @@ const bandViews: (readonly [string, () => void | Promise<void>, { isWorking?: bo
   ['rotate due', () => { percent = 40 }, {}, view({ entries: buildBandEntries({ ...quiet, rotating: true, wrapping: true }) })],
   ['armed', () => { arm() }, {}, view({ entries: buildBandEntries({ ...quiet, rotating: true, armed: true }) })],
   ['countdown', async () => { arm(); await turnComplete() }, {}, view({ entries: buildBandEntries({ ...quiet, countdown: { seconds: GRACE_SECONDS, ink: OWN }, rotating: true, armed: true }) })],
-  ['chat only off', () => { enableChatOnly(); files['/work/.cs/local/chat-only'] = 'off\n' }, {}, view({ entries: buildBandEntries({ ...quiet, chatOnly: { on: false, onPress: noPress } }) })],
-  ['chat only on', () => { enableChatOnly(); files['/work/.cs/local/chat-only'] = 'on\n' }, {}, view({ entries: buildBandEntries({ ...quiet, chatOnly: { on: true, onPress: noPress } }) })],
+  ['filter chat off', () => { enableFilterChat(); files['/work/.cs/local/filter-chat'] = 'off\n' }, {}, view({ entries: buildBandEntries({ ...quiet, filterChat: { on: false, onPress: noPress } }) })],
+  ['filter chat on', () => { enableFilterChat(); files['/work/.cs/local/filter-chat'] = 'on\n' }, {}, view({ entries: buildBandEntries({ ...quiet, filterChat: { on: true, onPress: noPress } }) })],
   ['queue', () => { queueTasks(2) }, {}, view({ entries: buildBandEntries({ ...quiet, waiting: 2 }) })],
   ['running queue', () => { queueTasks(2); files['/work/.cs/local/queue.state'] = 'draining\n' }, {}, view({ entries: buildBandEntries({ ...quiet, queued: 2, queueRunning: true }) })],
   ['gate', async () => { await gateRuns() }, {}, view({ entries: buildBandEntries({ ...quiet, gate: 'finishing fix-auth · gate 3s' }) })],
@@ -3543,7 +3543,7 @@ function bandLine(tree: any, bodyColumns: number): string {
   return row
 }
 const EL = { Box: 'Box', Text: 'Text', Button: 'Button' } as any
-const everything = buildBandEntries({ ...quiet, featured: { label: '3 features · fix-auth ready', onPress: noPress }, rotating: true, wrapping: true, chatOnly: { on: true, onPress: noPress }, waiting: 2, mail: 1 })
+const everything = buildBandEntries({ ...quiet, featured: { label: '3 features · fix-auth ready', onPress: noPress }, rotating: true, wrapping: true, filterChat: { on: true, onPress: noPress }, waiting: 2, mail: 1 })
 const droppable = buildBandEntries({ ...quiet, featured: { label: '3 features · none ready' }, rotating: true, wrapping: true, gate: 'finishing fix-auth · gate 3s', queued: 2, mail: 1 })
 const lineAt = (entries: any[], bodyColumns: number, rail?: BandView['rail']) => bandLine(drawBand(view({ entries, bodyColumns, rail }), EL), bodyColumns)
 // `n` blank cells, for the spacer between the band's zones in a row written out.
@@ -3552,7 +3552,7 @@ const gap = (n: number) => ' '.repeat(n)
 // The typical line at 120 columns: the actions at the left, then what the
 // session is and the rail at the right edge, the spacer between them.
 const FOURTEEN = Array.from({ length: 14 }, (_, i) => ({ uuid: `t${i + 1}`, text: i === 13 ? 'the band is too busy' : `step ${i + 1}` }))
-const typical = buildBandEntries({ ...quiet, rotating: true, wrapping: true, chatOnly: { on: true, onPress: noPress }, waiting: 2, mail: 1 })
+const typical = buildBandEntries({ ...quiet, rotating: true, wrapping: true, filterChat: { on: true, onPress: noPress }, waiting: 2, mail: 1 })
 
 // The rail at 120 columns: fourteen prompts, five bars, and the jump to the
 // twelfth refused.
@@ -3637,8 +3637,8 @@ test('a dim middle dot parts the keys, the clear key\'s count among them, from t
   expect(dots(after)).toEqual([{ dimColor: true }])
   // A chord with no key bound is still a key.
   expect(bandLine(drawBand(view({ chords: {}, entries: buildBandEntries({ ...quiet, rotating: true, waiting: 1 }), bodyColumns: 120 }), EL), 120)).toBe('  rotate · ▤ run 1 queued task')
-  // The chat only key is a press: the dot parts it from the keys before it.
-  expect(lineAt(buildBandEntries({ ...quiet, rotating: true, wrapping: true, chatOnly: { on: true, onPress: noPress } }), 120)).toBe('  ctrl+x 1 rotate   2 wrap · filter chat ●')
+  // The filter chat key is a press: the dot parts it from the keys before it.
+  expect(lineAt(buildBandEntries({ ...quiet, rotating: true, wrapping: true, filterChat: { on: true, onPress: noPress } }), 120)).toBe('  ctrl+x 1 rotate   2 wrap · filter chat ●')
   // Keys alone, a count after its clear key, and a press with no key before it draw no dot.
   expect(lineAt(buildBandEntries({ ...quiet, rotating: true, wrapping: true }), 120)).toBe('  ctrl+x 1 rotate   2 wrap')
   expect(lineAt(buildBandEntries({ ...quiet, rotating: true, armed: true, countdown: { seconds: 18, ink: OWN } }), 120)).toBe('  ctrl+x 1 /clear now   in 18s')
@@ -3667,7 +3667,7 @@ test('an entry the band has no zone for is a programmer error, named', () => {
 // A sweep draws 82,432 lines: about 20 s on a Mac, three times that and more
 // on a CI macOS runner. The limit only catches a hang.
 const SWEEP_TIMEOUT = 180000
-const ACTION_KEYS = ['cs-rotate', 'cs-countdown', 'cs-wrap', 'cs-chat-only', 'cs-queue']
+const ACTION_KEYS = ['cs-rotate', 'cs-countdown', 'cs-wrap', 'cs-filter-chat', 'cs-queue']
 const RAIL_LEAST = 8
 test('every combination of entries at every width from 40 to 200 draws one row no wider than the line, and keeps the rail whenever the actions leave it room', () => {
   const chordSets = [CHORDS, { 'strip:jump1': 'ctrl+x 1', 'strip:jump2': 'ctrl+w 2' }, {}]
@@ -3678,7 +3678,7 @@ test('every combination of entries at every width from 40 to 200 draws one row n
     const entries = buildBandEntries({
       ...quiet,
       rotating: on(0), armed: on(1), countdown: on(1) ? { seconds: 18, ink: OWN } : undefined, wrapping: on(2),
-      chatOnly: on(3) ? { on: true, onPress: noPress } : undefined, waiting: on(4) ? 2 : 0,
+      filterChat: on(3) ? { on: true, onPress: noPress } : undefined, waiting: on(4) ? 2 : 0,
       featured: on(5) ? { label: '3 features · fix-auth ready', onPress: noPress } : undefined,
       gate: on(6) ? 'finishing fix-auth · gate 3s' : undefined, queued: on(7) ? 2 : 0, mail: on(8) ? 1 : 0,
     })
@@ -3704,7 +3704,7 @@ test('every combination of entries at every width from 40 to 200 draws one row n
   expect(drawn).toBe(512 * 161 - 81)
   // The rail is on at 80 widths; at 368 of their 40960 lines beside its
   // least the words lose an action the whole line keeps (the countdown at
-  // 256, the queue press at 48, the chat only key at 32, both presses at
+  // 256, the queue press at 48, the filter chat key at 32, both presses at
   // 32), and there it may go.
   expect(railKept).toBe(80 * 512 - 368)
 }, SWEEP_TIMEOUT)
@@ -3723,7 +3723,7 @@ test('with cs.bandPrompt read, every combination of entries at every width from 
     const entries = buildBandEntries({
       ...quiet,
       rotating: on(0), armed: on(1), countdown: on(1) ? { seconds: 18, ink: OWN } : undefined, wrapping: on(2),
-      chatOnly: on(3) ? { on: true, onPress: noPress } : undefined, waiting: on(4) ? 2 : 0,
+      filterChat: on(3) ? { on: true, onPress: noPress } : undefined, waiting: on(4) ? 2 : 0,
       featured: on(5) ? { label: '3 features · fix-auth ready', onPress: noPress } : undefined,
       gate: on(6) ? 'finishing fix-auth · gate 3s' : undefined, queued: on(7) ? 2 : 0, mail: on(8) ? 1 : 0,
     })
@@ -3793,7 +3793,7 @@ test('every entry the band never drops stays whole at the narrowest line that ho
 })
 
 test('a status word keeps at least its head, the words before its first `·`, and `…`: cut shorter it says nothing, so it leaves and the line is fitted again', () => {
-  const oneReady = buildBandEntries({ ...quiet, featured: { label: '1 feature · fix-auth ready', onPress: noPress }, rotating: true, wrapping: true, chatOnly: { on: true, onPress: noPress }, waiting: 3, mail: 1 })
+  const oneReady = buildBandEntries({ ...quiet, featured: { label: '1 feature · fix-auth ready', onPress: noPress }, rotating: true, wrapping: true, filterChat: { on: true, onPress: noPress }, waiting: 3, mail: 1 })
   // `1 feature…` is the shortest the features press draws.
   expect(lineAt(oneReady, 78, railOf(FOUR))).toBe('  1 rotate   2 wrap · filter chat ●   ▤ run 3 queued tasks   1 feature…   │││┃')
   // A cell fewer would cut it into its head: it leaves, and the shared prefix comes back.
@@ -3813,7 +3813,7 @@ test('with every entry on, the band leaves out its lowest words, then shortens t
 })
 
 test('a shortened queue press keeps its count whole, or cuts to its glyph: cut inside `▤ run N` it would name another number', () => {
-  const twelve = buildBandEntries({ ...quiet, rotating: true, wrapping: true, chatOnly: { on: true, onPress: noPress }, waiting: 12 })
+  const twelve = buildBandEntries({ ...quiet, rotating: true, wrapping: true, filterChat: { on: true, onPress: noPress }, waiting: 12 })
   expect(lineAt(twelve, 59)).toBe('  1 rotate   2 wrap · filter chat ●   ▤ run 12 queued tasks')
   expect(lineAt(twelve, 47)).toBe('  1 rotate   2 wrap · filter chat ●   ▤ run 12…')
   expect(lineAt(twelve, 46)).toBe('  1 rotate   2 wrap · filter chat ●   ▤…')
@@ -3825,12 +3825,12 @@ test('the rail keeps its least, `…N ┃` three cells after the words, while th
   expect(lineAt(typical, 75, REFUSED)).toBe('  ctrl+x 1 rotate   2 wrap · filter chat ●   ▤ run 2 queued tasks   …11 ┆│┃')
   // With the features press too, the mail word drops and the press, cut into its head, leaves: the actions keep the prefix and the rail keeps three bars.
   expect(lineAt(everything, 75, REFUSED)).toBe('  ctrl+x 1 rotate   2 wrap · filter chat ●   ▤ run 2 queued tasks   …11 ┆│┃')
-  // Without the chat only key, as an install with no cs-chat-only draws it (docs/hooks.md), the features press stays, shortened, and the rail keeps its least.
-  const noChatOnly = buildBandEntries({ ...quiet, featured: { label: '3 features · fix-auth ready', onPress: noPress }, rotating: true, wrapping: true, waiting: 2, mail: 1 })
-  expect(lineAt(noChatOnly, 75, REFUSED)).toBe('  1 rotate   2 wrap · ▤ run 2 queued tasks   3 features · fix-auth…   …13 ┃')
+  // Without the filter chat key, as an install with no cs-filter-chat draws it (docs/hooks.md), the features press stays, shortened, and the rail keeps its least.
+  const noFilterChat = buildBandEntries({ ...quiet, featured: { label: '3 features · fix-auth ready', onPress: noPress }, rotating: true, wrapping: true, waiting: 2, mail: 1 })
+  expect(lineAt(noFilterChat, 75, REFUSED)).toBe('  1 rotate   2 wrap · ▤ run 2 queued tasks   3 features · fix-auth…   …13 ┃')
   // 38 columns: the features press would cut into its head and leaves, the queue press shortens to a cell and `…`, and the rotate and wrap keys lose their words.
   expect(lineAt(everything, 38, REFUSED)).toBe('  1   2 · filter chat ●   ▤…   …11 ┆│┃')
-  // 37 columns: the bare keys, the chat only key and the queue's glyph leave the rail its least and a bar.
+  // 37 columns: the bare keys, the filter chat key and the queue's glyph leave the rail its least and a bar.
   expect(lineAt(everything, 37, REFUSED)).toBe('  1   2 · filter chat ●   ▤…   …12 │┃')
 })
 
@@ -3850,7 +3850,7 @@ test('a chord drawn as its key alone is still its Button, pressed by its action,
   expect(pressable).toEqual([
     ['cs-rotate', 'strip:jump1', '1', [{ bold: true, color: OWN }]],
     ['cs-wrap', 'strip:jump2', '2', [{ bold: true, color: OWN }]],
-    ['cs-chat-only', undefined, 'filter chat ●', [{ color: GREEN }]],
+    ['cs-filter-chat', undefined, 'filter chat ●', [{ color: GREEN }]],
     ['cs-queue', undefined, '▤…', [{ color: 'rgb(180,83,9)' }]],
   ])
 })
@@ -3861,12 +3861,12 @@ test('a cut that lands after a space drops the space before the ellipsis, in the
   expect(textOf(gapLabel(drawBand(view({ bodyColumns: 17, rail: railOf(shop) }), EL)))).toBe(' #2 go to…')
 })
 
-test('when even the keys overrun, the queue press leaves whole, then the chat only key, then the chords right to left', () => {
+test('when even the keys overrun, the queue press leaves whole, then the filter chat key, then the chords right to left', () => {
   // The features press, which would cut into its head, has left already.
   expect(lineAt(everything, 28)).toBe('  1   2 · filter chat ●   ▤…')
   expect(lineAt(everything, 27)).toBe('  1   2 · filter chat ●')
   expect(lineAt(everything, 23)).toBe('  1   2 · filter chat ●')
-  // With the chat only key gone, the chords take their words back where they fit.
+  // With the filter chat key gone, the chords take their words back where they fit.
   expect(lineAt(everything, 22)).toBe('  1 rotate   2 wrap')
   expect(lineAt(everything, 20)).toBe('  1 rotate   2 wrap')
   expect(lineAt(everything, 19)).toBe('  1 rotate   2 wrap')
@@ -3886,8 +3886,8 @@ test('the queue press never shortens past `▤…`: it leaves whole, and a line 
   expect(drawBand(view({ entries: queue, bodyColumns: 3 }), EL)).toBe(DRAWN)
 })
 
-test('the countdown is free text after its clear key: it leaves before its own key loses its word, and the chat only key outlasts it', () => {
-  const counting = buildBandEntries({ ...quiet, featured: { label: '3 features · fix-auth ready', onPress: noPress }, countdown: { seconds: 30, ink: OWN }, rotating: true, armed: true, chatOnly: { on: true, onPress: noPress }, queued: 2, mail: 1 })
+test('the countdown is free text after its clear key: it leaves before its own key loses its word, and the filter chat key outlasts it', () => {
+  const counting = buildBandEntries({ ...quiet, featured: { label: '3 features · fix-auth ready', onPress: noPress }, countdown: { seconds: 30, ink: OWN }, rotating: true, armed: true, filterChat: { on: true, onPress: noPress }, queued: 2, mail: 1 })
   expect(lineAt(counting, 102)).toBe(`  ctrl+x 1 /clear now   in 30s · filter chat ●   ▤ queue 2${gap(8)}3 features · fix-auth ready   mail 1`)
   expect(lineAt(counting, 39)).toBe('  1 /clear now   in 30s · filter chat ●')
   // A cell fewer would key the clear bare: the count leaves, and the prefix comes back.
@@ -3924,7 +3924,7 @@ test('chords that differ fall back to their whole chord, right to left; the last
   expect(at(10)).toBe('  ctrl+x 1')
 })
 
-test('with chords that differ, every chord outlives the features, queue and chat only presses', () => {
+test('with chords that differ, every chord outlives the features, queue and filter chat presses', () => {
   const differ = { 'strip:jump1': 'ctrl+x 1', 'strip:jump2': 'ctrl+w 2' }
   const at = (bodyColumns: number) => bandLine(drawBand(view({ chords: differ, entries: everything, bodyColumns }), EL), bodyColumns)
   // The features press would cut into its head, so it has left.
@@ -3933,12 +3933,12 @@ test('with chords that differ, every chord outlives the features, queue and chat
   expect(at(42)).toBe('  ctrl+x 1   ctrl+w 2 · filter chat ●   ▤…')
   expect(at(41)).toBe('  ctrl+x 1   ctrl+w 2 · filter chat ●')
   expect(at(37)).toBe('  ctrl+x 1   ctrl+w 2 · filter chat ●')
-  // The chat only key leaves, and the two chords take their words back.
+  // The filter chat key leaves, and the two chords take their words back.
   expect(at(36)).toBe('  ctrl+x 1 rotate   ctrl+w 2 wrap')
 })
 
-test('an unbound chord has no key to fall back to: the chat only press before it leaves whole, then the last chord cuts its word to end in `…`, and leaves when not a cell of it fits', () => {
-  const at = (bodyColumns: number) => bandLine(drawBand(view({ chords: {}, entries: buildBandEntries({ ...quiet, rotating: true, wrapping: true, chatOnly: { on: true, onPress: noPress } }), bodyColumns }), EL), bodyColumns)
+test('an unbound chord has no key to fall back to: the filter chat press before it leaves whole, then the last chord cuts its word to end in `…`, and leaves when not a cell of it fits', () => {
+  const at = (bodyColumns: number) => bandLine(drawBand(view({ chords: {}, entries: buildBandEntries({ ...quiet, rotating: true, wrapping: true, filterChat: { on: true, onPress: noPress } }), bodyColumns }), EL), bodyColumns)
   expect(at(31)).toBe('  rotate   wrap · filter chat ●')
   expect(at(30)).toBe('  rotate   wrap')
   expect(at(14)).toBe('  rotate   wr…')
@@ -3967,38 +3967,38 @@ test('band entries keep the drawn rotate and wrap labels in order', async () => 
   expect(entries.map(entry => entry.label)).toEqual(['rotate', 'wrap'])
 })
 
-const chatOnlyKey = (tree: any) => buttons(tree).find(button => button.props.key === 'cs-chat-only')
-const enableChatOnly = () => {
-  availableCommands = [{ name: 'chat-only', source: 'plugin', plugin: 'cs-chat-only' }]
+const filterChatKey = (tree: any) => buttons(tree).find(button => button.props.key === 'cs-filter-chat')
+const enableFilterChat = () => {
+  availableCommands = [{ name: 'filter-chat', source: 'plugin', plugin: 'cs-filter-chat' }]
   bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
 }
 
-test('the chat only key toggles this session, answers no chord, and colours its dot green only while on', async () => {
-  enableChatOnly()
-  files['/work/.cs/local/chat-only'] = 'off\n'
+test('the filter chat key toggles this session, answers no chord, and colours its dot green only while on', async () => {
+  enableFilterChat()
+  files['/work/.cs/local/filter-chat'] = 'off\n'
   percent = 40
   const tree = await band()
-  expect(chatOnlyKey(tree)?.props.label).toBe('filter chat ○')
-  expect(buttons(tree).find(button => button.props.label === 'filter chat ○')?.props.key).toBe('cs-chat-only')
-  expect(chatOnlyKey(tree).props.action).toBeUndefined()
+  expect(filterChatKey(tree)?.props.label).toBe('filter chat ○')
+  expect(buttons(tree).find(button => button.props.label === 'filter chat ○')?.props.key).toBe('cs-filter-chat')
+  expect(filterChatKey(tree).props.action).toBeUndefined()
   expect(words(tree)).toEqual(['ctrl+x', '1', '   ', '2', ' · ', '○'])
-  await chatOnlyKey(tree).props.onPress()
+  await filterChatKey(tree).props.onPress()
   const on = await band()
-  expect(chatOnlyKey(on).props.label).toBe('filter chat ●')
-  expect(files['/work/.cs/local/chat-only']).toBe('on\n')
-  expect(texts(chatOnlyKey(on)).map(text => [textOf(text), text.props.color])).toEqual([['●', GREEN]])
+  expect(filterChatKey(on).props.label).toBe('filter chat ●')
+  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
+  expect(texts(filterChatKey(on)).map(text => [textOf(text), text.props.color])).toEqual([['●', GREEN]])
   expect(ran).toEqual([])
   expect(invalidated).toEqual(['ui.render'])
-  await chatOnlyKey(on).props.onPress()
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
-  expect(files['/work/.cs/local/chat-only']).toBe('off\n')
+  await filterChatKey(on).props.onPress()
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
   expect(ran).toEqual([])
   expect(invalidated).toEqual(['ui.render', 'ui.render'])
 })
 
 test('the band shares the prefix of bound chords and leaves unbound labels unkeyed', async () => {
-  enableChatOnly()
-  files['/work/.cs/local/chat-only'] = 'off\n'
+  enableFilterChat()
+  files['/work/.cs/local/filter-chat'] = 'off\n'
   percent = 40
   bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
   expect(bandWords(await band())).toEqual(['ctrl+x', '1', 'rotate', '   ', '2', 'wrap', ' · ', 'filter chat ○'])
@@ -4006,95 +4006,95 @@ test('the band shares the prefix of bound chords and leaves unbound labels unkey
   expect(bandWords(await band())).toEqual(['rotate', '   ', 'ctrl+x', '2', 'wrap', ' · ', 'filter chat ○'])
 })
 
-test('a chat only press refuses a session whose control files are tracked', async () => {
-  enableChatOnly()
-  files['/work/.cs/local/chat-only'] = 'on\n'
+test('a filter chat press refuses a session whose control files are tracked', async () => {
+  enableFilterChat()
+  files['/work/.cs/local/filter-chat'] = 'on\n'
   runResult = tracked
-  await chatOnlyKey(await band()).props.onPress()
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
-  expect(files['/work/.cs/local/chat-only']).toBe('on\n')
+  await filterChatKey(await band()).props.onPress()
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
   expect(written).toEqual({})
   expect(runs.map(run => run.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work']])
   expect(toasts).toEqual([`no rotation in this session: ${TRACKED}`])
   expect(invalidated).toEqual(['ui.render'])
   runResult = VETTED
-  await chatOnlyKey(await band()).props.onPress()
-  expect(files['/work/.cs/local/chat-only']).toBe('off\n')
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
-  await chatOnlyKey(await band()).props.onPress()
-  expect(files['/work/.cs/local/chat-only']).toBe('on\n')
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ●')
+  await filterChatKey(await band()).props.onPress()
+  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  await filterChatKey(await band()).props.onPress()
+  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
 })
 
 // A prompt clears the handoff's refusal so its toast says it again, but cs's
-// answer on the session's control files still stands for the chat only key:
+// answer on the session's control files still stands for the filter chat key:
 // a refused vet keeps the key off until a vet passes or the mod loads again.
-test('a refused session keeps the chat only key off across prompts, whichever vet refused it', async () => {
-  enableChatOnly()
-  files['/work/.cs/local/chat-only'] = 'on\n'
+test('a refused session keeps the filter chat key off across prompts, whichever vet refused it', async () => {
+  enableFilterChat()
+  files['/work/.cs/local/filter-chat'] = 'on\n'
   runResult = tracked
   await startSession()
   expect(runs.map(run => run.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work']])
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
   await promptSubmit()
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
-  await chatOnlyKey(await band()).props.onPress()
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  await filterChatKey(await band()).props.onPress()
   await promptSubmit()
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
-  expect(files['/work/.cs/local/chat-only']).toBe('on\n')
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
   runResult = VETTED
-  await chatOnlyKey(await band()).props.onPress()
-  expect(files['/work/.cs/local/chat-only']).toBe('off\n')
-  await chatOnlyKey(await band()).props.onPress()
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ●')
+  await filterChatKey(await band()).props.onPress()
+  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
+  await filterChatKey(await band()).props.onPress()
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
 })
 
-test('a chat only press survives clearing the conversation and loading the band again', async () => {
-  enableChatOnly()
-  files['/work/.cs/local/chat-only'] = 'off\n'
-  await chatOnlyKey(await band()).props.onPress()
+test('a filter chat press survives clearing the conversation and loading the band again', async () => {
+  enableFilterChat()
+  files['/work/.cs/local/filter-chat'] = 'off\n'
+  await filterChatKey(await band()).props.onPress()
   sessionId = 'uuid-next'
   files['/work/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
   register(on as any, OPTIONS)
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ●')
-  expect(files['/work/.cs/local/chat-only']).toBe('on\n')
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
   for (const content of ['', 'o', 'on', 'off\n', 'on\njunk', ' on\n', 'on\r\n']) {
-    files['/work/.cs/local/chat-only'] = content
-    expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
+    files['/work/.cs/local/filter-chat'] = content
+    expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
   }
-  delete files['/work/.cs/local/chat-only']
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ●')
-  await chatOnlyKey(await band()).props.onPress()
-  expect(files['/work/.cs/local/chat-only']).toBe('off\n')
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
+  delete files['/work/.cs/local/filter-chat']
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  await filterChatKey(await band()).props.onPress()
+  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
 })
 
-test('a torn chat only write redraws its off state and allows another press', async () => {
-  enableChatOnly()
-  files['/work/.cs/local/chat-only'] = 'on\n'
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ●')
+test('a torn filter chat write redraws its off state and allows another press', async () => {
+  enableFilterChat()
+  files['/work/.cs/local/filter-chat'] = 'on\n'
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
   const write = $.fs.write
   $.fs.write = async path => {
     files[path] = ''
-    throw new Error('EACCES /work/.cs/local/chat-only')
+    throw new Error('EACCES /work/.cs/local/filter-chat')
   }
   try {
-    await chatOnlyKey(await band()).props.onPress()
+    await filterChatKey(await band()).props.onPress()
     expect(invalidated).toEqual(['ui.render'])
-    expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
-    expect(files['/work/.cs/local/chat-only']).toBe('')
-    expect(toasts).toEqual(['chat only update failed: EACCES /work/.cs/local/chat-only'])
+    expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+    expect(files['/work/.cs/local/filter-chat']).toBe('')
+    expect(toasts).toEqual(['filter chat update failed: EACCES /work/.cs/local/filter-chat'])
   } finally {
     $.fs.write = write
   }
-  await chatOnlyKey(await band()).props.onPress()
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ●')
+  await filterChatKey(await band()).props.onPress()
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
   expect(invalidated).toEqual(['ui.render', 'ui.render'])
 })
 
-test('duplicate chat only presses both wait until the one write is ready', async () => {
-  enableChatOnly()
-  files['/work/.cs/local/chat-only'] = 'off\n'
+test('duplicate filter chat presses both wait until the one write is ready', async () => {
+  enableFilterChat()
+  files['/work/.cs/local/filter-chat'] = 'off\n'
   const write = $.fs.write
   let finish = () => {}
   const writes: [string, string][] = []
@@ -4104,21 +4104,21 @@ test('duplicate chat only presses both wait until the one write is ready', async
     await write(path, text)
   }
   try {
-    const key = chatOnlyKey(await band())
+    const key = filterChatKey(await band())
     let duplicateFinished = false
-    const press = key.props.onPress().then(() => files['/work/.cs/local/chat-only'])
+    const press = key.props.onPress().then(() => files['/work/.cs/local/filter-chat'])
     const duplicate = key.props.onPress().then(() => {
       duplicateFinished = true
-      return files['/work/.cs/local/chat-only']
+      return files['/work/.cs/local/filter-chat']
     })
     await settle()
     expect(duplicateFinished).toBe(false)
-    expect(writes).toEqual([['/work/.cs/local/chat-only', 'on\n']])
-    expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
+    expect(writes).toEqual([['/work/.cs/local/filter-chat', 'on\n']])
+    expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
     expect(invalidated).toEqual([])
     finish()
     expect(await Promise.all([press, duplicate])).toEqual(['on\n', 'on\n'])
-    expect(chatOnlyKey(await band()).props.label).toBe('filter chat ●')
+    expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
     expect(invalidated).toEqual(['ui.render'])
     expect(ran).toEqual([])
   } finally {
@@ -4127,8 +4127,8 @@ test('duplicate chat only presses both wait until the one write is ready', async
   }
 })
 
-test('a non-session redraw does not discover the chat only command', async () => {
-  enableChatOnly()
+test('a non-session redraw does not discover the filter chat command', async () => {
+  enableFilterChat()
   cwdPath = '/outside'
   const list = $.command.list
   let listed = 0
@@ -4143,64 +4143,64 @@ test('a non-session redraw does not discover the chat only command', async () =>
   }
 })
 
-test('the chat only key draws idle and mid-turn, follows command availability and the band ownership gates', async () => {
-  enableChatOnly()
-  files['/work/.cs/local/chat-only'] = 'off\n'
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
-  expect(chatOnlyKey(await band({ isWorking: true })).props.label).toBe('filter chat ○')
-  expect(chatOnlyKey(await band({ hasSurvey: true }))).toBeUndefined()
+test('the filter chat key draws idle and mid-turn, follows command availability and the band ownership gates', async () => {
+  enableFilterChat()
+  files['/work/.cs/local/filter-chat'] = 'off\n'
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await band({ isWorking: true })).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await band({ hasSurvey: true }))).toBeUndefined()
   sessionId = 'uuid-teammate'
-  expect(chatOnlyKey(await band())).toBeUndefined()
+  expect(filterChatKey(await band())).toBeUndefined()
   sessionId = 'uuid-lead'
   arm()
   expect(buttons(await band()).map(button => button.props.key)).toEqual(['cs-rotate'])
   delete files[MARKER]
-  for (const command of [undefined, { name: 'chat-only', source: 'user' }, { name: 'chat-only', source: 'plugin', plugin: 'another-plugin' }]) {
+  for (const command of [undefined, { name: 'filter-chat', source: 'user' }, { name: 'filter-chat', source: 'plugin', plugin: 'another-plugin' }]) {
     availableCommands = command === undefined ? [] : [command]
     expect(await band()).toBe(DRAWN)
   }
   expect(ran).toEqual([{ command: 'color', args: 'red' }, { command: 'color', args: 'red' }])
 })
 
-test('chat only state stays with its session across registration and stale button presses', async () => {
-  enableChatOnly()
-  files['/work/.cs/local/chat-only'] = 'off\n'
-  const stale = chatOnlyKey(await band())
+test('filter chat state stays with its session across registration and stale button presses', async () => {
+  enableFilterChat()
+  files['/work/.cs/local/filter-chat'] = 'off\n'
+  const stale = filterChatKey(await band())
   await stale.props.onPress()
   register(on as any, OPTIONS)
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ●')
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
   await stale.props.onPress()
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
   expect(ran).toEqual([])
-  await chatOnlyKey(await band()).props.onPress()
+  await filterChatKey(await band()).props.onPress()
   sessionId = 'uuid-next'
   cwdPath = '/other'
   existing.add('/other/.cs/local')
   realPaths['/other'] = '/other'
   realPaths['/home/.claude-sessions/other'] = '/other'
   files['/other/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
-  files['/other/.cs/local/chat-only'] = 'off\n'
+  files['/other/.cs/local/filter-chat'] = 'off\n'
   register(on as any, OPTIONS)
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
-  expect(files['/work/.cs/local/chat-only']).toBe('on\n')
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  expect(files['/work/.cs/local/filter-chat']).toBe('on\n')
 })
 
-test('a companion chat only file change appears on the next redraw without reloading', async () => {
-  enableChatOnly()
-  const stale = chatOnlyKey(await band())
-  files['/work/.cs/local/chat-only'] = 'on\n'
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ●')
-  files['/work/.cs/local/chat-only'] = 'off\n'
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
-  files['/work/.cs/local/chat-only'] = 'on\n'
+test('a companion filter chat file change appears on the next redraw without reloading', async () => {
+  enableFilterChat()
+  const stale = filterChatKey(await band())
+  files['/work/.cs/local/filter-chat'] = 'on\n'
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  files['/work/.cs/local/filter-chat'] = 'off\n'
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  files['/work/.cs/local/filter-chat'] = 'on\n'
   await stale.props.onPress()
-  expect(files['/work/.cs/local/chat-only']).toBe('off\n')
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
+  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
   expect(ran).toEqual([])
 })
 
-test('an unreadable chat only file leaves the band visible and reports each read error once', async () => {
-  enableChatOnly()
+test('an unreadable filter chat file leaves the band visible and reports each read error once', async () => {
+  enableFilterChat()
   percent = 40
   cwdPath = '/ENOENT'
   existing.add('/ENOENT/.cs/local')
@@ -4208,22 +4208,22 @@ test('an unreadable chat only file leaves the band visible and reports each read
   realPaths['/home/.claude-sessions/ENOENT'] = '/ENOENT'
   files['/ENOENT/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-lead\n'
   const read = $.fs.read
-  let error = 'cs: $.fs.read(/ENOENT/.cs/local/chat-only) failed: EACCES'
+  let error = 'cs: $.fs.read(/ENOENT/.cs/local/filter-chat) failed: EACCES'
   $.fs.read = async path => {
-    if (path === '/ENOENT/.cs/local/chat-only') throw new Error(error)
+    if (path === '/ENOENT/.cs/local/filter-chat') throw new Error(error)
     return read(path)
   }
   try {
     for (let redraw = 0; redraw < 2; redraw++) {
       expect(buttons(await band()).map(button => button.props.label)).toEqual(['rotate', 'wrap', 'filter chat ○'])
     }
-    expect(logs).toEqual(['the chat only setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/chat-only) failed: EACCES'])
-    error = 'cs: $.fs.read(/ENOENT/.cs/local/chat-only) failed: EISDIR'
-    expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
-    expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
+    expect(logs).toEqual(['the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/filter-chat) failed: EACCES'])
+    error = 'cs: $.fs.read(/ENOENT/.cs/local/filter-chat) failed: EISDIR'
+    expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+    expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
     expect(logs).toEqual([
-      'the chat only setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/chat-only) failed: EACCES',
-      'the chat only setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/chat-only) failed: EISDIR',
+      'the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/filter-chat) failed: EACCES',
+      'the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/filter-chat) failed: EISDIR',
     ])
     expect(toasts).toEqual([])
     expect(written).toEqual({})
@@ -4234,17 +4234,17 @@ test('an unreadable chat only file leaves the band visible and reports each read
   }
 })
 
-test('chat only presses use the local directory even when private storage exists', async () => {
-  enableChatOnly()
+test('filter chat presses use the local directory even when private storage exists', async () => {
+  enableFilterChat()
   existing.add('/work/.cs/private')
-  files['/work/.cs/private/chat-only'] = 'on\n'
-  files['/work/.cs/local/chat-only'] = 'off\n'
-  expect(chatOnlyKey(await band()).props.label).toBe('filter chat ○')
-  await chatOnlyKey(await band()).props.onPress()
-  await chatOnlyKey(await band()).props.onPress()
-  expect(files['/work/.cs/local/chat-only']).toBe('off\n')
-  expect(files['/work/.cs/private/chat-only']).toBe('on\n')
-  expect(written).toEqual({ '/work/.cs/local/chat-only': 'off\n' })
+  files['/work/.cs/private/filter-chat'] = 'on\n'
+  files['/work/.cs/local/filter-chat'] = 'off\n'
+  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  await filterChatKey(await band()).props.onPress()
+  await filterChatKey(await band()).props.onPress()
+  expect(files['/work/.cs/local/filter-chat']).toBe('off\n')
+  expect(files['/work/.cs/private/filter-chat']).toBe('on\n')
+  expect(written).toEqual({ '/work/.cs/local/filter-chat': 'off\n' })
   expect(ran).toEqual([])
 })
 

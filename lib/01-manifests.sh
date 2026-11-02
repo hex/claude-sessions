@@ -108,6 +108,7 @@ RETIRED_SKILLS=(
     merge   # replaced by finish: integrate and report, never remove
     cs-hint # a mod (deployed under skills/ like every mod): the hint line under the prompt, retired
     cs-rotate # a mod: renamed to cs, cs's in-session mod (the rotate band, forced rotation, the wrap key)
+    cs-chat-only # a mod: renamed to cs-filter-chat, which ships; it was only ever deployed by hand
 )
 
 # install.sh and run_uninstall join each entry of the three retired lists
@@ -140,14 +141,14 @@ CS_SKILL_FILES=(
 )
 
 # Mod directories under mods/ the installer keeps out: experimental, their
-# source and tests in the checkout only. cs-chat-only is one, so the cs band,
-# which draws its chat only key only beside cs-chat-only's /chat-only, draws
+# source and tests in the checkout only. cs-filter-chat is one, so the cs band,
+# which draws its filter chat key only beside cs-filter-chat's /filter-chat, draws
 # none. Every file under mods/ outside these and their test/ is in
 # CS_MOD_FILES below (tests/test_install.sh holds the two lists to that), and
 # cs -doctor's drift scan skips them.
 # shellcheck disable=SC2034  # read by cs -doctor and tests/test_install.sh
 CS_MODS_KEPT_OUT=(
-    cs-chat-only
+    cs-filter-chat
 )
 
 # Mods cs ships: Claude Code function-hooks plugins, deployed file by file as

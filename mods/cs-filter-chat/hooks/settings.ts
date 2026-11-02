@@ -1,70 +1,70 @@
-// ABOUTME: cs-chat-only's switch: the per-session file .cs/local/chat-only (cs's band writes it too), what its text means, and the /chat-only grammar; and its one /config row, the you ink.
-// ABOUTME: Pure. Chat only is on by default: no file reads on, `on\n` on, `off\n` off, and any other text off with its problem named.
+// ABOUTME: cs-filter-chat's switch: the per-session file .cs/local/filter-chat (cs's band writes it too), what its text means, and the /filter-chat grammar; and its one /config row, the you ink.
+// ABOUTME: Pure. Filter chat is on by default: no file reads on, `on\n` on, `off\n` off, and any other text off with its problem named.
 import type { PluginOptions, ThemeKey } from 'claude-code'
 
 /**
  * The per-session truth, shared with cs's band. Relative to
  * `$.session.cwd()`, which both sides read the same way. cs's band reads it
- * with the same rule (mods/cs/hooks/register.tsx readChatOnly) and writes it
- * from its chat only key (pressChatOnly). A contract between two plugins:
- * KEEP IN SYNC with readChatOnly and pressChatOnly; a test in each mod pins
+ * with the same rule (mods/cs/hooks/register.tsx readFilterChat) and writes it
+ * from its filter chat key (pressFilterChat). A contract between two plugins:
+ * KEEP IN SYNC with readFilterChat and pressFilterChat; a test in each mod pins
  * these literals.
  */
-export const CHAT_ONLY_FILE = '.cs/local/chat-only'
+export const FILTER_CHAT_FILE = '.cs/local/filter-chat'
 export const ON_LINE = 'on\n'
 export const OFF_LINE = 'off\n'
-/** The directory whose presence says "this may be a cs session". /chat-only never creates it ($.fs.write would), and a missing chat only file reads as on only where it exists. */
+/** The directory whose presence says "this may be a cs session". /filter-chat never creates it ($.fs.write would), and a missing filter chat file reads as on only where it exists. */
 export const CS_LOCAL = '.cs/local'
 /**
  * How long `cs -vet-session` may take before its answer counts as a refusal.
- * Every /chat-only write asks it first, as cs's band press does, and so does
- * a read that finds CHAT_ONLY_FILE on with no answer cached for it (§20.22,
+ * Every /filter-chat write asks it first, as cs's band press does, and so does
+ * a read that finds FILTER_CHAT_FILE on with no answer cached for it (§20.22,
  * session.vetRefusal, session.vetOnRead). KEEP IN SYNC with VET_TIMEOUT_MS
  * in mods/cs/hooks/register.tsx. The env name `CS_BIN` stays a literal at its
  * one read, as cs's is: validate lists the names a module reads.
  */
 export const VET_TIMEOUT_MS = 10000
-/** The Button cs's band draws for the switch: `ui.press` reaches cs-chat-only's hook addressed `{ plugin, element }`. KEEP IN SYNC with cs's buildBandEntries key `cs-chat-only`. */
+/** The Button cs's band draws for the switch: `ui.press` reaches cs-filter-chat's hook addressed `{ plugin, element }`. KEEP IN SYNC with cs's buildBandEntries key `cs-filter-chat`. */
 export const BAND_PLUGIN = 'cs'
-export const BAND_ELEMENT = 'cs-chat-only'
+export const BAND_ELEMENT = 'cs-filter-chat'
 
-/** Why a CHAT_ONLY_FILE text reads as off although it is not `off\n`: a write torn before its newline, or any other text. */
-export type ChatOnlyProblem = 'torn' | 'other'
+/** Why a FILTER_CHAT_FILE text reads as off although it is not `off\n`: a write torn before its newline, or any other text. */
+export type FilterChatProblem = 'torn' | 'other'
 
-export type ChatOnlyState =
+export type FilterChatState =
   | { readonly on: true }
-  | { readonly on: false; readonly problem?: ChatOnlyProblem }
+  | { readonly on: false; readonly problem?: FilterChatProblem }
 
 /**
- * What CHAT_ONLY_FILE's text says. Writes are non-atomic, so only a whole
+ * What FILTER_CHAT_FILE's text says. Writes are non-atomic, so only a whole
  * line counts and nothing is trimmed: `undefined` (no file) is on, the
  * default; `on\n` is on; `off\n` is off; anything else is off with its problem.
  */
-export function chatOnlyState(text: string | undefined): ChatOnlyState {
+export function filterChatState(text: string | undefined): FilterChatState {
   if (text === undefined || text === ON_LINE) return { on: true }
   if (text === OFF_LINE) return { on: false }
   return { on: false, problem: text.endsWith('\n') ? 'other' : 'torn' }
 }
 
 /**
- * What a typed /chat-only asks for. Every change is this session's (this
- * directory's CHAT_ONLY_FILE). cs's band key does not come through here: it
- * writes CHAT_ONLY_FILE itself, and cs-chat-only's ui.press hook reads it
+ * What a typed /filter-chat asks for. Every change is this session's (this
+ * directory's FILTER_CHAT_FILE). cs's band key does not come through here: it
+ * writes FILTER_CHAT_FILE itself, and cs-filter-chat's ui.press hook reads it
  * after next(e).
  *
- *   /chat-only          toggle: the file's value flipped, written
- *   /chat-only on|off   that value, written
- *   /chat-only status   nothing written; CHAT_ONLY_FILE read again, the reply `on` or `off` as vetted
+ *   /filter-chat          toggle: the file's value flipped, written
+ *   /filter-chat on|off   that value, written
+ *   /filter-chat status   nothing written; FILTER_CHAT_FILE read again, the reply `on` or `off` as vetted
  *   anything else        the usage line
  */
-export type ChatOnlyCommand =
+export type FilterChatCommand =
   | { readonly kind: 'toggle' }
   | { readonly kind: 'switch'; readonly on: boolean }
   | { readonly kind: 'status' }
   | { readonly kind: 'usage' }
 
 /** Lowercased and split on whitespace; one word at most. */
-export function parseChatOnlyArgs(args: string): ChatOnlyCommand {
+export function parseFilterChatArgs(args: string): FilterChatCommand {
   const words = args.trim().toLowerCase().split(/\s+/).filter(word => word !== '')
   const [word] = words
   if (word === undefined) return { kind: 'toggle' }
@@ -75,10 +75,10 @@ export function parseChatOnlyArgs(args: string): ChatOnlyCommand {
 }
 
 /**
- * The /config row `cs-chat-only.youInk`, the manifest's one userConfig field:
+ * The /config row `cs-filter-chat.youInk`, the manifest's one userConfig field:
  * the theme key your lines draw in, remember by default. Each key passes 4.5:1
  * on the light and dark themes' backgrounds. KEEP IN SYNC with the manifest's
- * `options`; tests/test_mod_chat_only.sh compares the two.
+ * `options`; tests/test_mod_filter_chat.sh compares the two.
  */
 export const YOU_INK_OPTION = 'youInk'
 export const YOU_INKS = ['remember', 'planMode', 'success', 'merged', 'error', 'text'] as const satisfies readonly ThemeKey[]
@@ -93,6 +93,6 @@ export type YouInk = typeof YOU_INKS[number]
 export function youInkOf(options: PluginOptions): YouInk {
   const value = options[YOU_INK_OPTION]
   const ink = YOU_INKS.find(key => key === value)
-  if (ink === undefined) throw new Error(`cs-chat-only option ${YOU_INK_OPTION} is ${JSON.stringify(value)}, not one of ${YOU_INKS.join(', ')}: the manifest's options and settings.YOU_INKS differ`)
+  if (ink === undefined) throw new Error(`cs-filter-chat option ${YOU_INK_OPTION} is ${JSON.stringify(value)}, not one of ${YOU_INKS.join(', ')}: the manifest's options and settings.YOU_INKS differ`)
   return ink
 }
