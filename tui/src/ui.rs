@@ -957,7 +957,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                 // order: the two archive keys sit with the session actions
                 // they belong to rather than at the end where they would be
                 // the first thing lost.
-                "q:quit  Enter:open  n:new  d:delete  r:rename  a:archive  A:archived  Tab:to-do  Space:mark  /:search  1-6:sort  ?:legend"
+                "q:quit  Enter:open  n:new  d:delete  r:rename  a:archive  A:archived  Tab:queue  Space:mark  /:search  1-6:sort  ?:legend"
             }
             Mode::SessionMenu => "j/k:navigate  Enter:select  key:run directly  q/Esc:close",
             Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
@@ -2002,7 +2002,7 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let list = Paragraph::new(list_lines);
     frame.render_widget(list, pad_h(rows[3]));
 
-    card_frame(frame.buffer_mut(), area, "to-do", side, p);
+    card_frame(frame.buffer_mut(), area, "queue", side, p);
 }
 
 /// The merge screen. Replaces the two content panes rather than overlaying
@@ -2271,7 +2271,7 @@ mod tests {
     use ratatui::Terminal;
 
     /// The queue card's top border. The word alone also matches the footer's
-    /// `Tab:queue`, which draws whether or not the card does.
+    /// `Tab queue` hint, which draws whether or not the card does.
     const QUEUE_CARD_TITLE: &str = "\u{256d} queue ";
 
     fn one_session() -> Vec<Session> {
@@ -2917,7 +2917,7 @@ mod tests {
 
         let joined = render_wide(&mut app);
         assert!(joined.contains("?"), "footer should advertise the legend key");
-        assert!(joined.contains("Tab:queue"), "footer should name the queue pane's key: {joined}");
+        assert!(joined.contains("Tab queue"), "footer should name the queue pane's key: {joined}");
         assert!(!joined.contains("recency dot"), "legend hidden until asked for");
 
         app.handle_key(KeyEvent::from(KeyCode::Char('?')));
