@@ -5232,6 +5232,24 @@ _feature_readiness() {  # base_name task
         "$wt_dirty" "$untracked" "$base_dirty" "$lock" "$state"
 }
 
+# What a person reads for a readiness record, on every surface: the band's
+# FEATURE_SENTENCES (mods/cs/hooks/register.tsx) and the TUI's
+# feature_state_cell (tui/src/ui.rs) copy this table, and each one's test runs
+# this function against its copy.
+_feature_state_sentence() {  # state lock untracked ahead
+    case "$1" in
+        ready) if [ "$4" = 0 ]; then echo "no commits"; else echo "ready"; fi ;;
+        merged) echo "merged" ;;
+        staged) echo "retire staged" ;;
+        untracked) if [ "$3" = 1 ]; then echo "1 file untracked"; else echo "$3 files untracked"; fi ;;
+        locked) echo "$2 session is live" ;;
+        dirty) echo "uncommitted changes" ;;
+        base-dirty) echo "base has uncommitted changes" ;;
+        vault-locked) echo "base vault is locked" ;;
+        *) error "Unknown feature state '$1'" ;;
+    esac
+}
+
 # Resolve a symlinked directory to its real path, portably. BSD readlink gained
 # -f only in macOS 12.3; cd+pwd -P follows the link on every platform, and the
 # fallback keeps the original path rather than aborting under set -e.
@@ -6933,7 +6951,7 @@ run_features() {  # base_name [--porcelain]
         esac
     done
 
-    local features task record
+    local features task record branch ahead untracked lock state sentence
     features=$(_worktree_features "$base_name")
     [ -n "$features" ] || return 0
 
@@ -6949,9 +6967,9 @@ run_features() {  # base_name [--porcelain]
     while IFS= read -r task; do
         [ -n "$task" ] || continue
         record=$(_feature_readiness "$base_name" "$task")
-        printf '%s\n' "$record" | awk -F'\t' \
-            '{ detail = ($10 == "untracked") ? sprintf("%s file%s untracked", $7, ($7 == 1) ? "" : "s") : $10;
-               printf "%-24s %-24s %6s  %s\n", $1, $2, $3, detail }'
+        IFS=$'\t' read -r task branch ahead _ _ _ untracked _ lock state <<< "$record"
+        sentence=$(_feature_state_sentence "$state" "$lock" "$untracked" "$ahead")
+        printf '%-24s %-24s %6s  %s\n' "$task" "$branch" "$ahead" "$sentence"
     done <<< "$features"
 }
 

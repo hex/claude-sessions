@@ -609,13 +609,14 @@ makes shows when that turn ends. In a base, one feature ready reads
 `1 feature · fix-auth ready` (or `3 features · fix-auth ready`) and a press
 runs `/finish fix-auth`; two or more ready read `3 features · 2 ready` and a
 press runs `/finish`, which lists them and asks which; none ready reads
-`1 feature · fix-auth dirty` or `3 features · none ready`, dim, with no
-press. `ready` is `_feature_readiness`'s own word; ready with no commit ahead
-of the base reads `no commits`. A feature session (`base@task`) draws no
+`1 feature · fix-auth uncommitted changes` or `3 features · none ready`, dim,
+with no press. A state reads as the sentence `cs <base> -features` and the TUI
+print (`_feature_state_sentence` in `lib/30-worktree.sh`); ready with no commit
+ahead of the base reads `no commits`. A feature session (`base@task`) draws no
 features word and asks cs nothing: `/finish` lands a feature only from its
 base, whose word names it. A cs that fails, cannot start,
-or prints a record that is not ten fields with a whole `ahead` and a known
-state draws no word, and the mod logs it once.
+or prints a record that is not ten fields with a whole `ahead` and `untracked`
+and a known lock and state draws no word, and the mod logs it once.
 
 Two counts draw with no press, each only when it has something to count.
 `▤ queue N` stands at the left, where the queue's start press would, while
