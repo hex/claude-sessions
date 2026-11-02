@@ -92,6 +92,7 @@ cs -uninstall
 | [Hooks](docs/hooks.md) | Hook behavior, prompt rewriting, and Claude Code mods. |
 | [Secrets](docs/secrets.md) | Storage backends, backups, and signed sync files. |
 | [Statusline](docs/statusline.md) | Segments, the quiet, band and capsule layouts, colors, thresholds, and agent rows. |
+| [Rejected designs](docs/rejected-designs.md) | Designs cs rejected or declined, each with its reason and date. |
 
 ## License
 

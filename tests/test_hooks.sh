@@ -2538,6 +2538,32 @@ test_session_start_emits_session_state_in_a_worktree() {
         "a worktree session must get the resume state block too" || return 1
 }
 
+# The commit is aged out of the digest's 7-day window: the line must not depend
+# on there being a recent commit to report.
+test_session_start_resume_warns_of_actions_its_summary_omits() {
+    session_start_setup
+    GIT_COMMITTER_DATE="2020-01-01T00:00:00Z" \
+        git -C "$CLAUDE_SESSION_DIR" commit -q --amend --no-edit --date="2020-01-01T00:00:00Z"
+    local line="The conversation before this one may have finished actions its summary does not show; check git log, cs -msg log and the remote before repeating a push, a merge, an install or a message."
+
+    local output context
+    output=$(echo '{"session_id":"s","source":"resume","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_eq "0" "$(grep -c '^Recent commits:' <<< "$context")" \
+        "the fixture leaves no recent commit to report" || return 1
+    assert_eq "1" "$(grep -c -x -F "$line" <<< "$context")" \
+        "a resume carries the line once, as a whole line" || return 1
+
+    output=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null)
+    context=$(echo "$output" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$context" "You are working in a managed Claude Code session" \
+        "a startup still builds its context" || return 1
+    assert_eq "0" "$(grep -c -x -F "$line" <<< "$context")" \
+        "a startup does not carry the line" || return 1
+}
+
 test_session_start_announces_worktree_task() {
     session_start_setup
     mkdir -p "$CLAUDE_SESSION_META_DIR/local"
@@ -4519,6 +4545,7 @@ run_test test_session_start_is_silent_when_narratives_fit
 run_test test_session_start_survives_a_leading_zero_budget_override
 run_test test_session_start_emits_session_state_on_resume
 run_test test_session_start_emits_session_state_in_a_worktree
+run_test test_session_start_resume_warns_of_actions_its_summary_omits
 run_test test_session_start_announces_worktree_task
 run_test test_session_start_worktree_block_needs_at_shaped_name
 run_test test_session_start_no_worktree_block_for_plain_sessions
