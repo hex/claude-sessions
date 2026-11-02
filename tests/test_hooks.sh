@@ -2384,7 +2384,7 @@ test_session_start_announces_worktree_task() {
         "worktree sessions must be told what they are (on every source)" || return 1
     assert_output_contains "$context" "/finish fix-auth in session myproj" \
         "the integration command must be spelled out" || return 1
-    assert_output_contains "$context" "while this conversation is open /finish stages the retire in the base, and the base runs it by itself once the user closes this session" \
+    assert_output_contains "$context" "while this conversation is live /finish stages the retire in the base, and the base runs it by itself once the user closes this session" \
         "and the retirement rule: the user closes this session, then /finish again" || return 1
     assert_output_not_contains "$context" "cs myproj --merge" \
         "the retired verb is never named" || return 1
