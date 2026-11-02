@@ -35,7 +35,7 @@ export type Load = {
   vet?: Vetted
   /** The last read-side refusal logged, so each distinct refusal is logged once per load, as cs's band de-duplicates its filter chat complaint. Cleared by a pass. */
   vetLogged?: string
-  /** The last settings file read error logged (readFilterChat), so the same error is logged once per load whichever read finds it. */
+  /** The last settings file read error logged (readFilterChat); a read that finds the same error again does not log it twice in a row. */
   fileLogged?: string
   /**
    * Read tickets for the setting (applyFilterChat): `started` is taken
@@ -108,9 +108,9 @@ export function filterChatRecord(load: Load, $: $): Promise<boolean> {
  *   neither says                        off (the default): no vet and no log
  *   a read error but ENOENT             that file says nothing, logged with the path and the error
  *
- * Each log line is written once per load, whichever read finds it
- * (Load.fileLogged), as the band's readFilterChat writes each distinct
- * complaint once.
+ * A log line that repeats the last one written (Load.fileLogged) is not
+ * written again, whichever read finds it; a different line is, and so is a
+ * line that returns after another.
  */
 export async function readFilterChat(load: Load, $: $, cwd: string): Promise<boolean> {
   const pin = await $.env.get('CS_FILTER_CHAT')
