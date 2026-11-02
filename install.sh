@@ -117,6 +117,7 @@ RETIRED_HOOKS=(
     artifact-tracker.sh       # retired: PreToolUse:Write redirect was inert (updatedInput path rewrite is not honored by the harness); tracking removed entirely
     prose-lint.sh             # retired with the `cs -lint` verb it called; MUST stay listed, because a deployed copy calling the removed verb reads error()'s exit 1 as "violations found" and blocks every turn-end
     bash-logger.sh            # retired: PreToolUse:Bash command log cost every Bash call a hook process (~1.4 s), and nothing read the BASH: lines it wrote
+    narrative-reminder.sh     # retired: renamed stop-blocks.sh, since every answer it gives is a block and the narrative reminder lives in stop-notices.sh; settings.json entries under this name are stripped and registered under the name it has
 )
 
 # Hook scripts cs ships; deployed to ~/.claude/hooks/cs/ and registered in
@@ -124,7 +125,8 @@ RETIRED_HOOKS=(
 CS_HOOKS=(
     session-start.sh
     autosave-commits.sh
-    narrative-reminder.sh
+    stop-blocks.sh
+    stop-notices.sh
     session-end.sh
     subagent-context.sh
     tool-failure-logger.sh
@@ -198,6 +200,7 @@ RETIRED_SKILLS=(
     merge   # replaced by finish: integrate and report, never remove
     cs-hint # a mod (deployed under skills/ like every mod): the hint line under the prompt, retired
     cs-rotate # a mod: renamed to cs, cs's in-session mod (the rotate band, forced rotation, the wrap key)
+    cs-chat-only # a mod: renamed to cs-filter-chat, which ships; it was only ever deployed by hand
 )
 
 # install.sh and run_uninstall join each entry of the three retired lists
@@ -230,14 +233,11 @@ CS_SKILL_FILES=(
 )
 
 # Mod directories under mods/ the installer keeps out: experimental, their
-# source and tests in the checkout only. cs-feed is one, so the cs band, which
-# draws its feed key only beside cs-feed's /feed, draws none. Every file under
-# mods/ outside these and their test/ is in CS_MOD_FILES below
-# (tests/test_install.sh holds the two lists to that), and cs -doctor's drift
-# scan skips them.
+# source and tests in the checkout only. Every file under mods/ outside these and their test/ is in
+# CS_MOD_FILES below (tests/test_install.sh holds the two lists to that), and
+# cs -doctor's drift scan skips them.
 # shellcheck disable=SC2034  # read by cs -doctor and tests/test_install.sh
 CS_MODS_KEPT_OUT=(
-    cs-feed
 )
 
 # Mods cs ships: Claude Code function-hooks plugins, deployed file by file as
@@ -262,6 +262,14 @@ CS_MOD_FILES=(
     cs-panel/hooks/register.tsx
     cs-panel/hooks/settings.ts
     cs-panel/hooks/draw.tsx
+    cs-filter-chat/.claude-plugin/plugin.json
+    cs-filter-chat/hooks/hooks.json
+    cs-filter-chat/hooks/register.tsx
+    cs-filter-chat/hooks/session.ts
+    cs-filter-chat/hooks/settings.ts
+    cs-filter-chat/hooks/verdict.ts
+    cs-filter-chat/hooks/words.ts
+    cs-filter-chat/hooks/draw.tsx
 )
 
 # The cs tips file as install.sh names it in settings.json's
@@ -353,8 +361,7 @@ _strip_hook_registration() {
 # "command:<name>" actions, which submit /<name>. Ctrl+X 1 and Ctrl+X 2 bind
 # the engine actions the cs mod's band Buttons answer to: they press the
 # band's rotate (or /clear) and wrap keys. KEEP IN SYNC with ROTATE_ACTION and
-# WRAP_ACTION in mods/cs/hooks/register.tsx; its FEED_ACTION has no key while
-# cs-feed is kept out (CS_MODS_KEPT_OUT above). install.sh
+# WRAP_ACTION in mods/cs/hooks/register.tsx. install.sh
 # asks once per machine and binds each in the context block Claude Code wants
 # it in (home, below): the command keys in Chat, the chords in Global, where
 # the mod reads them. cs -uninstall takes back only the keys that still hold
@@ -1392,13 +1399,13 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "f93e22cb7e6fcbbf3da6d5ca386a328cce468e5bc5c8ab3e13949aa937928d8e  bin/cs"
+    "e651bb5d2ec85a4de48bc76615696e25b168fbfaca1f59f6ad5e30169440c894  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
-    "2148a9cf6df5ff9185fa9392b3e186067ce0b395b73f75ca951aa64c0172c17e  bin/cs-statusline"
+    "ac6b329e266e45f6794602db7cbb39288f334351c15cdaba0769ef1fa4e5f20d  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
-    "7ee2b17a9edd3e31f6414d8107071986e1ce2af8aa444169724848e9da8d0828  hooks/cs-shared.sh"
-    "1afbc021d4755317cb865ce23a776e23f3974a64b655a8a0cb5b8836c1d31279  hooks/cs-config.sh"
+    "aff28ed20c622ff6d9607be2c8f757780305052178578962870dd7e52ac5d8fc  hooks/cs-shared.sh"
+    "10aa9a48cf58dcb6982f7dab143fc08b2a48b4ca9b1c655ef90dd25aae1f928c  hooks/cs-config.sh"
     "50d63ce0995e68fddd8503700c15f9585d11938c9cd3872a883146de7707c765  hooks/cs-iterm-tab.py"
     "21988bf58bb6fea15c6435445f4abc3a38f4c4a9a7db78c4ff4797650709ba3f  hooks/memory-index-guard.sh"
     "0202455687b8c8a584cfc1ecf0439de03e8f70fcb0062e479484fdfeb4b83147  hooks/prompt-rewriter.sh"
@@ -1406,14 +1413,15 @@ CS_PAYLOAD_SHA256=(
     "8be7cf198e9e950cb11eeb5d02231bb3e168aa078018495a1a8832186334bbc2  hooks/prompt-rewriter-vendor.sh"
     "1fa475982564ec70f12bf5295b874989dd95f89224f27bb6be4854cc5b8674e3  hooks/wrap-sweep.md"
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
-    "af4a586e9a317f33d867d3bab9a60dedf21dc2ac01465211975d3513b1a115d1  hooks/session-start.sh"
+    "d22ebd5a106135b9e5d2d5c5be232951ddc8a91c491c28efda4c27e87b45b022  hooks/session-start.sh"
     "cae9775702513f11b1abff031928047766ab69714e3a9b1db82ff080e186f20b  hooks/autosave-commits.sh"
-    "5d5a289944d88a3b255095d9341172f893690a205fa77f486d3f812967b3133c  hooks/narrative-reminder.sh"
-    "8377b722bd856d5ca918bb9ffea2cfb3e0a0077ee0b9441a1f52461fd7282739  hooks/session-end.sh"
+    "59a45222ec8106787e9e97c7c48acc32b754831ecdc5247fdc40d992f36ee009  hooks/stop-blocks.sh"
+    "7709e7d4a45e074b73880f203957cfe10b99760835015093bdfa87ae858fdb1f  hooks/stop-notices.sh"
+    "a96c77d8f13d893e46116b7d61e517f72bba7f8e10b790517934004be21ae43a  hooks/session-end.sh"
     "81a13835a65f4b4b35bb87493da0df9848de68375ca7ab1525d2d5079cf52bf1  hooks/subagent-context.sh"
     "53b16016dd6d087c3cc3db7e4acf8de6629e149e3b7f326f0731b36809574156  hooks/tool-failure-logger.sh"
     "2736fd914673827102dd9e1ec60b1c385d8cfef56bac3b8579fde953d22fdbcb  hooks/session-auto-approve.sh"
-    "b1bfb9ddbf99a3afdb56bfb744eda51e70aa4afc5d10f7f656c2d20d36a7f034  hooks/scope-prompt.sh"
+    "68c76099cba2c4cff85321b35745bf148df18f6cc538743a31a424d250ef478d  hooks/scope-prompt.sh"
     "9e06eaa16960dff49881234c8a479c2f8d2dd8d672283056e1591c4528e755ab  commands/checkpoint.md"
     "a0e341d4bdc60072b25354256e751b320733cdcc31b91ac3d4a4f661c73b611e  commands/wrap.md"
     "2520a6d54d75e3e9f1768160826a8b9f21e38e2234538cc62e3ec6337008fc28  skills/store-secret/SKILL.md"
@@ -1426,7 +1434,7 @@ CS_PAYLOAD_SHA256=(
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
     "a4a0978846dd5f6cca361977b6c8b4b951d475734af234cbe78aae1f3bf8148a  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
-    "064c9ded7c71b15430b3dc801a20d3985f8cc0ce988f0b2564efba4cb6ca2ec8  mods/cs/hooks/register.tsx"
+    "e209d54d089fea0a64f8bfb6f75d0edf224aa6711abb567b2063742d42d54063  mods/cs/hooks/register.tsx"
     "7ca977c9aaef11d11a8dfe8c362e6e2f899aa15e4703b89f19d7a9192af2c8f9  mods/cs/tips.json"
     "2f8d4b45beddd0b27b050f1c2eb08ebb25552b4dea5f33b9398318a2ef636985  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
@@ -1441,8 +1449,16 @@ CS_PAYLOAD_SHA256=(
     "8aaadea0975e0ccbeadb995515245a9b3a2651f84626c9ba6806a57da3b5ac53  mods/cs-panel/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
     "6909b481962cddcd80bf35f3c2424bedf5861549f7fd490b9791e352ac7c640f  mods/cs-panel/hooks/register.tsx"
-    "aa19b3a82022a48af564ffe694dde0003758a30cd93c9532d60e08c347f93f22  mods/cs-panel/hooks/settings.ts"
+    "336f7d477e1a0bb204b2eac4c460b5e67dc6486e7b6c161f23733b3e8eefb9a6  mods/cs-panel/hooks/settings.ts"
     "cc34939c470679a8a9aec93d11a96806c4fdd83a55224cd530c587d9b8b398f1  mods/cs-panel/hooks/draw.tsx"
+    "531a46cb4bc246ffc6f1734b8aaca0b30258104223f3df6faae9ae5e23a408ab  mods/cs-filter-chat/.claude-plugin/plugin.json"
+    "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-filter-chat/hooks/hooks.json"
+    "271be4bc1607706ea82ca610eacc49d7f527880431a24a2a28d03963f3212c91  mods/cs-filter-chat/hooks/register.tsx"
+    "286958e5c6e7f9c436c6ab384b5bf007b35a2b3cb30a63eb0da74e7c57c0d874  mods/cs-filter-chat/hooks/session.ts"
+    "50fdaf38780882182c4941e11d66c3f60962f8109c9a401fb825038f2070afc5  mods/cs-filter-chat/hooks/settings.ts"
+    "6cca574728693b2fa8072182015e17d9dce47a3ca8118b41ca0e09928546aa41  mods/cs-filter-chat/hooks/verdict.ts"
+    "ef2434b735efc6c5727d230eac9d4f439a9439d59946289b024b6e1bcd8f2c80  mods/cs-filter-chat/hooks/words.ts"
+    "a5d9864215c3f7b99a49bd59524b72bbc2a75d8df15c97caa23c1aba31ddb428  mods/cs-filter-chat/hooks/draw.tsx"
     "3595bfd6c3e3e266456eee69eb552ba28294cbb9d7a447ac4e6cb9b297cae178  completions/cs.bash"
     "b34174fb73e20a6cf00db1c59bdb0905bec55154da11bb6ec15b49a580dfcd00  completions/_cs"
 )
@@ -2206,17 +2222,24 @@ else
     # answering nothing loses the maildir watch for the rest of the session.
     # Registering FileChanged is itself what opens that path, so the mailbox has
     # to answer the event its own registration enables.
+    #
+    # Stop carries two entries. stop-blocks.sh's blocks must continue the
+    # turn (the queue drain, the staged retire, the mail wake). stop-notices.sh
+    # is async: a synchronous Stop hook that hands the model text always draws
+    # Claude Code's stop-hook row in the chat, while an async one draws none and
+    # its additionalContext reaches the model with the next prompt.
     _register_cs_hooks() {
         _merge_cs_hook SessionStart       session-start.sh       30
         _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
-        _merge_cs_hook Stop               narrative-reminder.sh  10
+        _merge_cs_hook Stop               stop-blocks.sh         10
+        _merge_cs_hook Stop               stop-notices.sh        10 "" true
         _merge_cs_hook SessionEnd         session-end.sh         30
         _merge_cs_hook SubagentStart      subagent-context.sh    10
         _merge_cs_hook PostToolUseFailure tool-failure-logger.sh 10 "" true
         _merge_cs_hook PermissionRequest  session-auto-approve.sh 5 "Write|Edit"
         _merge_cs_hook UserPromptSubmit   scope-prompt.sh        10
-        _merge_cs_hook FileChanged        narrative-reminder.sh  10 "" "" true
-        _merge_cs_hook CwdChanged         narrative-reminder.sh   5
+        _merge_cs_hook FileChanged        stop-blocks.sh         10 "" "" true
+        _merge_cs_hook CwdChanged         stop-blocks.sh          5
     }
 
     # Register cs-statusline as the Claude Code status line. A status line the

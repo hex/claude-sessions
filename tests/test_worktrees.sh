@@ -1045,7 +1045,7 @@ _base_stop() {  # base_dir
     printf '{}\n' | CLAUDE_SESSION_NAME="myproj" CLAUDE_SESSION_DIR="$1" \
         CLAUDE_SESSION_META_DIR="$1/.cs" CS_LEAD_PID=$$ CLAUDE_PID=$$ \
         PATH="$(cd "$(dirname "$CS_BIN")" && pwd):$PATH" \
-        bash "$SCRIPT_DIR/../hooks/narrative-reminder.sh" 2>/dev/null | jq -r '.reason // .systemMessage // ""'
+        bash "$SCRIPT_DIR/../hooks/stop-blocks.sh" 2>/dev/null | jq -r '.reason // .systemMessage // ""'
 }
 
 # A landed feature whose retire is staged behind an open conversation: the
@@ -1115,7 +1115,7 @@ test_stop_hook_of_a_teammate_leaves_a_staged_retire_alone() {
     rm -f "$CS_SESSIONS_ROOT/myproj@fix-auth/.cs/session.lock"
     out=$(printf '{}\n' | env -u CS_LEAD_PID -u CLAUDE_PID CLAUDE_SESSION_NAME="myproj" CLAUDE_SESSION_DIR="$base_dir" \
         CLAUDE_SESSION_META_DIR="$base_dir/.cs" PATH="$(cd "$(dirname "$CS_BIN")" && pwd):$PATH" \
-        bash "$SCRIPT_DIR/../hooks/narrative-reminder.sh" 2>/dev/null | jq -r '.reason // .systemMessage // ""')
+        bash "$SCRIPT_DIR/../hooks/stop-blocks.sh" 2>/dev/null | jq -r '.reason // .systemMessage // ""')
     case "$out" in *retire*) echo "  a teammate's Stop touched the staged retire: $out"; return 1 ;; esac
     assert_file_exists "$stage" "stage kept for the lead" || return 1
     assert_dir "$CS_SESSIONS_ROOT/myproj@fix-auth" "worktree kept" || return 1
@@ -1140,7 +1140,7 @@ test_stop_hook_reports_a_missing_cs_binary_and_keeps_the_stage() {
     out=$(printf '{}\n' | CLAUDE_SESSION_NAME="myproj" CLAUDE_SESSION_DIR="$base_dir" \
         CLAUDE_SESSION_META_DIR="$base_dir/.cs" CS_LEAD_PID=$$ CLAUDE_PID=$$ \
         HOME="$TEST_TMPDIR/nohome" PATH="/usr/bin:/bin" \
-        bash "$SCRIPT_DIR/../hooks/narrative-reminder.sh" 2>/dev/null | jq -r '.reason // .systemMessage // ""')
+        bash "$SCRIPT_DIR/../hooks/stop-blocks.sh" 2>/dev/null | jq -r '.reason // .systemMessage // ""')
     assert_output_contains "$out" "no cs binary was found on PATH or at ~/.local/bin/cs, so its staged retire could not run; run /finish fix-auth again" \
         "the hook says what it could not find" || return 1
     assert_file_exists "$stage" "stage kept" || return 1

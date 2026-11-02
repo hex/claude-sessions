@@ -232,7 +232,7 @@ fi
     && rm -f "$_attention_dir/attention" 2>/dev/null
 
 # iTerm2: the bounce raised at turn end stops the moment the user prompts.
-# Mirrors the guard in narrative-reminder.sh (hooks are standalone).
+# Mirrors the guard in stop-blocks.sh (hooks are standalone).
 if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
     _it2="${CS_IT2_DIR:-$HOME/.iterm2}/it2attention"
     { [ -x "$_it2" ] && "$_it2" stop > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
@@ -338,6 +338,20 @@ if [ "${CS_CLARIFY_DISABLE:-}" != "1" ] && [ -n "$PROMPT" ]; then
     esac
 fi
 _trace clarify
+
+# --- Narrative line ---
+
+# The Stop hooks' narrative reminder reaches the model only with the next
+# prompt (stop-notices.sh is async), so a finding made on the last turn before
+# the user leaves is lost unless the model writes it during that turn. One
+# sentence on every prompt asks for it there. The lead's alone: a tmux
+# teammate and a nested `claude -p` are not cs_is_lead and get nothing.
+# CS_SCOPE_DISABLE silences it with the rest of the grounding.
+NARRATIVE_LINE=""
+if [ "${CS_NARRATIVE_PROMPT_DISABLE:-}" != "1" ] && [ "${CS_SCOPE_DISABLE:-}" != "1" ] \
+    && command -v cs_is_lead >/dev/null 2>&1 && cs_is_lead; then
+    NARRATIVE_LINE="If this turn produces a finding worth keeping (a decision and its reason, a measured fact, a failed approach, a preference the user states), append it to your own narrative before your final answer; routine work is not a finding."
+fi
 
 # --- Queue inbox digest (surface-once) ---
 
@@ -530,7 +544,7 @@ $part"
 
 _digest_exit() {
     local _emitted=0
-    _emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" "$SKIP_NOTE" || _emitted=$?
+    _emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" "$NARRATIVE_LINE" "$SKIP_NOTE" || _emitted=$?
     # An emission that failed left the digest and the note unheard; the cursor
     # and the stamp wait for the next prompt to carry them.
     if [ "$_emitted" -eq 0 ]; then
@@ -799,6 +813,10 @@ CAP=8000
 if [ -n "$CLARIFY" ]; then
     CAP=$(( CAP - $(printf '%s' "$CLARIFY" | wc -c | tr -d ' ') - 2 ))
 fi
+# The narrative line is ASCII, so its length in characters is its byte count.
+if [ -n "$NARRATIVE_LINE" ]; then
+    CAP=$(( CAP - ${#NARRATIVE_LINE} - 2 ))
+fi
 if [ "$(printf '%s' "$BLOCK" | wc -c | tr -d ' ')" -gt "$CAP" ]; then
     BLOCK=$(printf '%s' "$BLOCK" | head -c "$(( CAP - 100 ))")
     BLOCK="${BLOCK%$'\n'*}
@@ -810,7 +828,7 @@ fi
 # marker — nothing severed may read as a complete path, and anything appended
 # after the marker breaks that.
 _emitted=0
-_emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" "$BLOCK" || _emitted=$?
+_emit_context "$DATE_NOTE" "$DIGEST" "$CLARIFY" "$NARRATIVE_LINE" "$BLOCK" || _emitted=$?
 if [ "$_emitted" -eq 0 ]; then
     _commit_digest "$DIGEST_DIR"
     _commit_date_stamp "${CLAUDE_SESSION_META_DIR:-}"

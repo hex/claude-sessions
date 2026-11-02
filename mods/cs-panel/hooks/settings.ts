@@ -105,7 +105,7 @@ export type ModRow = {
 
 // The plugins whose /config rows the pane lists, by name: a cs-* plugin that
 // is not one of them is not cs's to show.
-const MOD_PROVIDERS: ReadonlySet<string> = new Set(['cs', 'cs-update', 'cs-mermaid'])
+const MOD_PROVIDERS: ReadonlySet<string> = new Set(['cs', 'cs-update', 'cs-mermaid', 'cs-filter-chat'])
 
 export function isModProvider(plugin: string): boolean {
   return MOD_PROVIDERS.has(plugin)

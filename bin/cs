@@ -64,6 +64,7 @@ RETIRED_HOOKS=(
     artifact-tracker.sh       # retired: PreToolUse:Write redirect was inert (updatedInput path rewrite is not honored by the harness); tracking removed entirely
     prose-lint.sh             # retired with the `cs -lint` verb it called; MUST stay listed, because a deployed copy calling the removed verb reads error()'s exit 1 as "violations found" and blocks every turn-end
     bash-logger.sh            # retired: PreToolUse:Bash command log cost every Bash call a hook process (~1.4 s), and nothing read the BASH: lines it wrote
+    narrative-reminder.sh     # retired: renamed stop-blocks.sh, since every answer it gives is a block and the narrative reminder lives in stop-notices.sh; settings.json entries under this name are stripped and registered under the name it has
 )
 
 # Hook scripts cs ships; deployed to ~/.claude/hooks/cs/ and registered in
@@ -71,7 +72,8 @@ RETIRED_HOOKS=(
 CS_HOOKS=(
     session-start.sh
     autosave-commits.sh
-    narrative-reminder.sh
+    stop-blocks.sh
+    stop-notices.sh
     session-end.sh
     subagent-context.sh
     tool-failure-logger.sh
@@ -145,6 +147,7 @@ RETIRED_SKILLS=(
     merge   # replaced by finish: integrate and report, never remove
     cs-hint # a mod (deployed under skills/ like every mod): the hint line under the prompt, retired
     cs-rotate # a mod: renamed to cs, cs's in-session mod (the rotate band, forced rotation, the wrap key)
+    cs-chat-only # a mod: renamed to cs-filter-chat, which ships; it was only ever deployed by hand
 )
 
 # install.sh and run_uninstall join each entry of the three retired lists
@@ -177,14 +180,11 @@ CS_SKILL_FILES=(
 )
 
 # Mod directories under mods/ the installer keeps out: experimental, their
-# source and tests in the checkout only. cs-feed is one, so the cs band, which
-# draws its feed key only beside cs-feed's /feed, draws none. Every file under
-# mods/ outside these and their test/ is in CS_MOD_FILES below
-# (tests/test_install.sh holds the two lists to that), and cs -doctor's drift
-# scan skips them.
+# source and tests in the checkout only. Every file under mods/ outside these and their test/ is in
+# CS_MOD_FILES below (tests/test_install.sh holds the two lists to that), and
+# cs -doctor's drift scan skips them.
 # shellcheck disable=SC2034  # read by cs -doctor and tests/test_install.sh
 CS_MODS_KEPT_OUT=(
-    cs-feed
 )
 
 # Mods cs ships: Claude Code function-hooks plugins, deployed file by file as
@@ -209,6 +209,14 @@ CS_MOD_FILES=(
     cs-panel/hooks/register.tsx
     cs-panel/hooks/settings.ts
     cs-panel/hooks/draw.tsx
+    cs-filter-chat/.claude-plugin/plugin.json
+    cs-filter-chat/hooks/hooks.json
+    cs-filter-chat/hooks/register.tsx
+    cs-filter-chat/hooks/session.ts
+    cs-filter-chat/hooks/settings.ts
+    cs-filter-chat/hooks/verdict.ts
+    cs-filter-chat/hooks/words.ts
+    cs-filter-chat/hooks/draw.tsx
 )
 
 # The cs tips file as install.sh names it in settings.json's
@@ -300,8 +308,7 @@ _strip_hook_registration() {
 # "command:<name>" actions, which submit /<name>. Ctrl+X 1 and Ctrl+X 2 bind
 # the engine actions the cs mod's band Buttons answer to: they press the
 # band's rotate (or /clear) and wrap keys. KEEP IN SYNC with ROTATE_ACTION and
-# WRAP_ACTION in mods/cs/hooks/register.tsx; its FEED_ACTION has no key while
-# cs-feed is kept out (CS_MODS_KEPT_OUT above). install.sh
+# WRAP_ACTION in mods/cs/hooks/register.tsx. install.sh
 # asks once per machine and binds each in the context block Claude Code wants
 # it in (home, below): the command keys in Chat, the chords in Global, where
 # the mod reads them. cs -uninstall takes back only the keys that still hold
@@ -1865,13 +1872,15 @@ _cs_tmux_title_lock_path() {  # pane
 #   another file once it holds the lock, lets it go and takes the lock on the
 #   file the path names, trying three times in all.
 # - A directory that is missing, or cannot take a new file, refuses at once.
-# - A live holder is waited for, but for no more than five seconds: past that
-#   the caller goes ahead without the lock or gives up, as it chooses, since a
-#   launch or a hook must never stall on a lock a stray process holds.
+# - A live holder is waited for, but for no more than the seconds the second
+#   argument names, five when it is absent (zero tries once and waits for no
+#   one): past that the caller goes ahead without the lock or gives up, as it
+#   chooses, since a launch or a hook must never stall on a lock a stray
+#   process holds.
 # - Without perl nothing is locked, and a line on stderr says so.
 # Returns 0 holding the lock, 1 holding nothing.
-_cs_lock() {  # lock file
-    local lock="$1" rc
+_cs_lock() {  # lock file, [seconds to wait for a live holder]
+    local lock="$1" wait="${2:-5}" rc
     if [ -n "${_CS_LOCK_HELD:-}" ]; then
         echo "cs: cannot lock $lock: this process already holds $_CS_LOCK_HELD" >&2
         return 1
@@ -1887,7 +1896,7 @@ _cs_lock() {  # lock file
         fi
         { exec 9<>"$lock"; } 2>/dev/null || return 1
         rc=0
-        perl -e "$_CS_LOCK_PERL" "$lock" || rc=$?
+        perl -e "$_CS_LOCK_PERL" "$wait" "$lock" || rc=$?
         case "$rc" in
             0)
                 _CS_LOCK_HELD="$lock"
@@ -1910,10 +1919,11 @@ _cs_lock() {  # lock file
 }
 
 # _cs_lock's perl, run on the lock file with bash's fd 9 open on it. Exits 0
-# holding the lock; 1 after five seconds of a live holder; 2 when the path is
+# holding the lock; 1 after the seconds $ARGV[0] names of a live holder; 2 when the path
+# ($ARGV[1], last so a test can tell this perl by its argument) is
 # not the regular file fd 9 has open (a link, or another type); 3 when the
 # path names another regular file than fd 9 has, or nothing at all, so the
-# caller opens the path again. The five seconds are read from the clock, not
+# caller opens the path again. The seconds are read from the clock, not
 # counted in polls: a starved CPU wakes each 50 ms poll late, and a hundred
 # late polls would wait twice as long as promised. The clock is the
 # monotonic one, so a wall-clock step during the wait (NTP, a manual date
@@ -1926,14 +1936,14 @@ open(my $fd, "+<&=", 9) or exit 1;
 my @held = stat($fd);
 exit 2 unless @held && -f _;
 sub path_names_held {
-    my @path = lstat($ARGV[0]);
+    my @path = lstat($ARGV[1]);
     return @path && -f _ && $path[0] == $held[0] && $path[1] == $held[1];
 }
-my @path = lstat($ARGV[0]);
+my @path = lstat($ARGV[1]);
 exit 3 if !@path && $!{ENOENT};
 exit 2 unless @path && -f _;
 exit 3 unless path_names_held();
-my $deadline = now() + 5;
+my $deadline = now() + $ARGV[0];
 while (1) {
     if (flock($fd, LOCK_EX | LOCK_NB)) {
         exit 0 if path_names_held();
@@ -2061,6 +2071,29 @@ _cs_file_mode() {  # path
 # file removed, and returns the failing status. Callers that want a message
 # add it: hooks source this file, and `error` is cs's alone.
 # Usage: cs_write_atomic <dest> <command> [args...]
+# What dirname and basename print for a path, without starting either: every
+# write a hook makes asks both, more than once.
+_cs_path_dir() {  # path
+    local p="$1"
+    while [ "$p" != "${p%/}" ] && [ -n "${p%/}" ]; do p=${p%/}; done
+    case "$p" in
+        /*/*|[!/]*/*) ;;
+        /*) printf '/\n'; return ;;
+        *) printf '.\n'; return ;;
+    esac
+    p=${p%/*}
+    while [ "$p" != "${p%/}" ]; do p=${p%/}; done
+    printf '%s\n' "${p:-/}"
+}
+_cs_path_base() {  # path
+    local p="$1"
+    while [ "$p" != "${p%/}" ] && [ -n "${p%/}" ]; do p=${p%/}; done
+    case "$p" in
+        /|//*) printf '/\n'; return ;;
+    esac
+    printf '%s\n' "${p##*/}"
+}
+
 # Where a write to a path lands: its symlinks followed, 16 hops as
 # cs_write_atomic follows them, and its directory resolved physically, so a
 # linked parent counts too. Fails when that directory does not exist, and
@@ -2081,7 +2114,7 @@ _cs_write_target() {  # path
         link=${link%x}
         case "$link" in
             /*) dest="$link" ;;
-            *) dest="$(dirname -- "$dest")/$link" ;;
+            *) dest="$(_cs_path_dir "$dest")/$link" ;;
         esac
         case "$dest" in *"$nl"/*|*"$nl") return 3 ;; esac
         hops=$((hops + 1))
@@ -2100,9 +2133,9 @@ _cs_write_target() {  # path
     # collapse `link/..` to the link's own parent, not the target's. The x
     # keeps a directory's trailing newline; the name after it keeps it from
     # the caller's $(...).
-    dir=$(cd -P -- "$(dirname -- "$dest")" 2>/dev/null && pwd -P && printf x) || return 1
+    dir=$(cd -P -- "$(_cs_path_dir "$dest")" 2>/dev/null && pwd -P && printf x) || return 1
     dir=${dir%"$nl"x}
-    printf '%s/%s\n' "${dir%/}" "$(basename -- "$dest")"
+    printf '%s/%s\n' "${dir%/}" "$(_cs_path_base "$dest")"
 }
 
 # True when .cs at <root> is a submodule or nested repository, whose files
@@ -2329,21 +2362,41 @@ cs_mkdir_inside() {  # dir
     done
 }
 
+# The key the two Stop hooks (stop-blocks.sh, stop-notices.sh) agree
+# on for one Stop: the cksum of the Stop input, a dot, and the byte size of the
+# transcript the input names. The input alone repeats across turns (session_id,
+# transcript_path and last_assistant_message can all be the same on two Stops),
+# and the transcript holds the turn's assistant message before Stop fires and
+# takes what the hooks return only after they exit, so its size differs per
+# Stop and both hooks, reading at their start, read one size. A transcript the
+# input does not name, or that cannot be read, leaves the cksum alone as the
+# key, and two such Stops on one input share it. The caller hands in the path
+# from its one read of the input. Each hook carries a copy of
+# this function for a partial install without this library, and
+# tests/test_hooks.sh holds the three to one text.
+cs_stop_key() {  # stop input, the transcript path it names
+    local c t="$2" s=""
+    c=$(printf '%s' "$1" | cksum)
+    c=${c%% *}
+    if [ -n "$t" ] && [ -f "$t" ] && [ -r "$t" ]; then s=$(wc -c < "$t" 2>/dev/null) || s=""; s=${s//[[:space:]]/}; fi
+    case "$s" in ''|*[!0-9]*) printf '%s' "$c" ;; *) printf '%s.%s' "$c" "$s" ;; esac
+}
+
 cs_write_atomic() {  # dest, command [args...]
     local dest="$1"; shift
     (
         local dir tmp mode link hops=0
         ! _cs_refuses_write cs_write_atomic "$dest" || exit 1
         [ -z "${CS_WRITE_QUIET:-}" ] || exec 2>/dev/null
-        # readlink, dirname and basename below take dest without --: a
-        # relative dest starting with a dash fails at them or at mktemp and
-        # writes nothing, so that spelling is accepted, not re-fixed.
+        # readlink and mv below take dest without --: a relative dest
+        # starting with a dash fails at them and writes nothing, so that
+        # spelling is accepted, not re-fixed.
         while [ -L "$dest" ] && [ "$hops" -lt 16 ]; do
             link=$(readlink -n "$dest" && printf x) || exit 1
             link=${link%x}
             case "$link" in
                 /*) dest="$link" ;;
-                *) dest="$(dirname "$dest")/$link" ;;
+                *) dest="$(_cs_path_dir "$dest")/$link" ;;
             esac
             hops=$((hops + 1))
         done
@@ -2351,8 +2404,8 @@ cs_write_atomic() {  # dest, command [args...]
             echo "cs_write_atomic: $dest is a directory" >&2
             exit 1
         fi
-        dir=$(dirname "$dest")
-        tmp=$(mktemp "$dir/.cs-tmp.$(basename "$dest").XXXXXX") || exit 1
+        dir=$(_cs_path_dir "$dest")
+        tmp=$(mktemp "$dir/.cs-tmp.$(_cs_path_base "$dest").XXXXXX") || exit 1
         trap 'rm -f "$tmp"' EXIT
         "$@" > "$tmp" || exit $?
         if [ -f "$dest" ]; then
@@ -2607,6 +2660,7 @@ _CS_CONFIG_SPEC=(
     'CS_OBJECTIVE_CAPTURE_DISABLE|Prompts|Objective capture|flagoff|flag|-|off|now|applies at your next prompt|Records the first real prompt of a session as its objective in .cs/README.md.'
     'CS_DATE_REMINDER_DISABLE|Prompts|Date reminder|flagoff|flag|-|off|now|applies at your next prompt|Tells Claude the new date when a conversation runs past midnight.'
     'CS_CLARIFY_DISABLE|Prompts|Clarifying questions|flagoff|flag|-|off|now|applies at your next prompt|Asks Claude to question an unclear request instead of guessing; a leading ~ skips one prompt.'
+    'CS_NARRATIVE_PROMPT_DISABLE|Prompts|Narrative line|flagoff|flag|-|off|now|applies at your next prompt|Asks Claude, on each prompt, to note a finding in its narrative before it answers.'
     'CS_CTX_WARN_CTX|Rotation|Context warning %|text|num|-|40|now|applies when the next turn ends|Context use at which Claude tells you, once, that the conversation is filling up.'
     'CS_ROTATE_BUTTON_CTX|Rotation|Rotate button from %|text|num|-|the warn %|now|applies by your next prompt|Context use from which the band above the prompt shows the rotate key, Ctrl+X 1.'
     'CS_ROTATE_NUDGE_CTX|Rotation|Rotation nudge %|text|num|-|65|now|applies when the next turn ends|Context use at which Claude suggests, once, writing a handoff and going on after /clear.'
@@ -2622,6 +2676,7 @@ _CS_CONFIG_SPEC=(
     'CS_TERM_BG_RGB|Terminal|Background r;g;b|text|rgb|-|detected|now|applies at the next repaint|Your terminal background colour, which the status line shades its capsules from.'
     'CS_NO_ITERM2|Terminal|iTerm2 features|flagoff|flag|-|off|now+launch|the tab title, the bell bounce and the iTerm reads of the bar: now. The iTerm tmux path of the launch: the next launch.|Uses iTerm2 for the tab title, a dock bounce when a turn ends and the theme of your profile.'
     'CS_NERD_FONTS|Terminal|Nerd Font glyphs|flag|flag|-|off|now|applies at the next cs command|Shows Nerd Font icons in cs banners and session lists; needs a Nerd Font in the terminal.'
+    'CS_FILTER_CHAT|Terminal|Filter chat|flag|flag|-|off|now+launch|/filter-chat and the band key: now. A change here or in a shell: the next launch.|Shows only your prompts and the replies from Claude in this session; the band key or /filter-chat flips it.'
     'CS_NO_MAIL_WAKE|Mail|Wake on mail|flagoff|flag|-|off|now|applies when the next turn ends|Unread mail from another session takes a turn, so the exchange goes on without you typing.'
     'CS_MAIL_WAKE_MAX|Mail|Wakes in a row|text|num|-|5|now|applies when the next turn ends|How many turns mail may take in a row before it waits for a prompt from you.'
     'CS_NO_TASK_TOOLS|Launch|Task tools|flagoff|flag|-|off|launch|applies at the next launch|Gives Claude its task list tools on every model, for rotation, the queue and handoffs.'
@@ -13029,11 +13084,12 @@ _doctor_check_hook_authority() {
     _doctor_authority_row "clarify"       "scope-prompt"       'CS_CLARIFY_DISABLE=1'           "${CS_CLARIFY_DISABLE:-}" CS_CLARIFY_DISABLE
     _doctor_authority_row "date reminder" "scope-prompt"       'CS_DATE_REMINDER_DISABLE=1'     "${CS_DATE_REMINDER_DISABLE:-}" CS_DATE_REMINDER_DISABLE
     _doctor_authority_row "objective"     "scope-prompt"       'CS_OBJECTIVE_CAPTURE_DISABLE=1' "${CS_OBJECTIVE_CAPTURE_DISABLE:-}" CS_OBJECTIVE_CAPTURE_DISABLE
+    _doctor_authority_row "narrative line" "scope-prompt"      'CS_NARRATIVE_PROMPT_DISABLE=1'  "${CS_NARRATIVE_PROMPT_DISABLE:-}" CS_NARRATIVE_PROMPT_DISABLE
     _doctor_authority_row "rewrite"       "prompt-rewriter"    'CS_REWRITE_DISABLE=1'           "${CS_REWRITE_DISABLE:-}" CS_REWRITE_DISABLE
-    _doctor_authority_row "narrative"     "narrative-reminder" '.cs/local/disabled'             ""
-    _doctor_authority_row "council nudge" "narrative-reminder" '.cs/local/disabled or uninstall the plugin' ""
-    _doctor_authority_row "ctx warning"   "narrative-reminder" 'CS_CTX_WARN_CTX=101'            ""
-    _doctor_authority_row "rotate nudge"  "narrative-reminder" 'CS_ROTATE_NUDGE_CTX=101'        ""
+    _doctor_authority_row "narrative"     "stop-notices"       '.cs/local/disabled'             ""
+    _doctor_authority_row "council nudge" "stop-notices"       '.cs/local/disabled or uninstall the plugin' ""
+    _doctor_authority_row "ctx warning"   "stop-notices"       'CS_CTX_WARN_CTX=101'            ""
+    _doctor_authority_row "rotate nudge"  "stop-notices"       'CS_ROTATE_NUDGE_CTX=101'        ""
     _doctor_authority_row "subagent ctx"  "subagent-context"   '.cs/local/disabled'             ""
     _doctor_authority_row "session ctx"   "session-start"      '.cs/local/disabled'             ""
     # Local instructions remain in the prompt even when session hooks are disabled.
@@ -13185,7 +13241,7 @@ _doctor_check_session_id_match() {
     fi
 }
 
-# A mod (cs, cs-update; cs-mermaid and cs-panel write no heartbeat) is a Claude Code function-hooks plugin the
+# A mod (cs, cs-update; cs-mermaid, cs-panel and cs-filter-chat write no heartbeat) is a Claude Code function-hooks plugin the
 # installer deploys under ~/.claude/skills. Absent, it is not news. Present, the
 # row reads the heartbeat the mod writes when Claude Code loads it, never the
 # directory: the loader sits behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, which a

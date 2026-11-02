@@ -958,11 +958,12 @@ test_manifest_arrays_in_sync() {
     for arr in CS_HOOKS CS_HOOK_LIBS RETIRED_HOOKS CS_COMMANDS RETIRED_COMMANDS CS_SKILLS RETIRED_SKILLS CS_SKILL_FILES CS_MOD_FILES CS_MODS_KEPT_OUT; do
         a=$(extract_array "$SCRIPT_DIR/../install.sh" "$arr" | sort)
         b=$(extract_array "$CS_BIN" "$arr" | sort)
-        if [ -z "$a" ]; then
+        # A listed array may hold nothing (CS_MODS_KEPT_OUT), so its opening line says it is there.
+        if ! grep -q "^$arr=(" "$SCRIPT_DIR/../install.sh"; then
             echo "  FAIL: $arr not found in install.sh"
             return 1
         fi
-        if [ -z "$b" ]; then
+        if ! grep -q "^$arr=(" "$CS_BIN"; then
             echo "  FAIL: $arr not found in bin/cs"
             return 1
         fi
@@ -1096,6 +1097,8 @@ test_install_deploys_the_rotate_mod_and_uninstall_removes_it() {
     printf 'y\n' | HOME="$fake_home" "$CS_BIN" -uninstall > /dev/null 2>&1 || { echo "  FAIL: cs -uninstall exited non-zero"; return 1; }
     [ ! -d "$fake_home/.claude/skills/cs" ] \
         || { echo "  FAIL: uninstall left ~/.claude/skills/cs behind"; return 1; }
+    [ ! -d "$fake_home/.claude/skills/cs-filter-chat" ] \
+        || { echo "  FAIL: uninstall left ~/.claude/skills/cs-filter-chat behind"; return 1; }
 }
 
 # The Spinner tips lines in install's output, each without its leading marker.
@@ -1679,6 +1682,34 @@ EOF
         "$(jq -c '.hooks.PreToolUse' "$s")" "the user's own hook is all PreToolUse holds" || return 1
 }
 
+# The sync Stop hook shipped as narrative-reminder.sh before it took the name
+# stop-blocks.sh. An install over the old name removes the deployed copy and all
+# three of its registrations, registers the hook under its name on each event,
+# once, ahead of stop-notices.sh on Stop, and keeps a user's own Stop hook.
+test_install_moves_the_narrative_reminder_registrations_to_stop_blocks() {
+    local home="$TEST_TMPDIR/home-stopblocks" s rc=0 out d
+    d="$home/.claude/hooks/cs"
+    mkdir -p "$d"
+    _cs_shipped_content > "$d/narrative-reminder.sh"
+    s="$home/.claude/settings.json"
+    cat > "$s" << 'EOF'
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"~/bin/my-own-stop.sh","timeout":5}]},{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/narrative-reminder.sh","timeout":10}]},{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/stop-notices.sh","timeout":10,"async":true}]}],"FileChanged":[{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/narrative-reminder.sh","timeout":10,"asyncRewake":true,"rewakeMessage":"cs woke this session:","rewakeSummary":"cs"}]}],"CwdChanged":[{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/narrative-reminder.sh","timeout":5}]}]}}
+EOF
+    out=$(HOME="$home" bash "$INSTALL_SH" 2>&1 < /dev/null) || rc=$?
+    assert_eq "0" "$rc" "install exit status" || { echo "$out"; return 1; }
+    assert_file_not_exists "$d/narrative-reminder.sh" "the deployed copy under the old name is removed" || return 1
+    assert_file_exists "$d/stop-blocks.sh" "the hook is deployed under its name" || return 1
+    assert_eq '["~/bin/my-own-stop.sh","~/.claude/hooks/cs/stop-blocks.sh","~/.claude/hooks/cs/stop-notices.sh"]' \
+        "$(jq -c '[.hooks.Stop[].hooks[].command]' "$s")" \
+        "Stop holds the user's hook, then stop-blocks.sh once, then stop-notices.sh" || return 1
+    assert_eq '["~/.claude/hooks/cs/stop-blocks.sh"]' "$(jq -c '[.hooks.FileChanged[].hooks[].command]' "$s")" \
+        "FileChanged holds stop-blocks.sh once" || return 1
+    assert_eq 'true' "$(jq -c '.hooks.FileChanged[0].hooks[0].asyncRewake' "$s")" \
+        "FileChanged keeps its rewake" || return 1
+    assert_eq '["~/.claude/hooks/cs/stop-blocks.sh"]' "$(jq -c '[.hooks.CwdChanged[].hooks[].command]' "$s")" \
+        "CwdChanged holds stop-blocks.sh once" || return 1
+}
+
 # A retired hook under ~/.claude/hooks/cs/ that cs did not write is kept, and
 # so is its registration, the same rule as for a kept flat hook: install and
 # uninstall leave both, and still strip a cs-written copy's file and entry.
@@ -2060,6 +2091,24 @@ test_install_removes_the_mod_under_its_old_name() {
         || { echo "  FAIL: the mod was not deployed under ~/.claude/skills/cs"; return 1; }
 }
 
+# cs-filter-chat was cs-chat-only, deployed by hand before it shipped; a copy
+# left under that name keeps drawing the chat beside the mod that replaced it.
+test_install_removes_the_hand_deployed_cs_chat_only() {
+    local fake_home="$TEST_TMPDIR/home-chat-only"
+    mkdir -p "$fake_home/.claude/skills/cs-chat-only/hooks"
+    echo '{"modules":["./register.tsx"]}' > "$fake_home/.claude/skills/cs-chat-only/hooks/hooks.json"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || {
+        echo "  FAIL: install.sh exited non-zero"
+        return 1
+    }
+    if [ -d "$fake_home/.claude/skills/cs-chat-only" ]; then
+        echo "  FAIL: the old cs-chat-only directory survived the install"
+        return 1
+    fi
+    cmp -s "$SCRIPT_DIR/../mods/cs-filter-chat/hooks/register.tsx" "$fake_home/.claude/skills/cs-filter-chat/hooks/register.tsx" \
+        || { echo "  FAIL: the mod was not deployed under ~/.claude/skills/cs-filter-chat"; return 1; }
+}
+
 test_install_writes_version_stamp() {
     local fake_home="$TEST_TMPDIR/home"
     mkdir -p "$fake_home"
@@ -2146,18 +2195,23 @@ test_install_and_uninstall_keep_a_flat_shape_hook_entry() {
 # cs's registration under each event the shape tests below use, as install
 # writes it (jq -c), and the hooks-list shapes that are the user's to keep:
 # no .hooks at all, then false, null, a number, a string, an object, and a
-# list of hooks that are not cs's.
+# list of hooks that are not cs's. Stop holds two entries, in registration
+# order: stop-blocks.sh, whose blocks continue the turn, then the async
+# stop-notices.sh.
 SESSION_START_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/session-start.sh","timeout":30}]}'
-STOP_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/narrative-reminder.sh","timeout":10}]}'
+STOP_BLOCKS_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/stop-blocks.sh","timeout":10}]}'
+STOP_NOTICES_REGISTRATION='{"hooks":[{"type":"command","command":"~/.claude/hooks/cs/stop-notices.sh","timeout":10,"async":true}]}'
+STOP_REGISTRATION="$STOP_BLOCKS_REGISTRATION,$STOP_NOTICES_REGISTRATION"
 USER_HOOK_SHAPES='[{"type":"command","command":"notify"},{"matcher":"a","hooks":false},{"matcher":"b","hooks":null},{"hooks":7},{"hooks":"notify"},{"hooks":{"custom":{"type":"command","command":"notify"}}},{"matcher":"c","hooks":[{"type":"command","command":"notify","timeout":5},{"type":"command","command":"log-it"}]}]'
 
 # Runs install and then uninstall over a HOME whose settings.json holds the
 # entries $3 (a JSON list, written as jq -c prints it) as the whole of event
 # $2. They must come through both exactly as written and in order: after
-# install the event holds them followed by $4, cs's registration there ("" for
-# an event cs registers nothing under, which then holds them alone); after
-# uninstall settings.json is the file it was, byte for byte. $1 names the HOME.
-_install_and_uninstall_keep_hook_entries() {  # label, event, entries, cs's entry
+# install the event holds them followed by $4, cs's registrations there, comma
+# separated ("" for an event cs registers nothing under, which then holds them
+# alone); after uninstall settings.json is the file it was, byte for byte. $1
+# names the HOME.
+_install_and_uninstall_keep_hook_entries() {  # label, event, entries, cs's entries
     local home="$TEST_TMPDIR/$1-home" s rc=0 expected="$3"
     s="$home/.claude/settings.json"
     mkdir -p "$home/.claude"
@@ -2302,7 +2356,7 @@ test_uninstall_leaves_an_event_that_is_not_a_list() {
     mv "$s.new" "$s"
     printf 'y\n' | HOME="$home" "$CS_BIN" -uninstall > "$TEST_TMPDIR/event-object.un" 2>&1 || rc=$?
     assert_eq "0" "$rc" "uninstall exit status" || { cat "$TEST_TMPDIR/event-object.un"; return 1; }
-    assert_eq "{\"hooks\":{\"Stop\":{\"custom\":$STOP_REGISTRATION}}}" "$(jq -c . "$s")" \
+    assert_eq "{\"hooks\":{\"Stop\":{\"custom\":$STOP_BLOCKS_REGISTRATION}}}" "$(jq -c . "$s")" \
         "uninstall leaves the object event and strips the rest" || { cat "$TEST_TMPDIR/event-object.un"; return 1; }
 }
 
@@ -3720,7 +3774,7 @@ test_filechanged_registration_carries_async_rewake() {
     local inst="$SCRIPT_DIR/../install.sh" reg
     reg=$(grep -E '^ +_merge_cs_hook FileChanged ' "$inst") \
         || { echo "  FAIL: FileChanged is not registered"; return 1; }
-    assert_output_contains "$reg" "narrative-reminder.sh" \
+    assert_output_contains "$reg" "stop-blocks.sh" \
         "FileChanged routes to the hook that owns the mail wake" || return 1
     # 6th positional is the rewake flag; a matcher here would break the event
     # (its matcher is tested against the changed file's basename).
@@ -4300,6 +4354,7 @@ run_test test_statusline_disable_sets_and_enable_clears_declined_marker
 run_test test_uninstall_removes_declined_marker
 run_test test_install_removes_the_retired_hint_mod
 run_test test_install_retires_the_bash_logger
+run_test test_install_moves_the_narrative_reminder_registrations_to_stop_blocks
 run_test test_install_and_uninstall_keep_a_kept_retired_hook_and_its_registration
 run_test test_uninstall_removes_a_cs_written_retired_hook_and_its_registration
 run_test test_install_that_stops_early_keeps_a_registered_retired_hook
@@ -4309,6 +4364,7 @@ run_test test_a_retired_hook_known_by_its_record_survives_a_run_without_jq
 run_test test_a_retired_hook_replaced_during_a_question_is_kept
 run_test test_a_retired_hook_replaced_by_a_link_to_a_device_is_kept_unread
 run_test test_install_removes_the_mod_under_its_old_name
+run_test test_install_removes_the_hand_deployed_cs_chat_only
 run_test test_install_and_uninstall_remove_retired_commands_cs_wrote
 run_test test_install_deploys_wrap_and_the_passes_it_reads_but_no_pass_command
 run_test test_install_and_uninstall_refuse_a_retired_command_with_a_path

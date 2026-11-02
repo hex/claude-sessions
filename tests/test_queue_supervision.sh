@@ -59,7 +59,7 @@ test_failure_counter_still_logs_to_session_log() {
 _stop_turn() {  # [hook input JSON]
     local input='{}'
     [ "$#" -eq 0 ] || input="$1"
-    printf '%s\n' "$input" | bash "$HOOKS_DIR/narrative-reminder.sh"
+    printf '%s\n' "$input" | bash "$HOOKS_DIR/stop-blocks.sh"
 }
 
 # A Stop whose final assistant message is the given text, as Claude Code
@@ -290,14 +290,14 @@ test_threshold_env_overrides() {
     _stop_turn >/dev/null || return 1
     printf '2\n' > "$CLAUDE_SESSION_META_DIR/local/failures"
     local out
-    out=$(echo '{}' | CS_QUEUE_MAX_FAILURES=2 bash "$HOOKS_DIR/narrative-reminder.sh") || return 1
+    out=$(echo '{}' | CS_QUEUE_MAX_FAILURES=2 bash "$HOOKS_DIR/stop-blocks.sh") || return 1
     assert_output_contains "$out" "circuit breaker" "override lowers the threshold" || return 1
 
     _qs_session "ov2"
     _arm_queue "a" "b"
     _stop_turn >/dev/null || return 1
     printf '5\n' > "$CLAUDE_SESSION_META_DIR/local/failures"
-    out=$(echo '{}' | CS_QUEUE_MAX_FAILURES=banana bash "$HOOKS_DIR/narrative-reminder.sh") || return 1
+    out=$(echo '{}' | CS_QUEUE_MAX_FAILURES=banana bash "$HOOKS_DIR/stop-blocks.sh") || return 1
     assert_output_contains "$out" "circuit breaker" "garbage override falls back to default 5" || return 1
 }
 
@@ -541,7 +541,7 @@ test_partial_limits_skips_silently_without_stderr() {
     _stop_turn >/dev/null 2>&1 || return 1
     printf 'stamped_at: %s\n' "$(date +%s)" > "$CLAUDE_SESSION_META_DIR/local/limits"
     local out err_file="$CLAUDE_SESSION_META_DIR/local/stderr.capture"
-    out=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>"$err_file") || return 1
+    out=$(echo '{}' | bash "$HOOKS_DIR/stop-blocks.sh" 2>"$err_file") || return 1
     assert_output_contains "$out" "next task" "partial limits drains on" || return 1
     [ ! -s "$err_file" ] || { echo "  FAIL: hook leaked stderr: $(cat "$err_file")"; return 1; }
 }
@@ -552,7 +552,7 @@ test_ctx_threshold_env_override() {
     _stop_turn >/dev/null || return 1
     printf '50\n' > "$CLAUDE_SESSION_META_DIR/local/context-pct"
     local out
-    out=$(echo '{}' | CS_QUEUE_MAX_CTX=40 bash "$HOOKS_DIR/narrative-reminder.sh") || return 1
+    out=$(echo '{}' | CS_QUEUE_MAX_CTX=40 bash "$HOOKS_DIR/stop-blocks.sh") || return 1
     assert_output_contains "$out" "circuit breaker" "CTX override lowers the threshold" || return 1
     assert_output_contains "$out" "context" "trip names context" || return 1
 }
@@ -563,7 +563,7 @@ test_5h_threshold_env_override() {
     _stop_turn >/dev/null || return 1
     printf 'five_hour_used_pct: 40\nstamped_at: %s\n' "$(date +%s)" > "$CLAUDE_SESSION_META_DIR/local/limits"
     local out
-    out=$(echo '{}' | CS_QUEUE_MAX_5H=30 bash "$HOOKS_DIR/narrative-reminder.sh") || return 1
+    out=$(echo '{}' | CS_QUEUE_MAX_5H=30 bash "$HOOKS_DIR/stop-blocks.sh") || return 1
     assert_output_contains "$out" "circuit breaker" "5H override lowers the threshold" || return 1
     assert_output_contains "$out" "five" "trip names five_hour" || return 1
 }

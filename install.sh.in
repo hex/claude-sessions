@@ -860,17 +860,24 @@ else
     # answering nothing loses the maildir watch for the rest of the session.
     # Registering FileChanged is itself what opens that path, so the mailbox has
     # to answer the event its own registration enables.
+    #
+    # Stop carries two entries. stop-blocks.sh's blocks must continue the
+    # turn (the queue drain, the staged retire, the mail wake). stop-notices.sh
+    # is async: a synchronous Stop hook that hands the model text always draws
+    # Claude Code's stop-hook row in the chat, while an async one draws none and
+    # its additionalContext reaches the model with the next prompt.
     _register_cs_hooks() {
         _merge_cs_hook SessionStart       session-start.sh       30
         _merge_cs_hook PostToolUse        autosave-commits.sh    10 "Write|Edit" true
-        _merge_cs_hook Stop               narrative-reminder.sh  10
+        _merge_cs_hook Stop               stop-blocks.sh         10
+        _merge_cs_hook Stop               stop-notices.sh        10 "" true
         _merge_cs_hook SessionEnd         session-end.sh         30
         _merge_cs_hook SubagentStart      subagent-context.sh    10
         _merge_cs_hook PostToolUseFailure tool-failure-logger.sh 10 "" true
         _merge_cs_hook PermissionRequest  session-auto-approve.sh 5 "Write|Edit"
         _merge_cs_hook UserPromptSubmit   scope-prompt.sh        10
-        _merge_cs_hook FileChanged        narrative-reminder.sh  10 "" "" true
-        _merge_cs_hook CwdChanged         narrative-reminder.sh   5
+        _merge_cs_hook FileChanged        stop-blocks.sh         10 "" "" true
+        _merge_cs_hook CwdChanged         stop-blocks.sh          5
     }
 
     # Register cs-statusline as the Claude Code status line. A status line the

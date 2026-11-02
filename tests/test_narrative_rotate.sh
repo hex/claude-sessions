@@ -940,7 +940,7 @@ test_narrative_budget_is_one_value_in_both_copies() {
     local shared="$SCRIPT_DIR/../hooks/cs-shared.sh" hook
     assert_eq "$lib_max" "$(grep -o 'CS_NARRATIVE_MAX_DEFAULT=[0-9]*' "$shared" | head -1 | cut -d= -f2)" \
         "the hooks' library carries the same budget" || return 1
-    for hook in narrative-reminder.sh session-start.sh; do
+    for hook in stop-notices.sh session-start.sh; do
         assert_file_contains "$SCRIPT_DIR/../hooks/$hook" '_narrative_budget "${CS_NARRATIVE_MAX_BYTES:-}" "$CS_NARRATIVE_MAX_DEFAULT"' \
             "$hook takes the budget from the shared library" || return 1
         if grep -q -e 'NARRATIVE_MAX=[0-9]' -e 'MAX_BYTES:-}" [0-9]' "$SCRIPT_DIR/../hooks/$hook"; then

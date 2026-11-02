@@ -591,7 +591,7 @@ fi
 [ -z "$LOCAL_DIR" ] || rm -f "$LOCAL_DIR/attention" 2>/dev/null || true
 
 # iTerm2: also cancel any dock bounce the previous conversation left running.
-# Mirrors the guard in narrative-reminder.sh (hooks are standalone).
+# Mirrors the guard in stop-blocks.sh (hooks are standalone).
 if [ -z "${CS_NO_ITERM2:-}" ] && [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
     _it2="${CS_IT2_DIR:-$HOME/.iterm2}/it2attention"
     { [ -x "$_it2" ] && "$_it2" stop > "${CS_IT2_TTY:-/dev/tty}"; } 2>/dev/null || true
@@ -943,7 +943,7 @@ if [ -n "$ROTATION_HANDOFF" ] && [ "$SOURCE" = "clear" ] && [ "$IS_LEAD" = 1 ] \
         rm -f "$_kick_dir/delivered" "$_kick_dir"/*.kick 2>/dev/null || true
         # A non-integer override must not reach sleep: under errexit a failed
         # sleep would kill the child before the write, arming a watch nothing
-        # ever fires. Same validation shape as narrative-reminder's _num_or,
+        # ever fires. Same validation shape as stop-blocks.sh's _num_or,
         # inlined because this hook sources no shared library.
         _kick_delay="${CS_ROTATION_KICK_DELAY:-2}"
         case "$_kick_delay" in ''|*[!0-9]*) _kick_delay=2 ;; esac
