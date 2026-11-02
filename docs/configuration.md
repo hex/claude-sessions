@@ -263,6 +263,13 @@ export CS_SUBAGENT_STATUSLINE_DISABLE="1"
 export CS_CTX_WARN_CTX="40"
 export CS_ROTATE_NUDGE_CTX="65"
 
+# Seconds, counted from its start, that the async Stop hook (stop-notices.sh)
+# waits for the other Stop hook's verdict once that verdict reads pending; a
+# verdict still pending then counts as approve and the notice goes out. Capped
+# at the hook's 8 s budget; a non-numeric value falls back to the default
+# (see hooks.md).
+export CS_STOP_VERDICT_WAIT="7"   # this is the default
+
 # Context percentage at which the cs mod's band draws its rotate key (Ctrl+X 1)
 # above the prompt (default: the status line's warn band, 40).
 # The mod reads it from the launched process's environment.
@@ -390,8 +397,9 @@ means none, and the last field is never `-`.
 1. The key.
 2. Its group.
 3. Its label.
-4. How the settings pane changes it: `flag` toggles, `choice` offers the
-   choices, `text` takes typed text, and `shell` takes no change, since you
+4. How the settings pane changes it: `flag` is on or off, flipped at once
+   while no file holds it and offered as on, off, `Default` and `Keep` while
+   one does, `choice` offers the choices, `text` takes typed text, and `shell` takes no change, since you
    change it from a shell. `flagoff` and `shelloff` act as `flag` and `shell`
    for a key that turns something off. Its label names the feature the key
    turns off, so the pane shows the feature on while the key is off.
@@ -599,8 +607,9 @@ one toast; the rest of the mod runs.
 
 ### Spinner tip
 
-Claude Code's spinner tips say how to turn on the prompt bars. The installer
-names cs's tips file, `~/.claude/skills/cs/tips.json`, in `settings.json`:
+cs's tips file adds a few tips to Claude Code's spinner, such as how to turn
+on the prompt bars. The installer names it, `~/.claude/skills/cs/tips.json`,
+in `settings.json`:
 
 ```json
 {"spinnerTipsOverride": {"tipsFile": "~/.claude/skills/cs/tips.json"}}
@@ -608,7 +617,7 @@ names cs's tips file, `~/.claude/skills/cs/tips.json`, in `settings.json`:
 
 - The installer writes `tipsFile` only when `settings.json` names no tips
   file. Claude Code reads one tips file, so a file you named stays, and the
-  installer says that Claude Code does not show cs's tip.
+  installer says that Claude Code does not show cs's tips.
 - The installer never changes `tips`, `label`, `excludeDefault`, or
   `spinnerTipsEnabled`. With `spinnerTipsEnabled` set to `false`, Claude Code
   shows no tips, cs's included.
@@ -618,11 +627,11 @@ names cs's tips file, `~/.claude/skills/cs/tips.json`, in `settings.json`:
 - `cs -uninstall` removes `tipsFile` when it names cs's file and the file is
   gone. If you changed the file, uninstall keeps the file and the setting.
 
-To turn cs's tip off, delete the `tipsFile` line or set it to `""`. The
+To turn cs's tips off, delete the `tipsFile` line or set it to `""`. The
 installer records each choice in `~/.config/cs/tips-file` (under
 `$XDG_CONFIG_HOME` when you set it): `named` after it names cs's file, and
 `declined` after you take the file out. `cs -update` then leaves the setting
-alone. To get cs's tip back, delete `~/.config/cs/tips-file` and run
+alone. To get cs's tips back, delete `~/.config/cs/tips-file` and run
 `cs -update`. The installer reads a record that holds any other value as
 `declined` and warns. `cs -uninstall` deletes the record.
 
@@ -671,6 +680,6 @@ process and its hooks can find the session:
 - `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence; a feature worktree gets its own list under its `base@task` name, not the base's
 - `CLAUDE_CODE_AUTO_MEMORY_PATH` / `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` - Redirect [Claude Code auto memory](https://code.claude.com/docs/en/memory) into `<session>/.cs/memory/`. Claude Code owns the memory-file format and cs owns the storage path. See [memory records](session-layout.md#shared-files).
 - `CS_BIN` - Exported by every cs launch, never set by hand: the absolute path of the running cs, replacing any value inherited from a parent launch. The mods run cs through it (`cs -update`, `/queue`), since the claude process's `PATH` is not the launching shell's
-- `CS_UPDATE_AVAILABLE` - Exported by a cs launch, never set by hand: the version a newer cs was found at. The cs-update mod reads it to draw the release-notes pane, and the settings pane (cs-panel) to say on its band which cs is available. Absent when nothing is pending
+- `CS_UPDATE_AVAILABLE` - Exported by a cs launch, never set by hand: the version a newer cs was found at. The cs-update mod reads it to draw the release-notes pane, and the settings pane (cs-panel) to name it on a second line of its masthead, `cs <version> available · run cs -update`. Absent when nothing is pending
 - `CS_UPDATE_DECLINED` - Exported by a cs launch, never set by hand: the pending version, when you declined it at a launch's offer to update. The cs-update mod then says in one line that the release is there instead of opening its pane. Absent otherwise
 - `CS_LIVE_LOCK_PID` - Set only for `.cs/local/pre-open`, never by hand: the pid in `.cs/session.lock` when that pid is a running process, empty otherwise. A pre-open reads it to tell whether the session is running instead of reading the lock (see [session-layout.md](session-layout.md))

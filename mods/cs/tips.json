@@ -7,6 +7,14 @@
     {
       "id": "cs.settings-pane",
       "text": "every cs setting is in one pane: run /cs, type to search, and press Enter on a row to change it"
+    },
+    {
+      "id": "cs.settings-file",
+      "text": "cs settings need no export in your shell: cs -config set <KEY> <value> keeps one for this machine, cs <name> -config set for one session, and cs -config list shows every setting and where its value comes from"
+    },
+    {
+      "id": "cs.filter-chat",
+      "text": "to see only your prompts and Claude's answers in this session, run /filter-chat; run it again to show the work between them"
     }
   ]
 }

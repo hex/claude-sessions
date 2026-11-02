@@ -519,9 +519,10 @@ inside Claude Code's own process rather than a shell script it spawns. It adds
 one key to conversation rotation. Once the context window reaches 40% (the
 status bar's warn band, where the Stop hook gives its headroom notice), the band
 directly above the prompt draws `rotate`, pressed by Ctrl+X 1.
-`CS_ROTATE_BUTTON_CTX=<percent>` in the shell that launches cs moves it; unset
-or not a number, the band follows the bar's own warn band
-(`CS_STATUSLINE_CTX_WARN`, 40 by default). The band is one thin line above
+`CS_ROTATE_BUTTON_CTX=<percent>`, kept with `cs -config set` or exported in the
+shell that launches cs, moves it; unset or not a number, the band follows the
+bar's own warn band (`CS_STATUSLINE_CTX_WARN`, 40 by default), read the same
+way. The band is one thin line above
 the prompt, two columns in where Claude Code draws its own footer, with a
 blank line above it, in two zones. At the left stand the
 actions, what a key or a press does now, and the queue's count; at the line's right edge stand the
@@ -559,9 +560,9 @@ screen, from the engine's own on-screen reports of the transcript's rows)
 and follows the scroll (see
 [configuration.md](configuration.md#band-settings)). A press on a bar scrolls the transcript so that
 prompt's row is at the top. The band's focus ring never lands on a bar:
-the keyboard route is `/cs next`, `/cs prev`, `/cs first`, `/cs last` and
-`/cs N`, which move the same way from the prompt being read, mid-turn too,
-for keybindings. A
+the keyboard route is `/cs next` and `/cs prev`, which move one prompt from
+the prompt being read, and `/cs first`, `/cs last` and `/cs N`, which go to
+that prompt, all mid-turn too, for keybindings. A
 refusal is toasted once a session; a prompt no row has drawn since a resume
 toasts `cs: that prompt is not on screen yet` once. The prompts come from the
 session's transcript (`~/.claude/projects/<slug>/<id>.jsonl`, or
@@ -657,9 +658,10 @@ an engine action, `strip:jump1` for the rotate (or `/clear`) key and
 `strip:jump2` for the wrap key.
 The installer binds Ctrl+X 1 and Ctrl+X 2
 to them in `keybindings.json` (see
-[configuration.md](configuration.md#rotate-and-wrap-keys)). The band spells,
-bold in the session's colour, whatever chord that file binds to each action,
-as written there, and nothing where none does; the Buttons still answer a click
+[configuration.md](configuration.md#rotate-and-wrap-keys)). The band spells
+whatever chord that file's `Global` block binds to each action, as written
+there, a shared prefix bold in `subtle` gray and each key's own part bold in
+the session's colour, and nothing where none does; the Buttons still answer a click
 and Ctrl+X Tab. Claude Code re-reads `keybindings.json` while it runs, so a
 chord bound after launch works at once (measured on 2.1.292). An encrypted
 session launched before `keybindings.json` existed gets the file at its next
@@ -700,9 +702,10 @@ Duplicate presses wait for the same write and redraw.
 
 The Button's stable element key is `cs-filter-chat`; it carries no action.
 cs-filter-chat must hook `ui.press` with `{ plugin: 'cs', element: 'cs-filter-chat' }`, await
-`next(e)`, then read the file the band's handler wrote. The band sends no
-command. When cs-filter-chat writes the file directly, the band reads the new value
-on its next redraw. Spike 3 measured immediate cross-plugin press hooks with
+`next(e)`, then read the setting the band's handler wrote with `cs <session> -config set
+CS_FILTER_CHAT`. The band sends no command. When `/filter-chat` changes the
+setting through the same `cs -config set`, the band reads the new value on its
+next redraw. Spike 3 measured immediate cross-plugin press hooks with
 no transcript rows, while command delivery queued until idle and host state
 reset on `/clear` and resume.
 
@@ -733,12 +736,16 @@ feedback starts one, leaves it in place. A summary written any other way
 hides nothing, and a wrap that fails a pass
 skips the marker. Below the band the mod draws nothing, and it draws none of
 these keys while a turn runs or while a survey holds the band. While a turn
-runs, the `/finish` gate word, the features word (with no press) and the
-queue and mail counts still draw; under a survey only the gate word
-does. It never submits a prompt of its own.
+runs, the filter chat key, the `/finish` gate word, the features word (with
+no press), the queue and mail counts and the rail still draw; under a survey
+only the gate word does. Its rotate, wrap and `/clear` keys run slash
+commands and the filter chat key runs `cs -config set`, and none submits a
+prompt; a queue start, from `/queue` or the band's press, submits one, and
+only while no turn runs.
 
 The same button has a second state. Once the `rotate` skill has armed a
-handoff (`.cs/local/pending-handoff` names one), the band draws
+handoff (`.cs/local/pending-handoff` names one, or `.cs/private/pending-handoff`
+in an encrypted session), the band draws
 `/clear now` whatever the context reads, alone
 (the wrap key hides: with a handoff armed the conversation has nothing left to
 do but the `/clear`), and
@@ -746,13 +753,13 @@ Ctrl+X 1 runs `/clear` itself: the conversation ends, and cs's SessionStart
 hook starts the handoff's next step in the new one, as it does after a typed
 `/clear`. The mod does not touch the marker; the hook consumes it. The button
 appears only for a marker the hook accepts: a bare basename, a file in
-`.cs/handoffs/`, frontmatter still `status: unconsumed`. An empty marker, or one
+that marker's store (`.cs/handoffs/` or `.cs/private/handoffs/`), frontmatter still `status: unconsumed`. An empty marker, or one
 an aborted rotation left naming a handoff since consumed or gone, leaves the
 rotate button in place.
 
 The mod presses the button for you by default. The forcing is **on at 80%**;
-`CS_ROTATE_FORCE_CTX=<percent>` (1 to 100) in the shell that launches cs moves
-it, `CS_ROTATE_FORCE_CTX=off` (or `0`) turns it off, and a value that is neither —
+`CS_ROTATE_FORCE_CTX=<percent>` (1 to 100), kept with `cs -config set` or
+exported in the shell that launches cs, moves it, `CS_ROTATE_FORCE_CTX=off` (or `0`) turns it off, and a value that is neither —
 a typo, or a number past 100 — is the default rather than silence, since a value nobody can read must
 not quietly disable a rotation you are relying on. The first launch on a machine
 that has not been told prints one notice naming the threshold and the way out,
@@ -830,9 +837,10 @@ prove the directory a session. The plugin's own id follows
 `state` on every fresh conversation, so the lead keeps its button across
 rotations. Every render asks the engine for the conversation's id and context
 usage, reads the handoff marker (and the handoff it names), and lists the queue
-and the mailbox; once it has something to draw it also checks that this is the
-lead (the sessions root and `.cs/local/state`) and reads `keybindings.json` and
-the session's colour. The band renders a handful of times per turn, not per keystroke.
+and the mailbox; once it has something to draw, the filter chat key included, it also checks
+that this is the lead (the sessions root and `.cs/local/state`), lists the
+engine's commands for `/filter-chat`, and reads `keybindings.json`, the
+session's colour and the filter chat setting's files. The band renders a handful of times per turn, not per keystroke.
 
 
 `install.sh` deploys the mod's four files (`.claude-plugin/plugin.json`,
@@ -868,8 +876,11 @@ Two facts about the plugin runtime shape the code. A module reads the
 environment through `$.env.get` with a literal name, which `claude plugin
 validate` lists, so a render reads each variable it needs by name: the
 threshold's `CS_ROTATE_BUTTON_CTX` and `CS_STATUSLINE_CTX_WARN`, the inks'
-`CS_TERM_BG_RGB` and `CS_TERM_THEME`, and `CLAUDE_CONFIG_DIR`, `HOME` and
-`CS_SESSIONS_ROOT` to find `keybindings.json` and the sessions root. The
+`CS_TERM_BG_RGB` and `CS_TERM_THEME`, the filter chat key's `CS_FILTER_CHAT`
+and `XDG_CONFIG_HOME`, and `CLAUDE_CONFIG_DIR`, `HOME` and `CS_SESSIONS_ROOT`
+to find `keybindings.json`, the settings files and the sessions root. For the
+thresholds, the theme and the background, a value a settings file gives comes
+first unless the shell exports the key. The
 defaults and the twelve ink triplets (the eight session colours, and amber and
 crit for a light and a dark terminal) are literals in `register.tsx` that
 `tests/test_mod_rotate.sh` pins to the status line's. The
@@ -878,8 +889,9 @@ judging) is reset by a hot reload, which drops a running countdown and adopts
 the conversation it meets next unjudged.
 
 The mods hand Claude Code every toast, `$.ui.ask` dialog, `$.ui.log` notice,
-slash-command reply and command registration from tables they export: cs and
-cs-update in `register.tsx` (`TOASTS`, `ASKS`, `LOGS`, `REPLIES`, `COMMANDS`),
+slash-command reply and command registration from tables they export: cs in
+`register.tsx` (`TOASTS`, `ASKS`, `LOGS`, `REPLIES`, `COMMANDS`), cs-update in
+`register.tsx` (`TOASTS`, `REPLIES`, `COMMANDS`),
 cs-panel in `register.tsx`, `draw.tsx` (`WORDS`) and `settings.ts`
 (`LABELS`), cs-filter-chat in
 `words.ts`. `tests/test_mod_tables.sh` fails when a call site writes
@@ -894,8 +906,9 @@ in flight instead of waiting for it to end. `/queue <task>` runs
 `cs -queue add "<task>"` through `$.process.run` by the path the launch
 exports in `CS_BIN` (no shell; the claude process's `PATH` is not the
 launching shell's), and `/queue` alone runs `cs -queue list` and prints it.
-When the list has a `Queued (N)` heading and `.cs/local/queue.state` is not
-`armed` or `draining`, the mod then asks through `$.ui.ask` whether to start
+When the list has a `Queued (N)` heading and the queue's state file
+(`.cs/private/queue.state` in an encrypted session, `.cs/local/queue.state`
+otherwise) is not `armed` or `draining`, the mod then asks through `$.ui.ask` whether to start
 them. Start and Compact then ask how the tasks run (In this
 conversation, In subagents, As workflows; free text under "Other" is refused
 with a toast) before anything runs, and Start runs `cs -queue start` with
@@ -957,8 +970,8 @@ launch. A third, `CS_UPDATE_DECLINED`, names the pending version when the
 person answered no to the launch's own question (`~/.cache/cs/update-declined`
 keeps that answer): the mod then toasts one line, `cs X.Y.Z is available · run
 cs -update to install it, or /cs-update for the notes`, and opens no pane
-until `/cs-update` asks for it. Without `CS_UPDATE_AVAILABLE` there is nothing to show and the mod does
-nothing.
+until `/cs-update` asks for it. Without `CS_UPDATE_AVAILABLE` there is nothing to show, so the mod opens no
+pane and toasts nothing.
 Present, the mod reads the changelog span the launch's check cached at
 `~/.cache/cs/update-notes-full-<version>` (KEEP IN SYNC with
 `check_update_notify` in `lib/20-update.sh`), strips its markdown the way
@@ -970,14 +983,13 @@ The pane is for the lead conversation of a cs session only. The sessions root
 must name the directory, by its own name or by the `session_name` its state
 records, as the `cs` mod asks. The mod then checks `.cs/local/state`'s
 `claude_session_id` against its own conversation id, as the `cs` mod's button
-does. A `.cs/local/disabled` directory refuses the pane outright. A teammate
+does. A `.cs/local/disabled` file refuses the pane outright. A teammate
 claude in the same directory reads the same state file and does not match, so
 it gets no pane of its own. A cloned repository that carries `.cs/local` gets
 none either.
 
 The launch pane opens once per load of the mod (a launch, or a plugin
-reload), never again for the same conversation, whether or not the update key
-was pressed. `/cs-update`, which the mod registers at every load, opens the
+reload) and not after `/clear`, whether or not the update key was pressed. `/cs-update`, which the mod registers at every load, opens the
 same pane on demand: after a dismiss, with the `/config` row off, or with
 nothing else having shown it. Run from a teammate, or in a directory the
 sessions root does not name, it says the pane belongs to the conversation cs
@@ -989,8 +1001,11 @@ Pressing `1` runs `cs -update` through the engine's own process runner
 process's `PATH` is not the launching shell's), with a ten-minute timeout for
 the download, the checksum and the signature. The pane shows `updating…`
 while it runs and hides the key so a second press cannot start a second
-installer; a non-zero exit or a run that could not start keeps the key for
-another try and shows the last lines of stderr; a clean exit retires the key
+installer; a failure keeps the key for another try and says what happened: a
+non-zero exit shows `cs -update exited N.` over the last five lines of
+stderr, a run that could not start shows `cs -update did not run:` and the
+error, and a launch that set no `CS_BIN` says to run `cs -update` from a
+shell; a clean exit retires the key
 and the pane keeps the outcome ("Update finished. Takes effect on your next
 launch.") until it is dismissed, since the new files take effect only on the
 next launch for the rest of this claude: the update replaces this mod's own
@@ -1000,9 +1015,8 @@ closes the pane at any point.
 That reload resets the mod's module state mid-pane, which would otherwise
 blank a pane still showing "Update finished". A clean exit also writes
 `.cs/local/cs-update.done` (version plus the outcome line); the engine
-re-renders the open pane the instant it reloads the module, before
-`session.start` (which does not fire on a reload, only at load) gets a
-chance, so the reloaded module reads the marker back and redraws the finished
+re-renders the open pane the instant it reloads the module, which can come
+before the reloaded module's `session.start` runs, so the reloaded module reads the marker back and redraws the finished
 pane from its own next render. That redraw asks the lead check first,
 so a directory the sessions root does not name gets no pane back. A pane dismissed before the install landed
 leaves nothing open to redraw, so `/cs-update` after the reload reads the
@@ -1136,9 +1150,11 @@ transcript, 60 columns wide, in fullscreen from 110 columns.
 
 The rows come from two places. `Mods` lists the `/config` rows of `cs`,
 `cs-update`, `cs-mermaid` and `cs-filter-chat` (`$.config.list()`, those four
-plugins by name, so another `cs-*` plugin's rows are not drawn). Those mods title each row `cs: `
-and its label, so `/config` marks the row as cs's; under `Mods` the mark says
-nothing and the pane draws the label without it. Under it, cs's own settings come in
+plugins by name, so another `cs-*` plugin's rows are not drawn). The cs, cs-update and
+cs-mermaid mods title each row `cs: ` and its label, so `/config` marks the row
+as cs's; under `Mods` the mark says nothing and the pane draws the label
+without it. cs-filter-chat titles its row `Filter chat: your lines' colour`,
+which the pane draws whole. Under it, cs's own settings come in
 cs's groups and order from `cs -config list --porcelain`, run through `CS_BIN`
 (the path the launch exported) with no shell. The panel holds no list of
 settings and no copy of their checks: labels, choices, defaults, when a change
@@ -1168,9 +1184,10 @@ terminal's own background, its top border and left side in the installer's
 rust, `rgb(230,74,25)`, and its right side and bottom border in its gold,
 `rgb(255,193,7)`. Inside, a cell in from the left side, come the
 `claude-sessions` wordmark in bold, each letter one step of the installer's
-gradient from rust to gold, then cs's version, the number of rows, the number
-of settings a file or the shell overrides (`3 overrides`, `1 override`) and the session name, with a
-`·` between the counts and the name. The counts draw in ink, and the version,
+gradient from rust to gold, then cs's version after a space, then the number of
+rows, `/config` rows included (`49 settings`), the number of settings a file
+or the shell overrides (`3 overrides`, `1 override`) and the session name,
+each after a `·`. The counts draw in ink, and the version,
 the dots and the session name draw muted. Where the pane is too narrow, these
 parts drop from the right, down to the wordmark alone, cut short on the
 narrowest pane, and at least a cell stays before the right side. A `/config`
@@ -1253,7 +1270,7 @@ a round border in the soft rule colour, as wide as the pane, that reads
 the pane shows only the rows whose label, key or group holds the text, in any
 case. A group with no row left goes, and `no setting matches <text>` stands in
 for an empty list. While the field holds text, the column header's right end
-says how many rows show out of the total, `3 of 46`, muted, and the heads
+says how many rows show out of the total, `3 of 49`, muted, and the heads
 give up their end to leave it room. The masthead keeps its counts, and `+N above` and
 `+N below` count the rows shown. An empty field shows every row again, and
 closing the pane forgets the text. Enter in the field, labelled `select`,
@@ -1294,7 +1311,7 @@ it does on a row, so `Keep` stays a Button under it. Selecting another row,
 editing the filter or closing the pane closes the chooser too. No Button
 offers the value the row already has. The mobile app draws no Input and no
 Select, so there you cannot type a value, a typed setting's chooser offers
-only `Default` and `Keep`, a setting with choices offers its other values as
+only `Default (<default>)` and `Keep <value>`, a setting with choices offers its other values as
 Buttons ahead of those, and an on/off setting a file holds offers `Turn on` or
 `Turn off` there.
 
@@ -1311,8 +1328,8 @@ row shows. cs's own checker judges a typed value.
   the file matter there. A flag that turns its feature off at 1 lists its
   feature's states: `off` writes 1, `on` writes 0, which cs reads as unset,
   and its default is `on`.
-- A setting with choices offers its picker, then `Default` while a file holds
-  the value, then `Keep`.
+- A setting with choices offers its picker, then `Default (<default>)` while a
+  file holds the value, then `Keep`.
 - Any other setting offers its Input, then `Default (<default>)` and
   `Keep <value>`.
 
@@ -1323,8 +1340,10 @@ line's `this session` writes this session's own file, `cs <name> -config set`,
 `~/.config/cs/config`. The pane opens on `this session`, keeps the choice
 while it stays open and forgets it when it closes.
 
-The toast is cs's own reply: the line naming the file and when the change
-applies, or the line refusing the value (`not changed: exited 1: Error: …`).
+The toast is cs's own reply: after a new value, the line naming the file and
+when the change applies; after `Default`, `<key> removed from <file>` or
+`<key> is not in <file>; nothing changed`; after a refusal,
+`<key> not changed: exited 1: Error: …`.
 A `/config` row changes through `$.config.set`, which runs the owning plugin's
 own `config.set` guard: a toggle flips at once, a choice offers a picker of its
 options and `Keep`, a number or text row offers its Input and `Keep <value>`,
@@ -1374,9 +1393,9 @@ the bare form on with `next(e)`, and this mod passes any argument on, so
 `claude plugin validate` lists both hooks as gates.
 
 The mod reads both sources when the pane opens, after each change or reset, at the end of
-each main-loop turn while the pane is open, and after a `/config` menu change of
-one of those three plugins' rows (a pass-through `config.set` hook whose own
-failure never refuses the row). It runs no clock. It redraws only when an answer
+each main-loop turn while the pane is open, and, after a `/config` menu change of
+one of those four plugins' rows, reads the `/config` rows again (a pass-through
+`config.set` hook whose own failure never refuses the row). It runs no clock. It redraws only when an answer
 changed, keeps the last rows over a failed or unreadable answer and names the
 reason above them.
 
@@ -1404,7 +1423,7 @@ passes Claude Code's own drawing through.
 The switch is per session:
 
 - `filter chat`, the cs band's key (see the band above), pressed by
-  a click or Ctrl+X Tab, never a chord: this session
+  a click, or by Enter once Ctrl+X Tab has focused the band, never a chord: this session
   on or off. It shows during a turn too, and leaves the row to a survey or
   an armed handoff.
 - `/filter-chat` alone flips this session's switch: it reads the setting and
@@ -1432,7 +1451,8 @@ neither trims a line:
 - Nothing says: off, the default. cs-filter-chat starts no process and logs
   nothing. Outside a directory with `.cs/local` it is off whatever is set.
 - A read error other than a missing file says nothing of the setting.
-  cs-filter-chat logs the path and the error, each error once per load.
+  cs-filter-chat logs the path and the error, and skips a line that repeats
+  the one it logged last.
 
 cs-filter-chat keeps the value in a mirror it reads once per load, not at each
 draw. `/filter-chat` and the band key update it at once. A change from the `/cs`
@@ -1451,9 +1471,9 @@ timeout), the same rule cs's band asks before its own writes:
 - cs-filter-chat vets the read that turns filter chat on, too. At the first draw of each
   load, a setting that reads on costs one
   `cs -vet-session` process (0.15-0.44 s), and the hooked rows wait for its
-  answer before they draw. A session cs refuses reads as off: filter chat draws
-  nothing, and the log says `cs-filter-chat: filter chat is off in this session:` with
-  the refusal, once per distinct refusal. A setting that reads off starts no
+  answer before they draw. A session cs refuses reads as off: every row keeps
+  Claude Code's own drawing, and the log says `cs-filter-chat: filter chat is off in this session:` with
+  the refusal, again only when the refusal changes. A setting that reads off starts no
   process.
 - `/filter-chat status` picks up the `/cs` pane, a shell or a second Claude
   process in the directory, and vets a flip to on that neither writer made before it turns
@@ -1466,8 +1486,8 @@ What it draws while on:
 
 - Your messages. A message you typed draws a bold `❯` in the you ink at Claude
   Code's 2-column margin, then your text. A slash command draws its name in
-  that ink and its arguments dim. On desktop your rows keep Claude Code's
-  drawing.
+  that ink and its arguments dim. Off the terminal, as on desktop, your rows
+  keep Claude Code's drawing.
 - Claude's replies, at the same margin, with no label. The reply's Markdown
   is Claude Code's drawing (or cs-mermaid's), so diagrams draw whichever mod
   loads first.
@@ -1512,8 +1532,11 @@ mod keeps no transcript, runs no clock and writes no state.
 `hooks/register.tsx`, `hooks/session.ts`, `hooks/settings.ts`,
 `hooks/verdict.ts`, `hooks/words.ts` and `hooks/draw.tsx`) under
 `~/.claude/skills/cs-filter-chat/`, `cs -doctor`'s drift scan holds them to the
-checkout, and `cs -uninstall` removes the directory. An install also removes
-a copy left under the old name, `~/.claude/skills/cs-chat-only/`. The
+checkout, and `cs -uninstall` removes the directory. An install also clears
+from a copy left under the old name, `~/.claude/skills/cs-chat-only/`, every
+file cs knows it wrote; a copy deployed by hand keeps the rest, each named
+once in a `Kept <path>: cs did not write it` warning, and the directory stays
+for you to delete. The
 mod writes no heartbeat, so `cs -doctor` has no "last ran" row for it.
 
 Tests: `tests/test_mod_filter_chat.sh` pins the manifest, which declares no state
@@ -1522,8 +1545,8 @@ types and one `userConfig` field, the you ink, whose options are the theme keys
 files, checks that the source never names the events and calls the mod must
 not use (`tool.call`, `turn.step`, `classic.*`, `prompt.compose`,
 `config.set`, `$.command.run`), runs `claude plugin validate` and pins its
-exact hook inventory, type-checks the mod against the engine's contract, and
-runs the tests under `mods/cs-filter-chat/test/` with `claude plugin test` when
+exact hook inventory, type-checks the mod against the engine's contract when `npx` is on `PATH`
+and engine-written types are present, and runs the tests under `mods/cs-filter-chat/test/` with `claude plugin test` when
 `claude` is on `PATH`.
 
 ## Hook Configuration

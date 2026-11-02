@@ -107,7 +107,8 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 | Installation | Secrets backend, hooks, and statusline registration. |
 | Session | Shadow refs, memory writability, project tokens, and migration stamp. |
 | Claude Code | Settings counts and cs/cs-update runtime markers. |
-| Authority | Context-injecting hooks and their opt-outs. |
+| Settings files | How many settings this machine's and this session's files hold, each line they skip and why, and each value your environment hides from a file. |
+| Authority | Context-injecting hooks and their opt-outs, and where each switch your environment or a settings file sets comes from. |
 | Checkout picker | Rust/Cargo input timestamps and installed bytes against the checkout build, from any directory. Release downloads skip this build check. |
 
 - Build the picker with `cd tui && cargo build --release`.
@@ -140,7 +141,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 |---|---|
 | `cs myproj@fix-auth` | Creates a feature on branch `cs/fix-auth`, from the base's current commit. An existing `cs/fix-auth` is reused from its own tip, and the launch says how far behind the base that is. A detached base is refused: the feature would have no branch to land on. |
 | `cs myproj@perf` | Opens another independent feature. |
-| `cs <base> -features` | Lists feature readiness. |
+| `cs <base> -features [--porcelain]` | Lists each feature's branch, commits ahead and readiness: `ready`, `no commits`, `merged`, `retire staged`, `uncommitted changes`, `N files untracked`, `base session is live` or `worktree session is live`, `base has uncommitted changes`, or `base vault is locked`. `--porcelain` prints one tab-separated record per feature with the raw state key. |
 | `cs <base> -finish <feature>` | Opens the base with `/finish <feature>`. |
 | `cs -rm myproj@fix-auth` | Abandons the feature. |
 
@@ -164,7 +165,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 
 ### Retirement
 
-- Finish can land work while the feature conversation runs. Retirement then waits for it to close: the retire entry writes `.cs/local/retire-staged/<task>` in the base (the captured commit and whether `--force` applied) and answers `staged <task> <sha>: ...`. When that conversation ends, its SessionEnd mails the base, and the base's Stop hook starts the entry detached (`--staged`, the stage standing in for the base's own ancestry), waits up to six seconds for it, and reports `retired` or the refusal in the turn that finds it ended. The entry re-reads the feature's lock under its openers' mutex right before the removal, so a conversation reopened meanwhile stages the retire again instead of losing its directory. `cs <base> -features` reads `staged` for it. No keystroke or signal closes the other session; the user does, when they are done there.
+- Finish can land work while the feature conversation runs. Retirement then waits for it to close: the retire entry writes `.cs/local/retire-staged/<task>` in the base (the captured commit and whether `--force` applied) and answers `staged <task> <sha>: ...`. When that conversation ends, its SessionEnd mails the base, and the base's Stop hook starts the entry detached (`--staged`, the stage standing in for the base's own ancestry), waits up to six seconds for it, and reports `retired` or the refusal in the turn that finds it ended. The entry re-reads the feature's lock under its openers' mutex right before the removal, so a conversation reopened meanwhile stages the retire again instead of losing its directory. `cs <base> -features` reads `retire staged` for it. No keystroke or signal closes the other session; the user does, when they are done there.
 - Retirement commits nothing and refuses dirty or untracked work.
 - Recreated build directories such as `node_modules`, `target`, and `.venv` go with the checkout.
 - Other ignored files go to system trash, with each file or whole-directory count listed.
