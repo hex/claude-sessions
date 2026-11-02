@@ -29,6 +29,16 @@ check_dependencies() {
     fi
 }
 
+# Refuses the name Claude Code shows for a feature session (cs_claude_name)
+# typed into cs, naming the one cs takes. Every entry that takes a session
+# name from the command line runs this, so a user who read `base+feature` in
+# Claude Code learns the `@` form here and nothing is created or removed.
+cs_refuse_claude_name() {  # name
+    case "$1" in
+        *+*) error "$1 is the name Claude Code shows for feature session ${1//+/@}; cs takes ${1//+/@}" ;;
+    esac
+}
+
 # Validate session name
 validate_session_name() {
     local name="$1"

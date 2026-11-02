@@ -63,7 +63,11 @@ test_finish_skill_teaches_the_ritual() {
     assert_file_contains "$SKILL" "equals the captured" "force needs the PR head to be the captured commit" || return 1
     assert_file_contains "$SKILL" 'retire-staged/<task>' "a live conversation stages the retire in the base" || return 1
     assert_file_contains "$SKILL" "conversation is still live" "a running conversation is live, the word cs uses" || return 1
-    assert_file_not_contains "$SKILL" "conversation is still open" "and never open" || return 1
+    # Joined on one line first: the skill wraps at 80 columns, so a line-based
+    # grep would miss the phrase split over two lines.
+    if tr '\n' ' ' < "$SKILL" | grep -Eq "conversation is still[[:space:]]+open|open conversation"; then
+        echo "  FAIL: the skill still calls a running conversation open"; return 1
+    fi
     assert_file_contains "$SKILL" "go by themselves after" "and the skill says the removal needs nothing more from the user" || return 1
     assert_file_not_contains "$SKILL" "run \`/finish <task>\` here again" "no second /finish is asked for the open-conversation case" || return 1
     assert_file_not_contains "$SKILL" "[-]-merge" "the retired verb is never named" || return 1

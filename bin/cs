@@ -2056,16 +2056,6 @@ cs_claude_name() {  # session_name
     printf '%s\n' "${1//@/+}"
 }
 
-# Refuses the name Claude Code shows for a feature session (cs_claude_name)
-# typed into cs, naming the one cs takes. Every entry that takes a session
-# name from the command line runs this, so a user who read `base+feature` in
-# Claude Code learns the `@` form here and nothing is created or removed.
-cs_refuse_claude_name() {  # name
-    case "$1" in
-        *+*) error "$1 is the name Claude Code shows for feature session ${1//+/@}; cs takes ${1//+/@}" ;;
-    esac
-}
-
 # The pid of the remote-control server serving session <name>, from its
 # .cs/local/remote.pid, when that pid runs `remote-control --name <name>`
 # (the name claude is given, cs_claude_name).
@@ -4567,6 +4557,16 @@ check_dependencies() {
     if [ ${#missing[@]} -gt 0 ]; then
         error "Missing required dependencies: ${missing[*]}"
     fi
+}
+
+# Refuses the name Claude Code shows for a feature session (cs_claude_name)
+# typed into cs, naming the one cs takes. Every entry that takes a session
+# name from the command line runs this, so a user who read `base+feature` in
+# Claude Code learns the `@` form here and nothing is created or removed.
+cs_refuse_claude_name() {  # name
+    case "$1" in
+        *+*) error "$1 is the name Claude Code shows for feature session ${1//+/@}; cs takes ${1//+/@}" ;;
+    esac
 }
 
 # Validate session name

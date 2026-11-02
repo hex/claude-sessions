@@ -1432,12 +1432,12 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "653674a6a5c067415b322d4003e4b5e0ba64a46d81694c978e4e54ebfabe0624  bin/cs"
+    "6ec2a342f885d996e45ff6aa94a1ac768a09809cbf53579d0ac519dcb13f3c0d  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "ba8fff7f5576e3cc24276fb470b9518a64e7af96b050a31cb40506778e0f80c3  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
-    "554d6a5c10cce2bf88f4efcc905ec025f7f78435fed0fd4a3b99443b5e27d1a5  hooks/cs-shared.sh"
+    "82317d0619150e8323c6b80d6ddbaaa17463ab225e128d9081d0d3e165249c21  hooks/cs-shared.sh"
     "10aa9a48cf58dcb6982f7dab143fc08b2a48b4ca9b1c655ef90dd25aae1f928c  hooks/cs-config.sh"
     "50d63ce0995e68fddd8503700c15f9585d11938c9cd3872a883146de7707c765  hooks/cs-iterm-tab.py"
     "21988bf58bb6fea15c6435445f4abc3a38f4c4a9a7db78c4ff4797650709ba3f  hooks/memory-index-guard.sh"
@@ -1460,7 +1460,7 @@ CS_PAYLOAD_SHA256=(
     "2520a6d54d75e3e9f1768160826a8b9f21e38e2234538cc62e3ec6337008fc28  skills/store-secret/SKILL.md"
     "eaf2ade4ce76f74b8d6ab979f536007606e77308a0c33dfedf28d31befd1eaec  skills/prose-hygiene/SKILL.md"
     "5e275bba3498c648c648132d31efb4481335a2ee5c3cdf38d0af40ada01d680f  skills/rotate/SKILL.md"
-    "b099d4f06f20f566c0b53e91702067823fa5be4c72a5969045d0091b83733110  skills/finish/SKILL.md"
+    "0d88656291eb6078b08187204807c72bd926b93c360041767cdbc26e64567353  skills/finish/SKILL.md"
     "938985c6dbc9166170d1e0d7e632cd3c4a4089d5cdd5b2cf5f0702600f29110f  skills/feature/SKILL.md"
     "343016f4d62029a85cfae3c0911b8a7a2bff99a31bd868e04ca83ec4002d6f48  skills/write-as-me/SKILL.md"
     "9d42a50e396f05c53d62f13f4a6e21ba20ee04abf7b532023e0d8e5be988e2d3  skills/write-as-me/scripts/build-corpus.sh"
@@ -1471,7 +1471,7 @@ CS_PAYLOAD_SHA256=(
     "31a4e95f517c28fa17d68f731d8adaefc5825872c654ab63f0d04d2f963e109c  mods/cs/tips.json"
     "2f8d4b45beddd0b27b050f1c2eb08ebb25552b4dea5f33b9398318a2ef636985  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
-    "d2feb3927501b9fa8db9a08ba8c212bce8520c36296161968c8b1c1d18cebd1c  mods/cs-update/hooks/register.tsx"
+    "24a173a7705879c5f7835e7154a6b694a6ba23320e19ffd8fbfa7e15506d2a39  mods/cs-update/hooks/register.tsx"
     "67c3217e96ce069a27d2f8af84944f1aaf18aeab29f8a570bf0cb0f96fc61519  mods/cs-mermaid/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-mermaid/hooks/hooks.json"
     "17ded962d4bda355fb9f4c6e3707aab94062b42361df695e79a6e1702a8e8cf8  mods/cs-mermaid/hooks/layout.ts"

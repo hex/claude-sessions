@@ -980,7 +980,7 @@ test_retire_stages_itself_while_the_feature_conversation_is_open() {
     assert_dir "$wt" "worktree preserved" || return 1
     assert_eq "sha: $sha
 force: 0" "$(cat "$stage")" "the stage records the captured commit and the force decision" || return 1
-    # A second /finish while the conversation is still open rewrites the same stage.
+    # A second /finish while the conversation is still live rewrites the same stage.
     output=$("$CS_BIN" "myproj" -retire-feature "fix-auth" "$sha" --force 2>&1) || status=$?
     assert_eq "0" "$status" "a repeat stage is not an error: $output" || return 1
     assert_eq "sha: $sha
@@ -1048,7 +1048,7 @@ _base_stop() {  # base_dir
         bash "$SCRIPT_DIR/../hooks/stop-blocks.sh" 2>/dev/null | jq -r '.reason // .systemMessage // ""'
 }
 
-# A landed feature whose retire is staged behind an open conversation: the
+# A landed feature whose retire is staged behind a live conversation: the
 # stage path and the captured sha are printed, one per line.
 _staged_feature() {  # base_dir
     local wt="$CS_SESSIONS_ROOT/myproj@fix-auth" sha
@@ -1075,7 +1075,7 @@ test_stop_hook_leaves_a_staged_retire_while_the_feature_conversation_is_open() {
     base_dir=$(create_test_session_with_git "myproj")
     stage=$(_staged_path "$base_dir") || { echo "  FAIL: stage fixture"; return 1; }
     out=$(_base_stop "$base_dir")
-    case "$out" in *retire*) echo "  the hook spoke of the retire while the conversation is open: $out"; return 1 ;; esac
+    case "$out" in *retire*) echo "  the hook spoke of the retire while the conversation is live: $out"; return 1 ;; esac
     assert_file_exists "$stage" "stage kept" || return 1
     assert_dir "$CS_SESSIONS_ROOT/myproj@fix-auth" "worktree kept" || return 1
     rm -f "$CS_SESSIONS_ROOT/myproj@fix-auth/.cs/session.lock"
@@ -1673,7 +1673,7 @@ test_retire_keeps_the_records_when_a_fuse_write_fails() {
 }
 
 test_retire_refusal_for_an_open_session_comes_after_the_landing_check() {
-    # An open conversation on an UNLANDED feature must hear "/finish first",
+    # A live conversation on an UNLANDED feature must hear "/finish first",
     # not "the feature is landed, close the session".
     local base_dir
     base_dir=$(create_test_session_with_git "myproj")

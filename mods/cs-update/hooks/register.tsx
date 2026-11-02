@@ -19,8 +19,9 @@ export const HEARTBEAT = '.cs/local/cs-update.heartbeat'
 // this mod's own deployed file, Claude Code reloads it and immediately
 // re-renders the open pane, and the reload drops the module state the `done`
 // pane was drawing from before this file existed. `session.start` fires
-// again after the reload (the engine runs it for each fresh load of a
-// plugin), but the re-render comes first, so the restore cannot wait for it.
+// again on the reload (the engine runs it for each fresh load of a plugin),
+// and the types fix no order between it and that re-render, so the restore
+// cannot wait for it.
 export const DONE = '.cs/local/cs-update.done'
 // Where cs writes the id of the conversation it launched; a teammate claude
 // in the same directory has its own id and must not pop its own pane.
@@ -81,8 +82,8 @@ export function parseSpan(text: string): Section[] {
 // dropped on a reload, which is what "once per load" means. A finished update
 // is the one exception: the DONE marker survives the reload the update itself
 // causes, and the marker is redrawn from disk, by the Pane render the reload
-// triggers immediately and again by the session.start that follows it, each
-// a no-op once the other has filled this state.
+// triggers and by the reload's session.start, in whichever order the engine
+// runs them, each a no-op once the other has filled this state.
 let version: string | undefined
 let sections: Section[] | undefined
 let accent: string | undefined
@@ -132,8 +133,8 @@ export function register(on: On, options: PluginOptions) {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE) return next(e)
     // The engine re-renders the open pane the instant it reloads this
-    // module, before the reload's session.start gets a chance to restore
-    // it, so a pane asked to draw with no module state
+    // module, and the reload's session.start may not have restored it yet,
+    // so a pane asked to draw with no module state
     // tries the marker itself before giving up to the ordinary gate. It asks
     // the lead gate first, as session.start does, so a directory the
     // sessions root does not name gets no pane back.
