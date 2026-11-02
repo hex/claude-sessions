@@ -3038,7 +3038,7 @@ test('the queue glyph takes the status line\'s amber, light on a dark terminal a
 })
 
 // cs's own resolution of its settings, the golden `cs -config list --porcelain`:
-// eleven tab-separated fields a record, the value ninth and its source tenth.
+// twelve tab-separated fields a record, the value ninth and its source tenth.
 const PORCELAIN = readFileSync(new URL('../../../tests/fixtures/config-porcelain.txt', import.meta.url), 'utf8')
 const SETTINGS_ARGV = ['/opt/cs/bin/cs', '-config', 'list', '--porcelain']
 // The golden with <key>'s record carrying <value> from <source>, or without the record.
@@ -3196,7 +3196,7 @@ test('a failed, unreadable or unanswered read keeps the settings last read, and 
   expect(logs).toEqual([
     'cs -config list exited 2: Usage: cs [<name>] -config list',
     'cs -config list gave a record the band cannot read: CS_EXTRA\tTerminal\tToo short',
-    'cs -config list gave a record the band cannot read: CS_TERM_THEME\tTerminal\tTheme\tchoice\tlight,dark\tdetected\tnow\tapplies at the next repaint\tlight\tdisk\t-',
+    'cs -config list gave a record the band cannot read: CS_TERM_THEME\tTerminal\tTheme\tchoice\tlight,dark\tdetected\tnow\tapplies at the next repaint\tlight\tdisk\t-\tWhether cs draws for a light or a dark terminal; unset, cs detects it at launch.',
     'cs\'s settings could not be read: timed out after 10000 ms',
   ])
 })

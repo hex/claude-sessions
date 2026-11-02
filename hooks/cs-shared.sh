@@ -1259,54 +1259,57 @@ _cs_prune_settings_backups() {  # file, [backup just written]
 # ABOUTME: KEY=value reader and the loader that fills unpinned keys. build.sh folds this into bin/cs and delivers it to hooks/cs-config.sh, hooks/cs-shared.sh and bin/cs-statusline.
 
 # The allow-list, one record per key, in the order `cs -config list` prints:
-#   KEY|group|label|edit|check|choices|default|when|whenText
+#   KEY|group|label|edit|check|choices|default|when|whenText|describe
 # edit is what the panel offers (flag toggles, choice asks with choices, text
-# asks for free text, shell is changed from a shell only); check names the
-# arm of _cs_config_check that accepts what the key's readers accept; when is
-# now, /clear, launch or now+launch. Walked with parameter expansion only, so
+# asks for free text, shell is changed from a shell only); flagoff and
+# shelloff are flag and shell for a key that turns something off, whose label
+# names what it turns off, so the panel shows that on while the key is off.
+# check names the arm of _cs_config_check that accepts what the key's readers
+# accept; when is now, /clear, launch or now+launch; describe is one sentence
+# on what the setting does for you. Walked with parameter expansion only, so
 # loading forks nothing.
 _CS_CONFIG_SPEC=(
-    'CS_STATUSLINE_DISABLE|Status line|Hide the status line|flag|flag|-|off|now|applies at the next repaint'
-    'CS_STATUSLINE_LAYOUT|Status line|Layout|choice|enum|quiet,band,capsules|quiet|now|applies at the next repaint'
-    'CS_STATUSLINE_SEGMENTS|Status line|Segments|text|segments|-|logo,session,notes,mail,git,model,ctx,limits|now|applies at the next repaint'
-    'CS_STATUSLINE_BAND|Status line|Band colour|text|band|-|session|now|applies at the next repaint'
-    'CS_STATUSLINE_COLS|Status line|Width in columns|text|cols|-|measured|now|applies at the next repaint'
-    'CS_STATUSLINE_FRAME|Status line|Frame columns|text|num|-|4|now|applies at the next repaint'
-    'CS_STATUSLINE_CTX_WARN|Status line|Context warn %|text|num|-|40|now|applies at the next repaint'
-    'CS_STATUSLINE_CTX_CRIT|Status line|Context critical %|text|num|-|65|now|applies at the next repaint'
-    'CS_USAGE_NO_REFRESH|Status line|Usage from cache only|flag|flag|-|off|now|applies at the next repaint'
-    'CS_SUBAGENT_STATUSLINE_DISABLE|Status line|Hide the subagent rows|flag|flag|-|off|now|applies at the next repaint'
-    'CS_SCOPE_DISABLE|Prompts|No scope grounding|flag|flag|-|off|now|applies at your next prompt'
-    'CS_SCOPE_TRACE_DISABLE|Prompts|No scope trace|flag|flag|-|off|now|applies at your next prompt'
-    'CS_SCOPE_BUDGET_MS|Prompts|Scope scan budget (ms)|text|ms|-|1500|now|applies at your next prompt'
-    'CS_OBJECTIVE_CAPTURE_DISABLE|Prompts|No objective capture|flag|flag|-|off|now|applies at your next prompt'
-    'CS_DATE_REMINDER_DISABLE|Prompts|No date reminder|flag|flag|-|off|now|applies at your next prompt'
-    'CS_CLARIFY_DISABLE|Prompts|No clarifying questions|flag|flag|-|off|now|applies at your next prompt'
-    'CS_CTX_WARN_CTX|Turn end|Context warning %|text|num|-|40|now|applies when the next turn ends'
-    'CS_ROTATE_NUDGE_CTX|Turn end|Rotation nudge %|text|num|-|65|now|applies when the next turn ends'
-    'CS_QUEUE_MAX_FAILURES|Turn end|Queue stops after failures|text|num|-|5|now|applies when the next turn ends'
-    'CS_QUEUE_MAX_CTX|Turn end|Queue stops past context %|text|num|-|85|now|applies when the next turn ends'
-    'CS_QUEUE_MAX_5H|Turn end|Queue stops past 5h limit %|text|num|-|85|now|applies when the next turn ends'
-    'CS_MAIL_WAKE_MAX|Turn end|Mail wakes in a row|text|num|-|5|now|applies when the next turn ends'
-    'CS_NO_MAIL_WAKE|Turn end|No mail wake|flag|flag|-|off|now|applies when the next turn ends'
-    'CS_NARRATIVE_MAX_BYTES|Turn end|Narrative budget (bytes)|text|bytes|-|131072|now|applies when the next turn ends'
-    'CS_NARRATIVE_KEEP_BYTES|Turn end|Narrative tail kept (bytes)|text|bytes|-|65536|now|applies when the next turn ends'
-    'CS_ROTATE_FORCE_CTX|Rotation|Rotate on its own past %|text|force|-|80|now|applies by your next prompt'
-    'CS_ROTATE_BUTTON_CTX|Rotation|Rotate button from %|text|num|-|the warn %|now|applies by your next prompt'
-    'CS_NO_ROTATION_WAKE|Rotation|No wake after /clear|flag|flag|-|off|/clear|applies at the next /clear or launch'
-    'CS_ROTATION_KICK_DELAY|Rotation|Wake delay (s)|text|secs|-|2|now|applies at the next rotation'
-    'CS_REWRITE_PROVIDER|Rewriter (ctrl+g)|Provider|choice|enum|claude,claude-api,openai,openai-api,gemini,gemini-api,grok,xai|claude|now|applies at the next ctrl+g'
-    'CS_REWRITE_MODEL|Rewriter (ctrl+g)|Model|text|model|-|per provider|now|applies at the next ctrl+g'
-    'CS_REWRITE_TIMEOUT|Rewriter (ctrl+g)|Timeout (s)|text|secs|-|25|now|applies at the next ctrl+g'
-    'CS_REWRITE_PROGRESS|Rewriter (ctrl+g)|Progress|choice|enum|screen,native,line,static|screen|now|applies at the next ctrl+g'
-    'CS_REWRITE_DISABLE|Rewriter (ctrl+g)|No rewrite|flag|flag|-|off|now+launch|on: the next ctrl+g passes through. Off after a launch with it on: the next launch, which installs the ctrl+g shim.'
-    'CS_TERM_THEME|Terminal|Theme|choice|enum|light,dark|detected|now|applies at the next repaint'
-    'CS_TERM_BG_RGB|Terminal|Background r;g;b|text|rgb|-|detected|now|applies at the next repaint'
-    'CS_NO_ITERM2|Terminal|No iTerm2 features|flag|flag|-|off|now+launch|the tab title, the bell bounce and the iTerm reads of the bar: now. The iTerm tmux path of the launch: the next launch.'
-    'CS_NERD_FONTS|Terminal|Nerd Font glyphs|flag|flag|-|off|now|applies at the next cs command'
-    'CS_NO_TASK_TOOLS|Launch|No task tools|flag|flag|-|off|launch|applies at the next launch'
-    'CS_NO_UPDATE_CHECK|Launch|No update check|flag|flag|-|off|launch|applies at the next launch'
-    'CS_NO_FUNCTION_HOOKS|Launch|No mods|shell|flag|-|off|launch|applies at the next launch; on, it loads no mod, the cs panel included'
+    'CS_STATUSLINE_DISABLE|Status line|Status line|flagoff|flag|-|off|now|applies at the next repaint|Draws the line under the prompt with the session, branch, model, context and usage limits.'
+    'CS_STATUSLINE_LAYOUT|Status line|Layout|choice|enum|quiet,band,capsules|quiet|now|applies at the next repaint|How the status line looks: plain text, one full-width band of colour, or capsules.'
+    'CS_STATUSLINE_SEGMENTS|Status line|Segments|text|segments|-|logo,session,notes,mail,git,model,ctx,limits|now|applies at the next repaint|Which items the status line shows, in order, as a comma-separated list.'
+    'CS_STATUSLINE_BAND|Status line|Band colour|text|band|-|session|now|applies at the next repaint|The colour of the band and the session chip; session gives each session its own colour.'
+    'CS_STATUSLINE_COLS|Status line|Width in columns|text|cols|-|measured|now|applies at the next repaint|A fixed width for the status line; unset, it fits the terminal.'
+    'CS_STATUSLINE_FRAME|Status line|Frame columns|text|num|-|4|now|applies at the next repaint|Columns the prompt frame takes from the measured width, so the line is not cut short.'
+    'CS_STATUSLINE_CTX_WARN|Status line|Context warn %|text|num|-|40|now|applies at the next repaint|Context use at which the gauge turns to its warning colour.'
+    'CS_STATUSLINE_CTX_CRIT|Status line|Context critical %|text|num|-|65|now|applies at the next repaint|Context use at which the gauge turns to its critical colour.'
+    'CS_USAGE_NO_REFRESH|Status line|Usage refresh|flagoff|flag|-|off|now|applies at the next repaint|Fetches your Fable usage for the status line; off, it shows only what is already cached.'
+    'CS_SUBAGENT_STATUSLINE_DISABLE|Status line|Subagent rows|flagoff|flag|-|off|now|applies at the next repaint|Styles the rows Claude Code shows for running subagents to match the status line.'
+    'CS_SCOPE_DISABLE|Prompts|Scope grounding|flagoff|flag|-|off|now|applies at your next prompt|Adds a short summary of the relevant code to each prompt that asks for code work.'
+    'CS_SCOPE_TRACE_DISABLE|Prompts|Scope trace|flagoff|flag|-|off|now|applies at your next prompt|Logs how long each step cs runs on your prompt takes, to find a slow or stuck one.'
+    'CS_SCOPE_BUDGET_MS|Prompts|Scope scan budget (ms)|text|ms|-|1500|now|applies at your next prompt|If the first steps on a prompt take longer than this, cs skips its code scan; 0 always skips it.'
+    'CS_OBJECTIVE_CAPTURE_DISABLE|Prompts|Objective capture|flagoff|flag|-|off|now|applies at your next prompt|Records the first real prompt of a session as its objective in .cs/README.md.'
+    'CS_DATE_REMINDER_DISABLE|Prompts|Date reminder|flagoff|flag|-|off|now|applies at your next prompt|Tells Claude the new date when a conversation runs past midnight.'
+    'CS_CLARIFY_DISABLE|Prompts|Clarifying questions|flagoff|flag|-|off|now|applies at your next prompt|Asks Claude to question an unclear request instead of guessing; a leading ~ skips one prompt.'
+    'CS_CTX_WARN_CTX|Rotation|Context warning %|text|num|-|40|now|applies when the next turn ends|Context use at which Claude tells you, once, that the conversation is filling up.'
+    'CS_ROTATE_BUTTON_CTX|Rotation|Rotate button from %|text|num|-|the warn %|now|applies by your next prompt|Context use from which the band above the prompt shows the rotate key, Ctrl+X 1.'
+    'CS_ROTATE_NUDGE_CTX|Rotation|Rotation nudge %|text|num|-|65|now|applies when the next turn ends|Context use at which Claude suggests, once, writing a handoff and going on after /clear.'
+    'CS_ROTATE_FORCE_CTX|Rotation|Rotate on its own past %|text|force|-|80|now|applies by your next prompt|Context use past which cs rotates by itself after a 20 second countdown you can stop.'
+    'CS_NO_ROTATION_WAKE|Rotation|Wake after /clear|flagoff|flag|-|off|/clear|applies at the next /clear or launch|After /clear on a handoff, the fresh conversation starts its next step without you typing.'
+    'CS_ROTATION_KICK_DELAY|Rotation|Wake delay (s)|text|secs|-|2|now|applies at the next rotation|Seconds between tries to wake the fresh conversation after /clear; 0 tries once.'
+    'CS_REWRITE_PROVIDER|Rewriter (ctrl+g)|Provider|choice|enum|claude,claude-api,openai,openai-api,gemini,gemini-api,grok,xai|claude|now|applies at the next ctrl+g|Who rewrites your prompt; an -api choice calls the vendor API in place of its CLI.'
+    'CS_REWRITE_MODEL|Rewriter (ctrl+g)|Model|text|model|-|per provider|now|applies at the next ctrl+g|The model that rewrites your prompt, by the provider name for it; unset, the provider picks.'
+    'CS_REWRITE_TIMEOUT|Rewriter (ctrl+g)|Timeout (s)|text|secs|-|25|now|applies at the next ctrl+g|Seconds to wait for a rewrite before your prompt is left as you typed it.'
+    'CS_REWRITE_PROGRESS|Rewriter (ctrl+g)|Progress|choice|enum|screen,native,line,static|screen|now|applies at the next ctrl+g|What the screen shows while ctrl+g waits for the rewrite.'
+    'CS_REWRITE_DISABLE|Rewriter (ctrl+g)|Rewrite (ctrl+g)|flagoff|flag|-|off|now+launch|stopping rewrites: the next ctrl+g. Starting them after a launch without them: the next launch, which installs the ctrl+g shim.|Ctrl+g in the prompt rewrites what you typed into a clearer prompt before you send it.'
+    'CS_TERM_THEME|Terminal|Theme|choice|enum|light,dark|detected|now|applies at the next repaint|Whether cs draws for a light or a dark terminal; unset, cs detects it at launch.'
+    'CS_TERM_BG_RGB|Terminal|Background r;g;b|text|rgb|-|detected|now|applies at the next repaint|Your terminal background colour, which the status line shades its capsules from.'
+    'CS_NO_ITERM2|Terminal|iTerm2 features|flagoff|flag|-|off|now+launch|the tab title, the bell bounce and the iTerm reads of the bar: now. The iTerm tmux path of the launch: the next launch.|Uses iTerm2 for the tab title, a dock bounce when a turn ends and the theme of your profile.'
+    'CS_NERD_FONTS|Terminal|Nerd Font glyphs|flag|flag|-|off|now|applies at the next cs command|Shows Nerd Font icons in cs banners and session lists; needs a Nerd Font in the terminal.'
+    'CS_NO_MAIL_WAKE|Mail|Wake on mail|flagoff|flag|-|off|now|applies when the next turn ends|Unread mail from another session takes a turn, so the exchange goes on without you typing.'
+    'CS_MAIL_WAKE_MAX|Mail|Wakes in a row|text|num|-|5|now|applies when the next turn ends|How many turns mail may take in a row before it waits for a prompt from you.'
+    'CS_NO_TASK_TOOLS|Launch|Task tools|flagoff|flag|-|off|launch|applies at the next launch|Gives Claude its task list tools on every model, for rotation, the queue and handoffs.'
+    'CS_NO_UPDATE_CHECK|Launch|Update check|flagoff|flag|-|off|launch|applies at the next launch|Asks GitHub for a newer cs at most hourly; off, cs makes no network request for it.'
+    'CS_NO_FUNCTION_HOOKS|Launch|Mods|shelloff|flag|-|off|launch|applies at the next launch; with mods off, the cs panel does not load either|Lets a launch load mods, the cs band and settings pane among them; off, none loads.'
+    'CS_QUEUE_MAX_FAILURES|Queue|Stops after failures|text|num|-|5|now|applies when the next turn ends|A queue run stops once one task has this many failed tool calls.'
+    'CS_QUEUE_MAX_CTX|Queue|Stops past context %|text|num|-|85|now|applies when the next turn ends|A queue run stops before its next task once context use reaches this.'
+    'CS_QUEUE_MAX_5H|Queue|Stops past 5h limit %|text|num|-|85|now|applies when the next turn ends|A queue run stops before its next task once your 5-hour usage limit reaches this.'
+    'CS_NARRATIVE_MAX_BYTES|Narrative|Budget (bytes)|text|bytes|-|131072|now|applies when the next turn ends|Size past which a session narrative is due to move its older sections to the archive.'
+    'CS_NARRATIVE_KEEP_BYTES|Narrative|Tail kept (bytes)|text|bytes|-|65536|now|applies when the next turn ends|How much of the newest narrative stays in the live file when it rotates.'
 )
 
 # Keys a file never sets, each with the reason the writer gives. Each names a
@@ -1331,12 +1334,14 @@ _CS_CONFIG_EXCLUDED=(
 # process, the first time a file or a value is checked: a reader on a machine
 # with no settings file never pays for it.
 _cs_config_index() {
-    local rec key
+    local rec key arm
     [ "${_CS_CFG_INDEXED:-}" != "$$" ] || return 0
     for rec in "${_CS_CONFIG_SPEC[@]}"; do
         key=${rec%%|*}
         rec=${rec#*|*|*|*|}
-        printf -v "_CS_CFG_R_$key" '%s' "${rec%|*|*|*}"
+        arm=${rec%%|*}
+        rec=${rec#*|}
+        printf -v "_CS_CFG_R_$key" '%s|%s' "$arm" "${rec%%|*}"
     done
     _CS_CFG_INDEXED=$$
 }

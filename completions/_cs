@@ -159,7 +159,8 @@ _cs() {
     done
 
     # Context: after -config, global or after a session name: its action,
-    # then for get, set and unset a setting's name, which cs itself lists.
+    # then for get, set and unset a setting's name, which cs itself lists, and
+    # for reset its --yes.
     local ci
     for ((ci=2; ci < CURRENT; ci++)); do
         [[ "${words[ci]}" == "-config" ]] || continue
@@ -170,6 +171,7 @@ _cs() {
                 'get:The value readers see now'
                 'set:Keep a setting in the file'
                 'unset:Remove a setting from the file'
+                'reset:Remove every setting from the file'
             )
             _describe 'config action' config_cmds
         elif (( CURRENT == ci + 2 )); then
@@ -178,6 +180,11 @@ _cs() {
                     local -a config_list_opts
                     config_list_opts=('--porcelain:Tab-separated records for tools')
                     _describe 'option' config_list_opts
+                    ;;
+                reset)
+                    local -a config_reset_opts
+                    config_reset_opts=('--yes:Remove them without asking')
+                    _describe 'option' config_reset_opts
                     ;;
                 get|set|unset)
                     local -a config_keys

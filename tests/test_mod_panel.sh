@@ -14,6 +14,11 @@ teardown() { :; }
 # main loop's turn end, and the /config writes it follows.
 HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=cs}, command.run{command=cs-panel}, ui.render{component=Pane, requestId=cs-panel}, ui.focus{requestId=cs-panel}, ui.scroll{requestId=cs-panel}, ui.close{id=cs-panel}, turn.complete, config.set'
 
+# Every engine call the mod makes, as validate prints it. No $.ui.ask: the
+# pane asks in itself, so no dialog takes the focus from it; the ring moves by
+# $.ui.focus and every redraw is a $.ui.invalidate.
+CALLS_LINE='./register.tsx calls: $.clock.after, $.command.register, $.config.list (via refreshMods), $.config.set (via changeMod), $.env.get (via readLaunch), $.process.run (via runCs), $.ui.focus (via refocus), $.ui.invalidate, $.ui.log (via inBackground, readVersion), $.ui.open (via openPanel), $.ui.panes (via resume), $.ui.resolve, $.ui.toast (via askReset, change, changeMod, changeSetting, resetSettings)'
+
 test_mod_manifest_names_the_plugin_and_its_module() {
     local manifest="$MOD/.claude-plugin/plugin.json"
     assert_eq "cs-panel" "$(jq -r .name "$manifest")" "plugin name" || return 1
@@ -116,6 +121,9 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     local line
     line="$(grep -F './register.tsx hooks:' <<< "$out" | sed 's/^[^.]*//')"
     assert_eq "$HOOKS_LINE" "$line" "the exact hooks inventory" || return 1
+    line="$(grep -F './register.tsx calls:' <<< "$out" | sed 's/^[^.]*//')"
+    assert_eq "$CALLS_LINE" "$line" "the exact calls inventory" || return 1
+    assert_output_not_contains "$out" '$.ui.ask' "the pane opens no dialog" || return 1
     assert_output_contains "$out" 'gating hook without .catch: command.run{command=cs}$' "bare /cs is a gate" || return 1
     assert_output_contains "$out" 'gating hook without .catch: ui.scroll{requestId=cs-panel}$' "the pane's window moves are a gate" || return 1
     assert_output_contains "$out" 'gating hook with .catch: config.set$' "the /config observer is a gate with a catch" || return 1

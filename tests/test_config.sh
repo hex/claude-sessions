@@ -143,6 +143,130 @@ test_unset_removes_every_line_of_the_key() {
     assert_eq "$before" "$(cat "$MCFG"; printf x)" "and the bytes stay" || return 1
 }
 
+# The setting of <key> as the porcelain reports it: "<value>|<source>".
+_porcelain_value() {  # key, [session name]
+    "$CS_BIN" ${2:+"$2"} -config list --porcelain | awk -F'\t' -v k="$1" '$1 == k { print $9 "|" $10 }'
+}
+
+# reset removes every line unset would remove for some setting, a value no
+# reader takes included, and keeps every other line byte for byte; it counts
+# settings, not lines, and readers fall back to the defaults. Nothing left to
+# remove, or no file, changes nothing, makes nothing and needs no --yes.
+test_reset_removes_every_setting_line_and_keeps_the_rest() {
+    local out rc=0
+    machine_cfg '# my settings' 'CS_STATUSLINE_LAYOUT=capsules' '' 'CS_FOO=1' 'export CS_SCOPE_DISABLE=1' \
+        ' CS_STATUSLINE_CTX_WARN=45' 'CS_STATUSLINE_CTX_WARN=45' 'CS_SECRETS_PASSWORD=x' 'CS_STATUSLINE_LAYOUT=bands' \
+        'not a setting' 'CS_SCOPE_DISABLE=1'
+    assert_eq "capsules|machine" "$(_porcelain_value CS_STATUSLINE_LAYOUT)" "before the reset the file's value applies" || return 1
+    out=$(cs_plain -config reset --yes) || rc=$?
+    assert_eq "0|3 settings removed from ~/.config/cs/config" "$rc|$out" "reset counts the settings it removed" || return 1
+    assert_eq "# my settings
+
+CS_FOO=1
+export CS_SCOPE_DISABLE=1
+ CS_STATUSLINE_CTX_WARN=45
+CS_SECRETS_PASSWORD=x
+not a setting
+x" "$(cat "$MCFG"; printf x)" "every line of a setting went, every other line stayed as typed" || return 1
+    assert_eq "-|default" "$(_porcelain_value CS_STATUSLINE_LAYOUT)" "readers see the default again" || return 1
+    assert_eq "-|default" "$(_porcelain_value CS_SCOPE_DISABLE)" "a flag too" || return 1
+    local before
+    before=$(cat "$MCFG"; printf x)
+    rc=0
+    out=$(cs_plain -config reset < /dev/null) || rc=$?
+    assert_eq "0|nothing to reset in ~/.config/cs/config" "$rc|$out" "a file with no setting left, no --yes, no terminal" || return 1
+    assert_eq "$before" "$(cat "$MCFG"; printf x)" "and the bytes stay" || return 1
+    rm -rf "$HOME/.config"
+    out=$(cs_plain -config reset < /dev/null) || rc=$?
+    assert_eq "0|no settings file at ~/.config/cs/config; nothing to reset" "$rc|$out" "no file" || return 1
+    assert_not_exists "$HOME/.config" "reset makes no directory" || return 1
+}
+
+# Without --yes reset asks on a terminal and changes the file only on y or Y;
+# without a terminal it refuses with status 2. --yes or -y, before or after
+# reset, asks nothing.
+test_reset_asks_on_a_terminal_and_refuses_without_one() {
+    local out rc=0 before
+    machine_cfg 'CS_SCOPE_DISABLE=1' '# keep' 'CS_STATUSLINE_LAYOUT=band'
+    before=$(cat "$MCFG"; printf x)
+    out=$(cs_plain -config reset < /dev/null) || rc=$?
+    assert_eq "2|Error: cs -config reset needs --yes without a terminal" "$rc|$out" "no terminal and no --yes" || return 1
+    assert_eq "$before" "$(cat "$MCFG"; printf x)" "the refusal wrote nothing" || return 1
+    local answer
+    for answer in n N yes ''; do
+        rc=0
+        out=$(printf '%s\n' "$answer" | CS_ASSUME_TTY=1 cs_plain -config reset) || rc=$?
+        assert_eq "0|Remove 2 settings from ~/.config/cs/config? [y/N] nothing changed" "$rc|$out" "the answer '$answer' declines" || return 1
+        assert_eq "$before" "$(cat "$MCFG"; printf x)" "and '$answer' wrote nothing" || return 1
+    done
+    rc=0
+    out=$(CS_ASSUME_TTY=1 cs_plain -config reset < /dev/null) || rc=$?
+    assert_eq "0|Remove 2 settings from ~/.config/cs/config? [y/N] nothing changed" "$rc|$out" "no answer at all declines" || return 1
+    rc=0
+    out=$(printf 'Y\n' | CS_ASSUME_TTY=1 cs_plain -config reset) || rc=$?
+    assert_eq "0|Remove 2 settings from ~/.config/cs/config? [y/N] 2 settings removed from ~/.config/cs/config" "$rc|$out" "Y removes" || return 1
+    assert_eq "# keep" "$(cat "$MCFG")" "the comment stayed" || return 1
+    machine_cfg 'CS_SCOPE_DISABLE=1'
+    out=$(printf 'y\n' | CS_ASSUME_TTY=1 cs_plain -config reset) || rc=$?
+    assert_eq "0|Remove 1 setting from ~/.config/cs/config? [y/N] 1 setting removed from ~/.config/cs/config" "$rc|$out" "y removes, one setting" || return 1
+    assert_eq "" "$(cat "$MCFG")" "the file is empty" || return 1
+    local form
+    for form in 'reset -y' '--yes reset' '-y reset'; do
+        machine_cfg 'CS_SCOPE_DISABLE=1'
+        # shellcheck disable=SC2086  # the form is two words
+        out=$(cs_plain -config $form < /dev/null) || rc=$?
+        assert_eq "0|1 setting removed from ~/.config/cs/config" "$rc|$out" "cs -config $form asks nothing" || return 1
+    done
+    machine_cfg 'CS_SCOPE_DISABLE=1'
+    _refused "Usage: cs [<name>] -config list [--porcelain] | get <KEY> | set <KEY> <value> | unset <KEY> | reset [--yes]" \
+        -config reset --force || return 1
+    _refused "Usage: cs [<name>] -config list [--porcelain] | get <KEY> | set <KEY> <value> | unset <KEY> | reset [--yes]" \
+        -config reset --yes CS_SCOPE_DISABLE || return 1
+    assert_eq "CS_SCOPE_DISABLE=1" "$(cat "$MCFG")" "a refused form wrote nothing" || return 1
+}
+
+# A key the environment also sets keeps the environment's value after a reset,
+# and reset says so on stderr, as set does.
+test_reset_names_a_key_the_environment_still_sets() {
+    local rc=0
+    machine_cfg 'CS_STATUSLINE_LAYOUT=capsules' 'CS_SCOPE_DISABLE=1'
+    CS_STATUSLINE_LAYOUT=band "$CS_BIN" -config reset --yes > "$TEST_TMPDIR/out" 2> "$TEST_TMPDIR/err" || rc=$?
+    assert_eq "0|2 settings removed from ~/.config/cs/config" "$rc|$(cat "$TEST_TMPDIR/out")" "stdout is the count" || return 1
+    assert_eq "CS_STATUSLINE_LAYOUT is also set in your environment (band), which wins until you unset it there" \
+        "$(cat "$TEST_TMPDIR/err")" "stderr names the key the environment pins" || return 1
+}
+
+# The named form empties the session's own file of settings and leaves this
+# machine's alone, whose values readers in that session see again; the
+# session's vet runs before anything is asked or written.
+test_named_reset_touches_only_the_session_file() {
+    local dir out rc=0
+    dir=$(create_test_session_with_git alpha)
+    machine_cfg 'CS_STATUSLINE_LAYOUT=band'
+    session_cfg "$dir" 'CS_STATUSLINE_LAYOUT=capsules' '# mine' 'CS_SCOPE_DISABLE=1'
+    assert_eq "capsules|session" "$(_porcelain_value CS_STATUSLINE_LAYOUT alpha)" "before the reset the session's value applies" || return 1
+    out=$(cs_plain alpha -config reset --yes) || rc=$?
+    assert_eq "0|2 settings removed from alpha/.cs/local/config" "$rc|$out" "the named reset says the session's file" || return 1
+    assert_eq "# mine" "$(cat "$dir/.cs/local/config")" "the session's file keeps its comment" || return 1
+    assert_eq "CS_STATUSLINE_LAYOUT=band" "$(cat "$MCFG")" "the machine's file is untouched" || return 1
+    assert_eq "band|machine" "$(_porcelain_value CS_STATUSLINE_LAYOUT alpha)" "the session sees the machine's value" || return 1
+    assert_eq "-|default" "$(_porcelain_value CS_SCOPE_DISABLE alpha)" "and the default where the machine sets none" || return 1
+    local beta
+    beta=$(create_test_session beta)
+    out=$(cs_plain beta -config reset < /dev/null) || rc=$?
+    assert_eq "0|no settings file at beta/.cs/local/config; nothing to reset" "$rc|$out" "a session with no file" || return 1
+    assert_not_exists "$beta/.cs/local/config" "reset makes no session file" || return 1
+    _refused "No such session: nosuch" nosuch -config reset --yes || return 1
+    session_cfg "$dir" 'CS_SCOPE_DISABLE=1'
+    printf 'x\n' > "$dir/.cs/local/state"
+    (cd "$dir" && git add -f .cs/local/state && git commit -q -m "track local state")
+    rc=0
+    out=$(printf 'y\n' | CS_ASSUME_TTY=1 cs_plain alpha -config reset) || rc=$?
+    assert_eq "1|Error: .cs/local/state is tracked in git (per-actor state must stay local). Fix with: git -C $dir --literal-pathspecs rm -r --cached -- .cs/local && git -C $dir commit -m 'stop tracking .cs/local'" \
+        "$rc|$out" "a session whose .cs/local git tracks is refused before the question" || return 1
+    assert_eq "CS_SCOPE_DISABLE=1" "$(cat "$dir/.cs/local/config")" "and nothing is written" || return 1
+}
+
 # Each refusal names the key and what it takes, exits 1 and writes nothing.
 _refused() {  # expected message, cs arguments...
     local want="$1" out rc=0
@@ -195,8 +319,8 @@ EOF2
     _refused "CS_STATUSLINE_BAND is a palette name, brand, periwinkle, session, none or r;g;b; got red?x" \
         -config set CS_STATUSLINE_BAND "red
 x" || return 1
-    _refused "Usage: cs [<name>] -config list [--porcelain] | get <KEY> | set <KEY> <value> | unset <KEY>" -config set CS_SCOPE_DISABLE || return 1
-    _refused "Usage: cs [<name>] -config list [--porcelain] | get <KEY> | set <KEY> <value> | unset <KEY>" -config || return 1
+    _refused "Usage: cs [<name>] -config list [--porcelain] | get <KEY> | set <KEY> <value> | unset <KEY> | reset [--yes]" -config set CS_SCOPE_DISABLE || return 1
+    _refused "Usage: cs [<name>] -config list [--porcelain] | get <KEY> | set <KEY> <value> | unset <KEY> | reset [--yes]" -config || return 1
     _refused "CS_FOO is not a cs setting; cs -config list names every one" -config get CS_FOO || return 1
     _refused "CS_ACTOR is not kept in cs's config: identity has its own per-session file, .cs/local/identity, which outranks a machine-wide name. Export it in your shell." \
         -config unset CS_ACTOR || return 1
@@ -302,7 +426,7 @@ test_list_hides_the_value_of_a_key_no_file_keeps() {
 }
 
 # The porcelain is the one record the panel and the cs mod parse: one line per
-# allowed key, table order, eleven tab-separated fields, nothing else.
+# allowed key, table order, twelve tab-separated fields, nothing else.
 _porcelain_world() {
     local dir
     dir=$(create_test_session alpha)
@@ -318,7 +442,27 @@ test_list_porcelain_equals_the_golden_record() {
     assert_eq "0" "$rc" "list --porcelain exits 0" || return 1
     assert_eq "" "$(cat "$TEST_TMPDIR/err")" "and says nothing on stderr" || return 1
     assert_eq "$(cat "$SCRIPT_DIR/fixtures/config-porcelain.txt")" "$out" "stdout is the golden record" || return 1
-    assert_eq "41" "$(printf '%s\n' "$out" | awk -F'\t' 'NF == 11' | wc -l | tr -d ' ')" "41 records of 11 fields" || return 1
+    assert_eq "41" "$(printf '%s\n' "$out" | awk -F'\t' 'NF == 12' | wc -l | tr -d ' ')" "41 records of 12 fields" || return 1
+}
+
+# A key that turns something off (*_NO_*, *_DISABLE) has an inverted edit
+# kind, flagoff, or shelloff where the pane takes no change, and a label that
+# names the feature, so the pane shows the feature on while the key is off.
+# Every record's last field says what the setting does, short enough for the
+# pane's footer.
+test_porcelain_names_features_and_describes_each() {
+    local out rc=0
+    out=$("$CS_BIN" -config list --porcelain 2>&1) || rc=$?
+    assert_eq "0" "$rc" "list --porcelain exits 0: $out" || return 1
+    assert_eq "" "$(printf '%s\n' "$out" | awk -F'\t' '$4 !~ /^(flag|flagoff|choice|text|shell|shelloff)$/ { print $1 ": " $4 }')" \
+        "every edit kind is one of the six" || return 1
+    assert_eq "" "$(printf '%s\n' "$out" | awk -F'\t' '
+        { off = ($1 ~ /_NO_|_DISABLE$/); inverted = ($4 == "flagoff" || $4 == "shelloff") }
+        off != inverted { print $1 ": " $4 }')" "every key that turns something off, and no other, has an inverted kind" || return 1
+    assert_eq "" "$(printf '%s\n' "$out" | awk -F'\t' '($4 == "flagoff" || $4 == "shelloff") && $3 ~ /^(No|Hide) / { print $1 ": " $3 }')" \
+        "an inverted key's label names the feature" || return 1
+    assert_eq "" "$(printf '%s\n' "$out" | awk -F'\t' '$12 == "" || $12 == "-" || length($12) > 110 { print $1 ": " length($12) }')" \
+        "every record describes its setting in 1 to 110 characters" || return 1
 }
 
 # The human listing: every group, every key with its value, source and when,
@@ -342,11 +486,11 @@ test_list_prints_the_table_and_the_skipped_lines() {
 Ignored in alpha/.cs/local/config
   line 4: CS_ROTATE_FORCE_CTX=101: not off, 0 or a percentage from 1 to 100" \
         "$(printf '%s\n' "$out" | sed -n '/^Ignored in /,$p')" "the skipped lines, file by file, at the end" || return 1
-    assert_eq "Status line|Prompts|Turn end|Rotation|Rewriter (ctrl+g)|Terminal|Launch|Ignored in ~/.config/cs/config|Ignored in alpha/.cs/local/config" \
-        "$(printf '%s\n' "$out" | grep '^[A-Z]' | paste -sd '|' -)" "the seven groups in table order, then the two files' skips" || return 1
+    assert_eq "Status line|Prompts|Rotation|Rewriter (ctrl+g)|Terminal|Mail|Launch|Queue|Narrative|Ignored in ~/.config/cs/config|Ignored in alpha/.cs/local/config" \
+        "$(printf '%s\n' "$out" | grep '^[A-Z]' | paste -sd '|' -)" "the nine groups in table order, each once, then the two files' skips" || return 1
     local rc=0
     out=$(cs_plain -config list) || rc=$?
-    assert_eq "0|Status line|Prompts|Turn end|Rotation|Rewriter (ctrl+g)|Terminal|Launch|Ignored in ~/.config/cs/config" \
+    assert_eq "0|Status line|Prompts|Rotation|Rewriter (ctrl+g)|Terminal|Mail|Launch|Queue|Narrative|Ignored in ~/.config/cs/config" \
         "$rc|$(printf '%s\n' "$out" | grep '^[A-Z]' | paste -sd '|' -)" "outside any session: the machine's file alone" || return 1
 }
 
@@ -379,6 +523,9 @@ test_verb_runs_under_bash_32() {
     out=$(PATH="/bin:$PATH" cs_plain alpha -config set CS_STATUSLINE_LAYOUT capsules) || rc=$?
     assert_eq "0|CS_STATUSLINE_LAYOUT=capsules in alpha/.cs/local/config: applies at the next repaint" "$rc|$out" "set under bash 3.2" || return 1
     assert_eq "capsules" "$(PATH="/bin:$PATH" cs_plain alpha -config get CS_STATUSLINE_LAYOUT)" "get under bash 3.2" || return 1
+    out=$(PATH="/bin:$PATH" cs_plain alpha -config reset --yes) || rc=$?
+    assert_eq "0|5 settings removed from alpha/.cs/local/config" "$rc|$out" "reset under bash 3.2" || return 1
+    assert_eq "band" "$(PATH="/bin:$PATH" cs_plain alpha -config get CS_STATUSLINE_LAYOUT)" "the machine's value after the reset under bash 3.2" || return 1
 }
 
 # --- Readers ---------------------------------------------------------------------
@@ -674,6 +821,10 @@ run_test test_loader_reads_nothing_from_a_file_it_cannot_read
 run_test test_set_writes_a_new_machine_file
 run_test test_set_keeps_every_other_line
 run_test test_unset_removes_every_line_of_the_key
+run_test test_reset_removes_every_setting_line_and_keeps_the_rest
+run_test test_reset_asks_on_a_terminal_and_refuses_without_one
+run_test test_reset_names_a_key_the_environment_still_sets
+run_test test_named_reset_touches_only_the_session_file
 run_test test_set_refuses_what_no_reader_takes
 run_test test_named_set_writes_the_session_file
 run_test test_get_follows_the_precedence
@@ -681,6 +832,7 @@ run_test test_a_key_that_is_not_a_name_runs_nothing
 run_test test_a_named_verb_reads_the_target_sessions_file
 run_test test_list_hides_the_value_of_a_key_no_file_keeps
 run_test test_list_porcelain_equals_the_golden_record
+run_test test_porcelain_names_features_and_describes_each
 run_test test_list_prints_the_table_and_the_skipped_lines
 run_test test_concurrent_sets_both_land
 run_test test_verb_runs_under_bash_32
