@@ -43,8 +43,12 @@ _rot_session() {  # name
 # Ambient env + session dir for driving hooks directly (no cs launch).
 _rot_hook_session() {  # name
     local dir="$CS_SESSIONS_ROOT/$1"
-    mkdir -p "$dir/.cs/local"
+    mkdir -p "$dir/.cs/local" "$dir/.cs/memory"
     touch "$dir/.cs/local/session.log"
+    # The actor's own narrative, just written, so the narrative reminder stays
+    # out of the Stop notices these tests read.
+    printf 'alice\n' > "$dir/.cs/local/identity"
+    printf '# narrative\n' > "$dir/.cs/memory/narrative.alice.md"
     # Model a cs-launched lead: rotation events come from the rebind, which the
     # hook performs only for the claude cs exec'd into, matched by pid.
     export CS_LEAD_PID=$$

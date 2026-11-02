@@ -237,8 +237,8 @@ if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] \
 fi
 
 # --- The narrative reminder ---------------------------------------------------
-# Decided here too: REMINDER_DUE is 1 when the newest narrative is stale and
-# no reminder went out within the cooldown, read unlocked here as the cheap
+# Decided here too: REMINDER_DUE is 1 when this actor's own narrative is stale
+# and no reminder went out within the cooldown, read unlocked here as the cheap
 # answer for the common case and again under the lock before the stamp.
 COOLDOWN_FILE="$META_DIR/.narrative-reminder-cooldown"
 COOLDOWN_SECONDS=300  # 5 minutes
@@ -267,10 +267,18 @@ _within_cooldown() {
     [ $((CURRENT_TIME - last)) -lt "$COOLDOWN_SECONDS" ]
 }
 
-# Per-actor narratives: track the most recently modified narrative.*.md, and
-# note any that has outgrown its byte budget. The same stat pass serves both.
+# Per-actor narratives. Freshness is read from this actor's own narrative
+# alone: a teammate's write says nothing about whether this claude kept its
+# notes, and it shares the directory. The actor is named by the rules
+# session-start.sh names it by (cs_actor_raw in cs-shared.sh); without the
+# library the own narrative is unknown and counts as stale, as a missing one
+# does. The byte budget is still checked over every narrative*.md, since the
+# budget line names a teammate's file too.
 NARRATIVE_FILE=""
 NARRATIVE_MTIME=0
+if command -v cs_actor_raw >/dev/null 2>&1 && command -v _slugify >/dev/null 2>&1; then
+    NARRATIVE_FILE="$META_DIR/memory/narrative.$(_slugify "$(cs_actor_raw "$SESSION_DIR" "$META_DIR")").md"
+fi
 # The budget and its validation come from cs-shared.sh; without the library
 # the budget is unknown and the size check is skipped (SessionStart names the
 # missing library; a Stop hook has no channel for it). The mtime pass still runs.
@@ -285,10 +293,8 @@ if [ "$_nested" = 0 ] && ! _within_cooldown; then
         # GNU stat is asked first and BSD second, by which one answers rather than
         # by OSTYPE: Homebrew's coreutils can put GNU stat ahead of the system's on
         # a Mac, and GNU `stat -f` prints the file system's details, not the mtime.
-        _m=$(_num_or "$(stat -c %Y "$_nf" 2>/dev/null || stat -f %m "$_nf" 2>/dev/null)" 0)
-        if [ "$_m" -ge "$NARRATIVE_MTIME" ]; then
-            NARRATIVE_MTIME="$_m"
-            NARRATIVE_FILE="$_nf"
+        if [ "$_nf" = "$NARRATIVE_FILE" ]; then
+            NARRATIVE_MTIME=$(_num_or "$(stat -c %Y "$_nf" 2>/dev/null || stat -f %m "$_nf" 2>/dev/null)" 0)
         fi
         _sz=$(wc -c < "$_nf" 2>/dev/null | tr -d ' ' || echo 0)
         case "$_sz" in ''|*[!0-9]*) _sz=0 ;; esac
@@ -296,9 +302,9 @@ if [ "$_nested" = 0 ] && ! _within_cooldown; then
             NARRATIVE_OVER="${NARRATIVE_OVER} $(_cs_plain_name "$(basename "$_nf")" 160) is $((_sz / 1024)) KB, over the $((NARRATIVE_MAX / 1024)) KB budget — if it is yours, run \`cs -narrative rotate\` before appending."
         fi
     done
-    # Nothing to nag about until a narrative file exists, and none while the
-    # newest was updated within the cooldown.
-    if [ -n "$NARRATIVE_FILE" ] && [ $((CURRENT_TIME - NARRATIVE_MTIME)) -ge "$COOLDOWN_SECONDS" ]; then
+    # None while the own narrative was updated within the cooldown; a missing
+    # one reads as never updated.
+    if [ $((CURRENT_TIME - NARRATIVE_MTIME)) -ge "$COOLDOWN_SECONDS" ]; then
         REMINDER_DUE=1
     fi
 fi
@@ -498,12 +504,17 @@ fi
 # condition the model must evaluate is one it will not.
 COMMIT_CADENCE=" Never commit narrative appends or anything else under .cs/ on your own, not even beside a project change: cs commits files under .cs/ only in the commit that creates a session and the merge /finish makes, and you commit them only when the user asks. Never push a commit that holds narrative appends unless the user asks. Uncommitted appends are safe — autosave snapshots every edit to a shadow ref."
 
-# .cs/memory is tracked, so a clone chooses the narrative's file name: it is
-# printed as a plain name.
-NARRATIVE_SHOWN="$META_DIR/memory/$(_cs_plain_name "${NARRATIVE_FILE##*/}" 160)"
+# The actor slug comes from a git identity a clone can choose: it is printed
+# as a plain name. Without the library the actor is unknown, and the reminder
+# names the file by its pattern; it already says to run cs -whoami.
+if [ -n "$NARRATIVE_FILE" ]; then
+    NARRATIVE_SHOWN="$META_DIR/memory/$(_cs_plain_name "${NARRATIVE_FILE##*/}" 160)"
+else
+    NARRATIVE_SHOWN="$META_DIR/memory/narrative.<actor>.md"
+fi
 # Worded for where it lands: beside the user's next request, about the turn
 # that ended before it. The cooldown stamp above is this notice's cursor, and
 # it is written before the print on purpose: the lock holds it, and a reminder
 # lost at exit comes back after the cooldown rather than twice in a row.
-_emit_notice "Narrative check. This note is carried over from your previous turn, which ended without a narrative note. Before answering the request below, record what that turn found, in your own narrative only (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Newest on disk is $NARRATIVE_SHOWN. (1) If that turn disproved or superseded one of your entries, append a dated correction that names it; never rewrite or delete earlier sections. (2) Append what that turn found as plain dated notes: a decision and its reason, a measured fact, a failed approach, a preference the user stated. A line that only restates routine work, such as \"appended X to Y\" or \"ran the tests\", is not a finding and must not be written. If that turn found nothing worth keeping, say so in one line and answer the request.${COMMIT_CADENCE}${NARRATIVE_OVER}${ADVISOR_NUDGE}"
+_emit_notice "Narrative check. This note is carried over from your previous turn, which ended without a narrative note. Before answering the request below, record what that turn found, in your own narrative only (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Yours is $NARRATIVE_SHOWN. (1) If that turn disproved or superseded one of your entries, append a dated correction that names it; never rewrite or delete earlier sections. (2) Append what that turn found as plain dated notes: a decision and its reason, a measured fact, a failed approach, a preference the user stated. A line that only restates routine work, such as \"appended X to Y\" or \"ran the tests\", is not a finding and must not be written. If that turn found nothing worth keeping, say so in one line and answer the request.${COMMIT_CADENCE}${NARRATIVE_OVER}${ADVISOR_NUDGE}"
 _done 0

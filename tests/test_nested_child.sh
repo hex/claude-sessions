@@ -18,6 +18,7 @@ _nested_setup() {
     mkdir -p "$CLAUDE_SESSION_META_DIR/memory" "$CLAUDE_SESSION_META_DIR/local"
     # A narrative older than the reminder's cooldown, so the lead WOULD be
     # reminded: that is what makes the child's silence a measurement.
+    printf 'alice\n' > "$CLAUDE_SESSION_META_DIR/local/identity"
     printf '# narrative\n' > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     touch -t 202601010000 "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     unset CS_RESOLVED_FROM 2>/dev/null || true
@@ -41,7 +42,7 @@ test_the_lead_gets_the_narrative_reminder() {
     _nested_setup
     local out
     out=$(_stop_notices "$$" "$$")
-    assert_output_contains "$(stop_notice_text "$out")" "^Narrative check\. .* Newest on disk is $CLAUDE_SESSION_META_DIR/memory/narrative\.alice\.md\. " \
+    assert_output_contains "$(stop_notice_text "$out")" "^Narrative check\. .* Yours is $CLAUDE_SESSION_META_DIR/memory/narrative\.alice\.md\. " \
         "the lead is reminded on a stale narrative, as additionalContext" || return 1
 }
 
