@@ -752,7 +752,7 @@ _cs_path_base() {  # path
     local p="$1"
     while [ "$p" != "${p%/}" ] && [ -n "${p%/}" ]; do p=${p%/}; done
     case "$p" in
-        /|//*) printf '/\n'; return ;;
+        /) printf '/\n'; return ;;
     esac
     printf '%s\n' "${p##*/}"
 }

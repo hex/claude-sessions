@@ -491,14 +491,13 @@ fi
 # exit. Claude Code starts the two hooks together and neither runs first by
 # contract, so the wait has two bounds. No line for this Stop within the first
 # two seconds of this process means no verdict is coming (a partial install
-# without the sync hook, or one that predates the verdict), and the notices go
-# ahead as they did before the verdict existed; a pending line extends the
-# wait to CS_STOP_VERDICT_WAIT seconds from the process start (default 7, at
+# without the sync hook, or one whose hook writes no verdict), and the notices go
+# ahead unblocked; a pending line extends the wait to CS_STOP_VERDICT_WAIT
+# seconds from the process start (default 7, at
 # most the budget), and a verdict that is still pending then is treated as
 # approve, since a notice that waits longer risks the 10 s registration
 # timeout. The staged retire can block later than that (its settle waits up
-# to six seconds twice), and a notice then lands beside its block, as every
-# notice did before the verdict existed. The key is one per Stop, so an
+# to six seconds twice), and a notice then lands beside its block. The key is one per Stop, so an
 # earlier Stop's line is never this one's; its epoch is for a reader. Lead
 # only: every block the sync hook answers with is the lead's, and only the
 # lead's sync hook writes the file.
@@ -536,7 +535,7 @@ fi
 # the budget, nothing at all once the budget is spent; without the library,
 # without perl, when the lock file cannot be made (the local directory is
 # unwritable) or when a holder keeps it past the budget, the files are read
-# and written unlocked, as they were before the lock existed, and a stamp that
+# and written unlocked, and a stamp that
 # cannot be written costs no reminder: the hook fails open. The lock is taken
 # in this process, not a $(...), as its contract asks. Its file sits in
 # .cs/local/, per-machine state.

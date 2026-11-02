@@ -387,7 +387,7 @@ CONTEXT_DAY=${CONTEXT_LOADED%% *}
 # model never hands a peer the spelling SendMessage refuses.
 NAME_NOTE=""
 [[ "$CLAUDE_SESSION_NAME" != *@* ]] || NAME_NOTE="
-Claude Code's own tools (ListAgents, SendMessage) know this session as $(cs_claude_name "$CLAUDE_SESSION_NAME"); cs (cs -msg, cs -rm, the directory) takes $CLAUDE_SESSION_NAME."
+Claude Code's own tools (ListAgents, SendMessage) know this session as ${CLAUDE_SESSION_NAME//@/+}; cs (cs -msg, cs -rm, the directory) takes $CLAUDE_SESSION_NAME."
 CONTEXT=$(cat << EOF
 You are working in a managed Claude Code session: $CLAUDE_SESSION_NAME$NAME_NOTE
 Context loaded: $CONTEXT_LOADED ($(date -u +%Y-%m-%dT%H:%M:%SZ))

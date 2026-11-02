@@ -198,7 +198,7 @@ _config_list_human() {  # session name or ""
 }
 
 cmd_config() {  # session name or "", action, args...
-    local name="$1" sdir="" file action yes="" arg answer count keys key
+    local name="$1" sdir="" file action yes="" arg answer count keys key present
     shift
     if [ -n "$name" ]; then
         sdir="$SESSIONS_ROOT/$name"
@@ -245,7 +245,17 @@ cmd_config() {  # session name or "", action, args...
             [ $# -eq 1 ] || error "$_CONFIG_USAGE"
             _config_known_key "$1"
             [ -z "$sdir" ] || _vet_named_session "$sdir"
-            if [ ! -f "$file" ] || ! grep -q "^$1=" "$file"; then
+            # grep exits 1 for no match and 2 when it cannot read the file;
+            # only the first means the key is absent.
+            present=""
+            if [ -f "$file" ]; then
+                if grep -q "^$1=" "$file" 2>/dev/null; then
+                    present=1
+                elif [ $? -ne 1 ]; then
+                    error "$_CONFIG_LABEL could not be read; nothing changed"
+                fi
+            fi
+            if [ -z "$present" ]; then
                 printf '%s is not in %s; nothing changed\n' "$1" "$_CONFIG_LABEL"
                 return 0
             fi

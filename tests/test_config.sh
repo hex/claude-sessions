@@ -143,6 +143,22 @@ test_unset_removes_every_line_of_the_key() {
     assert_eq "$before" "$(cat "$MCFG"; printf x)" "and the bytes stay" || return 1
 }
 
+# A file unset cannot read is an error, not an absent key: a silent "nothing
+# changed" would leave the key in force while saying it was never there.
+test_unset_refuses_a_file_it_cannot_read() {
+    if [ "$(id -u)" = 0 ]; then
+        echo "  SKIP: root reads a mode-000 file"
+        return 77
+    fi
+    local out rc=0
+    machine_cfg 'CS_STATUSLINE_LAYOUT=capsules'
+    chmod 000 "$MCFG"
+    out=$(cs_plain -config unset CS_STATUSLINE_LAYOUT 2>&1) || rc=$?
+    chmod 644 "$MCFG"
+    assert_eq "1|Error: ~/.config/cs/config could not be read; nothing changed" "$rc|$out" "an unreadable file is an error" || return 1
+    assert_eq "CS_STATUSLINE_LAYOUT=capsules" "$(cat "$MCFG")" "and the line stays" || return 1
+}
+
 # The setting of <key> as the porcelain reports it: "<value>|<source>".
 _porcelain_value() {  # key, [session name]
     "$CS_BIN" ${2:+"$2"} -config list --porcelain | awk -F'\t' -v k="$1" '$1 == k { print $9 "|" $10 }'
@@ -821,6 +837,7 @@ run_test test_loader_reads_nothing_from_a_file_it_cannot_read
 run_test test_set_writes_a_new_machine_file
 run_test test_set_keeps_every_other_line
 run_test test_unset_removes_every_line_of_the_key
+run_test test_unset_refuses_a_file_it_cannot_read
 run_test test_reset_removes_every_setting_line_and_keeps_the_rest
 run_test test_reset_asks_on_a_terminal_and_refuses_without_one
 run_test test_reset_names_a_key_the_environment_still_sets

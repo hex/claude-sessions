@@ -434,7 +434,7 @@ test_stop_hooks_parse_a_library_again_once_it_changes() {
 
 test_path_helpers_print_what_dirname_and_basename_print() {
     local row path dir base
-    for row in 'a|.|a' '/a|/|a' 'a/b|a|b' '/a/b|/a|b' 'a/b/|a|b' 'a//b|a|b' '/|/|/' '-x|.|-x' './-x|.|-x' '/a/b/c.d|/a/b|c.d'; do
+    for row in 'a|.|a' '/a|/|a' 'a/b|a|b' '/a/b|/a|b' 'a/b/|a|b' 'a//b|a|b' '//a/b|//a|b' '//a|/|a' '/|/|/' '-x|.|-x' './-x|.|-x' '/a/b/c.d|/a/b|c.d'; do
         path=${row%%|*} base=${row##*|} dir=${row#*|} dir=${dir%|*}
         assert_eq "$dir" "$(. "$HOOKS_DIR/cs-shared.sh"; _cs_path_dir "$path")" "directory of $path" || return 1
         assert_eq "$base" "$(. "$HOOKS_DIR/cs-shared.sh"; _cs_path_base "$path")" "name of $path" || return 1
