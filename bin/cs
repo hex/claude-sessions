@@ -7081,7 +7081,9 @@ run_features() {  # base_name [--porcelain]
     while IFS= read -r task; do
         [ -n "$task" ] || continue
         record=$(_feature_readiness "$base_name" "$task")
-        IFS=$'\t' read -r task branch ahead _ _ _ untracked _ lock state <<< "$record"
+        # Read on a separator that is not IFS whitespace: a run of tabs
+        # collapses under IFS=$'\t', and an empty field would shift the rest.
+        IFS=$'\037' read -r task branch ahead _ _ _ untracked _ lock state <<< "${record//$'\t'/$'\037'}"
         sentence=$(_feature_state_sentence "$state" "$lock" "$untracked" "$ahead")
         printf '%-24s %-24s %6s  %s\n' "$task" "$branch" "$ahead" "$sentence"
     done <<< "$features"
