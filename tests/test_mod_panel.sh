@@ -10,9 +10,14 @@ setup() { :; }
 teardown() { :; }
 
 # What the mod hooks, as `claude plugin validate` prints it: the bare /cs and
-# /cs-panel, its own pane's render, focus ring and close, the main loop's turn
-# end, and the /config writes it follows.
-HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=cs}, command.run{command=cs-panel}, ui.render{component=Pane, requestId=cs-panel}, ui.focus{requestId=cs-panel}, ui.close{id=cs-panel}, turn.complete, config.set'
+# /cs-panel, its own pane's render, focus ring, window moves and close, the
+# main loop's turn end, and the /config writes it follows.
+HOOKS_LINE='./register.tsx hooks: session.start, command.run{command=cs}, command.run{command=cs-panel}, ui.render{component=Pane, requestId=cs-panel}, ui.focus{requestId=cs-panel}, ui.scroll{requestId=cs-panel}, ui.close{id=cs-panel}, turn.complete, config.set'
+
+# Every engine call the mod makes, as validate prints it. No $.ui.ask: the
+# pane asks in itself, so no dialog takes the focus from it; the ring moves by
+# $.ui.focus and every redraw is a $.ui.invalidate.
+CALLS_LINE='./register.tsx calls: $.clock.after, $.command.register, $.config.list (via refreshMods), $.config.set (via changeMod), $.env.get (via readLaunch), $.process.run (via runCs), $.ui.focus (via refocus), $.ui.invalidate, $.ui.log (via inBackground, readVersion), $.ui.open (via openPanel), $.ui.panes (via resume), $.ui.resolve, $.ui.toast (via askReset, change, changeMod, changeSetting, resetSettings)'
 
 test_mod_manifest_names_the_plugin_and_its_module() {
     local manifest="$MOD/.claude-plugin/plugin.json"
@@ -97,10 +102,10 @@ test_mod_typechecks_against_the_engine_contract() {
     assert_eq "0" "$status" "tsc exits 0" || { echo "$out"; return 1; }
 }
 
-# The bare /cs and the /config observer are gates, the observer with a catch
-# so its own failure never refuses a row; cs's settings are written only by
-# cs, the mods' rows only through $.config.set; the mod touches no file, sets
-# no environment variable and reaches no network.
+# The bare /cs, the pane's window moves and the /config observer are gates,
+# the observer with a catch so its own failure never refuses a row; cs's
+# settings are written only by cs, the mods' rows only through $.config.set;
+# the mod touches no file, sets no environment variable and reaches no network.
 test_mod_validate_inventories_the_hooks_and_calls() {
     require_tool claude || return $?
     local out raw="${TMPDIR:-/tmp}/cs-mod-panel-validate.$$"
@@ -116,12 +121,16 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     local line
     line="$(grep -F './register.tsx hooks:' <<< "$out" | sed 's/^[^.]*//')"
     assert_eq "$HOOKS_LINE" "$line" "the exact hooks inventory" || return 1
+    line="$(grep -F './register.tsx calls:' <<< "$out" | sed 's/^[^.]*//')"
+    assert_eq "$CALLS_LINE" "$line" "the exact calls inventory" || return 1
+    assert_output_not_contains "$out" '$.ui.ask' "the pane opens no dialog" || return 1
     assert_output_contains "$out" 'gating hook without .catch: command.run{command=cs}$' "bare /cs is a gate" || return 1
+    assert_output_contains "$out" 'gating hook without .catch: ui.scroll{requestId=cs-panel}$' "the pane's window moves are a gate" || return 1
     assert_output_contains "$out" 'gating hook with .catch: config.set$' "the /config observer is a gate with a catch" || return 1
     assert_output_contains "$out" '$.config.list (via refreshMods)' "the mod rows come from \$.config.list" || return 1
     assert_output_contains "$out" '$.config.set (via changeMod)' "a mod row is written through \$.config.set" || return 1
     assert_output_contains "$out" '$.process.run (via runCs)' "every cs run goes through runCs" || return 1
-    assert_output_contains "$out" 'env reads: CLAUDE_SESSION_NAME, CS_BIN$' "the launch's two exports, nothing else" || return 1
+    assert_output_contains "$out" 'env reads: CLAUDE_SESSION_NAME, CS_BIN, CS_UPDATE_AVAILABLE$' "the launch's three exports, nothing else" || return 1
     assert_output_contains "$out" 'env writes: nothing$' "the mod sets no environment variable" || return 1
     assert_output_not_contains "$out" '$.env.set' "no \$.env.set" || return 1
     assert_output_not_contains "$out" '$.fs.' "the mod reads and writes no file: cs owns the settings files" || return 1

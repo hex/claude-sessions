@@ -862,7 +862,7 @@ the conversation it meets next unjudged.
 The mods hand Claude Code every toast, `$.ui.ask` dialog, `$.ui.log` notice,
 slash-command reply and command registration from tables they export: cs and
 cs-update in `register.tsx` (`TOASTS`, `ASKS`, `LOGS`, `REPLIES`, `COMMANDS`),
-cs-panel in `register.tsx`, `draw.tsx` (`WORDS`, `KEYS`) and `settings.ts`
+cs-panel in `register.tsx`, `draw.tsx` (`WORDS`) and `settings.ts`
 (`LABELS`), cs-feed in
 `words.ts`. `tests/test_mod_tables.sh` fails when a call site writes
 such a line inline. Claude Code leads a toast, a notice and a command reply with
@@ -1118,71 +1118,258 @@ transcript, 60 columns wide, in fullscreen from 110 columns.
 
 The rows come from two places. `Mods` lists the `/config` rows of `cs`,
 `cs-update` and `cs-mermaid` (`$.config.list()`, those three plugins by name, so
-another `cs-*` plugin's rows are not drawn). Under it, cs's own settings come in
+another `cs-*` plugin's rows are not drawn). Those mods title each row `cs: `
+and its label, so `/config` marks the row as cs's; under `Mods` the mark says
+nothing and the pane draws the label without it. Under it, cs's own settings come in
 cs's groups and order from `cs -config list --porcelain`, run through `CS_BIN`
 (the path the launch exported) with no shell. The panel holds no list of
 settings and no copy of their checks: labels, choices, defaults, when a change
-applies and where each value comes from all arrive in that record. A row shows
-its label, its value (cs's name for the default when nothing sets it), where the
-value comes from (`shell`, `launch`, `session`, `machine` or `default`; `mod` or
-`locked` for a `/config` row) and when a change applies (`now`, `/clear`,
-`launch` or `now+launch`).
+applies, where each value comes from and a sentence on what the setting does
+all arrive in that record, twelve fields with that sentence last. The panel
+refuses a whole answer that holds a record of any other length, and says so
+above the rows. A row shows its label and its value (cs's name for the default
+when nothing sets it). From 72 columns it also shows where the
+value comes from (`shell`, `launch`, `session` or `machine`; `mod` or `locked`
+for a `/config` row) and when a change applies (`/clear`, `launch` or
+`now+launch`). A row at its default leaves the last two empty, and a change
+that applies at once (`now`) leaves the last one empty. Below 72 columns, as
+in the 58-column dock, the row ends at its value and the footer says the
+rest.
 
-Tab, the arrows or a click select a row (`ui.focus`). The line under the strip
-says what the selected row is and when a change takes hold. The strip holds the
-keys that row admits, each one Button with its own hotkey:
+The pane draws in the cs TUI's look. Ink, muted, faint, soft, teal and green
+are Claude Code's own theme keys: `text`, `inactive`, `subtle` for both faint
+and soft, `planMode` and `success`. Claude Code resolves them to your theme at
+each redraw, so the pane follows it (auto, dark or light) with no setting, and
+`CS_TERM_THEME` changes none of its colours. Only the brand's colours stay the
+same on every theme: the amber of `tui/src/theme.rs`, and the rust, the gold
+and the wordmark's letters between them of the installer's banner.
 
-- `c`, Enter or a click changes the row. An on/off setting flips at once. A
-  setting with a few values asks with them as choices in one `$.ui.ask`
-  dialog, with `Default (<default>)` beside them while the dialog has room
-  for it (four choices fill it); any other asks with `Keep <value>` and
-  `Default`, and you type the value under Other. The write is `cs -config set` where the
-  value lives: cs changes a value from this session's file there and anything
-  else in this machine's file, so a change always moves what the row shows.
-- `u` puts back the default: `cs -config unset` in the file that holds the
-  value, so a session value falls back to the machine's and the machine's to
-  the default.
-- `p` writes this session's own file only: `cs <name> -config set`, `<name>`
-  being `CLAUDE_SESSION_NAME`. Without a session name the panel offers no `p`,
-  and a setting this session's file sets offers nothing.
+The pane opens on the masthead, the installer's banner (`show_banner` in
+`install.sh.in`) as wide as the pane: a round box of three lines on the
+terminal's own background, its top border and left side in the installer's
+rust, `rgb(230,74,25)`, and its right side and bottom border in its gold,
+`rgb(255,193,7)`. Inside, a cell in from the left side, come the
+`claude-sessions` wordmark in bold, each letter one step of the installer's
+gradient from rust to gold, then cs's version, the number of rows, the number
+of settings a file or the shell overrides (`3 overrides`, `1 override`) and the session name, with a
+`·` between the counts and the name. The counts draw in ink, and the version,
+the dots and the session name draw muted. Where the pane is too narrow, these
+parts drop from the right, down to the wordmark alone, cut short on the
+narrowest pane, and at least a cell stays before the right side. A `/config`
+row never counts as an override, since the panel cannot see its default. The
+version is what `cs -version` prints, asked once each time the mod loads, when
+the pane first opens or a reload finds it open; until cs answers, the masthead
+goes on without it. A run that fails, or prints anything but `cs <version>`,
+writes `cs -version <why>` to the transcript, and the next open asks again.
+When the launch found a newer cs (`CS_UPDATE_AVAILABLE`), a second line inside
+the box reads `cs <version> available · run cs -update`, the version in amber
+and the rest muted, dropped from the right the same way, so the box is four
+lines. That line goes once the masthead's version is that version, as when a
+reload after an update installed from this conversation reads it again. The
+problem lines and the reading words sit right under the masthead.
+
+Under the masthead comes the search box, then the column header and the rows.
+The rows sit under a muted bold column header and a soft rule. Below 72
+columns the header reads `Setting` and `Value`, and a name takes every cell
+the 14-cell value column leaves, 40 in the 58-column dock. From 72 columns
+`Source` and `Applies` follow, a name takes up to 26 cells, and `Applies`
+takes what a wider pane leaves. Each group's headline is its name in bold
+ink, one space and a soft `─` rule to the pane's edge, with an empty line
+above every group but the first.
+
+The selected row's lines are the pane's footer: under the last row drawn, and
+the `+N below` count when there is one, a soft rule as wide as the pane, then
+these lines, each of the first four opening with `▍` in the soft rule colour:
+
+1. `selected · ` muted, then the row's label in bold ink, cut short where the
+   pane is too narrow.
+2. What the setting does, in ink: cs's sentence from the record, or a
+   `/config` row's own description. A row with none has no such line.
+3. The whole value as the row draws it, then where the value comes from in
+   that source's colour (`default` muted), then a note, muted: when a change
+   applies, why cs skipped a file's value, or why Enter changes nothing.
+4. The row's key, muted: the `CS_*` name, or a `/config` row's
+   `<plugin>.<field>`.
+5. Two cells in and muted, the keys: `↑↓ move · Enter change · Esc close`. On
+   a row Enter changes at once with no chooser, an on/off setting no file
+   holds or a `/config` toggle, the middle part reads `Enter flip`. On
+   a row Enter cannot change, the middle part says why: `shell sets it`,
+   `shell only`, `managed` or `no session name`. At the line's right end
+   sits the reset control, `reset all…`, muted, and the keys give up their
+   end to leave a cell before it. The mobile app draws the same line.
+6. Under a session name, the scope line, two cells in: `writes to: ● this
+   session  ○ this machine`, `writes to: ` muted and then a plain Button for
+   each file, `●` in green on the file writes go to and `○` on the other.
+   Where the line cannot hold `writes to: `, it leaves it out, and where it
+   cannot hold both Buttons, it cuts each one to the same width. With no
+   session name the pane draws no scope line.
+
+Lines 2 and 3 wrap by words and take three lines at most between them. The
+value line comes first: it takes two of the three where there is a
+description, which keeps one or two and ends in `…` where it runs out. A short
+pane takes back lines in this order, so the window keeps at least one: the
+wrapped lines down to one value line, then the key, then the keys' line, then
+the scope line, then the value line, down to the label alone. A pane with no
+line left for the label draws no footer.
+
+Every value draws in ink, at its default too. Only the source word says what
+overrides a value, in the colour of where the value lives: `session` teal,
+`machine` green, `shell` amber (the environment overrides both files), and
+`launch` faint. Its applies word is muted. A toggle reads `● on`, the dot
+green, or `○ off`. Some flags turn off what their label names when they are
+1: cs's `flagoff` and `shelloff` records. cs labels such a row with the
+feature (`Scope grounding` for `CS_SCOPE_DISABLE`), so it reads `● on` while
+the flag is unset and `○ off` at 1. A percent setting (its label ends in `%`)
+draws its number and `%`, `40%`, and a value that is no number, `the warn %`,
+unchanged. Faint is for the `+N` counts and the `launch` source only.
+
+Each row is one plain Button, keyed by the row and named by its label: the
+name and every column are its text, so the focus inverts the whole row. The
+selected row has `▌` in amber outside the Button and its label bold, on no
+background. Every row's label is in ink, selected or not, at its default or
+set.
+
+The pane opens with the focus ring in the search box: a one-line Input inside
+a round border in the soft rule colour, as wide as the pane, that reads
+`search settings` while empty. As you type,
+the pane shows only the rows whose label, key or group holds the text, in any
+case. A group with no row left goes, and `no setting matches <text>` stands in
+for an empty list. While the field holds text, the column header's right end
+says how many rows show out of the total, `3 of 46`, muted, and the heads
+give up their end to leave it room. The masthead keeps its counts, and `+N above` and
+`+N below` count the rows shown. An empty field shows every row again, and
+closing the pane forgets the text. Enter in the field, labelled `select`,
+selects the first row shown and moves the ring there. On the terminal the box
+takes three lines: its border above, the field, its border below. The mobile
+app draws no Input, so there three empty lines stand in the box's place, and
+the pane shows every row. The rows start on the same line on the terminal and
+the mobile app.
+
+Tab or a click selects a row (`ui.focus`). The focus ring walks the search
+box, the rows drawn with an open chooser's elements after its row, then the
+reset control or the confirmation's two Buttons, then the scope line's two, so
+Tab from the last row drawn reaches `reset all…`. The arrows, the wheel, the
+page keys, Home and End move the selection by the rows they ask for among the
+rows shown (`ui.scroll`). The selection stops at the last row and at the
+first, where Up moves the ring back to the field. The pane draws its own
+window of rows, so the engine's window stays put while the window and the
+focus ring follow the selection. The footer says what the selected row is and
+does, and when a change takes hold.
+
+Enter or a click on a row opens its chooser under it, in the row list, or
+flips an on/off setting no file holds. The chooser is a line of plain Buttons
+four cells in, ` · ` between them, wrapped onto more lines by whole choices
+where one line cannot hold them, and a choice wider than the line ends in
+`…`. A row that takes a typed value puts an Input on a line of its own above
+them, holding the value (the default's name while empty), Enter
+labelled `set`. A row that takes one of its values puts a picker there
+instead: a Select listing every value in its owner's order, with the one the
+row holds selected. On the terminal it reads `band ▾`, and with the ring on it
+the picker opens to its options under that line, eight at most and `… N more`
+for the rest. The window counts the chooser's lines, the open picker's
+included, and the selected row stays drawn above it. The ring moves onto the
+chooser's first element, the arrows walk its elements while it stays open and
+stop at its ends, and Enter picks one. On the picker the arrows move its
+highlight instead. `Keep` closes the chooser and writes nothing, and so does
+picking the value the row already holds. Esc on the picker closes the pane, as
+it does on a row, so `Keep` stays a Button under it. Selecting another row,
+editing the filter or closing the pane closes the chooser too. No Button
+offers the value the row already has. The mobile app draws no Input and no
+Select, so there you cannot type a value, a typed setting's chooser offers
+only `Default` and `Keep`, a setting with choices offers its other values as
+Buttons ahead of those, and an on/off setting a file holds offers `Turn on` or
+`Turn off` there.
+
+A change goes where the value lives when this session's file holds it: cs
+writes it there. Any other value goes to the file the scope line names, or to
+this machine's file with no session name, so a change always moves what the
+row shows. cs's own checker judges a typed value.
+
+- An on/off setting no file holds flips at once: no chooser opens, and cs
+  writes 1, which turns a flag's feature on and an off flag's feature off. As
+  after any write, cs's line is the toast and the pane reads cs again.
+- An on/off setting a file holds offers its picker of `on` and `off`, its
+  state selected, then `Default (<default>)` and `Keep`, since the default and
+  the file matter there. A flag that turns its feature off at 1 lists its
+  feature's states: `off` writes 1, `on` writes 0, which cs reads as unset,
+  and its default is `on`.
+- A setting with choices offers its picker, then `Default` while a file holds
+  the value, then `Keep`.
+- Any other setting offers its Input, then `Default (<default>)` and
+  `Keep <value>`.
+
+`Default` is `cs -config unset` in the file that holds the value, so a session
+value falls back to the machine's and the machine's to the default. The scope
+line's `this session` writes this session's own file, `cs <name> -config set`,
+`<name>` being `CLAUDE_SESSION_NAME`, and `this machine` writes
+`~/.config/cs/config`. The pane opens on `this session`, keeps the choice
+while it stays open and forgets it when it closes.
 
 The toast is cs's own reply: the line naming the file and when the change
 applies, or the line refusing the value (`not changed: exited 1: Error: …`).
 A `/config` row changes through `$.config.set`, which runs the owning plugin's
-own `config.set` guard: a toggle flips at once, a choice asks with its options,
-a number or text asks with `Keep <value>` and `Cancel`, and the panel refuses
-an answer a number row cannot read before it writes anything. The owner reloads with
-the new value, which for a `cs.*` row starts an armed rotation countdown over;
-the detail line says so. A `/config` row has no `u`, since the panel cannot see
-a `userConfig` default.
+own `config.set` guard: a toggle flips at once, a choice offers a picker of its
+options and `Keep`, a number or text row offers its Input and `Keep <value>`,
+and the panel refuses a text a number row cannot read before it writes
+anything (`<label> takes a number; got <text>`). The owner reloads with the
+new value, which for a `cs.*` row starts an armed rotation countdown over; the
+footer's note says so. A `/config` row's chooser has no `Default`, since the
+panel cannot see a `userConfig` default.
 
-Some rows offer no key, and the detail line says why. A setting your
-environment pins reads `CS_X=v in your environment wins; unset it there to
-change it here`. `CS_NO_FUNCTION_HOOKS` offers no key either: you change it
-from a terminal, `cs -config set CS_NO_FUNCTION_HOOKS 1`, since on it unloads
-every mod at the next launch, this panel included. A `/config` row a
-managed setting owns reads `a managed setting owns it`.
+On some rows Enter opens nothing and changes nothing. It toasts the row's
+label and the reason, which the footer's note also shows, and its keys' line
+names in short. A setting your environment pins reads `CS_X=v in your
+environment wins; unset it there to change it here`.
+`CS_NO_FUNCTION_HOOKS` takes no change either: you change it from a terminal,
+since `cs -config set CS_NO_FUNCTION_HOOKS 1` loads no mod from the next
+launch, this panel included. A `/config` row a managed setting owns reads
+`a managed setting owns it`. A setting this session's file sets, seen with no
+session name, reads `this session's file sets it, and this conversation has no
+cs session name to write it with`. While cs still writes a row's change, a
+second Enter on that row toasts `<key> is still changing, or no longer listed;
+try again`.
+
+Enter or a click on `reset all…` swaps the keys' line for its confirmation and
+moves the ring onto `confirm`: `remove 3 overrides from this session's file ·
+confirm · keep`. The count is how many settings the scope line's file
+overrides, as the rows' sources say (this machine's file with no session
+name). `your shell's exports stay` follows while the shell sets a setting, and
+`mod rows keep their values` while the pane lists a `/config` row, since a
+reset changes neither. The first part ends in `…` where it must leave the two
+Buttons room, and the others follow only while they fit, so the 58-column dock shows
+none of them. `confirm` runs `cs -config reset --yes`, or `cs <name> -config
+reset --yes` for this session's file, and the toast is cs's line:
+`N settings removed from <path>`, `nothing to reset in <path>` or `no settings
+file at <path>; nothing to reset`. cs can remove more lines than the line
+counts, such as a value it skipped or one the other file overrides, and its
+line gives the real number. A refusal toasts `cs settings not reset: exited
+<code>: <cs's line>`. `keep` brings the keys' line back and runs nothing, and
+both put the ring back on `reset all…`. A press before cs first lists its
+settings opens no confirmation and toasts `cs has not listed its settings yet,
+so nothing was reset`. When the pane draws no footer, as when the filter
+matches nothing, or no keys' line on a short pane, it draws no reset control
+either.
 
 Bare `/cs` is a cooperative pair with the `cs` mod's rail: the `cs` mod passes
 the bare form on with `next(e)`, and this mod passes any argument on, so
 `/cs next` and the bare form answer the same whichever plugin's hook runs first.
 `claude plugin validate` lists both hooks as gates.
 
-The mod reads both sources when the pane opens, after each press, at the end of
+The mod reads both sources when the pane opens, after each change or reset, at the end of
 each main-loop turn while the pane is open, and after a `/config` menu change of
 one of those three plugins' rows (a pass-through `config.set` hook whose own
 failure never refuses the row). It runs no clock. It redraws only when an answer
 changed, keeps the last rows over a failed or unreadable answer and names the
-reason above them. The pane draws no Input and no Select, so every surface gets
-the same pane.
+reason above them.
 
 The mod writes nothing itself: cs writes the settings files and the `/config`
 writer the rows. It has no heartbeat and no doctor row; doctor's drift scan
 covers its deployed files. Its words live in exported tables (`COMMANDS`,
-`REPLIES`, `ASKS`, `TOASTS`, `PROBLEMS`, `LOGS` in `register.tsx`, `WORDS` and
-`KEYS` in `draw.tsx`, `LABELS` in `settings.ts`), and `drawPane(view, el,
+`REPLIES`, `TOASTS`, `PROBLEMS`, `LOGS` in `register.tsx`, `WORDS` in
+`draw.tsx`, `LABELS` in `settings.ts`), and `drawPane(view, el,
 handlers)` is pure over a view. `tests/test_mod_panel.sh` runs the kit test and
-pins the manifest, the installer listing and the validate inventory;
+pins the manifest, the installer listing and the validate inventory, its
+hooks and its calls, with no `$.ui.ask` among them;
 `tests/test_config.sh` holds the porcelain to
 `tests/fixtures/config-porcelain.txt`, which the kit reads as `test/golden.ts`.
 

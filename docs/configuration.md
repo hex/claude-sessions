@@ -360,11 +360,12 @@ session's own `.cs/local/config`, which outranks it in that session. `cs
 -config` writes both:
 
 ```
-cs -config list [--porcelain]          every setting: its value, where it comes from, when a change applies, then the lines the files skip
-cs -config get <KEY>                   the value readers see now; empty when nothing sets it
-cs -config set <KEY> <value>           keep it in this machine's file
-cs -config unset <KEY>                 remove it from this machine's file
-cs <name> -config list|get|set|unset   the same, for that session's own file
+cs -config list [--porcelain]                every setting: its value, where it comes from, when a change applies, then the lines the files skip
+cs -config get <KEY>                         the value readers see now; empty when nothing sets it
+cs -config set <KEY> <value>                 keep it in this machine's file
+cs -config unset <KEY>                       remove it from this machine's file
+cs -config reset [--yes]                     remove every setting from this machine's file
+cs <name> -config list|get|set|unset|reset   the same, for that session's own file
 ```
 
 ```
@@ -372,15 +373,53 @@ $ cs -config set CS_STATUSLINE_LAYOUT band
 CS_STATUSLINE_LAYOUT=band in ~/.config/cs/config: applies at the next repaint
 $ cs my-session -config set CS_SCOPE_DISABLE 1
 CS_SCOPE_DISABLE=1 in my-session/.cs/local/config: applies at your next prompt
+$ cs -config reset
+Remove 2 settings from ~/.config/cs/config? [y/N] y
+2 settings removed from ~/.config/cs/config
 ```
+
+**For tools.** `cs -config list --porcelain` prints one line per setting, in
+the order `cs -config list` uses, with twelve tab-separated fields. A `-`
+means none, and the last field is never `-`.
+
+1. The key.
+2. Its group.
+3. Its label.
+4. How the settings pane changes it: `flag` toggles, `choice` offers the
+   choices, `text` takes typed text, and `shell` takes no change, since you
+   change it from a shell. `flagoff` and `shelloff` act as `flag` and `shell`
+   for a key that turns something off. Its label names the feature the key
+   turns off, so the pane shows the feature on while the key is off.
+5. Its choices, comma-separated.
+6. Its default.
+7. When a change applies: `now`, `/clear`, `launch` or `now+launch`.
+8. When a change applies, in words.
+9. The value readers see. For a `flagoff` key this is the key's own value:
+   `CS_SCOPE_DISABLE=1` is `1`, and the pane shows Scope grounding off.
+10. Where that value comes from: `default`, `machine`, `session`, `shell` or
+    `launch`.
+11. A file's value that readers skip and that would otherwise apply: `session`
+    or `machine`, then the line number, the line and why.
+12. What the setting does, in one sentence.
 
 `set` refuses a key the files never hold, a key that is no cs setting and a
 value the setting's readers would not take, each by name. When your shell
 also exports the key, `set` still writes the file and says on stderr that the
-export wins until you unset it there. `cs <name> -config set` and `unset` run
-the same checks as opening the session first, so cs refuses a session whose
-`.cs/local` git tracks, or whose config links out of the session, before it
-writes anything.
+export wins until you unset it there. `cs <name> -config set`, `unset` and
+`reset` run the same checks as opening the session first, so cs refuses a
+session whose `.cs/local` git tracks, or whose config links out of the
+session, before it asks or writes anything.
+
+`reset` removes the line of every setting the file holds, a value its setting
+refuses included, and keeps every other line as typed, so readers fall back
+to the next source under Precedence. It counts settings, not lines. On a
+terminal it asks first and changes nothing unless you answer `y` or `Y`.
+`--yes` (or `-y`) skips the question. Without a terminal, a reset with
+something to remove and no `--yes` exits with status 2 and changes nothing. A
+reset with nothing to remove, a file with no setting or no file at all,
+changes nothing and needs no `--yes`. Your shell's exports are in no file, so
+a reset leaves them, and cs names on stderr each removed key that your
+environment still sets.
 
 **Precedence.** Each reader takes, per setting, your environment, else the
 session's file, else this machine's, else the default, every time it runs: the
@@ -396,7 +435,8 @@ started outside cs carry no session, so they read this machine's file only.
 never run it as shell: they strip no quotes, trim no spaces and expand
 nothing. Lines starting with `#` and blank lines are comments. Every reader
 skips a line that is not `KEY=value`, a key that is not a setting and a value
-its setting refuses, and the writer keeps them; `cs -config list` and `cs
+its setting refuses, and the writer keeps them, apart from the lines of a
+setting `set`, `unset` or `reset` removes; `cs -config list` and `cs
 -doctor` name each with its line number and why. A skipped session value lets
 this machine's value apply. A key on two lines takes the last; `set` collapses
 them into one line at the end. On and off settings take `1` and `0`, and a
@@ -583,9 +623,11 @@ alone. To get cs's tip back, delete `~/.config/cs/tips-file` and run
 
 Bare `/cs` (or `/cs-panel`) opens a pane of these switches and of cs's settings
 together: the `/config` rows of `cs`, `cs-update` and `cs-mermaid`, then every
-setting `cs -config list` names. `c` changes the selected row, `u` removes a
-setting from the file that holds it, and `p` changes it for this session only;
-a setting your environment pins is read-only there. See
+setting `cs -config list` names. Type to filter the rows, then press Enter on
+one to open its choices under it: a new value, `Default` (which removes it from
+the file that holds it), or `Keep`; the scope line under the keys says which
+file a write goes to. An on/off setting no file holds, and a `/config` toggle,
+flip at once instead. A setting your environment pins is read-only there. See
 [the panel mod](hooks.md#cs-panel-not-a-hook-script--a-claude-code-mod).
 
 The release-notes pane is a Claude Code `/config` row, `cs-update.showReleaseNotes`
@@ -617,6 +659,6 @@ process and its hooks can find the session:
 - `CLAUDE_CODE_TASK_LIST_ID` - Set to the session name for task list persistence; a feature worktree gets its own list under its `base@task` name, not the base's
 - `CLAUDE_CODE_AUTO_MEMORY_PATH` / `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` - Redirect [Claude Code auto memory](https://code.claude.com/docs/en/memory) into `<session>/.cs/memory/`. Claude Code owns the memory-file format and cs owns the storage path. See [memory records](session-layout.md#shared-files).
 - `CS_BIN` - Exported by every cs launch, never set by hand: the absolute path of the running cs, replacing any value inherited from a parent launch. The mods run cs through it (`cs -update`, `/queue`), since the claude process's `PATH` is not the launching shell's
-- `CS_UPDATE_AVAILABLE` - Exported by a cs launch, never set by hand: the version a newer cs was found at. The cs-update mod reads it to draw the release-notes pane. Absent when nothing is pending
+- `CS_UPDATE_AVAILABLE` - Exported by a cs launch, never set by hand: the version a newer cs was found at. The cs-update mod reads it to draw the release-notes pane, and the settings pane (cs-panel) to say on its band which cs is available. Absent when nothing is pending
 - `CS_UPDATE_DECLINED` - Exported by a cs launch, never set by hand: the pending version, when you declined it at a launch's offer to update. The cs-update mod then says in one line that the release is there instead of opening its pane. Absent otherwise
 - `CS_LIVE_LOCK_PID` - Set only for `.cs/local/pre-open`, never by hand: the pid in `.cs/session.lock` when that pid is a running process, empty otherwise. A pre-open reads it to tell whether the session is running instead of reading the lock (see [session-layout.md](session-layout.md))

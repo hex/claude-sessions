@@ -1,43 +1,78 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: Draws the cs-panel pane from a view: the strip of keys for the selected row, its detail line, the problem lines, and a window of rows fitted to the body.
+// ABOUTME: Draws the cs-panel pane from a view in the cs TUI's look: the masthead, the problem lines, the search box, the column header, a window of rows fitted to the body, the chooser under the selected row and that row's footer, which the reset control and the scope line end.
 // ABOUTME: Pure over its view and exported with its word tables, so the design lab draws a fixture without the engine.
-import type { EngineInterface, RenderElement } from 'claude-code'
-import { shownOf, type Action, type Line, type Pending, type Row, type RowId, type Setting, type Source } from './settings'
+import type { EngineInterface, RenderElement, TextProps, ThemeKey } from 'claude-code'
+import {
+  changeOf, filterLines, flips, keyOf, labelOf, lockOf, shownOf, turnsOff, writesTo,
+  type Field, type Line, type Lock, type Pending, type Picker, type Row, type RowId, type Scope, type Source,
+} from './settings'
 
 declare const h: any
 declare const Fragment: any
 
+// What the pane asks in place: a row's chooser under it, with the text its
+// field holds and the element the ring is on, from 0 (the field first); or
+// reset all…'s confirmation in the keys' line.
+export type Chooser = { kind: 'row'; id: RowId; text: string; at: number } | { kind: 'reset' }
+
 // Everything drawPane needs: the lines (undefined until cs or /config first
-// answers), the selection, why a source is stale, and the room the Pane props
-// give.
+// answers), the selection, why a source is stale, the session name, cs's
+// version and a pending one, the room, the filter's text and whether the
+// surface draws fields (an Input, a Select), what the pane asks in place and
+// the scope line's file.
 export type PanelView = {
   lines: readonly Line[] | undefined
-  // The selected row; one no longer listed falls back to the first row.
+  // The selected row; one not shown falls back to the first row shown.
   selected: RowId | undefined
   problems: readonly string[]
-  // Pane props: bodyColumns, scroll.bodyRows, isFocused.
+  session: string | undefined
+  version: string | undefined
+  update: string | undefined
+  // Pane props: bodyColumns, scroll.bodyRows.
   columns: number
   bodyRows: number
-  hasKeys: boolean
+  filter: string
+  hasField: boolean
+  chooser: Chooser | undefined
+  // Drawn under a session name only; without one every write goes to this machine.
+  scope: Scope
 }
 
 export type Handlers = {
-  // The row pressed offers no change: select it.
-  select: (id: RowId) => void
-  // A strip key, or a row's press (change), for that row.
-  act: (action: Action, id: RowId) => void
+  // Enter on a row: its change, its chooser, or why it has neither.
+  change: (id: RowId) => void
+  // Enter on a choice of the row's chooser, or a pick in its picker, by the choice's key.
+  pick: (id: RowId, key: string) => void
+  // The chooser's field: its text on every edit, and Enter with it.
+  type: (text: string) => void
+  submit: (id: RowId, text: string) => void
+  // The search box's text, on every edit.
+  filter: (text: string) => void
+  // Enter in the search box: the ring to the first row shown.
+  toRows: () => void
+  // Enter on the reset control: its confirmation; then confirm or keep.
+  reset: () => void
+  confirm: () => void
+  keep: () => void
+  // Enter on a scope Button: the file the scope line names.
+  scope: (scope: Scope) => void
 }
 
-// The strip's keys, one per Action, in strip order. Three fixed letters, so no
-// two Buttons ever share a hotkey (two clash, later wins), however many rows.
-// `short` is the label a narrow strip draws.
-export const KEYS: Record<Action, { hotkey: string; verb: string; short: string }> = {
-  change: { hotkey: 'c', verb: 'change', short: 'change' },
-  unset: { hotkey: 'u', verb: 'default', short: 'default' },
-  session: { hotkey: 'p', verb: 'this session only', short: 'session' },
-}
+// The keys of the search box, the reset control, the chooser's field, its
+// picker and its choices, the confirmation's two and the scope line's; a row's
+// key is its RowId.
+export const FILTER = 'filter'
+export const RESET = 'reset'
+export const TYPED = 'typed'
+export const PICKER = 'picker'
+const OPTION = 'option:'
+export const optionKey = (label: string) => `${OPTION}${label}`
+export const isChooserKey = (key: string) => key === TYPED || key === PICKER || key.startsWith(OPTION)
+export const CONFIRM = 'confirm'
+export const KEEP = 'keep'
+const scopeKey = (scope: Scope) => `scope:${scope}`
 
 // Every word the pane draws itself.
 export const WORDS = {
@@ -48,76 +83,159 @@ export const WORDS = {
   from: { shell: 'shell', launch: 'launch', session: 'session', machine: 'machine', default: 'default' } satisfies Record<Source, string>,
   mod: 'mod',
   locked: 'locked',
-  modsGroup: 'Mods',
-  modWhen: 'now',
-  pending: { asking: 'asking', writing: 'writing' } satisfies Record<Pending, string>,
+  modsGroup: 'Mods', noMatch: (text: string) => `no setting matches ${text}`,
+  pending: { writing: 'writing' } satisfies Record<Pending, string>,
   above: (n: number) => `+${n} above`,
   below: (n: number) => `+${n} below`,
-  close: 'Esc: close',
-  takeKeys: 'ctrl+x tab: keys',
-  // The selected row's detail line.
-  about: (key: string, text: string) => `${key}: ${text}`,
+  find: 'search settings', toRows: 'select',
   pinned: (key: string, value: string) => `${key}=${value} in your environment wins; unset it there to change it here`,
-  shellOnly: (key: string) => `change it from a shell: cs -config set ${key} 1 (on, it unloads every mod at the next launch, this panel too)`,
+  shellOnly: (key: string) => `change it from a shell: cs -config set ${key} 1 loads no mod from the next launch, this panel included`,
   reloads: (plugin: string) => `changing it reloads ${plugin}${plugin === 'cs' ? ' (an armed rotation countdown starts over)' : ''}`,
   managed: 'a managed setting owns it',
+  noSession: "this session's file sets it, and this conversation has no cs session name to write it with",
+  brand: 'claude-sessions', cs: 'cs', available: 'available', toUpdate: 'run cs -update', caption: 'selected',
+  settings: (n: number) => `${n} settings`, overrides: (n: number) => n === 1 ? '1 override' : `${n} overrides`,
+  shown: (n: number, of: number) => `${n} of ${of}`, percent: (value: string) => `${value}%`,
+  heads: { name: 'Setting', value: 'Value', source: 'Source', applies: 'Applies' },
+  // The footer's last line: the keys, the middle one what Enter does or why it changes nothing on a locked row.
+  hint: { move: '↑↓ move', change: 'Enter change', flip: 'Enter flip', close: 'Esc close',
+    locked: { pinned: 'shell sets it', shellOnly: 'shell only', managed: 'managed', noSession: 'no session name' } satisfies Record<Lock, string> },
+  // The reset control at the right end of the keys' line.
+  reset: 'reset all…',
+  // What Enter in a chooser's field does.
+  set: 'set',
+  // The confirmation in the keys' place: what the reset removes, what no reset
+  // touches, and its two Buttons.
+  resetting: (overrides: number, scope: Scope): string => `remove ${WORDS.overrides(overrides)} from ${WORDS.files[scope]}`,
+  files: { machine: "this machine's file", session: "this session's file" } satisfies Record<Scope, string>,
+  stays: { shell: "your shell's exports stay", mods: 'mod rows keep their values' },
+  confirm: 'confirm', keep: 'keep',
+  // The scope line under the keys' line: its lead, then a Button for each file.
+  scope: { lead: 'writes to: ', session: 'this session', machine: 'this machine' },
+  // The bars, a toggle's dots, the rules, the dot, a clause's join, the footer's edge, the masthead's box.
+  marks: { selected: '▌', on: '●', off: '○', rule: '─', dot: '·', clause: '; ', edge: '▍', box: { top: ['╭', '╮'], bottom: ['╰', '╯'], side: '│' } },
 } as const
 
 type RowLine = Extract<Line, { kind: 'row' }>
 
-// The columns right of the name, in the order a narrow body drops them from
-// the end. Each is drawn cut and padded to its cells, so every row is exactly
-// as wide as every other.
-type Column = { cells: number; text: (line: RowLine) => string }
+// Claude Code's theme keys, which the engine resolves to the person's theme
+// on each drawing: ink, muted, faint, the soft rules, the session source's
+// teal and the machine source's green (blue in the colour-blind themes).
+const THEME = { ink: 'text', mut: 'inactive', faint: 'subtle', soft: 'subtle', teal: 'planMode', green: 'success' } as const satisfies Record<string, ThemeKey>
+
+// The brand's accents on every theme: tui/src/theme.rs's amber, and
+// install.sh.in's banner, its rust and gold and the wordmark's letters from one to the other.
+const rgb = (channels: readonly number[]) => `rgb(${channels.join(',')})`
+const BRAND = {
+  amber: rgb([246, 154, 0]), rust: rgb([230, 74, 25]), gold: rgb([255, 193, 7]),
+  wordmark: [[230, 74, 25], [232, 83, 24], [234, 91, 22], [235, 100, 21], [237, 108, 20], [239, 117, 19], [241, 125, 17], [243, 134, 16], [245, 142, 15], [246, 151, 14],
+    [248, 159, 12], [250, 168, 11], [252, 176, 10], [254, 185, 9], [255, 193, 7]].map(rgb),
+}
+
+// A run of one style; a line is a row of runs as wide as their texts.
+type Run = { text: string } & Pick<TextProps, 'color' | 'weight'>
+
+// The columns right of the name: the value, then from SOURCE_COLUMNS the source and when a change applies.
+type Column = { head: string; cells: number; runs: (line: RowLine, cells: number) => Run[] }
 const NAME_MIN = 8
+const NAME_MOST = 26
 const GAP = 2
-// `› ` on the selected row, two spaces elsewhere.
 const MARK_CELLS = 2
-// Between the strip's keys, and before its hint.
-const KEY_GAP = 3
-// How many lines the detail sentence takes at most.
-const DETAIL_LINES = 2
-const COLUMNS: readonly Column[] = [
-  { cells: 11, text: l => l.pending === undefined ? valueOf(l.row) : WORDS.pending[l.pending] },
-  { cells: 7, text: l => l.row.kind === 'mod' ? (l.row.mod.isLocked ? WORDS.locked : WORDS.mod) : WORDS.from[l.row.setting.source] },
-  { cells: 10, text: l => l.row.kind === 'mod' ? WORDS.modWhen : l.row.setting.when },
+const DOT = ` ${WORDS.marks.dot} `
+// Wide enough for every value cs names but a list, which the footer shows
+// whole; narrow where wide leaves the name less than NAME_MIN.
+const VALUE_CELLS = { wide: 14, narrow: 11 }
+// The body from which the source and applies columns draw; under it the footer says both.
+const SOURCE_COLUMNS = 72
+// The search box's lines on the terminal: its border above, the field, its border below.
+const BOX_LINES = 3
+// cs's `when` for a change that applies at once: the applies cell leaves it out.
+const AT_ONCE = 'now'
+// The footer's lines of the description and the value line together, at most.
+const WRAPPED_MOST = 3
+const VALUE: Column = { head: WORDS.heads.value, cells: VALUE_CELLS.wide, runs: (l, cells) => fitRuns(valueRuns(l), cells) }
+// A default row leaves source and applies empty, a mod row its applies.
+const REST: readonly Column[] = [
+  { head: WORDS.heads.source, cells: 7, runs: (l, cells) => l.row.kind === 'mod'
+    ? [{ text: fit(l.row.mod.isLocked ? WORDS.locked : WORDS.mod, cells), color: THEME.mut }]
+    : l.row.setting.source === 'default' ? [{ text: fit('', cells) }]
+      : [{ text: fit(WORDS.from[l.row.setting.source], cells), color: SOURCE_INK[l.row.setting.source] }] },
+  { head: WORDS.heads.applies, cells: 10, runs: (l, cells) => l.row.kind === 'setting' && l.row.setting.source !== 'default' && l.row.setting.when !== AT_ONCE
+    ? [{ text: fit(l.row.setting.when, cells), color: THEME.mut }] : [{ text: fit('', cells) }] },
 ]
 
-// What a row's value cell says: a flag or a toggle on or off (a flag the shell
-// pins to another word, as its readers take, that word), else the value, else
-// cs's name for the default.
-function valueOf(row: Row): string {
-  if (row.kind === 'mod') return typeof row.mod.value === 'boolean' ? (row.mod.value ? WORDS.on : WORDS.off) : shownOf(row.mod.value)
+// A source's colour, the shell's amber as it overrides both files.
+const SOURCE_INK: Record<Source, string> = { session: THEME.teal, machine: THEME.green, shell: BRAND.amber, launch: THEME.faint, default: THEME.mut }
+const OVERRIDES: ReadonlySet<Source> = new Set(['session', 'machine', 'shell'])
+
+// A percent setting: cs names each one with a label ending in `%`.
+const isPercentSetting = (label: string) => label.endsWith('%')
+
+// On (true), off (false), a word the shell pins a flag to, the value or the
+// default's name. An off flag is on while unset and off at 1.
+function valueOf(row: Row): boolean | string {
+  if (row.kind === 'mod') return typeof row.mod.value === 'boolean' ? row.mod.value : shownOf(row.mod.value)
   const s = row.setting
-  if (s.edit === 'flag') return s.value === undefined ? WORDS.off : s.value === '1' ? WORDS.on : s.value
-  return s.value ?? s.fallback ?? WORDS.none
+  if (s.edit === 'choice' || s.edit === 'text') return s.value ?? s.fallback ?? WORDS.none
+  return s.value === undefined || s.value === '1' ? (s.value === '1') !== turnsOff(s.edit) : s.value
 }
 
-function labelOf(row: Row): string {
-  return row.kind === 'mod' ? row.mod.label : row.setting.label
+// A value unpadded: what the row waits on, muted; else in ink, at its default
+// too, `● on` (the dot green), `○ off`, a percentage with its `%`, or the value.
+function valueRuns(l: RowLine): Run[] {
+  if (l.pending !== undefined) return [{ text: WORDS.pending[l.pending], color: THEME.mut }]
+  const value = valueOf(l.row)
+  if (value === true) return [{ text: WORDS.marks.on, color: THEME.green }, { text: ` ${WORDS.on}`, color: THEME.ink }]
+  if (value === false) return [{ text: `${WORDS.marks.off} ${WORDS.off}`, color: THEME.ink }]
+  const isPercent = l.row.kind === 'setting' && isPercentSetting(l.row.setting.label) && /^\d{1,3}$/.test(value) && Number(value) <= 100
+  return [{ text: isPercent ? WORDS.percent(value) : value, color: THEME.ink }]
 }
 
-// The longest prefix of COLUMNS that leaves the name NAME_MIN cells.
+// The columns a body this wide draws: the value, the wide cell where it leaves
+// the name NAME_MIN; from SOURCE_COLUMNS the source and applies too.
 export function columnsFor(columns: number): readonly Column[] {
-  let kept = 0
-  let used = MARK_CELLS
-  for (const column of COLUMNS) {
-    if (columns - used - GAP - column.cells < NAME_MIN) break
-    used += GAP + column.cells
-    kept++
-  }
-  return COLUMNS.slice(0, kept)
+  if (columns >= SOURCE_COLUMNS) return [VALUE, ...REST]
+  const cells = [VALUE_CELLS.wide, VALUE_CELLS.narrow].find(c => columns - MARK_CELLS - GAP - c >= NAME_MIN)
+  return cells === undefined ? [] : [{ ...VALUE, cells }]
+}
+
+// The name takes what the columns leave, beside the source and applies up to
+// NAME_MOST, the last column the rest.
+function tableOf(columns: number): { nameCells: number; cols: readonly Column[] } {
+  const cols = columnsFor(columns)
+  const room = columns - MARK_CELLS - cols.reduce((sum, c) => sum + GAP + c.cells, 0)
+  const nameCells = Math.max(1, cols.length > 1 ? Math.min(NAME_MOST, room) : room)
+  return { nameCells, cols: cols.map((c, i) => i === cols.length - 1 ? { ...c, cells: c.cells + Math.max(0, room - nameCells) } : c) }
 }
 
 // `text` cut to `cells` with `…`. Every text the panel fits is cs's ASCII
 // words, a /config label or its own words, so one UTF-16 unit is one cell
-// (`›` and `…` included).
+// (its marks and `…` included).
 function cut(text: string, cells: number): string {
   return text.length > cells ? `${text.slice(0, Math.max(0, cells - 1))}…` : text
 }
 
 function fit(text: string, cells: number): string {
   return cut(text, cells).padEnd(cells)
+}
+
+// `runs` cut to `cells` with `…` in the style of the run it cuts.
+function clip(runs: readonly Run[], cells: number): Run[] {
+  if (runs.reduce((sum, run) => sum + run.text.length, 0) <= cells) return [...runs]
+  const kept: Run[] = []
+  let left = cells - 1
+  for (const run of runs) {
+    if (run.text.length >= left) return [...kept, { ...run, text: `${run.text.slice(0, left)}…` }]
+    kept.push(run)
+    left -= run.text.length
+  }
+  throw new Error(`clip: ${runs.length} runs longer than ${cells} cells ended before the cut`)
+}
+
+// `runs` cut or padded to exactly `cells`, the last run taking the padding.
+function fitRuns(runs: readonly Run[], cells: number): Run[] {
+  const kept = clip(runs, cells), last = kept.at(-1), width = kept.reduce((sum, run) => sum + run.text.length, 0)
+  return last === undefined || width >= cells ? kept : [...kept.slice(0, -1), { ...last, text: last.text.padEnd(last.text.length + cells - width) }]
 }
 
 // The rows a body of `room` lines (at least one) draws of `count`, and which
@@ -140,105 +258,245 @@ export function windowOf(count: number, at: number, room: number): { from: numbe
   return { from, to: from + shown, above: true, below: true }
 }
 
-// The strip for the selected row, fitted widest first: `c: change   u:
-// default   p: this session only   Esc: close`, then without the hint, then
-// the short labels (`p: session`); a body narrower than that stacks them one
-// key per line. A plain Button draws `<hotkey>: <label>`, so each key is 3 +
-// label cells and the fit is exact.
-type Key = { action: Action; label: string }
-export function stripFor(line: RowLine | undefined, columns: number, hasKeys: boolean): { keys: Key[]; hint: string | undefined; stacked: boolean } {
-  const hint = hasKeys ? WORDS.close : WORDS.takeKeys
-  const actions = line?.actions ?? []
-  const full = actions.map(action => ({ action, label: KEYS[action].verb }))
-  const short = actions.map(action => ({ action, label: KEYS[action].short }))
-  const width = (keys: Key[], withHint: boolean) => [...keys.map(k => 3 + k.label.length), ...(withHint ? [hint.length] : [])]
-    .reduce((sum, cells, i) => sum + cells + (i === 0 ? 0 : KEY_GAP), 0)
-  if (width(full, true) <= columns) return { keys: full, hint, stacked: false }
-  if (width(full, false) <= columns) return { keys: full, hint: undefined, stacked: false }
-  if (width(short, false) <= columns) return { keys: short, hint: undefined, stacked: false }
-  return { keys: short, hint: undefined, stacked: true }
-}
-
-// `text` in lines of `columns` broken between words (a word longer than a line
-// is broken inside), at most `most` of them, the last cut with `…` when more
-// was left.
-function wrapped(text: string, columns: number, most: number): string[] {
-  const lines: string[] = []
-  let line = ''
-  for (let word of text.split(' ')) {
-    while (word.length > columns) {
-      if (line !== '') { lines.push(line); line = '' }
-      lines.push(word.slice(0, columns))
-      word = word.slice(columns)
-    }
-    if (line === '') line = word
-    else if (line.length + 1 + word.length <= columns) line = `${line} ${word}`
-    else { lines.push(line); line = word }
+// `runs` in at most `most` lines of `columns` broken between words, then cut with `…`.
+function wrapRuns(runs: readonly Run[], columns: number, most: number): Run[][] {
+  type Cell = { char: string; run: number }
+  const words: { space: Cell; word: Cell[] }[] = []
+  let space: Cell = { char: ' ', run: 0 }, word: Cell[] = []
+  const end = () => { if (word.length > 0) words.push({ space, word }); word = [] }
+  runs.forEach((run, i) => { for (const char of run.text) if (char === ' ') { end(); space = { char, run: i } } else word.push({ char, run: i }) })
+  end()
+  const lines: Cell[][] = []
+  let line: Cell[] = []
+  for (const w of words) {
+    if (line.length > 0 && line.length + 1 + w.word.length <= columns) { line.push(w.space, ...w.word); continue }
+    if (line.length > 0) lines.push(line)
+    let rest = w.word
+    for (; rest.length > columns; rest = rest.slice(columns)) lines.push(rest.slice(0, columns))
+    line = rest
   }
-  if (line !== '') lines.push(line)
-  if (lines.length <= most) return lines
-  const last = lines[most - 1] ?? ''
-  return [...lines.slice(0, most - 1), last.length + 1 <= columns ? `${last}…` : cut(last, columns)]
+  if (line.length > 0) lines.push(line)
+  const last = lines[most - 1]
+  const kept = lines.length <= most || last === undefined ? lines
+    : [...lines.slice(0, most - 1), [...last.slice(0, columns - 1), { char: '…', run: last.at(-1)?.run ?? 0 }]]
+  return kept.map(cells => cells.reduce<{ run: number; text: string }[]>((out, cell) => {
+    const prev = out.at(-1)
+    if (prev?.run === cell.run) prev.text += cell.char
+    else out.push({ run: cell.run, text: cell.char })
+    return out
+  }, []).map(({ run, text }) => ({ ...runs[run], text })))
 }
 
-// The selected row's sentence, in at most two lines of `columns`:
-//   setting, pinned by the shell -> WORDS.pinned
-//   setting, changed from a shell -> WORDS.shellOnly
-//   setting, a file value skipped -> <key>: <why cs skipped it>
-//   setting                       -> <key>: <when a change applies>
-//   mod row, locked               -> <key>: WORDS.managed
-//   mod row                       -> <key>: WORDS.reloads(<plugin>)
-export function detailOf(line: RowLine | undefined, columns: number): string[] {
-  if (line === undefined) return []
-  const row = line.row
-  return wrapped(row.kind === 'mod'
-    ? WORDS.about(row.mod.key, row.mod.isLocked ? WORDS.managed : WORDS.reloads(row.mod.plugin))
-    : sentenceOf(row.setting), columns, DETAIL_LINES)
+// Why Enter changes nothing on the row, why cs skipped a value, when a change
+// applies or what reloads.
+export function noteOf(row: Row, hasSelf: boolean): string {
+  const lock = lockOf(row, hasSelf)
+  if (row.kind === 'mod') return lock === undefined ? WORDS.reloads(row.mod.plugin) : WORDS.managed
+  const s = row.setting
+  if (lock === 'pinned') return WORDS.pinned(s.key, s.value ?? WORDS.none)
+  if (lock === 'shellOnly') return WORDS.shellOnly(s.key)
+  if (lock === 'noSession') return WORDS.noSession
+  return s.ignored ?? s.whenText
 }
 
-function sentenceOf(s: Setting): string {
-  if (s.source === 'shell') return WORDS.pinned(s.key, s.value ?? WORDS.none)
-  if (s.edit === 'shell') return WORDS.shellOnly(s.key)
-  return WORDS.about(s.key, s.ignored ?? s.whenText)
+// The footer's lines: the selected row's, then the keys' line, which the reset
+// control ends or the reset's confirmation takes, and the scope line under a
+// session name; each control's line undefined where the body has no room for it.
+type Footer = {
+  card: Run[][]
+  controls: { kind: 'keys' | 'confirm'; runs: Run[] } | undefined
+  scope: { lead: string | undefined; runs: Record<Scope, Run[]> } | undefined
 }
 
-// The Buttons' keys: a strip key by its action, a row by its RowId.
-const actKey = (action: Action) => `act:${action}`
+// The selected row's footer, in `room` lines where it can: the label after a
+// caption that says so; what the setting does; its whole value, its source and
+// its note; its key; then the keys, the middle one what Enter does or why it
+// changes nothing on a locked row, cut to leave a cell before the reset
+// control; then the scope line. A short body takes back the description and
+// the value line's later lines, then the key, then the keys' line, then the
+// scope line, then the value line; the description gives way to the value
+// line, and keeps a line beside it where two are left.
+function footerOf(l: RowLine, v: PanelView, room: number): Footer {
+  const row = l.row
+  const hasSelf = v.session !== undefined
+  const scopeLines = hasSelf ? 1 : 0
+  const from: Run = row.kind === 'mod' ? { text: row.mod.isLocked ? WORDS.locked : WORDS.mod, color: THEME.mut }
+    : { text: WORDS.from[row.setting.source], color: SOURCE_INK[row.setting.source] }
+  const dot: Run = { text: DOT, color: THEME.mut }
+  const width = Math.max(1, v.columns - MARK_CELLS)
+  const describe = row.kind === 'mod' ? row.mod.description : row.setting.describe
+  const wrapped = room < 2 ? 0 : Math.max(1, Math.min(WRAPPED_MOST, room - 3 - scopeLines))
+  const value = wrapped === 0 ? []
+    : wrapRuns([...valueRuns(l), dot, from, dot, { text: noteOf(row, hasSelf), color: THEME.mut }], width, describe === '' || wrapped < 2 ? wrapped : wrapped - 1)
+  const about = describe === '' || value.length === wrapped ? [] : wrapRuns([{ text: describe, color: THEME.ink }], width, wrapped - value.length)
+  const lock = lockOf(row, hasSelf)
+  const enter = lock !== undefined ? WORDS.hint.locked[lock] : flips(row, writesTo(v.scope, hasSelf)) ? WORDS.hint.flip : WORDS.hint.change
+  const keys = [WORDS.hint.move, enter, WORDS.hint.close].join(DOT)
+  const card = [clip([{ text: `${WORDS.caption}${DOT}`, color: THEME.mut }, { text: labelOf(row), color: THEME.ink, weight: 'bold' }], width), ...about, ...value,
+    ...(room >= 4 + scopeLines ? [[{ text: cut(keyOf(row), width), color: THEME.mut }]] : [])]
+  const keysCells = Math.max(1, width - WORDS.reset.length - 1)
+  const indent: Run = { text: ' '.repeat(MARK_CELLS) }
+  const controls = room < 3 + scopeLines ? undefined : v.chooser?.kind === 'reset'
+    ? { kind: 'confirm' as const, runs: [indent, { text: resettingOf(v, Math.max(1, width - 2 * DOT.length - WORDS.confirm.length - WORDS.keep.length)), color: THEME.mut }] }
+    : { kind: 'keys' as const, runs: [indent, { text: cut(keys, keysCells).padEnd(keysCells + 1), color: THEME.mut }] }
+  return { card: card.map(line => [{ text: `${WORDS.marks.edge} `, color: THEME.soft }, ...line]), controls, scope: hasSelf && room >= 3 ? scopeOf(v, width) : undefined }
+}
 
-const rowsIn = (lines: readonly Line[]) => lines.filter(l => l.kind === 'row').length
+// What reset all… removes from the file writes go to, counted as the rows'
+// sources say, then what no reset touches: the shell's exports while one
+// overrides a setting, the mod rows while any is listed. The first is cut to
+// `cells`; the others follow while they fit.
+function resettingOf(v: PanelView, cells: number): string {
+  const rows = (v.lines ?? []).flatMap(l => l.kind === 'row' ? [l.row] : [])
+  const scope = writesTo(v.scope, v.session !== undefined)
+  const stays = [...(rows.some(r => r.kind === 'setting' && r.setting.source === 'shell') ? [WORDS.stays.shell] : []), ...(rows.some(r => r.kind === 'mod') ? [WORDS.stays.mods] : [])]
+  let text = cut(WORDS.resetting(rows.filter(r => r.kind === 'setting' && r.setting.source === scope).length, scope), cells)
+  for (const clause of stays) {
+    if (text.length + WORDS.marks.clause.length + clause.length > cells) break
+    text = `${text}${WORDS.marks.clause}${clause}`
+  }
+  return text
+}
 
-// What a view draws, worked out once for drawPane and ringOf: the lines, the
-// selected row (an id no longer listed falls back to the first row), the
-// strip, the detail, the notice in place of lines, and the window of lines the
-// room left takes.
+// The scope line in `width` cells: a Button for each file, ● in green on the
+// one writes go to and ○ on the other, after `writes to: ` where it fits;
+// where the two do not fit, each is cut to the same width.
+function scopeOf(v: PanelView, width: number): NonNullable<Footer['scope']> {
+  const runsOf = (scope: Scope): Run[] => scope === v.scope ? [{ text: WORDS.marks.on, color: THEME.green }, { text: ` ${WORDS.scope[scope]}`, color: THEME.ink }]
+    : [{ text: `${WORDS.marks.off} ${WORDS.scope[scope]}`, color: THEME.ink }]
+  const whole = { session: runsOf('session'), machine: runsOf('machine') }
+  const cells = [...whole.session, ...whole.machine].reduce((sum, run) => sum + run.text.length, GAP)
+  if (WORDS.scope.lead.length + cells <= width) return { lead: WORDS.scope.lead, runs: whole }
+  if (cells <= width) return { lead: undefined, runs: whole }
+  const each = Math.max(1, Math.floor((width - GAP) / 2))
+  return { lead: undefined, runs: { session: clip(whole.session, each), machine: clip(whole.machine, each) } }
+}
+
+// A line of the chooser under the selected row: its field alone, its picker
+// alone, `rows` lines tall, or as many of its choices as fit side by side,
+// each with its key, label and text.
+type ChooserLine = { kind: 'field'; field: Field } | { kind: 'picker'; picker: Picker; rows: number } | { kind: 'choices'; choices: { key: string; label: string; text: string }[] }
+// The chooser's lines start this far in, under the row's label.
+const CHOOSER_CELLS = MARK_CELLS + GAP
+// The options the terminal's Select draws under its value while the ring is
+// on it, at most; a line under them counts the rest.
+const PICKER_SHOWN = 8
+
+// The chooser open on `l`, none while it is open on no row or on another, the
+// row is locked or Enter changes it at once: its field or its picker on a line
+// of its own where the surface draws one, the picker open while the ring is on
+// it (its first element); then its choices with ` · ` between them, led by the
+// changes the picker offers in its place where the surface draws no picker, a
+// line holding as many as fit and a choice wider than a line cut with `…`.
+function chooserOf(v: PanelView, l: RowLine): ChooserLine[] {
+  const hasSelf = v.session !== undefined
+  if (v.chooser?.kind !== 'row' || v.chooser.id !== l.row.id || lockOf(l.row, hasSelf) !== undefined) return []
+  const change = changeOf(l.row, writesTo(v.scope, hasSelf))
+  if (change.kind === 'now') return []
+  const cells = Math.max(1, v.columns - CHOOSER_CELLS)
+  const { control } = change
+  const open = (count: number) => 1 + Math.min(PICKER_SHOWN, count) + (count > PICKER_SHOWN ? 1 : 0)
+  const lines: ChooserLine[] = !v.hasField ? [] : control.kind === 'field' ? [{ kind: 'field', field: control }]
+    : [{ kind: 'picker', picker: control, rows: v.chooser.at === 0 ? open(control.options.length) : 1 }]
+  const choices = control.kind === 'picker' && !v.hasField ? [...control.others, ...change.choices] : change.choices
+  let width = 0
+  for (const choice of choices) {
+    const option = { key: optionKey(choice.label), label: choice.label, text: cut(choice.label, cells) }
+    const last = lines.at(-1)
+    if (last?.kind === 'choices' && width + DOT.length + option.text.length <= cells) {
+      last.choices.push(option)
+      width += DOT.length + option.text.length
+    } else {
+      lines.push({ kind: 'choices', choices: [option] })
+      width = option.text.length
+    }
+  }
+  return lines
+}
+
+// The keys of a chooser's elements in the order the ring walks them.
+const chooserKeysOf = (lines: readonly ChooserLine[]) => lines.flatMap(line => line.kind === 'field' ? [TYPED] : line.kind === 'picker' ? [PICKER] : line.choices.map(c => c.key))
+
+// The masthead, install.sh.in's banner the body wide: a round box, its top
+// border and left side rust and its right side and bottom border gold, around
+// the wordmark in bold letter by letter from rust to gold, cs's version, the
+// rows, how many a file or the shell overrides (a /config row tells no default) and
+// the session name, then, while cs is short of the version an update waits at,
+// that version and what installs it. A line starts a cell in from the left side
+// and ends at least a cell short of the right, its first part cut to fit and
+// the rest dropped from the right.
+function mastheadOf(v: PanelView): Run[][] {
+  const width = (runs: readonly Run[]) => runs.reduce((sum, run) => sum + run.text.length, 0)
+  const room = Math.max(1, v.columns - 4)
+  const { box } = WORDS.marks
+  const border = ([left, right]: readonly [string, string], color: string): Run[] => [{ text: `${left}${WORDS.marks.rule.repeat(Math.max(0, v.columns - 2))}${right}`, color }]
+  const line = (first: readonly Run[], rest: readonly Run[][]): Run[] => {
+    const kept = [...clip(first, room), ...rest.slice(0, rest.filter((_, i) => width(first) + width(rest.slice(0, i + 1).flat()) <= room).length).flat()]
+    return [{ text: box.side, color: BRAND.rust }, { text: ' ' }, ...kept, { text: ' '.repeat(Math.max(1, v.columns - 3 - width(kept))) }, { text: box.side, color: BRAND.gold }]
+  }
+  const after = (gap: string, text: string | undefined, color: string): Run[][] => text === undefined ? [] : [[{ text: gap, color: THEME.mut }, { text, color }]]
+  const rows = (v.lines ?? []).flatMap(l => l.kind === 'row' ? [l.row] : [])
+  const overrides = rows.filter(row => row.kind === 'setting' && OVERRIDES.has(row.setting.source)).length
+  const counts = v.lines === undefined ? [] : [...after(DOT, WORDS.settings(rows.length), THEME.ink), ...after(DOT, WORDS.overrides(overrides), THEME.ink)]
+  const wordmark = [...WORDS.brand].map((text, i): Run => ({ text, color: BRAND.wordmark[i], weight: 'bold' }))
+  const words = line(wordmark, [...after(' ', v.version, THEME.mut), ...counts, ...after(DOT, v.session, THEME.mut)])
+  const update = v.update === undefined || v.update === v.version ? []
+    : [line([{ text: `${WORDS.cs} `, color: THEME.mut }, { text: v.update, color: BRAND.amber }, { text: ` ${WORDS.available}`, color: THEME.mut }], after(DOT, WORDS.toUpdate, THEME.mut))]
+  return [border(box.top, BRAND.rust), words, ...update, border(box.bottom, BRAND.gold)]
+}
+
+// A Line, or the empty line above every heading but the first.
+type BodyLine = Line | { kind: 'gap' }
+
+const rowsIn = (lines: readonly BodyLine[]) => lines.filter(l => l.kind === 'row').length
+
+// What a view draws, for drawPane and ringOf: the rows the filter shows, under
+// the field and the column header once any row is listed; a group's name
+// stands for `+0 above`.
 function layoutOf(v: PanelView) {
-  const lines = v.lines ?? []
+  const isListed = (v.lines ?? []).length > 0
+  const lines = filterLines(v.lines ?? [], v.filter).flatMap((l, i): BodyLine[] => l.kind === 'group' && i > 0 ? [{ kind: 'gap' }, l] : [l])
   const listed = lines.findIndex(l => l.kind === 'row' && l.row.id === v.selected)
   const at = listed >= 0 ? listed : lines.findIndex(l => l.kind === 'row')
   const found = lines[at]
   const selected = found?.kind === 'row' ? found : undefined
-  const strip = stripFor(selected, v.columns, v.hasKeys)
-  const detail = detailOf(selected, v.columns)
   const notice = v.lines === undefined && v.problems.length === 0 ? WORDS.reading : undefined
-  const chrome = (strip.stacked ? strip.keys.length : 1) + detail.length + v.problems.length + (notice === undefined ? 0 : 1)
-  return { lines, selected, strip, detail, notice, ...windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - chrome)) }
+  const noMatch = isListed && lines.length === 0 ? WORDS.noMatch(v.filter.trim()) : undefined
+  const masthead = mastheadOf(v)
+  // The masthead, the problems, the notice; the search box, the header, its rule; the no-match line.
+  const top = masthead.length + v.problems.length + (notice === undefined ? 0 : 1) + (isListed ? BOX_LINES + 2 : 0) + (noMatch === undefined ? 0 : 1)
+  // The chooser under the selected row, drawn whole; then the footer under the
+  // window, its rule then the selected row's lines in what the body leaves past
+  // one line of window, none where that is no line.
+  const chooser = selected === undefined ? [] : chooserOf(v, selected)
+  const chooserRows = chooser.reduce((sum, line) => sum + (line.kind === 'picker' ? line.rows : 1), 0)
+  const room = v.bodyRows - top - 2 - chooserRows
+  const footer = selected === undefined || room < 1 ? undefined : footerOf(selected, v, room)
+  const bottom = footer === undefined ? 0 : 1 + footer.card.length + (footer.controls === undefined ? 0 : 1) + (footer.scope === undefined ? 0 : 1)
+  const shown = windowOf(lines.length, Math.max(0, at), Math.max(1, v.bodyRows - top - bottom - chooserRows))
+  const isEmptyAbove = shown.above && rowsIn(lines.slice(0, shown.from)) === 0
+  // While the filter holds text, how many rows it shows of all of them.
+  const count = v.filter.trim() === '' ? undefined : WORDS.shown(rowsIn(lines), rowsIn(v.lines ?? []))
+  return { masthead, isListed, lines, selected, chooser, footer, notice, noMatch, count, ...shown, ...(isEmptyAbove ? { from: 0, above: false } : {}) }
 }
 
-// The keys of the Buttons drawPane draws for a view, in the order the focus
-// ring walks them (the strip's, then the window's rows; a heading is no
-// Button), and the selected row's key, undefined with no rows.
+// The keys of the elements drawPane draws for a view, in the order the focus
+// ring walks them (the field, the window's rows with the chooser's elements
+// after the selected one, the reset control or the confirmation's two, then
+// the scope line's; a heading is no Button), and the selected row's key,
+// undefined with no rows.
 export function ringOf(v: PanelView): { keys: string[]; selected: string | undefined } {
-  const { lines, selected, strip, from, to } = layoutOf(v)
-  return {
-    keys: [...strip.keys.map(k => actKey(k.action)), ...lines.slice(from, to).flatMap(l => l.kind === 'row' ? [l.row.id] : [])],
-    selected: selected?.row.id,
-  }
+  const { isListed, lines, selected, chooser, footer, from, to } = layoutOf(v)
+  return { keys: [...(isListed && v.hasField ? [FILTER] : []),
+    ...lines.slice(from, to).flatMap(l => l.kind !== 'row' ? [] : l === selected ? [l.row.id, ...chooserKeysOf(chooser)] : [l.row.id]),
+    ...(footer?.controls === undefined ? [] : footer.controls.kind === 'keys' ? [RESET] : [CONFIRM, KEEP]),
+    ...(footer?.scope === undefined ? [] : [scopeKey('session'), scopeKey('machine')])], selected: selected?.row.id }
 }
 
 // Where the focus ring goes back to after a drawing, or undefined while its
-// place still holds the Button it was put on. The terminal keeps the ring as
-// a place among the Buttons, not a key, so a drawing that moves that Button
-// (a strip of another length, a shifted window, a row added above) hands the
+// place still holds the element it was put on. The terminal keeps the ring as
+// a place among the elements, not a key, so a drawing that moves that element
+// (a shifted window, a row added above, a filter that hides it) hands the
 // place to another, or to none past the last. Back on the same key while it
 // is drawn, else on the selected row.
 export function ringBack(ring: { key: string; at: number }, next: { keys: readonly string[]; selected: string | undefined }): string | undefined {
@@ -246,44 +504,77 @@ export function ringBack(ring: { key: string; at: number }, next: { keys: readon
   return next.keys.includes(ring.key) ? ring.key : next.selected
 }
 
-// The pane body, top to bottom: the strip (first, so a long list never pushes
-// the keys off the pane), the selected row's detail, the problem lines, `+N
-// above`, the window of lines, `+N below`; `+N` counts rows, not headings. A
-// heading is bold dim Text; a row is one plain Button keyed by its RowId whose
-// children are the marker, the label cut to its cells and one dim Text of the
-// padded columns: a Button never shrinks, so every line is measured to
-// `columns` before it is drawn. A row's press changes it (Enter on the ring's
-// row, a click, a tap), or selects it when it offers no change. The selected
-// row carries autoFocus, so a pane opened with focus starts the ring there.
+// The column header in muted bold over the columns, and while the filter holds
+// text how many rows it shows, muted, at the right, the heads cut to leave it room.
+function headerOf(columns: number, nameCells: number, cols: readonly Column[], count: string | undefined): Run[] {
+  const heads = `${fit(`${' '.repeat(MARK_CELLS)}${WORDS.heads.name}`, MARK_CELLS + nameCells)}${cols.map(c => `${' '.repeat(GAP)}${fit(c.head, c.cells)}`).join('')}`
+  if (count === undefined) return [{ text: heads, color: THEME.mut, weight: 'bold' }]
+  const room = Math.max(1, columns - count.length)
+  return [{ text: cut(heads.trimEnd(), room - 1).padEnd(room), color: THEME.mut, weight: 'bold' }, { text: count, color: THEME.mut }]
+}
+
+// A group's name in bold ink, then a soft rule to the body's edge.
+function headingOf(title: string, columns: number): Run[] {
+  const name = cut(title, Math.max(1, columns - 2))
+  return [{ text: name, color: THEME.ink, weight: 'bold' }, { text: ` ${WORDS.marks.rule.repeat(Math.max(1, columns - name.length - 1))}`, color: THEME.soft }]
+}
+
+// A row's Button holds the whole row after its mark (the focus inverts it all)
+// and never shrinks, so every line is measured. Enter in the field sends the
+// ring to the rows. The chooser's lines follow the selected row, and the mark
+// for the ring sits on the chooser's element it is on while one is open, else
+// on the selected row. The keys' line ends in the reset control's Button, or
+// the confirmation's two, and the scope line holds a Button for each file.
 export function drawPane(v: PanelView, el: ReturnType<EngineInterface['ui']['resolve']>, on: Handlers): RenderElement {
   const { Box, Text, Button } = el
-  const { lines, selected, strip, detail, notice, from, to, above, below } = layoutOf(v)
-  const cols = columnsFor(v.columns)
-  const nameCells = Math.max(1, v.columns - MARK_CELLS - cols.reduce((sum, c) => sum + GAP + c.cells, 0))
+  const { masthead, isListed, lines, selected, chooser, footer, notice, noMatch, count, from, to, above, below } = layoutOf(v)
+  const { nameCells, cols } = tableOf(v.columns)
+  const runs = (line: readonly Run[]) => line.map(({ text, ...style }) => <Text {...style}>{text}</Text>)
+  const Input = v.hasField && 'Input' in el ? el.Input : undefined
+  const Select = v.hasField && 'Select' in el ? el.Select : undefined
+  const ringed = v.chooser?.kind === 'row' ? chooserKeysOf(chooser)[v.chooser.at] : undefined
+  const focus = (key: string) => key === ringed ? { autoFocus: true } as const : {}
+  const indent = <Text>{' '.repeat(CHOOSER_CELLS)}</Text>
+  const chooserLine = (id: RowId, line: ChooserLine) => line.kind === 'field'
+    ? <Box flexDirection="row">{indent}{Input === undefined ? <Text>{' '}</Text> : <Input key={TYPED} value={v.chooser?.kind === 'row' ? v.chooser.text : line.field.value}
+      {...(line.field.placeholder === undefined ? {} : { placeholder: line.field.placeholder })} submitLabel={WORDS.set} {...focus(TYPED)} onInput={on.type} onSubmit={text => on.submit(id, text)} />}</Box>
+    : line.kind === 'picker' ? <Box flexDirection="row">{indent}{Select === undefined ? <Text>{' '}</Text> : <Select key={PICKER} options={line.picker.options.map(o => ({ value: o.label }))}
+      {...(line.picker.current === undefined ? {} : { value: line.picker.current })} {...focus(PICKER)} onSelect={value => on.pick(id, optionKey(value))} />}</Box>
+    : <Box flexDirection="row">{indent}{line.choices.flatMap((c, i) => [...(i === 0 ? [] : [<Text color={THEME.mut}>{DOT}</Text>]),
+      <Button key={c.key} plain label={c.label} {...focus(c.key)} onPress={() => on.pick(id, c.key)}><Text color={THEME.ink}>{c.text}</Text></Button>])}</Box>
+  const plainButton = (key: string, label: string, onPress: () => void, inner: readonly Run[]) => <Button key={key} plain label={label} onPress={onPress}>{runs(inner)}</Button>
   return (
     <Box flexDirection="column">
-      <Box flexDirection={strip.stacked ? 'column' : 'row'} columnGap={KEY_GAP}>
-        {strip.keys.map(k => (
-          <Button key={actKey(k.action)} plain hotkey={KEYS[k.action].hotkey} label={k.label}
-            onPress={() => { if (selected !== undefined) on.act(k.action, selected.row.id) }} />
-        ))}
-        {strip.hint !== undefined && <Text dimColor>{strip.hint}</Text>}
-      </Box>
-      {detail.map(text => <Text dimColor>{text}</Text>)}
-      {v.problems.map(problem => <Text dimColor>{cut(problem, v.columns)}</Text>)}
-      {notice !== undefined && <Text dimColor>{cut(notice, v.columns)}</Text>}
-      {above && <Text dimColor>{WORDS.above(rowsIn(lines.slice(0, from)))}</Text>}
-      {lines.slice(from, to).map(l => l.kind !== 'row'
-        ? <Text weight="bold" dimColor>{cut(l.kind === 'mods' ? WORDS.modsGroup : l.title, v.columns)}</Text>
-        : (
-          <Button key={l.row.id} plain label={labelOf(l.row)} {...(l === selected ? { autoFocus: true } : {})}
-            onPress={() => l.actions.includes('change') ? on.act('change', l.row.id) : on.select(l.row.id)}>
-            {l === selected ? '› ' : '  '}
-            <Text>{fit(labelOf(l.row), nameCells)}</Text>
-            <Text dimColor>{cols.map(c => `${' '.repeat(GAP)}${fit(c.text(l), c.cells)}`).join('')}</Text>
+      {masthead.map(line => <Text>{runs(line)}</Text>)}
+      {v.problems.map(problem => <Text color={THEME.mut}>{cut(problem, v.columns)}</Text>)}
+      {notice !== undefined && <Text color={THEME.mut}>{cut(notice, v.columns)}</Text>}
+      {isListed && (Input === undefined ? Array.from({ length: BOX_LINES }, () => <Text>{' '}</Text>) : <Box borderStyle="round" borderColor={THEME.soft} paddingX={1} flexDirection="row" width={v.columns}>
+        <Input key={FILTER} placeholder={WORDS.find} value={v.filter} submitLabel={WORDS.toRows} autoFocus onInput={on.filter} onSubmit={text => { on.filter(text); on.toRows() }} /></Box>)}
+      {isListed && <Text>{runs(headerOf(v.columns, nameCells, cols, count))}</Text>}
+      {isListed && <Text color={THEME.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
+      {noMatch !== undefined && <Text color={THEME.mut}>{cut(noMatch, v.columns)}</Text>}
+      {above && <Text color={THEME.faint}>{WORDS.above(rowsIn(lines.slice(0, from)))}</Text>}
+      {lines.slice(from, to).flatMap(l => l.kind === 'gap' ? [<Text>{' '}</Text>] : l.kind === 'group' ? [<Text>{runs(headingOf(l.title, v.columns))}</Text>] : [
+        <Box flexDirection="row">
+          {runs([l === selected ? { text: `${WORDS.marks.selected} `, color: BRAND.amber } : { text: ' '.repeat(MARK_CELLS) }])}
+          <Button key={l.row.id} plain label={labelOf(l.row)} {...(l === selected && ringed === undefined ? { autoFocus: true } : {})} onPress={() => on.change(l.row.id)}>
+            {runs([{ text: fit(labelOf(l.row), nameCells), color: THEME.ink, ...(l === selected ? { weight: 'bold' } as const : {}) },
+              ...cols.flatMap(c => [{ text: ' '.repeat(GAP) }, ...c.runs(l, c.cells)])])}
           </Button>
-        ))}
-      {below && <Text dimColor>{WORDS.below(rowsIn(lines.slice(to)))}</Text>}
+        </Box>,
+        ...(l === selected ? chooser.map(line => chooserLine(l.row.id, line)) : []),
+      ])}
+      {below && <Text color={THEME.faint}>{WORDS.below(rowsIn(lines.slice(to)))}</Text>}
+      {footer !== undefined && <Text color={THEME.soft}>{WORDS.marks.rule.repeat(v.columns)}</Text>}
+      {footer?.card.map(line => <Text>{runs(line)}</Text>)}
+      {footer?.controls?.kind === 'keys' && <Box flexDirection="row">{runs(footer.controls.runs)}{plainButton(RESET, WORDS.reset, on.reset, [{ text: WORDS.reset, color: THEME.mut }])}</Box>}
+      {footer?.controls?.kind === 'confirm' && <Box flexDirection="row">{runs(footer.controls.runs)}<Text color={THEME.mut}>{DOT}</Text>
+        {plainButton(CONFIRM, WORDS.confirm, on.confirm, [{ text: WORDS.confirm, color: THEME.ink }])}<Text color={THEME.mut}>{DOT}</Text>
+        {plainButton(KEEP, WORDS.keep, on.keep, [{ text: WORDS.keep, color: THEME.ink }])}</Box>}
+      {footer?.scope !== undefined && <Box flexDirection="row"><Text>{' '.repeat(MARK_CELLS)}</Text>
+        {footer.scope.lead !== undefined && <Text color={THEME.mut}>{footer.scope.lead}</Text>}
+        {plainButton(scopeKey('session'), WORDS.scope.session, () => on.scope('session'), footer.scope.runs.session)}<Text>{' '.repeat(GAP)}</Text>
+        {plainButton(scopeKey('machine'), WORDS.scope.machine, () => on.scope('machine'), footer.scope.runs.machine)}</Box>}
     </Box>
   )
 }

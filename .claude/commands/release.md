@@ -137,6 +137,19 @@ the review is auditable rather than a skim.
 
 **Fix any issues found** - update the documentation to match current code.
 
+**Spinner tips** (`mods/cs/tips.json`, the file the installer names in Claude
+Code's `spinnerTipsOverride.tipsFile`): the tips are documentation the user
+reads in the spinner, so review them in the same pass. For each tip, run the
+command or path it names and confirm it still exists and still does what the
+tip says; drop a tip for a feature this release removes, reword one whose
+command or wording changed, and add one for each user-facing feature in
+`git log <PREV_TAG>..HEAD` that a tip could lead the user to (a slash command,
+a `/config` row, a cs verb). Keep the shape `tests/test_install.sh` enforces:
+an `id` of letters, digits, `.`, `_` or `-`, a `text` under 500 characters.
+Report it on the same one line per file as the docs. Changing the file
+changes the hash `install.sh` carries for it, so `./build.sh` runs in Step 2's
+spirit and the rebuilt `install.sh` goes into the release commit.
+
 ### 4. Simplify Code
 
 Invoke the `/simplify` skill via the Skill tool to review all pending changes for reuse, quality, and efficiency. This catches duplicated logic, hacky patterns, and inefficiencies before they ship.

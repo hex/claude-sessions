@@ -2,7 +2,11 @@
   "tips": [
     {
       "id": "cs.band-prompts",
-      "text": "cs can draw a bar per prompt on its band, to scroll back to any prompt: run /config and turn on Band: prompt bars"
+      "text": "cs can draw a bar per prompt on its band, to scroll back to any prompt: run /config and turn on cs: Band: prompt bars"
+    },
+    {
+      "id": "cs.settings-pane",
+      "text": "every cs setting is in one pane: run /cs, type to search, and press Enter on a row to change it"
     }
   ]
 }

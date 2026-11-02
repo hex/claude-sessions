@@ -1,5 +1,5 @@
-// ABOUTME: What the cs-panel rows are: `cs -config list --porcelain` parsed into settings, the /config rows cs's mods own, the grouped lines and what each row offers.
-// ABOUTME: Pure: what a change asks and where it writes are decided here; register.tsx runs them.
+// ABOUTME: What the cs-panel rows are: `cs -config list --porcelain` parsed into settings, the /config rows cs's mods own, the grouped lines, the filter, and what Enter on each row offers.
+// ABOUTME: Pure: what a change offers and where it writes are decided here; register.tsx runs them.
 import type { ConfigKind, ConfigRow, ConfigValue } from 'claude-code'
 
 // A cs setting's name. Only parseSettings makes one, from a field that matched
@@ -16,8 +16,11 @@ export type SettingKey = string & { readonly __settingKey: unique symbol }
 export type Source = 'shell' | 'launch' | 'session' | 'machine' | 'default'
 
 // What a row offers: a toggle, a pick, a typed value, or nothing (changed from
-// a shell).
-export type Edit = 'flag' | 'choice' | 'text' | 'shell'
+// a shell). The `off` forms are flags whose 1 turns off what the label names:
+// `Scope grounding` is on while CS_SCOPE_DISABLE is unset.
+export type Edit = 'flag' | 'flagoff' | 'choice' | 'text' | 'shell' | 'shelloff'
+
+export const turnsOff = (edit: Edit): boolean => edit === 'flagoff' || edit === 'shelloff'
 
 // One record of the porcelain. Unknown is undefined.
 export type Setting = {
@@ -38,24 +41,26 @@ export type Setting = {
   source: Source
   // A file value cs skipped that would otherwise apply, with its line and why.
   ignored: string | undefined
+  // cs's sentence for what the setting does.
+  describe: string
 }
 
 // The line that refused the answer; '' when the answer held no line at all.
 export type Unreadable = { unreadable: string }
 
 const KEY = /^CS_[A-Z0-9_]+$/
-const EDITS: readonly string[] = ['flag', 'choice', 'text', 'shell'] satisfies readonly Edit[]
+const EDITS: readonly string[] = ['flag', 'flagoff', 'choice', 'text', 'shell', 'shelloff'] satisfies readonly Edit[]
 const SOURCES: readonly string[] = ['shell', 'launch', 'session', 'machine', 'default'] satisfies readonly Source[]
 // The porcelain's word for none.
 const NONE = '-'
 
 const noneOf = (field: string): string | undefined => field === NONE ? undefined : field
 
-// Parse, not validate: eleven tab fields per line (key group label edit
-// choices default when whenText value source ignored), or the whole answer is
-// refused with its first bad line, so a strict reader never draws shifted
-// columns. A closed word (edit, source) outside its set refuses too: a cs
-// change the panel does not know is a drawn problem, not a wrong row.
+// Parse, not validate: twelve tab fields per line (key group label edit
+// choices default when whenText value source ignored describe), or the whole
+// answer is refused with its first bad line, so a strict reader never draws
+// shifted columns. A closed word (edit, source) outside its set refuses too: a
+// cs change the panel does not know is a drawn problem, not a wrong row.
 // tests/fixtures/config-porcelain.txt pins the wire.
 export function parseSettings(stdout: string): Setting[] | Unreadable {
   const lines = stdout.split('\n').filter(line => line !== '')
@@ -71,14 +76,14 @@ export function parseSettings(stdout: string): Setting[] | Unreadable {
 
 function settingOf(line: string): Setting | undefined {
   const f = line.split('\t')
-  if (f.length !== 11) return undefined
-  const [key, group, label, edit, choices, fallback, when, whenText, value, source, ignored] = f as [string, string, string, string, string, string, string, string, string, string, string]
+  if (f.length !== 12) return undefined
+  const [key, group, label, edit, choices, fallback, when, whenText, value, source, ignored, describe] = f as [string, string, string, string, string, string, string, string, string, string, string, string]
   if (!KEY.test(key) || !EDITS.includes(edit) || !SOURCES.includes(source)) return undefined
-  if ([group, label, when, whenText].some(field => field === '' || field === NONE)) return undefined
+  if ([group, label, when, whenText, describe].some(field => field === '' || field === NONE)) return undefined
   if ((edit === 'choice') !== (choices !== NONE)) return undefined
   return {
     key: key as SettingKey, group, label, edit: edit as Edit, choices: choices === NONE ? [] : choices.split(','), fallback: noneOf(fallback),
-    when, whenText, value: noneOf(value), source: source as Source, ignored: noneOf(ignored),
+    when, whenText, value: noneOf(value), source: source as Source, ignored: noneOf(ignored), describe,
   }
 }
 
@@ -94,6 +99,8 @@ export type ModRow = {
   // A choice's declared options; [] otherwise.
   options: readonly string[]
   isLocked: boolean
+  // What the row does, as its plugin declares it; '' when it declares nothing.
+  description: string
 }
 
 // The plugins whose /config rows the pane lists, by name: a cs-* plugin that
@@ -104,9 +111,14 @@ export function isModProvider(plugin: string): boolean {
   return MOD_PROVIDERS.has(plugin)
 }
 
+// The mods title their rows `cs: <label>` so /config marks them as cs's; under
+// the pane's own Mods heading the mark says nothing, so it comes off.
+const MOD_LABEL_MARK = 'cs: '
+
 export function modRowsOf(rows: readonly ConfigRow[]): ModRow[] {
   return rows.filter(r => isModProvider(r.provider.plugin)).map(r => ({
-    key: r.key, plugin: r.provider.plugin, label: r.label, kind: r.kind, value: r.value, options: r.options ?? [], isLocked: r.isLocked,
+    key: r.key, plugin: r.provider.plugin, label: r.label.startsWith(MOD_LABEL_MARK) ? r.label.slice(MOD_LABEL_MARK.length) : r.label,
+    kind: r.kind, value: r.value, options: r.options ?? [], isLocked: r.isLocked, description: r.description ?? '',
   }))
 }
 
@@ -122,48 +134,36 @@ export type Row =
   | { kind: 'mod'; id: RowId; mod: ModRow }
   | { kind: 'setting'; id: RowId; setting: Setting }
 
-// What a row offers, in strip order; draw.tsx's KEYS is keyed by it and `act`
-// checks a press against it.
-//   change  : every row but a locked mod row, a shell-pinned setting and an
-//             `edit: shell` setting; also the row's own press.
-//   unset   : a setting a file sets: remove it there, so the next layer or the
-//             default applies. A /config row has none: the panel cannot see a
-//             userConfig default.
-//   session : a changeable setting, when this conversation runs under a cs
-//             session name: the change goes to that session's file only.
-// A setting this session's file sets is written there, so with no session
-// name it offers nothing.
-export type Action = 'change' | 'unset' | 'session'
+export const labelOf = (row: Row): string => row.kind === 'mod' ? row.mod.label : row.setting.label
+export const keyOf = (row: Row): string => row.kind === 'mod' ? row.mod.key : row.setting.key
 
-export function actionsOf(row: Row, hasSelf: boolean): Action[] {
-  if (row.kind === 'mod') return row.mod.isLocked ? [] : ['change']
+// Why Enter on a row changes nothing: the shell pins the value, it changes
+// from a shell only, a managed setting owns the /config row, or this session's
+// file sets it and no session name writes that file. Undefined: it changes it.
+export type Lock = 'pinned' | 'shellOnly' | 'managed' | 'noSession'
+
+export function lockOf(row: Row, hasSelf: boolean): Lock | undefined {
+  if (row.kind === 'mod') return row.mod.isLocked ? 'managed' : undefined
   const s = row.setting
-  if (s.edit === 'shell' || s.source === 'shell') return []
-  if (s.source === 'session' && !hasSelf) return []
-  const actions: Action[] = ['change']
-  if (s.source === 'session' || s.source === 'machine') actions.push('unset')
-  if (hasSelf) actions.push('session')
-  return actions
+  if (s.source === 'shell') return 'pinned'
+  if (s.edit === 'shell' || s.edit === 'shelloff') return 'shellOnly'
+  return s.source === 'session' && !hasSelf ? 'noSession' : undefined
 }
 
-// What a row waits on after a press; while set it offers nothing, so a second
-// press cannot start a second write.
-export type Pending = 'asking' | 'writing'
+// What a row waits on: a write cs or /config has not answered yet. While it is
+// set another Enter on the row is refused, so it cannot start a second write.
+export type Pending = 'writing'
 
-// The pane's lines, top to bottom: the `Mods` heading and its rows, then each
-// cs group in cs's order under its heading. A heading is text, not a Button,
-// so the focus ring walks rows only.
+// The pane's lines, top to bottom: the mods' group and its rows, then each cs
+// group in cs's order under its heading. A heading is text, not a Button, so
+// the focus ring walks rows only.
 export type Line =
-  | { kind: 'mods' }
   | { kind: 'group'; title: string }
-  | { kind: 'row'; row: Row; actions: readonly Action[]; pending: Pending | undefined }
+  | { kind: 'row'; row: Row; pending: Pending | undefined }
 
-export function linesOf(mods: readonly ModRow[], settings: readonly Setting[], pending: ReadonlyMap<RowId, Pending>, hasSelf: boolean): Line[] {
-  const lineOf = (row: Row): Line => {
-    const waiting = pending.get(row.id)
-    return { kind: 'row', row, actions: waiting === undefined ? actionsOf(row, hasSelf) : [], pending: waiting }
-  }
-  const lines: Line[] = mods.length === 0 ? [] : [{ kind: 'mods' }]
+export function linesOf(mods: readonly ModRow[], settings: readonly Setting[], pending: ReadonlyMap<RowId, Pending>, modsGroup: string): Line[] {
+  const lineOf = (row: Row): Line => ({ kind: 'row', row, pending: pending.get(row.id) })
+  const lines: Line[] = mods.length === 0 ? [] : [{ kind: 'group', title: modsGroup }]
   for (const mod of mods) lines.push(lineOf({ kind: 'mod', id: `mod:${mod.key}`, mod }))
   let group: string | undefined
   for (const setting of settings) {
@@ -176,89 +176,142 @@ export function linesOf(mods: readonly ModRow[], settings: readonly Setting[], p
   return lines
 }
 
+// The rows whose label, key or group holds `text` (trimmed, any case), each
+// under its group; a group left with no row goes. An empty text keeps all.
+export function filterLines(lines: readonly Line[], text: string): Line[] {
+  const needle = text.trim().toLowerCase()
+  let group = ''
+  const kept = lines.filter(l => {
+    if (l.kind === 'group') { group = l.title; return true }
+    return [labelOf(l.row), keyOf(l.row), group].some(field => field.toLowerCase().includes(needle))
+  })
+  return kept.filter((l, i) => l.kind === 'row' || kept[i + 1]?.kind === 'row')
+}
+
 // Where a write lands.
 export type Scope = 'machine' | 'session'
 
-// change and unset: where the value lives (a session value in the session,
-// anything else on the machine), so a change always moves what the row shows.
-// session: the session.
-export function scopeFor(setting: Setting, action: Action): Scope {
-  return action === 'session' || setting.source === 'session' ? 'session' : 'machine'
-}
+// The file a write the scope line decides goes to: the scope line's under a
+// session name, this machine's without one.
+export const writesTo = (scope: Scope, hasSelf: boolean): Scope => hasSelf ? scope : 'machine'
 
-// The option labels a change asks with; free text under Other is the value.
+const stateOf = (on: boolean) => on ? 'on' : 'off'
+
+// The labels of a chooser's choices.
 export const LABELS = {
-  keep: (value: string) => `Keep ${value}`,
+  turn: (on: boolean) => on ? 'Turn on' : 'Turn off',
+  keep: 'Keep',
+  keepValue: (value: string) => `Keep ${value}`,
   fallback: (fallback: string | undefined) => fallback === undefined ? 'Default' : `Default (${fallback})`,
-  cancel: 'Cancel',
 } as const
 
-// A change that asks first: the labels, the values the question names (a
-// choice with more values than labels), and what an answer means. `$.ui.ask`
-// takes 2-4 labels and pads fewer with Yes/No, so every plan has two or more.
-export type Ask<A> = { kind: 'ask'; options: readonly string[]; values: readonly string[]; read: (answer: string) => A }
+// What a choice does: leave the row; have cs write a setting's value to a file
+// (undefined unsets it there); set a /config row through its owner's
+// config.set guard; or refuse a text a number row cannot read, unwritten.
+export type Answer =
+  | { kind: 'keep' }
+  | { kind: 'write'; scope: Scope; key: SettingKey; value: string | undefined }
+  | { kind: 'set'; key: string; plugin: string; value: ConfigValue }
+  | { kind: 'notNumber'; label: string; text: string }
 
-// Leave it, put it back to its default (unset where it lives), or this value;
-// cs's checker judges a typed one, and its refusal is the toast.
-export type SettingAnswer = { kind: 'keep' } | { kind: 'default' } | { kind: 'value'; value: string }
+const KEEP: Answer = { kind: 'keep' }
 
-// A setting:
-//   flag         -> at once: '0' when on, '1' when off
-//   choice <= 3  -> ask: the choices and Default
-//   choice 4     -> ask: the four choices (u is the default)
-//   choice > 4   -> ask: the first three and Default; the question names
-//                   every value, the rest typed under Other
-//   text         -> ask: Keep <value> and Default; Other is the value
-export function settingChange(s: Setting): { kind: 'now'; value: string } | Ask<SettingAnswer> {
+// One choice of a chooser: its label, and what picking it does.
+export type Choice = { label: string; answer: Answer }
+
+// A chooser's field for a typed value: the text it opens with, what it shows
+// while empty, and what Enter with a text does.
+export type Field = { kind: 'field'; value: string; placeholder: string | undefined; read: (text: string) => Answer }
+
+// A chooser's picker of one of a row's values: every value in its owner's
+// order, each labelled by itself, the one the row holds among them keeping
+// it; that one, undefined when the row holds none of them; and what a surface
+// that draws no picker offers in its place, a change to each other value.
+export type Picker = { kind: 'picker'; options: readonly Choice[]; current: string | undefined; others: readonly Choice[] }
+
+// What Enter on a row does: one change at once, or a chooser opened under the
+// row, a field first where the row takes a typed value or a picker where it
+// takes one of its values, then its choices, the last one Keep.
+export type Change = { kind: 'now'; answer: Answer } | { kind: 'choose'; control: Field | Picker; choices: readonly Choice[] }
+
+// The picker of `values` for a row holding `current`, `pick` what picking
+// another does and `name` that change's label where no picker draws.
+function pickerOf(values: readonly string[], current: string | undefined, pick: (value: string) => Answer, name = (value: string) => value): Picker {
+  const isHeld = current !== undefined && values.includes(current)
+  return { kind: 'picker', options: values.map(value => ({ label: value, answer: value === current ? KEEP : pick(value) })), current: isHeld ? current : undefined,
+    others: values.filter(value => value !== current).map(value => ({ label: name(value), answer: pick(value) })) }
+}
+
+// A setting's change. A value this session's file holds changes there; any
+// other goes to `target`, the file writesTo names, so a change always moves
+// what the row shows. Default, an unset in the file that holds the value, is
+// offered while a file holds it (a typed setting always), Keep always, the
+// current value only in the picker, where picking it keeps the row. A flag's
+// picker holds its feature's states, Turn on|off where no picker draws, so an
+// off flag's off writes 1, and its default, the flag unset, is on.
+//   flag   -> no file holding it: the flip at once; else a picker of on and
+//             off, then Default, Keep
+//   choice -> a picker of every choice, then Default, Keep
+//   text   -> a field holding the value, whose text cs's checker judges, then
+//             Default, Keep <value>
+export function settingChange(s: Setting, target: Scope): Change {
+  if (s.edit === 'shell' || s.edit === 'shelloff') throw new Error(`settingChange: ${s.key} is changed from a shell, and the panel offers no change for it`)
+  const home: Scope = s.source === 'session' ? 'session' : 'machine'
+  const to: Scope = home === 'session' ? 'session' : target
+  const write = (value: string | undefined, scope = to): Answer => ({ kind: 'write', scope, key: s.key, value })
+  const isFlag = s.edit === 'flag' || s.edit === 'flagoff'
+  const isHeld = s.source === 'session' || s.source === 'machine'
+  const fallback: Choice[] = isHeld || s.edit === 'text' ? [{ label: LABELS.fallback(isFlag ? stateOf(turnsOff(s.edit)) : s.fallback), answer: write(undefined, home) }] : []
+  const keep: Choice = { label: s.edit === 'text' ? LABELS.keepValue(s.value ?? s.fallback ?? NONE) : LABELS.keep, answer: KEEP }
   switch (s.edit) {
     case 'flag':
-      return { kind: 'now', value: s.value === '1' ? '0' : '1' }
-    case 'choice': {
-      const fallback = LABELS.fallback(s.fallback)
-      const options = s.choices.length === 4 ? s.choices : [...s.choices.slice(0, 3), fallback]
-      return { kind: 'ask', options, values: s.choices.length > 4 ? s.choices : [], read: answer => answer === fallback ? { kind: 'default' } : { kind: 'value', value: answer } }
+    case 'flagoff': {
+      // The feature is on at 1, or for an off flag at anything but 1.
+      const isOn = (s.value === '1') !== turnsOff(s.edit), on = stateOf(true), to = (state: string) => write((state === on) !== turnsOff(s.edit) ? '1' : '0')
+      if (!isHeld) return { kind: 'now', answer: to(stateOf(!isOn)) }
+      return { kind: 'choose', control: pickerOf([on, stateOf(false)], stateOf(isOn), to, state => LABELS.turn(state === on)), choices: [...fallback, keep] }
     }
-    case 'text': {
-      const keep = LABELS.keep(s.value ?? s.fallback ?? NONE)
-      const fallback = LABELS.fallback(s.fallback)
-      return { kind: 'ask', options: [keep, fallback], values: [], read: answer => answer === keep ? { kind: 'keep' } : answer === fallback ? { kind: 'default' } : { kind: 'value', value: answer } }
-    }
-    case 'shell':
-      throw new Error(`settingChange: ${s.key} is changed from a shell, and the panel offers no change for it`)
+    case 'choice':
+      return { kind: 'choose', control: pickerOf(s.choices, s.value ?? s.fallback, choice => write(choice)), choices: [...fallback, keep] }
+    case 'text':
+      return { kind: 'choose', control: { kind: 'field', value: s.value ?? '', placeholder: s.fallback, read: text => write(text) }, choices: [...fallback, keep] }
   }
 }
 
-// Leave it, this value (the owner's config.set guard judges it, and its deny
-// is the toast), or an answer a number row cannot take, refused unwritten.
-export type ModAnswer = { kind: 'keep' } | { kind: 'value'; value: ConfigValue } | { kind: 'notNumber'; answer: string }
-
-// A mod row:
+// A /config row's change; the owner's config.set guard judges a value, and
+// its deny is the toast:
 //   boolean -> at once: the negation
-//   choice  -> ask: its options (more than four: the first four, the rest
-//              typed under Other; fewer than two: and Cancel)
-//   number  -> ask: Keep <value> and Cancel; Other must read as a number
-//   text    -> ask: Keep <value> and Cancel; Other is the value
-export function modChange(m: ModRow): { kind: 'now'; value: ConfigValue } | Ask<ModAnswer> {
+//   choice  -> a picker of its options, Keep
+//   number  -> a field holding the value, Keep <value>; a text that reads as
+//              no number is refused unwritten
+//   text    -> a field holding the value, Keep <value>
+export function modChange(m: ModRow): Change {
   const shown = shownOf(m.value)
-  const keepOr = (other: (answer: string) => ModAnswer) => (answer: string): ModAnswer =>
-    answer === LABELS.keep(shown) || answer === LABELS.cancel ? { kind: 'keep' } : other(answer)
+  const set = (value: ConfigValue): Answer => ({ kind: 'set', key: m.key, plugin: m.plugin, value })
+  const keep: Choice = { label: LABELS.keepValue(shown), answer: KEEP }
   switch (m.kind) {
     case 'boolean':
-      return { kind: 'now', value: m.value !== true }
-    case 'choice': {
-      const options = m.options.length < 2 ? [...m.options, LABELS.cancel] : m.options.slice(0, 4)
-      return { kind: 'ask', options, values: m.options.length > 4 ? m.options : [], read: answer => answer === LABELS.cancel ? { kind: 'keep' } : { kind: 'value', value: answer } }
-    }
+      return { kind: 'now', answer: set(m.value !== true) }
+    case 'choice':
+      return { kind: 'choose', control: pickerOf(m.options, shown, option => set(option)), choices: [{ label: LABELS.keep, answer: KEEP }] }
     case 'number':
-      return { kind: 'ask', options: [LABELS.keep(shown), LABELS.cancel], values: [], read: keepOr(answer => {
-        const typed = answer.trim()
+      return { kind: 'choose', control: { kind: 'field', value: shown, placeholder: undefined, read: text => {
+        const typed = text.trim()
         const value = Number(typed)
-        return typed !== '' && Number.isFinite(value) ? { kind: 'value', value } : { kind: 'notNumber', answer }
-      }) }
+        return typed !== '' && Number.isFinite(value) ? set(value) : { kind: 'notNumber', label: m.label, text }
+      } }, choices: [keep] }
     case 'text':
-      return { kind: 'ask', options: [LABELS.keep(shown), LABELS.cancel], values: [], read: keepOr(answer => ({ kind: 'value', value: answer })) }
+      return { kind: 'choose', control: { kind: 'field', value: shown, placeholder: undefined, read: text => set(text) }, choices: [keep] }
   }
 }
+
+// A row's change, its setting's written to `target` where it does not stay in
+// this session's file.
+export const changeOf = (row: Row, target: Scope): Change => row.kind === 'mod' ? modChange(row.mod) : settingChange(row.setting, target)
+
+// Whether Enter changes the row with no chooser: a mod's boolean, and a cs
+// flag no file holds.
+export const flips = (row: Row, target: Scope): boolean => changeOf(row, target).kind === 'now'
 
 // A /config value as the pane and its toasts show it.
 export function shownOf(value: ConfigValue): string {
@@ -266,13 +319,23 @@ export function shownOf(value: ConfigValue): string {
 }
 
 // The argv of one write, for runCs. `self` is the session name cs launched
-// this conversation under, which the session scope needs; actionsOf offers a
-// session write only with one.
+// this conversation under, which the session scope needs; a session write is
+// planned only with one.
 //   machine : -config set <key> <value> | -config unset <key>
 //   session : <self> -config set <key> <value> | <self> -config unset <key>
 export function writeArgv(scope: Scope, self: string | undefined, key: SettingKey, value: string | undefined): string[] {
   const verb = value === undefined ? ['-config', 'unset', key] : ['-config', 'set', key, value]
   if (scope === 'machine') return verb
   if (self === undefined) throw new Error(`writeArgv: ${key} is to be written to this session's file, but cs named no session for this conversation`)
+  return [self, ...verb]
+}
+
+// The argv of a reset, for runCs: cs removes every setting from the file, unasked.
+//   machine : -config reset --yes
+//   session : <self> -config reset --yes
+export function resetArgv(scope: Scope, self: string | undefined): string[] {
+  const verb = ['-config', 'reset', '--yes']
+  if (scope === 'machine') return verb
+  if (self === undefined) throw new Error("resetArgv: this session's file is to be reset, but cs named no session for this conversation")
   return [self, ...verb]
 }
