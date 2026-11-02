@@ -102,8 +102,8 @@ test_lock_prevents_duplicate_session() {
         return 1
     fi
 
-    if ! grep -qi "already open\|in use" <<< "$output"; then
-        echo "  FAIL: Error should mention session being in use: $output"
+    if ! grep -q "Session is live (PID" <<< "$output"; then
+        echo "  FAIL: Error should say the session is live: $output"
         return 1
     fi
 }
@@ -171,7 +171,7 @@ test_open_reads_the_lock_by_the_one_lock_rule() {
     out=$("$CS_BIN" test-session </dev/null 2>&1) || rc=$?
     kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null
     assert_eq "1" "$rc" "the open over a padded live pid exits 1" || return 1
-    assert_eq "Error: Session is already open (PID $live_pid)" "$(grep -F 'already open' <<< "$out")" \
+    assert_eq "Error: Session is live (PID $live_pid)" "$(grep -F 'is live' <<< "$out")" \
         "the refusal names the pid alone" || return 1
 }
 
@@ -651,6 +651,7 @@ test_collision_menu_shows_numbered_options() {
 
     local output status=0
     output=$(CS_ASSUME_TTY=1 "$CS_BIN" test-session < /dev/null 2>&1) || status=$?
+    assert_output_contains "$output" "is live" "menu says the session is live" || return 1
     assert_output_contains "$output" "force start" "menu offers force start" || return 1
     assert_output_contains "$output" "new feature" "menu offers new feature" || return 1
     assert_output_contains "$output" "cancel" "menu offers cancel" || return 1
@@ -879,7 +880,7 @@ STUB
     kill "$live_pid" 2>/dev/null || true
     wait "$live_pid" 2>/dev/null || true
 
-    assert_output_not_contains "$output" "already running elsewhere" \
+    assert_output_not_contains "$output" "is live elsewhere" \
         "menu force must bypass the live-duplicate guard like --force" || return 1
     assert_eq "0" "$status" "menu-forced launch should proceed, got: $output" || return 1
 }

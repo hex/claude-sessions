@@ -1,13 +1,15 @@
 // ABOUTME: Unit tests for the cs mod against a fake engine `$`.
 // ABOUTME: Covers the band's gate (crit, working, survey), the three presses and the wrap key's two-press guard, the armed handoff and its next-step toast, the heartbeat, /queue, and the /finish toasts and gate word.
 import { test, expect, beforeEach } from 'bun:test'
+import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 // The plugin realm provides `h` and `Fragment` as globals; the test does the same.
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, buildBandEntries, drawBand, fitBand, type BandView, parsePrompts, RAIL_TEXT_CHARS, DEFAULT_PERCENT, GRACE_SECONDS, NEXT_STEP_CHARS, WRAP_QUESTION, WRAP_YES, QUEUE_START, QUEUE_COMPACT, QUEUE_KICK, QUEUE_MODE_QUESTION, QUEUE_HERE, QUEUE_SUBAGENTS, QUEUE_WORKFLOWS, nextStepLine, isUnconsumed, TOASTS, LOGS, REPLIES, finishToast } from '../hooks/register.tsx'
+import { register, buildBandEntries, drawBand, fitBand, type BandView, parsePrompts, RAIL_TEXT_CHARS, DEFAULT_PERCENT, GRACE_SECONDS, NEXT_STEP_CHARS, WRAP_QUESTION, WRAP_YES, QUEUE_START, QUEUE_COMPACT, QUEUE_KICK, QUEUE_MODE_QUESTION, QUEUE_HERE, QUEUE_SUBAGENTS, QUEUE_WORKFLOWS, nextStepLine, isUnconsumed, TOASTS, LOGS, REPLIES, finishToast, parseFeatures, featuresWordOf } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -1710,9 +1712,9 @@ test('/queue with a long task confirms it in a toast cut to 60 characters', asyn
 
 test('/queue with no task, or only spaces, prints cs -queue list', async () => {
   envVars.CS_BIN = '/opt/cs/bin/cs'
-  runResult = { exitCode: 0, stdout: 'Pending:\n  1. first\n  2. second\n', stderr: '' }
-  expect(await queue('')).toEqual({ text: 'Pending:\n  1. first\n  2. second' })
-  expect(await queue('   ')).toEqual({ text: 'Pending:\n  1. first\n  2. second' })
+  runResult = { exitCode: 0, stdout: 'Queued:\n  1. first\n  2. second\n', stderr: '' }
+  expect(await queue('')).toEqual({ text: 'Queued:\n  1. first\n  2. second' })
+  expect(await queue('   ')).toEqual({ text: 'Queued:\n  1. first\n  2. second' })
   expect(runs.map(x => x.argv)).toEqual([['/opt/cs/bin/cs', '-queue', 'list'], ['/opt/cs/bin/cs', '-queue', 'list']])
   expect(toasts).toEqual([])
 })
@@ -1720,13 +1722,13 @@ test('/queue with no task, or only spaces, prints cs -queue list', async () => {
 // The offer is made after the listing is back on screen, so the person reads
 // the tasks before answering; the drain itself belongs to the Stop hook.
 const settle = () => new Promise(r => setTimeout(r, 0))
-const LISTED = { exitCode: 0, stdout: 'Pending (2)\n  1. first\n  2. second\n\nDone (1)\n  - shipped\n', stderr: '' }
+const LISTED = { exitCode: 0, stdout: 'Queued (2)\n  1. first\n  2. second\n\nDone (1)\n  - shipped\n', stderr: '' }
 
 test('/queue with pending tasks offers to start them; Start while idle arms the queue and starts a turn', async () => {
   envVars.CS_BIN = '/opt/cs/bin/cs'
   runResult = LISTED
   answer = QUEUE_START
-  expect(await queue('')).toEqual({ text: 'Pending (2)\n  1. first\n  2. second\n\nDone (1)\n  - shipped' })
+  expect(await queue('')).toEqual({ text: 'Queued (2)\n  1. first\n  2. second\n\nDone (1)\n  - shipped' })
   await settle()
   expect(asks).toEqual([
     { question: 'Start the 2 queued tasks now?', options: { header: 'Queue', options: [QUEUE_START, 'Not yet', QUEUE_COMPACT] } },
@@ -2737,8 +2739,8 @@ test('the right edge keeps its margins: three cells after the actions, three bet
 // `cs <base> -features --porcelain` (task branch ahead merged ff wt_dirty
 // untracked base_dirty lock state), first at the band's right edge.
 
-const feature = (task: string, ahead: number, state: string) =>
-  [task, `cs/${task}`, String(ahead), '0', '1', '0', '0', '0', 'none', state].join('\t')
+const feature = (task: string, ahead: number, state: string, { untracked = '0', lock = 'none' } = {}) =>
+  [task, `cs/${task}`, String(ahead), '0', '1', '0', untracked, '0', lock, state].join('\t')
 const porcelain = (...records: string[]) => { runResult = { exitCode: 0, stdout: records.map(r => `${r}\n`).join(''), stderr: '' } }
 const featureRuns = () => runs.filter(r => r.argv[2] === '-features')
 const featuresKey = (tree: any) => buttons(tree).find((b: any) => b.props.key === 'cs-features')
@@ -2784,14 +2786,45 @@ test('a base names its one ready feature among several, counts two or more ready
   expect(texts(tree).find((t: any) => textOf(t) === '3 features · none ready').props).toEqual({ dimColor: true })
 })
 
-test('one feature not ready says its own state; ready with nothing ahead of the base reads no commits', async () => {
+// A record of every state _feature_readiness prints, with what a person reads
+// for it, and the lock and count sides each sentence turns on.
+const FEATURE_SENTENCES: [string, string][] = [
+  [feature('fix-auth', 3, 'ready'), 'ready'],
+  [feature('fix-auth', 0, 'ready'), 'no commits'],
+  [feature('fix-auth', 0, 'merged'), 'merged'],
+  [feature('fix-auth', 2, 'staged', { lock: 'worktree' }), 'retire staged'],
+  [feature('fix-auth', 2, 'untracked', { untracked: '1' }), '1 file untracked'],
+  [feature('fix-auth', 2, 'untracked', { untracked: '3' }), '3 files untracked'],
+  [feature('fix-auth', 2, 'locked', { lock: 'base' }), 'base session is live'],
+  [feature('fix-auth', 2, 'locked', { lock: 'worktree' }), 'worktree session is live'],
+  [feature('fix-auth', 2, 'dirty'), 'uncommitted changes'],
+  [feature('fix-auth', 5, 'base-dirty'), 'base has uncommitted changes'],
+  [feature('fix-auth', 1, 'vault-locked'), 'base vault is locked'],
+]
+
+test('one feature not ready says its state as a sentence; ready with nothing ahead of the base reads no commits', async () => {
   featureDir('fix-auth')
-  for (const [ahead, state, word] of [[2, 'dirty', 'dirty'], [0, 'ready', 'no commits'], [5, 'base-dirty', 'base-dirty'], [1, 'vault-locked', 'vault-locked']] as const) {
-    porcelain(feature('fix-auth', ahead, state))
+  for (const [record, sentence] of FEATURE_SENTENCES.filter(([, sentence]) => sentence !== 'ready')) {
+    porcelain(record)
     await featuresTurn()
     const tree = await band()
-    expect(restingWords(tree)).toEqual([`1 feature · fix-auth ${word}`])
+    expect(restingWords(tree)).toEqual([`1 feature · fix-auth ${sentence}`])
     expect(featuresKey(tree)).toBeUndefined()
+  }
+})
+
+test('the band and lib/30-worktree.sh say every state alike, and know the same states', () => {
+  const lib = fileURLToPath(new URL('../../../lib/30-worktree.sh', import.meta.url))
+  const printed = [...readFileSync(lib, 'utf8').matchAll(/\bstate="([a-z-]+)"/g)].map(match => match[1])
+  const tried = new Set(FEATURE_SENTENCES.map(([record]) => record.split('\t')[9]))
+  expect([...tried].sort()).toEqual([...new Set(printed)].sort())
+  for (const [record, sentence] of FEATURE_SENTENCES) {
+    const [, , ahead, , , , untracked, , lock, state] = record.split('\t')
+    const shell = spawnSync('bash', ['-c', 'source "$1"; shift; _feature_state_sentence "$@"', 'bash', lib, state, lock, untracked, ahead], { encoding: 'utf8' })
+    expect({ status: shell.status, stdout: shell.stdout, stderr: shell.stderr }).toEqual({ status: 0, stdout: `${sentence}\n`, stderr: '' })
+    const parsed = parseFeatures(`${record}\n`)
+    if ('unreadable' in parsed) throw new Error(`the band cannot read ${record}`)
+    expect(featuresWordOf(parsed)?.label).toBe(`1 feature · fix-auth ${sentence}`)
   }
 })
 
@@ -2820,6 +2853,8 @@ test('a cs that fails, cannot start, or prints a record the band cannot read dra
     { exitCode: 0, stdout: `${record}\textra\n`, stderr: '' },
     { exitCode: 0, stdout: record.replace('\t3\t', '\tthree\t') + '\n', stderr: '' },
     { exitCode: 0, stdout: record.replace(/ready$/, 'landed') + '\n', stderr: '' },
+    { exitCode: 0, stdout: feature('fix-auth', 3, 'untracked', { untracked: 'some' }) + '\n', stderr: '' },
+    { exitCode: 0, stdout: feature('fix-auth', 3, 'locked', { lock: 'elsewhere' }) + '\n', stderr: '' },
   ]
   for (const answer of answers) {
     runResult = answer
@@ -2832,6 +2867,8 @@ test('a cs that fails, cannot start, or prints a record the band cannot read dra
     `cs work -features gave a record the band cannot read: ${record}\textra`,
     `cs work -features gave a record the band cannot read: ${record.replace('\t3\t', '\tthree\t')}`,
     `cs work -features gave a record the band cannot read: ${record.replace(/ready$/, 'landed')}`,
+    `cs work -features gave a record the band cannot read: ${feature('fix-auth', 3, 'untracked', { untracked: 'some' })}`,
+    `cs work -features gave a record the band cannot read: ${feature('fix-auth', 3, 'locked', { lock: 'elsewhere' })}`,
   ])
 })
 

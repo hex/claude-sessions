@@ -335,7 +335,7 @@ launch_claude_code() {
             || [[ "$_ps_out" == *"--name $claude_name"$'\n'* ]] \
             || [[ "$_ps_out" == *"--name $session_name "* ]] \
             || [[ "$_ps_out" == *"--name $session_name"$'\n'* ]]; then
-            error "Session $session_name is already running elsewhere${claude_session_id:+ (UUID $claude_session_id)}. Use --force to override."
+            error "Session $session_name is live elsewhere${claude_session_id:+ (UUID $claude_session_id)}. Use --force to override."
         fi
     fi
 

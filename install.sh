@@ -1399,7 +1399,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "42ee8b850441fbd09d0010acac7166119472cacb574e4f0fc7476d3e453e4ff3  bin/cs"
+    "e651bb5d2ec85a4de48bc76615696e25b168fbfaca1f59f6ad5e30169440c894  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "ac6b329e266e45f6794602db7cbb39288f334351c15cdaba0769ef1fa4e5f20d  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
@@ -1413,7 +1413,7 @@ CS_PAYLOAD_SHA256=(
     "8be7cf198e9e950cb11eeb5d02231bb3e168aa078018495a1a8832186334bbc2  hooks/prompt-rewriter-vendor.sh"
     "1fa475982564ec70f12bf5295b874989dd95f89224f27bb6be4854cc5b8674e3  hooks/wrap-sweep.md"
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
-    "b84116f28a45322eac7fa9448809383614339a797bf6b6e0d0f07e0f55333ba7  hooks/session-start.sh"
+    "d22ebd5a106135b9e5d2d5c5be232951ddc8a91c491c28efda4c27e87b45b022  hooks/session-start.sh"
     "cae9775702513f11b1abff031928047766ab69714e3a9b1db82ff080e186f20b  hooks/autosave-commits.sh"
     "59a45222ec8106787e9e97c7c48acc32b754831ecdc5247fdc40d992f36ee009  hooks/stop-blocks.sh"
     "7709e7d4a45e074b73880f203957cfe10b99760835015093bdfa87ae858fdb1f  hooks/stop-notices.sh"
@@ -1428,13 +1428,13 @@ CS_PAYLOAD_SHA256=(
     "eaf2ade4ce76f74b8d6ab979f536007606e77308a0c33dfedf28d31befd1eaec  skills/prose-hygiene/SKILL.md"
     "5e275bba3498c648c648132d31efb4481335a2ee5c3cdf38d0af40ada01d680f  skills/rotate/SKILL.md"
     "c3abc90866d30594959e68f8259d5155bbf0b9ed3d27b69da63fe78a116c712d  skills/finish/SKILL.md"
-    "77a206d36ec0081215de23274999ed54f92d8d2c920253a1069fd4085e1cc084  skills/feature/SKILL.md"
+    "938985c6dbc9166170d1e0d7e632cd3c4a4089d5cdd5b2cf5f0702600f29110f  skills/feature/SKILL.md"
     "343016f4d62029a85cfae3c0911b8a7a2bff99a31bd868e04ca83ec4002d6f48  skills/write-as-me/SKILL.md"
     "9d42a50e396f05c53d62f13f4a6e21ba20ee04abf7b532023e0d8e5be988e2d3  skills/write-as-me/scripts/build-corpus.sh"
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
     "a4a0978846dd5f6cca361977b6c8b4b951d475734af234cbe78aae1f3bf8148a  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
-    "d635d85cf4a858d3a35c5e4a16a4e947f66a049feeddcc45234f8ea921939efe  mods/cs/hooks/register.tsx"
+    "e209d54d089fea0a64f8bfb6f75d0edf224aa6711abb567b2063742d42d54063  mods/cs/hooks/register.tsx"
     "7ca977c9aaef11d11a8dfe8c362e6e2f899aa15e4703b89f19d7a9192af2c8f9  mods/cs/tips.json"
     "2f8d4b45beddd0b27b050f1c2eb08ebb25552b4dea5f33b9398318a2ef636985  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"

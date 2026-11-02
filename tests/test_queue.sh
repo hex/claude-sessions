@@ -67,7 +67,7 @@ test_queue_list_numbers_pending() {
     # indented under it.
     printf 'shipped\n\nlanded\n' > "$CLAUDE_SESSION_META_DIR/local/queue.done"
     out=$("$CS_BIN" -queue list 2>&1)
-    assert_eq "$(printf 'Pending (1)\n  1. alpha\n\nDone (2)\n  - shipped\n  - landed')" "$out" \
+    assert_eq "$(printf 'Queued (1)\n  1. alpha\n\nDone (2)\n  - shipped\n  - landed')" "$out" \
         "sections carry their counts and a blank line between them" || return 1
 }
 
@@ -1545,7 +1545,7 @@ test_queue_list_strips_control_bytes_from_a_pending_task() {
     "$CS_BIN" -queue add "$(printf 'run \033[31mred\033[0m job')" >/dev/null 2>&1 || return 1
     local out
     out=$("$CS_BIN" -queue list 2>&1) || return 1
-    assert_output_contains "$out" "Pending (1)" "the pending branch is reached" || return 1
+    assert_output_contains "$out" "Queued (1)" "the queued branch is reached" || return 1
     assert_output_contains "$out" "job" "text after the control byte survives" || return 1
     assert_eq "0" "$(_esc_bytes "$out")" "no raw ESC reaches the terminal" || return 1
 }

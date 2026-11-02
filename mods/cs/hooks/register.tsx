@@ -477,8 +477,8 @@ export function register(on: On, options: PluginOptions) {
       $.ui.toast(TOASTS.queued(task))
       return { text: REPLIES.queued(task) }
     }
-    const pending = /^Pending \((\d+)\)$/m.exec(result.stdout)
-    if (pending && !(await queueRunning($))) void offerToStart($, bin, Number(pending[1]))
+    const queuedHeading = /^Queued \((\d+)\)$/m.exec(result.stdout)
+    if (queuedHeading && !(await queueRunning($))) void offerToStart($, bin, Number(queuedHeading[1]))
     return { text: result.stdout.trimEnd() }
   })
 
@@ -1055,28 +1055,39 @@ export function sharedPrefix(chords: (string | undefined)[]): string | undefined
 }
 
 // One `-features --porcelain` record, as _feature_readiness prints it.
-export type FeatureRecord = { task: string; ahead: number; state: string }
-// Every state _feature_readiness prints (lib/30-worktree.sh).
-const FEATURE_STATES = new Set(['ready', 'staged', 'locked', 'dirty', 'untracked', 'vault-locked', 'base-dirty', 'merged'])
+export type FeatureRecord = { task: string; ahead: number; untracked: number; lock: string; state: FeatureState }
+type FeatureState = 'ready' | 'merged' | 'staged' | 'untracked' | 'locked' | 'dirty' | 'base-dirty' | 'vault-locked'
+// What each state _feature_readiness prints reads as: _feature_state_sentence's
+// table (lib/30-worktree.sh), which the test runs against this copy.
+const FEATURE_SENTENCES: Record<FeatureState, (record: FeatureRecord) => string> = {
+  ready: record => record.ahead === 0 ? 'no commits' : 'ready',
+  merged: () => 'merged',
+  staged: () => 'retire staged',
+  untracked: record => `${record.untracked} ${record.untracked === 1 ? 'file' : 'files'} untracked`,
+  locked: record => `${record.lock} session is live`,
+  dirty: () => 'uncommitted changes',
+  'base-dirty': () => 'base has uncommitted changes',
+  'vault-locked': () => 'base vault is locked',
+}
+const isFeatureState = (state: string): state is FeatureState => Object.hasOwn(FEATURE_SENTENCES, state)
 
 // The records of `-features --porcelain`, or what is wrong with the first line
-// that is not one: ten tab-separated fields, a whole `ahead`, a known state.
+// that is not one: ten tab-separated fields, a whole `ahead` and `untracked`,
+// a known lock and state.
 export function parseFeatures(stdout: string): FeatureRecord[] | { unreadable: string } {
   const records: FeatureRecord[] = []
   for (const line of stdout.split('\n')) {
     if (line === '') continue
     const fields = line.split('\t')
-    const [task, , ahead, , , , , , , state] = fields
-    if (fields.length !== 10 || task === undefined || task === '' || !/^\d+$/.test(ahead ?? '') || !FEATURE_STATES.has(state ?? '')) return { unreadable: line }
-    records.push({ task, ahead: Number(ahead), state: state as string })
+    const [task, , ahead, , , , untracked, , lock, state] = fields
+    if (fields.length !== 10 || task === undefined || task === '' || !/^\d+$/.test(ahead ?? '') || !/^\d+$/.test(untracked ?? '') || lock === undefined || !/^(none|base|worktree)$/.test(lock) || state === undefined || !isFeatureState(state)) return { unreadable: line }
+    records.push({ task, ahead: Number(ahead), untracked: Number(untracked), lock, state })
   }
   return records
 }
 
-// A record's state as the band says it: `ready` only with work ahead of the
-// base to land.
 function stateWord(record: FeatureRecord): string {
-  return record.state === 'ready' && record.ahead === 0 ? 'no commits' : record.state
+  return FEATURE_SENTENCES[record.state](record)
 }
 
 // The word for a base's records.

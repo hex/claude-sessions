@@ -20,7 +20,7 @@ _encrypt_refuse() {  # session_name
     [ -L "$dir" ] && error "$name: an adopted session cannot be encrypted; its .cs/ lives in the project checkout."
     cs_interactive || error "cs -encrypt asks for the vault password; run it from a terminal."
     meta="$dir/.cs"
-    session_is_live "$meta" && error "$name: the session is running; close it, then encrypt."
+    session_is_live "$meta" && error "$name: the session is live; close it, then encrypt."
     for sub in $CS_VAULT_LINKS; do
         [ -L "$meta/$sub" ] && error "$name: .cs/$sub is already a link; the session is encrypted, or half set up by hand."
     done
@@ -196,7 +196,7 @@ run_encrypt() {
     _take_session_lock "$meta" || taken=$?
     case "$taken" in
         0) ;;
-        1) error "$name: the session is running; close it, then encrypt." ;;
+        1) error "$name: the session is live; close it, then encrypt." ;;
         2) error "$name: another cs is opening this session ($meta/session.mutex.lock is held); try again in a moment." ;;
         *) error "_take_session_lock returned $taken for $meta" ;;
     esac

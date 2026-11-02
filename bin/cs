@@ -3522,7 +3522,7 @@ _lock_collision_menu() {
     fi
 
     echo
-    printf '  %b%b%b  %b %bis already open%b %b· PID %s%b\n' \
+    printf '  %b%b%b  %b %bis live%b %b· PID %s%b\n' \
         "$YELLOW" "$ICON_LOCK" "$NC" "$(_session_pill "$session_name" "$color")" \
         "$COMMENT" "$NC" "$DIM" "$lock_pid" "$NC"
     echo
@@ -3705,7 +3705,7 @@ acquire_session_lock() {
         CS_COLLISION_FORCE=1
         warn "Overriding active session lock (PID $lock_pid)"
     else
-        echo -e "${RED}Error: Session is already open (PID $lock_pid)${NC}" >&2
+        echo -e "${RED}Error: Session is live (PID $lock_pid)${NC}" >&2
         echo -e "${DIM}Use --force to override: cs $session_name --force${NC}" >&2
         exit 1
     fi
@@ -5287,6 +5287,24 @@ _feature_readiness() {  # base_name task
         "$wt_dirty" "$untracked" "$base_dirty" "$lock" "$state"
 }
 
+# What a person reads for a readiness record, on every surface: the band's
+# FEATURE_SENTENCES (mods/cs/hooks/register.tsx) and the TUI's
+# feature_state_cell (tui/src/ui.rs) copy this table, and each one's test runs
+# this function against its copy.
+_feature_state_sentence() {  # state lock untracked ahead
+    case "$1" in
+        ready) if [ "$4" = 0 ]; then echo "no commits"; else echo "ready"; fi ;;
+        merged) echo "merged" ;;
+        staged) echo "retire staged" ;;
+        untracked) if [ "$3" = 1 ]; then echo "1 file untracked"; else echo "$3 files untracked"; fi ;;
+        locked) echo "$2 session is live" ;;
+        dirty) echo "uncommitted changes" ;;
+        base-dirty) echo "base has uncommitted changes" ;;
+        vault-locked) echo "base vault is locked" ;;
+        *) error "Unknown feature state '$1'" ;;
+    esac
+}
+
 # Resolve a symlinked directory to its real path, portably. BSD readlink gained
 # -f only in macOS 12.3; cd+pwd -P follows the link on every platform, and the
 # fallback keeps the original path rather than aborting under set -e.
@@ -5707,7 +5725,7 @@ force: $force_word" ] || error "No stage at $stage records retiring $task at $sh
     else
         pid=$(_foreign_live_lock_pid "$base_name" "$base_dir/.cs")
         if [ -n "$pid" ]; then
-            error "Base session '$base_name' is open elsewhere (PID $pid); run /finish $task from that conversation"
+            error "Base session '$base_name' is live elsewhere (PID $pid); run /finish $task from that conversation"
         fi
     fi
     pid=$(_foreign_live_lock_pid "$wt_name" "$wt_dir/.cs")
@@ -5718,8 +5736,8 @@ force: $force_word" ] || error "No stage at $stage records retiring $task at $sh
         # once that conversation's lock is gone. Every refusal below runs
         # then as it would now.
         _write_retire_stage "$stage" "$sha" "$force" \
-            || error "The feature is landed, but its worktree is still here: the '$wt_name' conversation is open in it (PID $pid), and cs could not stage its removal at $stage. Close that session yourself (/exit there), then run /finish $task here again and it will be removed."
-        printf "staged %s %s: the '%s' conversation is open in its worktree (PID %s); the worktree and branch are removed from this session once that conversation closes\n" \
+            || error "The feature is landed, but its worktree is still here: the '$wt_name' conversation is live in it (PID $pid), and cs could not stage its removal at $stage. Close that session yourself (/exit there), then run /finish $task here again and it will be removed."
+        printf "staged %s %s: the '%s' conversation is live in its worktree (PID %s); the worktree and branch are removed from this session once that conversation closes\n" \
             "$task" "$sha" "$wt_name" "$pid"
         return 0
     fi
@@ -6169,7 +6187,7 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote [--ci-green]
     # conversation is a refusal, never a wait.
     local pid
     pid=$(_foreign_live_lock_pid "$base_name" "$base_dir/.cs")
-    [ -z "$pid" ] || error "Base session '$base_name' is open elsewhere (PID $pid); run /finish $task from that conversation"
+    [ -z "$pid" ] || error "Base session '$base_name' is live elsewhere (PID $pid); run /finish $task from that conversation"
 
     local commit
     commit=$(git -C "$base_dir" rev-parse -q --verify "$sha^{commit}" 2>/dev/null) \
@@ -6988,7 +7006,7 @@ run_features() {  # base_name [--porcelain]
         esac
     done
 
-    local features task record
+    local features task record branch ahead untracked lock state sentence
     features=$(_worktree_features "$base_name")
     [ -n "$features" ] || return 0
 
@@ -7004,9 +7022,9 @@ run_features() {  # base_name [--porcelain]
     while IFS= read -r task; do
         [ -n "$task" ] || continue
         record=$(_feature_readiness "$base_name" "$task")
-        printf '%s\n' "$record" | awk -F'\t' \
-            '{ detail = ($10 == "untracked") ? sprintf("%s file%s untracked", $7, ($7 == 1) ? "" : "s") : $10;
-               printf "%-24s %-24s %6s  %s\n", $1, $2, $3, detail }'
+        IFS=$'\t' read -r task branch ahead _ _ _ untracked _ lock state <<< "$record"
+        sentence=$(_feature_state_sentence "$state" "$lock" "$untracked" "$ahead")
+        printf '%-24s %-24s %6s  %s\n' "$task" "$branch" "$ahead" "$sentence"
     done <<< "$features"
 }
 
@@ -10827,7 +10845,7 @@ _queue_list() {  # qdir
     for f in "$qdir/queue"/*; do
         [ -f "$f" ] || continue
         n=$((n + 1))
-        [ "$n" -eq 1 ] && echo "Pending ($len)"
+        [ "$n" -eq 1 ] && echo "Queued ($len)"
         text=$(<"$f")
         printf '  %d. %s\n' "$n" "${text//$'\n'/ }"
     done
@@ -13713,7 +13731,7 @@ _encrypt_refuse() {  # session_name
     [ -L "$dir" ] && error "$name: an adopted session cannot be encrypted; its .cs/ lives in the project checkout."
     cs_interactive || error "cs -encrypt asks for the vault password; run it from a terminal."
     meta="$dir/.cs"
-    session_is_live "$meta" && error "$name: the session is running; close it, then encrypt."
+    session_is_live "$meta" && error "$name: the session is live; close it, then encrypt."
     for sub in $CS_VAULT_LINKS; do
         [ -L "$meta/$sub" ] && error "$name: .cs/$sub is already a link; the session is encrypted, or half set up by hand."
     done
@@ -13889,7 +13907,7 @@ run_encrypt() {
     _take_session_lock "$meta" || taken=$?
     case "$taken" in
         0) ;;
-        1) error "$name: the session is running; close it, then encrypt." ;;
+        1) error "$name: the session is live; close it, then encrypt." ;;
         2) error "$name: another cs is opening this session ($meta/session.mutex.lock is held); try again in a moment." ;;
         *) error "_take_session_lock returned $taken for $meta" ;;
     esac
@@ -15394,7 +15412,7 @@ launch_claude_code() {
             || [[ "$_ps_out" == *"--name $claude_name"$'\n'* ]] \
             || [[ "$_ps_out" == *"--name $session_name "* ]] \
             || [[ "$_ps_out" == *"--name $session_name"$'\n'* ]]; then
-            error "Session $session_name is already running elsewhere${claude_session_id:+ (UUID $claude_session_id)}. Use --force to override."
+            error "Session $session_name is live elsewhere${claude_session_id:+ (UUID $claude_session_id)}. Use --force to override."
         fi
     fi
 
@@ -16442,7 +16460,7 @@ _remote_refuse_live() {  # session_name, meta_dir, lock_pid, [remote]
         error "Session $1 is served by cs $1 --remote (remote-control PID $spid); stop it first with Ctrl-C in its window, or close the window."
     fi
     [ -z "${4:-}" ] \
-        || error "Session $1 is already open (PID $3); cs $1 --remote serves only a session that is not open. Close it first."
+        || error "Session $1 is live (PID $3); cs $1 --remote serves only a session that is not live. Close it first."
     return 0
 }
 

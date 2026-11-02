@@ -14,7 +14,7 @@ use unicode_width::UnicodeWidthStr;
 use ratatui::layout::Alignment;
 
 use crate::app::{
-    App, FlashKind, Focus, Mode, NotesFocus, SortColumn, SortDirection, StatusLevel,
+    App, FeatureRow, FlashKind, Focus, Mode, NotesFocus, SortColumn, SortDirection, StatusLevel,
 };
 use crate::session::DeleteWarning;
 use crate::theme::{self, Palette};
@@ -184,6 +184,23 @@ fn cursor_wrap_spans(
             }
         })
         .collect()
+}
+
+/// A readiness record's STATE cell: `_feature_state_sentence`'s table
+/// (lib/30-worktree.sh), which a test runs against this copy, in its colour.
+fn feature_state_cell(f: &FeatureRow, p: Palette) -> (String, Color) {
+    match f.state.as_str() {
+        "ready" if f.ahead == 0 => ("no commits".to_string(), p.faint),
+        "ready" => (f.state.clone(), p.ink),
+        "merged" => (f.state.clone(), p.faint),
+        "staged" => ("retire staged".to_string(), p.amber),
+        "untracked" => (format!("{} untracked", plural(f.untracked, "file")), p.amber),
+        "locked" => (format!("{} session is live", f.lock), p.amber),
+        "dirty" => ("uncommitted changes".to_string(), p.amber),
+        "base-dirty" => ("base has uncommitted changes".to_string(), p.amber),
+        "vault-locked" => ("base vault is locked".to_string(), p.amber),
+        other => (other.to_string(), p.amber),
+    }
 }
 
 /// "1 file", "2 files". Counts reach the merge screen from git, so one is an
@@ -940,7 +957,7 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                 // order: the two archive keys sit with the session actions
                 // they belong to rather than at the end where they would be
                 // the first thing lost.
-                "q:quit  Enter:open  n:new  d:delete  r:rename  a:archive  A:archived  Tab:to-do  Space:mark  /:search  1-6:sort  ?:legend"
+                "q:quit  Enter:open  n:new  d:delete  r:rename  a:archive  A:archived  Tab:queue  Space:mark  /:search  1-6:sort  ?:legend"
             }
             Mode::SessionMenu => "j/k:navigate  Enter:select  key:run directly  q/Esc:close",
             Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
@@ -1302,7 +1319,7 @@ fn render_confirm_force_open(app: &App, frame: &mut Frame) {
         .unwrap_or_default();
 
     let msg = format!(
-        "Session '{}' is in use{}.\nForce open?",
+        "Session '{}' is live{}.\nForce open?",
         session.name, pid_text
     );
 
@@ -1551,12 +1568,12 @@ fn render_legend(app: &App, frame: &mut Frame) {
     let lines: Vec<Line> = vec![
         Line::default(),
         entry("\u{25cf}", p.green, false, "recency dot \u{2014} green when recently active, fading to grey as the session goes dormant"),
-        entry("\u{25a0}", p.teal, false, "live \u{2014} conversation open right now, locked or not (in place of the recency dot)"),
+        entry("\u{25a0}", p.teal, false, "live \u{2014} conversation open right now, pid or heartbeat (in place of the recency dot)"),
         entry("*", p.gold, true, "marked with Space for batch actions (D deletes the marked set)"),
         entry("\u{25aa}", p.gold, false, "has stored secrets (shown here when the SECRETS column is hidden)"),
         entry("\u{2709}", p.amber, false, "unread cross-session mail (cs -msg) \u{2014} the number is the count not yet read"),
         entry("\u{2500}", p.comment, false, "dim grey row \u{2014} archived session, or not matching the current search"),
-        entry("\u{25b6}", p.teal, false, "to-do pane: the queue task Claude is actively working right now"),
+        entry("\u{25b6}", p.teal, false, "queue pane: the queue task Claude is actively working right now"),
         Line::default(),
     ];
 
@@ -1671,13 +1688,13 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         )
     } else if let Some(pid) = session.liveness.lock_pid() {
         (
-            format!("\u{25a0} live \u{b7} locked {}{}", pid, agent),
+            format!("\u{25a0} live \u{b7} pid {}{}", pid, agent),
             p.teal,
             None,
         )
     } else if session.liveness.is_live() {
         // Breathing without a lock: opened outside cs, no PID to show.
-        (format!("\u{25a0} live \u{b7} unlocked{}", agent), p.teal, None)
+        (format!("\u{25a0} live \u{b7} heartbeat{}", agent), p.teal, None)
     } else if session.archived {
         ("archived".to_string(), p.faint, None)
     } else {
@@ -1985,7 +2002,7 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
     let list = Paragraph::new(list_lines);
     frame.render_widget(list, pad_h(rows[3]));
 
-    card_frame(frame.buffer_mut(), area, "to-do", side, p);
+    card_frame(frame.buffer_mut(), area, "queue", side, p);
 }
 
 /// The merge screen. Replaces the two content panes rather than overlaying
@@ -2045,16 +2062,7 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         .merge_features
         .iter()
         .map(|f| {
-            let (label, color) = match f.state.as_str() {
-                "ready" => (f.state.clone(), p.ink),
-                "merged" => (f.state.clone(), p.faint),
-                "untracked" => (format!("{} untracked", plural(f.untracked, "file")), p.amber),
-                "locked" => (format!("{} session is open", f.lock), p.amber),
-                "dirty" => ("uncommitted changes".to_string(), p.amber),
-                "base-dirty" => ("base has uncommitted changes".to_string(), p.amber),
-                "vault-locked" => ("base vault is locked".to_string(), p.amber),
-                other => (other.to_string(), p.amber),
-            };
+            let (label, color) = feature_state_cell(f, p);
             Row::new(vec![
                 Cell::from(f.task.clone()).style(Style::default().fg(p.ink)),
                 Cell::from(f.ahead.to_string()).style(Style::default().fg(p.mut_)),
@@ -2136,7 +2144,7 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         // A lock is the one blocker the ritual cannot resolve for you, and base
         // and worktree locks want different remedies, so name the side.
         let (base_label, base_color) = if f.lock == "base" {
-            ("base session open".to_string(), p.amber)
+            ("base session is live".to_string(), p.amber)
         } else if f.state == "vault-locked" {
             ("vault locked".to_string(), p.amber)
         } else if f.base_dirty {
@@ -2151,7 +2159,7 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         if f.lock == "worktree" {
             lines.push(Line::from(vec![
                 Span::styled("  lock      ", Style::default().fg(p.mut_)),
-                Span::styled("feature session open", Style::default().fg(p.amber)),
+                Span::styled("worktree session is live", Style::default().fg(p.amber)),
             ]));
         }
 
@@ -2261,6 +2269,10 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
     use ratatui::Terminal;
+
+    /// The queue card's top border. The word alone also matches the footer's
+    /// `Tab queue` hint, which draws whether or not the card does.
+    const QUEUE_CARD_TITLE: &str = "\u{256d} queue ";
 
     fn one_session() -> Vec<Session> {
         vec![Session {
@@ -2684,7 +2696,7 @@ mod tests {
         let mut app = App::new(sessions);
         app.theme = Palette::dark();
         let joined = render_at(&mut app, 80, 50);
-        assert!(joined.contains("to-do"), "notes card title should render: {joined}");
+        assert!(joined.contains(QUEUE_CARD_TITLE), "queue card title should render: {joined}");
         assert!(
             joined.contains('\u{256d}'),
             "card corners should render once the panes open: {joined}"
@@ -2710,7 +2722,7 @@ mod tests {
         let mut app = App::new(sessions);
         app.theme = Palette::dark();
         let joined = render_wide(&mut app);
-        assert!(joined.contains("to-do"), "to-do card title should render: {joined}");
+        assert!(joined.contains(QUEUE_CARD_TITLE), "queue card title should render: {joined}");
         assert!(
             joined.contains('\u{256d}'),
             "card corners should render once the panes open: {joined}"
@@ -2755,7 +2767,7 @@ mod tests {
                             .to_string()
                     })
                     .collect();
-                if cells.concat().contains("to-do") {
+                if cells.concat().contains(QUEUE_CARD_TITLE) {
                     let left = cells.iter().position(|s| s == "\u{256d}").unwrap() as u16;
                     let right = cells.iter().rposition(|s| s == "\u{256e}").unwrap() as u16;
                     coords = Some((left, right, y + 1));
@@ -2763,7 +2775,7 @@ mod tests {
                 }
             }
             let (left_x, right_x, side_y) =
-                coords.expect("to-do card top border should render");
+                coords.expect("queue card top border should render");
             let left_fg = buf
                 .cell(ratatui::layout::Position::new(left_x, side_y))
                 .unwrap()
@@ -2778,13 +2790,13 @@ mod tests {
         let mut app = App::new(one_session());
         app.theme = p;
         let (left, right) = render_and_find_todo_side(&mut app);
-        assert_eq!(left, p.soft, "unfocused to-do card side border should be SOFT");
-        assert_eq!(right, p.soft, "unfocused to-do card side border should be SOFT");
+        assert_eq!(left, p.soft, "unfocused queue card side border should be SOFT");
+        assert_eq!(right, p.soft, "unfocused queue card side border should be SOFT");
 
         app.focus = Focus::Notes;
         let (left, right) = render_and_find_todo_side(&mut app);
-        assert_eq!(left, p.strong, "focused to-do card side border should brighten to STRONG");
-        assert_eq!(right, p.strong, "focused to-do card side border should brighten to STRONG");
+        assert_eq!(left, p.strong, "focused queue card side border should brighten to STRONG");
+        assert_eq!(right, p.strong, "focused queue card side border should brighten to STRONG");
     }
 
     #[test]
@@ -2905,12 +2917,13 @@ mod tests {
 
         let joined = render_wide(&mut app);
         assert!(joined.contains("?"), "footer should advertise the legend key");
+        assert!(joined.contains("Tab queue"), "footer should name the queue pane's key: {joined}");
         assert!(!joined.contains("recency dot"), "legend hidden until asked for");
 
         app.handle_key(KeyEvent::from(KeyCode::Char('?')));
         assert_eq!(app.mode, Mode::Legend);
         let joined = render_wide(&mut app);
-        for label in ["recency dot", "locked", "marked with Space", "stored secrets", "archived", "in place of the recency dot"] {
+        for label in ["recency dot", "pid or heartbeat", "marked with Space", "stored secrets", "archived", "in place of the recency dot", "queue pane"] {
             assert!(joined.contains(label), "legend should explain {label}: {joined}");
         }
 
@@ -3094,7 +3107,7 @@ mod tests {
     }
 
     #[test]
-    fn heartbeat_live_session_gets_the_square_and_unlocked_state() {
+    fn heartbeat_live_session_gets_the_square_and_heartbeat_state() {
         let mut app = App::new(one_session());
         app.theme = Palette::dark();
         app.show_preview = true;
@@ -3112,8 +3125,8 @@ mod tests {
 
         // The preview names the state honestly: live, but not cs-locked.
         assert!(
-            rows.iter().any(|r| r.contains("\u{25a0} live \u{b7} unlocked")),
-            "preview should read '■ live · unlocked' for a heartbeat-live session"
+            rows.iter().any(|r| r.contains("\u{25a0} live \u{b7} heartbeat")),
+            "preview should read '■ live · heartbeat' for a heartbeat-live session"
         );
         // The gutter carries the live square, teal like every liveness surface.
         let row_y = rows
@@ -3301,7 +3314,7 @@ mod tests {
         let input_row = rows
             .iter()
             .find(|r| r.contains("Tab to add"))
-            .expect("to-do input placeholder should render");
+            .expect("queue input placeholder should render");
         let border_x = input_row
             .chars()
             .position(|c| c == '\u{2502}')
@@ -3309,21 +3322,21 @@ mod tests {
         let after_border: String = input_row.chars().skip(border_x + 1).take(2).collect();
         assert_eq!(
             after_border, "  ",
-            "to-do content should sit two clear columns inside the left border: {input_row:?}"
+            "queue content should sit two clear columns inside the left border: {input_row:?}"
         );
 
         // Vertical headroom: the row under the to-do title is blank.
         let title_y = rows
             .iter()
-            .position(|r| r.contains("to-do"))
-            .expect("to-do card title should render");
+            .position(|r| r.contains(QUEUE_CARD_TITLE))
+            .expect("queue card title should render");
         let headroom: String = rows[title_y + 1]
             .chars()
             .filter(|c| c.is_alphanumeric())
             .collect();
         assert!(
             headroom.is_empty(),
-            "row under the to-do title should be blank, got: {:?}",
+            "row under the queue title should be blank, got: {:?}",
             rows[title_y + 1]
         );
     }
@@ -3342,8 +3355,8 @@ mod tests {
             .expect("preview card should render in stacked layout");
         let y_todo = rows
             .iter()
-            .position(|r| r.contains("to-do"))
-            .expect("to-do card should render in stacked layout");
+            .position(|r| r.contains(QUEUE_CARD_TITLE))
+            .expect("queue card should render in stacked layout");
         let list_rows = y_preview.saturating_sub(2); // content starts under the 2-row masthead
         let preview_rows = y_todo - y_preview;
         assert!(
@@ -4266,7 +4279,7 @@ mod tests {
         app.sessions[0].agent_status = Some("waiting".into());
         let text = render_wide(&mut app);
         assert!(
-            text.contains("locked 4242 \u{b7} waiting"),
+            text.contains("live \u{b7} pid 4242 \u{b7} waiting"),
             "state row must carry the advertised status beside the pid:\n{text}"
         );
     }
@@ -4286,9 +4299,9 @@ mod tests {
         app.sessions[0].liveness = Liveness::Locked(4242);
         app.sessions[0].agent_status = None;
         let text = render_wide(&mut app);
-        assert!(text.contains("locked 4242"), "state row missing:\n{text}");
+        assert!(text.contains("live \u{b7} pid 4242"), "state row missing:\n{text}");
         assert!(
-            !text.contains("locked 4242 \u{b7}"),
+            !text.contains("pid 4242 \u{b7}"),
             "no separator may trail the pid when nothing is advertised:\n{text}"
         );
     }
@@ -4746,12 +4759,18 @@ mod tests {
         app.merge_selected = 0;
         let text = render_wide(&mut app);
         assert!(
-            text.contains("base session open"),
+            text.contains("base      base session is live"),
             "the detail pane must name the locked side:\n{text}"
         );
         assert!(
             !text.contains("base      clean"),
             "a locked base must not also read clean:\n{text}"
+        );
+        app.merge_features[0].lock = "worktree".into();
+        let text = render_wide(&mut app);
+        assert!(
+            text.contains("lock      worktree session is live"),
+            "the detail pane must name the locked side:\n{text}"
         );
     }
 
@@ -4941,6 +4960,56 @@ mod tests {
         assert!(text.contains("ready"), "state missing:\n{text}");
         assert!(text.contains("untracked"), "blocker missing:\n{text}");
         assert!(text.contains("cs/fix-auth"), "branch missing from the detail pane:\n{text}");
+    }
+
+    #[test]
+    fn merge_screen_says_every_state_as_lib_worktree_does() {
+        let lib = concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/30-worktree.sh");
+        let records = [
+            ("ready", "none", 0, 3, "ready"),
+            ("ready", "none", 0, 0, "no commits"),
+            ("merged", "none", 0, 0, "merged"),
+            ("staged", "worktree", 0, 2, "retire staged"),
+            ("untracked", "none", 1, 2, "1 file untracked"),
+            ("untracked", "none", 3, 2, "3 files untracked"),
+            ("locked", "base", 0, 2, "base session is live"),
+            ("locked", "worktree", 0, 2, "worktree session is live"),
+            ("dirty", "none", 0, 2, "uncommitted changes"),
+            ("base-dirty", "none", 0, 5, "base has uncommitted changes"),
+            ("vault-locked", "none", 0, 1, "base vault is locked"),
+        ];
+        for (state, lock, untracked, ahead, sentence) in records {
+            let mut app = merge_app();
+            app.merge_features.truncate(1);
+            app.merge_features[0].state = state.into();
+            app.merge_features[0].lock = lock.into();
+            app.merge_features[0].untracked = untracked;
+            app.merge_features[0].ahead = ahead;
+            let (label, _) = feature_state_cell(&app.merge_features[0], app.theme);
+            assert_eq!(label, sentence, "{state}");
+            assert!(render_wide(&mut app).contains(sentence), "the row must read {sentence}");
+
+            let shell = std::process::Command::new("bash")
+                .args(["-c", r#"source "$1"; shift; _feature_state_sentence "$@""#, "bash", lib, state, lock])
+                .args([untracked.to_string(), ahead.to_string()])
+                .output()
+                .expect("bash runs the shell table");
+            assert_eq!(
+                String::from_utf8_lossy(&shell.stdout),
+                format!("{sentence}\n"),
+                "{state}: {}",
+                String::from_utf8_lossy(&shell.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn force_open_confirm_says_the_session_is_live() {
+        let mut app = App::new(one_session());
+        app.sessions[0].liveness = Liveness::Locked(4242);
+        app.mode = Mode::ConfirmForceOpen;
+        let text = render_wide(&mut app);
+        assert!(text.contains("Session 'alpha' is live (PID 4242)."), "the prompt must say live:\n{text}");
     }
 
     #[test]

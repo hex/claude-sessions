@@ -95,7 +95,7 @@ test_encrypt_refuses_a_live_session() {
     out=$(_encrypt enc 2>&1) || rc=$?
     kill "$live_pid" 2>/dev/null; wait "$live_pid" 2>/dev/null
     assert_eq "1" "$rc" "non-zero exit" || return 1
-    assert_output_contains "$out" "enc: the session is running; close it, then encrypt." "names the live session" || return 1
+    assert_output_contains "$out" "enc: the session is live; close it, then encrypt." "names the live session" || return 1
     _assert_nothing_written enc || return 1
 }
 
@@ -348,7 +348,7 @@ SHIM
     lock_now=$(cat "$meta/session.lock" 2>/dev/null)
     kill "$pid_open" 2>/dev/null; wait "$pid_open" 2>/dev/null
     assert_eq "1" "$rc" "cs -encrypt refuses" || return 1
-    assert_eq "Error: enc: the session is running; close it, then encrypt." "$(cat "$out")" \
+    assert_eq "Error: enc: the session is live; close it, then encrypt." "$(cat "$out")" \
         "cs -encrypt names the running session" || return 1
     assert_eq "" "$(cat "$FAKE_HDIUTIL_LOG")" "hdiutil never called" || return 1
     assert_eq "$pid_open" "$lock_now" "the open still holds the session lock" || return 1

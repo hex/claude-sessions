@@ -96,7 +96,7 @@ the brief already carries the feature. Let the permission prompt on
 branch and a window are about to exist. Never work around it.
 
 cs refuses when the name is invalid, the brief lacks one of its sections,
-tmux is missing, the session is already open, or a pending spawn for the
+tmux is missing, the session is already live, or a pending spawn for the
 name exists (cs keeps the earlier brief and refuses the new one). A missing
 section is yours to add; print any other refusal verbatim and stop, and do
 not retry with a different name on your own.

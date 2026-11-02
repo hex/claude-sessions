@@ -657,7 +657,7 @@ test_remote_refuses_a_session_open_locally() {
     pid="$(cat "$CS_SESSIONS_ROOT/demo/.cs/session.lock")"
     out=$("$CS_BIN" demo --remote 2>&1) || rc=$?
     assert_eq "1" "$rc" "a session open locally is not served" || return 1
-    assert_eq "Error: Session demo is already open (PID $pid); cs demo --remote serves only a session that is not open. Close it first." \
+    assert_eq "Error: Session demo is live (PID $pid); cs demo --remote serves only a session that is not live. Close it first." \
         "$(printf '%s' "$out" | strip_ansi | tail -1)" "the refusal names the open session's pid" || return 1
     assert_file_not_exists "$FAKE_CLAUDE_LOG" "remote-control never ran" || return 1
 }
@@ -1074,7 +1074,7 @@ test_remote_inside_tmux_refuses_an_open_or_served_session_on_the_callers_termina
     pid="$(cat "$CS_SESSIONS_ROOT/demo/.cs/session.lock")"
     out=$(TMUX="/tmp/fake,1,0" "$CS_BIN" demo --remote 2>&1) || rc=$?
     assert_eq "1" "$rc" "a session open locally is refused" || return 1
-    assert_eq "Error: Session demo is already open (PID $pid); cs demo --remote serves only a session that is not open. Close it first." \
+    assert_eq "Error: Session demo is live (PID $pid); cs demo --remote serves only a session that is not live. Close it first." \
         "$(printf '%s' "$out" | strip_ansi | tail -1)" "the open refusal" || return 1
     start_fake_server_process demo
     printf '%s\n' "$FAKE_SERVER_PID" > "$CS_SESSIONS_ROOT/demo/.cs/local/remote.pid"

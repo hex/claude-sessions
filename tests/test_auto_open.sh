@@ -273,7 +273,7 @@ test_dot_refuses_a_session_that_is_already_running() {
     out=$(_cs_in "$dir" .)
     unset CS_PS_BIN
 
-    assert_output_contains "$out" "already running elsewhere" \
+    assert_output_contains "$out" "is live elsewhere" \
         "cs . should refuse a live session exactly as 'cs <name>' does" || return 1
     assert_output_not_contains "$out" "LAUNCHED" \
         "a refused open must not reach claude" || return 1
