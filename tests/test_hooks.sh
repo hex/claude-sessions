@@ -4280,6 +4280,18 @@ test_work_gate_starts_a_conversation_at_its_first_timestamp() {
     assert_eq "" "$(_work_notices)" "a narrative written during the conversation is not" || return 1
 }
 
+# The floor spaces a reminder from the cursor's last stamp; a conversation with
+# no cursor has had none, so a busy first turn is reminded however short.
+test_work_gate_reminds_a_first_turn_shorter_than_the_floor() {
+    _work_fixture
+    rm -f "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+    jq -nc --arg ts "$(date -u -v-10S '+%Y-%m-%dT%H:%M:%S.000Z' 2>/dev/null || date -u -d '10 seconds ago' '+%Y-%m-%dT%H:%M:%S.000Z')" \
+        '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}' > "$TEST_TMPDIR/transcript.jsonl"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 0 0
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "three edits in a first turn of ten seconds remind" || return 1
+}
+
 # A transcript that cannot be read leaves the clock to decide: the cooldown
 # stamp holds a reminder back, and without one a stale narrative is reminded.
 test_work_gate_falls_back_to_the_clock_without_a_transcript() {
@@ -4314,6 +4326,7 @@ run_test test_work_gate_counts_only_past_the_cursor
 run_test test_work_gate_moves_the_cursor_when_the_narrative_was_written
 run_test test_work_gate_floor_keeps_close_stops_to_one_reminder
 run_test test_work_gate_starts_a_conversation_at_its_first_timestamp
+run_test test_work_gate_reminds_a_first_turn_shorter_than_the_floor
 run_test test_work_gate_falls_back_to_the_clock_without_a_transcript
 
 run_test test_auto_approve_allows_cs_metadata_write

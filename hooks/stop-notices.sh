@@ -250,9 +250,10 @@ fi
 # counts as written since the cursor when its mtime is at or past the epoch.
 # The cursor moves to the transcript's end, stamped now, after a reminder and
 # whenever the narrative was written since it; a reminder never goes out
-# within WORK_FLOOR seconds of the epoch, which keeps two Stops close together
-# from both reminding. A conversation with no cursor yet counts from the
-# transcript's start and takes its first timestamp as the epoch.
+# within WORK_FLOOR seconds of the cursor's stamp, which keeps two Stops close
+# together from both reminding. A conversation with no cursor yet counts from
+# the transcript's start and takes its first timestamp as the epoch; with no
+# stamp to space it from, the floor does not hold its first reminder back.
 WORK_EDITS=3
 WORK_TEXT=2000
 WORK_FLOOR=60
@@ -335,7 +336,9 @@ EOF
         CURSOR_MOVE=1
         return 0
     fi
-    [ $((CURRENT_TIME - ep)) -ge "$WORK_FLOOR" ] || return 0
+    if [ -f "$CURSOR_FILE" ] && [ $((CURRENT_TIME - ep)) -lt "$WORK_FLOOR" ]; then
+        return 0
+    fi
     if [ $((TRANSCRIPT_SIZE - off)) -gt "$WORK_READ_MAX" ]; then
         REMINDER_DUE=1
         return 0
