@@ -185,8 +185,8 @@ test_failures_breaker_trips_on_the_last_task() {
     assert_eq "1" "$(_qlen)" "the failed last task is still queued" || return 1
     assert_output_not_contains "$(_inbox)" '"event":"drain_finished"' "no drain_finished" || return 1
     out=$("$CS_BIN" -queue list 2>&1) || return 1
-    assert_eq "Pending (1)
-  1. only task" "$out" "cs -queue list shows the task pending and nothing done" || return 1
+    assert_eq "Queued (1)
+  1. only task" "$out" "cs -queue list shows the task queued and nothing done" || return 1
 }
 
 # The model can report a task it could not complete with a line of its own;

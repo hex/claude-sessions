@@ -2910,7 +2910,7 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Char('?')));
         assert_eq!(app.mode, Mode::Legend);
         let joined = render_wide(&mut app);
-        for label in ["recency dot", "locked", "marked with Space", "stored secrets", "archived", "in place of the recency dot"] {
+        for label in ["recency dot", "pid or heartbeat", "marked with Space", "stored secrets", "archived", "in place of the recency dot", "queue pane"] {
             assert!(joined.contains(label), "legend should explain {label}: {joined}");
         }
 
@@ -3094,7 +3094,7 @@ mod tests {
     }
 
     #[test]
-    fn heartbeat_live_session_gets_the_square_and_unlocked_state() {
+    fn heartbeat_live_session_gets_the_square_and_heartbeat_state() {
         let mut app = App::new(one_session());
         app.theme = Palette::dark();
         app.show_preview = true;
@@ -3112,8 +3112,8 @@ mod tests {
 
         // The preview names the state honestly: live, but not cs-locked.
         assert!(
-            rows.iter().any(|r| r.contains("\u{25a0} live \u{b7} unlocked")),
-            "preview should read '■ live · unlocked' for a heartbeat-live session"
+            rows.iter().any(|r| r.contains("\u{25a0} live \u{b7} heartbeat")),
+            "preview should read '■ live · heartbeat' for a heartbeat-live session"
         );
         // The gutter carries the live square, teal like every liveness surface.
         let row_y = rows
@@ -4266,7 +4266,7 @@ mod tests {
         app.sessions[0].agent_status = Some("waiting".into());
         let text = render_wide(&mut app);
         assert!(
-            text.contains("locked 4242 \u{b7} waiting"),
+            text.contains("live \u{b7} pid 4242 \u{b7} waiting"),
             "state row must carry the advertised status beside the pid:\n{text}"
         );
     }
@@ -4286,9 +4286,9 @@ mod tests {
         app.sessions[0].liveness = Liveness::Locked(4242);
         app.sessions[0].agent_status = None;
         let text = render_wide(&mut app);
-        assert!(text.contains("locked 4242"), "state row missing:\n{text}");
+        assert!(text.contains("live \u{b7} pid 4242"), "state row missing:\n{text}");
         assert!(
-            !text.contains("locked 4242 \u{b7}"),
+            !text.contains("pid 4242 \u{b7}"),
             "no separator may trail the pid when nothing is advertised:\n{text}"
         );
     }
@@ -4746,12 +4746,18 @@ mod tests {
         app.merge_selected = 0;
         let text = render_wide(&mut app);
         assert!(
-            text.contains("base session open"),
+            text.contains("base      base session is live"),
             "the detail pane must name the locked side:\n{text}"
         );
         assert!(
             !text.contains("base      clean"),
             "a locked base must not also read clean:\n{text}"
+        );
+        app.merge_features[0].lock = "worktree".into();
+        let text = render_wide(&mut app);
+        assert!(
+            text.contains("lock      feature session is live"),
+            "the detail pane must name the locked side:\n{text}"
         );
     }
 
@@ -4941,6 +4947,56 @@ mod tests {
         assert!(text.contains("ready"), "state missing:\n{text}");
         assert!(text.contains("untracked"), "blocker missing:\n{text}");
         assert!(text.contains("cs/fix-auth"), "branch missing from the detail pane:\n{text}");
+    }
+
+    #[test]
+    fn merge_screen_says_every_state_as_lib_worktree_does() {
+        let lib = concat!(env!("CARGO_MANIFEST_DIR"), "/../lib/30-worktree.sh");
+        let records = [
+            ("ready", "none", 0, 3, "ready"),
+            ("ready", "none", 0, 0, "no commits"),
+            ("merged", "none", 0, 0, "merged"),
+            ("staged", "worktree", 0, 2, "retire staged"),
+            ("untracked", "none", 1, 2, "1 file untracked"),
+            ("untracked", "none", 3, 2, "3 files untracked"),
+            ("locked", "base", 0, 2, "base session is live"),
+            ("locked", "worktree", 0, 2, "worktree session is live"),
+            ("dirty", "none", 0, 2, "uncommitted changes"),
+            ("base-dirty", "none", 0, 5, "base has uncommitted changes"),
+            ("vault-locked", "none", 0, 1, "base vault is locked"),
+        ];
+        for (state, lock, untracked, ahead, sentence) in records {
+            let mut app = merge_app();
+            app.merge_features.truncate(1);
+            app.merge_features[0].state = state.into();
+            app.merge_features[0].lock = lock.into();
+            app.merge_features[0].untracked = untracked;
+            app.merge_features[0].ahead = ahead;
+            let (label, _) = feature_state_cell(&app.merge_features[0], app.theme);
+            assert_eq!(label, sentence, "{state}");
+            assert!(render_wide(&mut app).contains(sentence), "the row must read {sentence}");
+
+            let shell = std::process::Command::new("bash")
+                .args(["-c", r#"source "$1"; shift; _feature_state_sentence "$@""#, "bash", lib, state, lock])
+                .args([untracked.to_string(), ahead.to_string()])
+                .output()
+                .expect("bash runs the shell table");
+            assert_eq!(
+                String::from_utf8_lossy(&shell.stdout),
+                format!("{sentence}\n"),
+                "{state}: {}",
+                String::from_utf8_lossy(&shell.stderr)
+            );
+        }
+    }
+
+    #[test]
+    fn force_open_confirm_says_the_session_is_live() {
+        let mut app = App::new(one_session());
+        app.sessions[0].liveness = Liveness::Locked(4242);
+        app.mode = Mode::ConfirmForceOpen;
+        let text = render_wide(&mut app);
+        assert!(text.contains("Session 'alpha' is live (PID 4242)."), "the prompt must say live:\n{text}");
     }
 
     #[test]

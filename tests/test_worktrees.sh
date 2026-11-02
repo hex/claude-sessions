@@ -3770,6 +3770,7 @@ test_retire_and_features_name_a_locked_base_vault_before_any_record() {
     line=$("$CS_BIN" proj -features --porcelain 2>&1)
     assert_eq "vault-locked" "$(_feat_field "$line" 10)" "the features screen reads vault-locked: $line" || return 1
     assert_eq "0" "$(_feat_field "$line" 7)" "with nothing at risk: $line" || return 1
+    assert_output_contains "$("$CS_BIN" proj -features 2>&1)" "  base vault is locked$" "the table says it as a sentence" || return 1
     echo "scratch" > "$wt/scratch.txt"
     line=$("$CS_BIN" proj -features --porcelain 2>&1)
     assert_eq "untracked" "$(_feat_field "$line" 10)" "untracked work comes first, as in the retire: $line" || return 1
@@ -5782,17 +5783,74 @@ test_features_ignores_a_dead_lock_pid() {
 
 run_test test_features_ignores_a_dead_lock_pid
 
+# One row of the -features table, spelled out so an assert names every column.
+_feat_row() {  # task branch ahead state
+    printf '%-24s %-24s %6s  %s' "$1" "$2" "$3" "$4"
+}
+
 test_features_human_table_names_the_state() {
     create_test_session_with_git "myproj" > /dev/null
     cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
     local output
     output=$("$CS_BIN" "myproj" -features 2>&1)
-    assert_output_contains "$output" "FEATURE" "the table carries a header" || return 1
-    assert_output_contains "$output" "fix-auth" "the feature is listed" || return 1
-    assert_output_contains "$output" "ready" "the state is named" || return 1
+    assert_eq "$(printf '%-24s %-24s %6s  %s' FEATURE BRANCH AHEAD STATE)" "$(sed -n 1p <<< "$output")" \
+        "the table carries a header" || return 1
+    assert_eq "$(_feat_row fix-auth cs/fix-auth 0 'no commits')" "$(sed -n 2p <<< "$output")" \
+        "a feature with nothing ahead of the base has nothing to land" || return 1
+    echo one > "$wt/a.txt"; (cd "$wt" && git add -A && git commit -q -m one)
+    output=$("$CS_BIN" "myproj" -features 2>&1)
+    assert_eq "$(_feat_row fix-auth cs/fix-auth 1 ready)" "$(sed -n 2p <<< "$output")" \
+        "a commit ahead of the base makes it ready" || return 1
 }
 
 run_test test_features_human_table_names_the_state
+
+# Every blocker reads as the sentence the TUI and the band print, on a real
+# record; the porcelain beside it keeps the state's key.
+test_features_human_table_says_each_blocker_as_a_sentence() {
+    local base_dir
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    local wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo one > "$wt/a.txt"; (cd "$wt" && git add -A && git commit -q -m one)
+
+    echo edit >> "$wt/a.txt"
+    assert_eq "$(_feat_row fix-auth cs/fix-auth 1 'uncommitted changes')" "$("$CS_BIN" myproj -features 2>&1 | sed -n 2p)" \
+        "dirty" || return 1
+    assert_eq "dirty" "$(_feat_field "$("$CS_BIN" myproj -features --porcelain 2>&1)" 10)" "the porcelain keeps the key" || return 1
+    git -C "$wt" checkout -q -- a.txt
+
+    echo scratch > "$wt/one.txt"; echo scratch > "$wt/two.txt"
+    assert_eq "$(_feat_row fix-auth cs/fix-auth 1 '2 files untracked')" "$("$CS_BIN" myproj -features 2>&1 | sed -n 2p)" \
+        "untracked, plural" || return 1
+    rm -f "$wt/one.txt" "$wt/two.txt"
+
+    echo "$$" > "$wt/.cs/session.lock"
+    assert_eq "$(_feat_row fix-auth cs/fix-auth 1 'worktree session is live')" "$("$CS_BIN" myproj -features 2>&1 | sed -n 2p)" \
+        "a live worktree" || return 1
+    mkdir -p "$base_dir/.cs/local/retire-staged"
+    : > "$base_dir/.cs/local/retire-staged/fix-auth"
+    assert_eq "$(_feat_row fix-auth cs/fix-auth 1 'retire staged')" "$("$CS_BIN" myproj -features 2>&1 | sed -n 2p)" \
+        "a staged retire over a live worktree" || return 1
+    rm -f "$wt/.cs/session.lock" "$base_dir/.cs/local/retire-staged/fix-auth"
+
+    echo "$$" > "$base_dir/.cs/session.lock"
+    assert_eq "$(_feat_row fix-auth cs/fix-auth 1 'base session is live')" "$("$CS_BIN" myproj -features 2>&1 | sed -n 2p)" \
+        "a live base" || return 1
+    rm -f "$base_dir/.cs/session.lock"
+
+    echo edit >> "$base_dir/CLAUDE.md"
+    assert_eq "$(_feat_row fix-auth cs/fix-auth 1 'base has uncommitted changes')" "$("$CS_BIN" myproj -features 2>&1 | sed -n 2p)" \
+        "a dirty base" || return 1
+    git -C "$base_dir" checkout -q -- CLAUDE.md
+
+    (cd "$base_dir" && git merge -q --no-ff --no-edit cs/fix-auth)
+    assert_eq "$(_feat_row fix-auth cs/fix-auth 0 merged)" "$("$CS_BIN" myproj -features 2>&1 | sed -n 2p)" \
+        "merged" || return 1
+}
+
+run_test test_features_human_table_says_each_blocker_as_a_sentence
 
 test_finish_arms_the_ritual_without_merging() {
     # -finish opens the base with the ritual armed. It must not merge: the
