@@ -14,7 +14,7 @@ use unicode_width::UnicodeWidthStr;
 use ratatui::layout::Alignment;
 
 use crate::app::{
-    App, FlashKind, Focus, Mode, NotesFocus, SortColumn, SortDirection, StatusLevel,
+    App, FeatureRow, FlashKind, Focus, Mode, NotesFocus, SortColumn, SortDirection, StatusLevel,
 };
 use crate::session::DeleteWarning;
 use crate::theme::{self, Palette};
@@ -188,6 +188,23 @@ fn cursor_wrap_spans(
 
 /// "1 file", "2 files". Counts reach the merge screen from git, so one is an
 /// ordinary value rather than an edge case.
+/// A readiness record's STATE cell: `_feature_state_sentence`'s table
+/// (lib/30-worktree.sh), which a test runs against this copy, in its colour.
+fn feature_state_cell(f: &FeatureRow, p: Palette) -> (String, Color) {
+    match f.state.as_str() {
+        "ready" if f.ahead == 0 => ("no commits".to_string(), p.faint),
+        "ready" => (f.state.clone(), p.ink),
+        "merged" => (f.state.clone(), p.faint),
+        "staged" => ("retire staged".to_string(), p.amber),
+        "untracked" => (format!("{} untracked", plural(f.untracked, "file")), p.amber),
+        "locked" => (format!("{} session is live", f.lock), p.amber),
+        "dirty" => ("uncommitted changes".to_string(), p.amber),
+        "base-dirty" => ("base has uncommitted changes".to_string(), p.amber),
+        "vault-locked" => ("base vault is locked".to_string(), p.amber),
+        other => (other.to_string(), p.amber),
+    }
+}
+
 fn plural(n: u32, noun: &str) -> String {
     if n == 1 {
         format!("{n} {noun}")
@@ -1302,7 +1319,7 @@ fn render_confirm_force_open(app: &App, frame: &mut Frame) {
         .unwrap_or_default();
 
     let msg = format!(
-        "Session '{}' is in use{}.\nForce open?",
+        "Session '{}' is live{}.\nForce open?",
         session.name, pid_text
     );
 
@@ -1551,12 +1568,12 @@ fn render_legend(app: &App, frame: &mut Frame) {
     let lines: Vec<Line> = vec![
         Line::default(),
         entry("\u{25cf}", p.green, false, "recency dot \u{2014} green when recently active, fading to grey as the session goes dormant"),
-        entry("\u{25a0}", p.teal, false, "live \u{2014} conversation open right now, locked or not (in place of the recency dot)"),
+        entry("\u{25a0}", p.teal, false, "live \u{2014} conversation open right now, pid or heartbeat (in place of the recency dot)"),
         entry("*", p.gold, true, "marked with Space for batch actions (D deletes the marked set)"),
         entry("\u{25aa}", p.gold, false, "has stored secrets (shown here when the SECRETS column is hidden)"),
         entry("\u{2709}", p.amber, false, "unread cross-session mail (cs -msg) \u{2014} the number is the count not yet read"),
         entry("\u{2500}", p.comment, false, "dim grey row \u{2014} archived session, or not matching the current search"),
-        entry("\u{25b6}", p.teal, false, "to-do pane: the queue task Claude is actively working right now"),
+        entry("\u{25b6}", p.teal, false, "queue pane: the queue task Claude is actively working right now"),
         Line::default(),
     ];
 
@@ -1671,13 +1688,13 @@ fn render_preview_pane(app: &App, frame: &mut Frame, area: Rect) {
         )
     } else if let Some(pid) = session.liveness.lock_pid() {
         (
-            format!("\u{25a0} live \u{b7} locked {}{}", pid, agent),
+            format!("\u{25a0} live \u{b7} pid {}{}", pid, agent),
             p.teal,
             None,
         )
     } else if session.liveness.is_live() {
         // Breathing without a lock: opened outside cs, no PID to show.
-        (format!("\u{25a0} live \u{b7} unlocked{}", agent), p.teal, None)
+        (format!("\u{25a0} live \u{b7} heartbeat{}", agent), p.teal, None)
     } else if session.archived {
         ("archived".to_string(), p.faint, None)
     } else {
@@ -2045,16 +2062,7 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         .merge_features
         .iter()
         .map(|f| {
-            let (label, color) = match f.state.as_str() {
-                "ready" => (f.state.clone(), p.ink),
-                "merged" => (f.state.clone(), p.faint),
-                "untracked" => (format!("{} untracked", plural(f.untracked, "file")), p.amber),
-                "locked" => (format!("{} session is open", f.lock), p.amber),
-                "dirty" => ("uncommitted changes".to_string(), p.amber),
-                "base-dirty" => ("base has uncommitted changes".to_string(), p.amber),
-                "vault-locked" => ("base vault is locked".to_string(), p.amber),
-                other => (other.to_string(), p.amber),
-            };
+            let (label, color) = feature_state_cell(f, p);
             Row::new(vec![
                 Cell::from(f.task.clone()).style(Style::default().fg(p.ink)),
                 Cell::from(f.ahead.to_string()).style(Style::default().fg(p.mut_)),
@@ -2136,7 +2144,7 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         // A lock is the one blocker the ritual cannot resolve for you, and base
         // and worktree locks want different remedies, so name the side.
         let (base_label, base_color) = if f.lock == "base" {
-            ("base session open".to_string(), p.amber)
+            ("base session is live".to_string(), p.amber)
         } else if f.state == "vault-locked" {
             ("vault locked".to_string(), p.amber)
         } else if f.base_dirty {
@@ -2151,7 +2159,7 @@ fn render_merge(app: &mut App, frame: &mut Frame, area: Rect) {
         if f.lock == "worktree" {
             lines.push(Line::from(vec![
                 Span::styled("  lock      ", Style::default().fg(p.mut_)),
-                Span::styled("feature session open", Style::default().fg(p.amber)),
+                Span::styled("feature session is live", Style::default().fg(p.amber)),
             ]));
         }
 
