@@ -880,7 +880,7 @@ STUB
     kill "$live_pid" 2>/dev/null || true
     wait "$live_pid" 2>/dev/null || true
 
-    assert_output_not_contains "$output" "already running elsewhere" \
+    assert_output_not_contains "$output" "is live elsewhere" \
         "menu force must bypass the live-duplicate guard like --force" || return 1
     assert_eq "0" "$status" "menu-forced launch should proceed, got: $output" || return 1
 }

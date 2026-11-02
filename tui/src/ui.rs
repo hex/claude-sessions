@@ -2270,6 +2270,10 @@ mod tests {
     use ratatui::style::Color;
     use ratatui::Terminal;
 
+    /// The queue card's top border. The word alone also matches the footer's
+    /// `Tab:queue`, which draws whether or not the card does.
+    const QUEUE_CARD_TITLE: &str = "\u{256d} queue ";
+
     fn one_session() -> Vec<Session> {
         vec![Session {
             name: "alpha".into(),
@@ -2692,7 +2696,7 @@ mod tests {
         let mut app = App::new(sessions);
         app.theme = Palette::dark();
         let joined = render_at(&mut app, 80, 50);
-        assert!(joined.contains("to-do"), "notes card title should render: {joined}");
+        assert!(joined.contains(QUEUE_CARD_TITLE), "queue card title should render: {joined}");
         assert!(
             joined.contains('\u{256d}'),
             "card corners should render once the panes open: {joined}"
@@ -2718,7 +2722,7 @@ mod tests {
         let mut app = App::new(sessions);
         app.theme = Palette::dark();
         let joined = render_wide(&mut app);
-        assert!(joined.contains("to-do"), "to-do card title should render: {joined}");
+        assert!(joined.contains(QUEUE_CARD_TITLE), "queue card title should render: {joined}");
         assert!(
             joined.contains('\u{256d}'),
             "card corners should render once the panes open: {joined}"
@@ -2763,7 +2767,7 @@ mod tests {
                             .to_string()
                     })
                     .collect();
-                if cells.concat().contains("to-do") {
+                if cells.concat().contains(QUEUE_CARD_TITLE) {
                     let left = cells.iter().position(|s| s == "\u{256d}").unwrap() as u16;
                     let right = cells.iter().rposition(|s| s == "\u{256e}").unwrap() as u16;
                     coords = Some((left, right, y + 1));
@@ -2771,7 +2775,7 @@ mod tests {
                 }
             }
             let (left_x, right_x, side_y) =
-                coords.expect("to-do card top border should render");
+                coords.expect("queue card top border should render");
             let left_fg = buf
                 .cell(ratatui::layout::Position::new(left_x, side_y))
                 .unwrap()
@@ -2786,13 +2790,13 @@ mod tests {
         let mut app = App::new(one_session());
         app.theme = p;
         let (left, right) = render_and_find_todo_side(&mut app);
-        assert_eq!(left, p.soft, "unfocused to-do card side border should be SOFT");
-        assert_eq!(right, p.soft, "unfocused to-do card side border should be SOFT");
+        assert_eq!(left, p.soft, "unfocused queue card side border should be SOFT");
+        assert_eq!(right, p.soft, "unfocused queue card side border should be SOFT");
 
         app.focus = Focus::Notes;
         let (left, right) = render_and_find_todo_side(&mut app);
-        assert_eq!(left, p.strong, "focused to-do card side border should brighten to STRONG");
-        assert_eq!(right, p.strong, "focused to-do card side border should brighten to STRONG");
+        assert_eq!(left, p.strong, "focused queue card side border should brighten to STRONG");
+        assert_eq!(right, p.strong, "focused queue card side border should brighten to STRONG");
     }
 
     #[test]
@@ -2913,6 +2917,7 @@ mod tests {
 
         let joined = render_wide(&mut app);
         assert!(joined.contains("?"), "footer should advertise the legend key");
+        assert!(joined.contains("Tab:queue"), "footer should name the queue pane's key: {joined}");
         assert!(!joined.contains("recency dot"), "legend hidden until asked for");
 
         app.handle_key(KeyEvent::from(KeyCode::Char('?')));
@@ -3309,7 +3314,7 @@ mod tests {
         let input_row = rows
             .iter()
             .find(|r| r.contains("Tab to add"))
-            .expect("to-do input placeholder should render");
+            .expect("queue input placeholder should render");
         let border_x = input_row
             .chars()
             .position(|c| c == '\u{2502}')
@@ -3317,21 +3322,21 @@ mod tests {
         let after_border: String = input_row.chars().skip(border_x + 1).take(2).collect();
         assert_eq!(
             after_border, "  ",
-            "to-do content should sit two clear columns inside the left border: {input_row:?}"
+            "queue content should sit two clear columns inside the left border: {input_row:?}"
         );
 
         // Vertical headroom: the row under the to-do title is blank.
         let title_y = rows
             .iter()
-            .position(|r| r.contains("to-do"))
-            .expect("to-do card title should render");
+            .position(|r| r.contains(QUEUE_CARD_TITLE))
+            .expect("queue card title should render");
         let headroom: String = rows[title_y + 1]
             .chars()
             .filter(|c| c.is_alphanumeric())
             .collect();
         assert!(
             headroom.is_empty(),
-            "row under the to-do title should be blank, got: {:?}",
+            "row under the queue title should be blank, got: {:?}",
             rows[title_y + 1]
         );
     }
@@ -3350,8 +3355,8 @@ mod tests {
             .expect("preview card should render in stacked layout");
         let y_todo = rows
             .iter()
-            .position(|r| r.contains("to-do"))
-            .expect("to-do card should render in stacked layout");
+            .position(|r| r.contains(QUEUE_CARD_TITLE))
+            .expect("queue card should render in stacked layout");
         let list_rows = y_preview.saturating_sub(2); // content starts under the 2-row masthead
         let preview_rows = y_todo - y_preview;
         assert!(
