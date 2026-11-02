@@ -162,6 +162,23 @@ NL='
 _num_or() {  # value, default -> prints value if a plain integer, else default
     case "${1:-}" in ''|*[!0-9]*|????????????????*) echo "$2";; *) echo "$((10#$1))";; esac
 }
+# The key stop-notices.sh and this hook share for one Stop, from cs-shared.sh,
+# which says why it is built as it is; the copy serves a partial install
+# without the library, and tests/test_hooks.sh holds the three to one text.
+if ! command -v cs_stop_key >/dev/null 2>&1; then
+cs_stop_key() {  # stop input
+    local c t s=""
+    c=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+    t=$(printf '%s' "$1" | jq -r '.transcript_path // empty' 2>/dev/null) || t=""
+    if [ -n "$t" ] && [ -f "$t" ] && [ -r "$t" ]; then s=$(wc -c < "$t" 2>/dev/null | tr -d ' ') || s=""; fi
+    case "$s" in ''|*[!0-9]*) printf '%s' "$c" ;; *) printf '%s.%s' "$c" "$s" ;; esac
+}
+fi
+# Read as soon as the library is in: the key carries the transcript's size,
+# and the later it is read the more a slow start lets the two hooks' readings
+# drift apart.
+STOP_KEY=""
+[ "$HOOK_EVENT" != "Stop" ] || STOP_KEY=$(cs_stop_key "$INPUT")
 
 # The queue is a directory of one file per task (written via tmp+rename by
 # cs -queue add / task-kind mail), so the drain can never read a torn entry.
@@ -511,12 +528,10 @@ QCURRENT_FILE="$QDIR/queue.current"
 # out its last task writes idle before it blocks, so the queue state alone
 # tells the async hook nothing, and the staged retire and the mail wake never
 # gated it at all. This hook posts its verdict to .cs/local/stop-verdict, one
-# line: the Stop's key, a word, the epoch it was written. The key is the cksum
-# of the Stop input, which Claude Code hands both hooks byte for byte; the Stop
-# input carries nothing unique per stop (session_id, transcript_path and
-# last_assistant_message all repeat), so two turns ending on the same final
-# message share a key, and the epoch is what keeps a verdict from an earlier
-# Stop from suppressing a later notice. The word is "pending" from the moment
+# line: the Stop's key, a word, the epoch it was written. The key is
+# cs_stop_key's, the cksum of the Stop input (which Claude Code hands both
+# hooks byte for byte) and the transcript's size, one per Stop; the epoch is
+# for a reader. The word is "pending" from the moment
 # this hook knows it is the lead's Stop, and the final word, "approve" or
 # "block", from the EXIT trap, so stop-notices.sh can tell "still deciding"
 # from "no verdict is coming" (a partial install without this hook). Lead only:
@@ -524,20 +539,24 @@ QCURRENT_FILE="$QDIR/queue.current"
 # file would overwrite the lead's verdict. The file is overwritten per Stop,
 # never appended.
 STOP_VERDICT=approve
-STOP_KEY=""
 _verdict_post() {  # word
     cs_write_atomic "$LOCAL/stop-verdict" printf '%s %s %s\n' "$STOP_KEY" "$1" "$(date +%s)" || true
 }
 if [ "$HOOK_EVENT" = "Stop" ] && _mail_is_lead; then
-    STOP_KEY=$(printf '%s' "$INPUT" | cksum | cut -d' ' -f1)
     _verdict_post pending
     trap '_verdict_post "$STOP_VERDICT"' EXIT
 fi
 # Every block this hook answers with goes through here, so the verdict can
-# never say approve beside a block.
+# never say approve beside a block, nor block beside no block: the verdict
+# turns to block only once the block line exists, so a jq that fails leaves
+# approve for the trap to post, and the notices are not silenced for a block
+# nobody printed. The mail wake below keeps its own print, in this order, as
+# its bookkeeping follows the print.
 _stop_block() {  # reason
+    local line
+    line=$(jq -nc --arg r "$1" '{decision:"block", reason:$r}') || exit 1
     STOP_VERDICT=block
-    jq -nc --arg r "$1" '{decision:"block", reason:$r}'
+    printf '%s\n' "$line"
     exit 0
 }
 
@@ -957,9 +976,12 @@ if [ -n "$MAILDIR" ] && _mail_is_lead; then
 fi
 _mail_apply_silencers
 if [ "$MAIL_FRESH" = 1 ]; then
+    # Not _stop_block, which exits: the two records below follow the print.
+    # The verdict turns to block only once the block line exists, as there.
+    MAIL_BLOCK=$(jq -nc --arg r "Unread cross-session mail ($MAIL_UNREAD)$(_mail_from_clause). $MAIL_REASON_TAIL" \
+        '{decision: "block", reason: $r}') || exit 1
     STOP_VERDICT=block
-    jq -nc --arg r "Unread cross-session mail ($MAIL_UNREAD)$(_mail_from_clause). $MAIL_REASON_TAIL" \
-        '{decision: "block", reason: $r}'
+    printf '%s\n' "$MAIL_BLOCK"
     # Emit first, record second: a kill in between costs one duplicate wake,
     # while the reverse costs a silent strand — unrecoverable for an idle
     # session, which submits no prompt and ends no turn.

@@ -15,9 +15,10 @@ set -euo pipefail
 # retire, the mail wake) stays a block in narrative-reminder.sh.
 #
 # At most one JSON object per run, and nothing when there is nothing to say.
-# The tiers below exit at the first one that speaks, which is what keeps the
-# rotation nudge and the context warning from both firing on one Stop; three
-# scripts running side by side could not see each other's decision.
+# The tiers below decide in order and the first that applies takes the slot,
+# which is what keeps the rotation nudge and the context warning from both
+# firing on one Stop; three scripts running side by side could not see each
+# other's decision.
 
 # Read hook input (may be empty for legacy Stop events)
 INPUT=$(cat 2>/dev/null || echo '{}')
@@ -92,9 +93,33 @@ _num_or() {  # value, default -> prints value if a plain integer, else default
     case "${1:-}" in ''|*[!0-9]*|????????????????*) echo "$2";; *) echo "$((10#$1))";; esac
 }
 
-# Prints the one notice. The caller stamps its cursor after this and exits:
-# a notice is lost when this process ends before Claude Code reads it, so a
-# cursor stamped first would record as sent a notice nobody received.
+# The key narrative-reminder.sh and this hook share for one Stop, from
+# cs-shared.sh, which says why it is built as it is; the copy serves a partial
+# install without the library, and tests/test_hooks.sh holds the three to one
+# text.
+if ! command -v cs_stop_key >/dev/null 2>&1; then
+cs_stop_key() {  # stop input
+    local c t s=""
+    c=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+    t=$(printf '%s' "$1" | jq -r '.transcript_path // empty' 2>/dev/null) || t=""
+    if [ -n "$t" ] && [ -f "$t" ] && [ -r "$t" ]; then s=$(wc -c < "$t" 2>/dev/null | tr -d ' ') || s=""; fi
+    case "$s" in ''|*[!0-9]*) printf '%s' "$c" ;; *) printf '%s.%s' "$c" "$s" ;; esac
+}
+fi
+# Read as soon as the library is in: the key carries the transcript's size,
+# and the later it is read the more a slow start lets the two hooks' readings
+# drift apart.
+STOP_KEY=$(cs_stop_key "$INPUT")
+
+# Claude Code registers this hook with a 10 s timeout, past which it kills the
+# process and drops whatever it printed. Everything below runs inside this
+# budget, counted from the process start ($SECONDS): the verdict wait ends at
+# it, the lock below waits only for what is left of it, and the scan and the
+# plugin probes run before the wait, so that the wait is the last thing
+# before the print.
+BUDGET=8
+
+# Prints the one notice.
 _emit_notice() {  # text
     jq -nc --arg c "$1" '{hookSpecificOutput: {hookEventName: "Stop", additionalContext: $c}}'
 }
@@ -138,78 +163,23 @@ if [ -n "$_qdir" ] && cs_is_lead; then
     done
 fi
 
-# --- The sync hook's verdict --------------------------------------------------
-# The queue gate above reads the state the drain leaves behind, and a drain
-# that trips a breaker or hands out its last task leaves idle behind and
-# blocks; the staged retire and the mail wake block without touching the
-# queue at all. A notice beside any such block is noise, so this hook waits
-# for the verdict narrative-reminder.sh posts to .cs/local/stop-verdict:
-# "<key> <word> <epoch>", the key the cksum of the Stop input both hooks
-# receive, the word pending while that hook runs and approve or block at its
-# exit. Claude Code starts the two hooks together and neither runs first by
-# contract, so the wait has two bounds. No line for this Stop within the first
-# two seconds means no verdict is coming (a partial install without the sync
-# hook, or one that predates the verdict), and the notices go ahead as they
-# did before the verdict existed; a pending line extends the wait to
-# CS_STOP_VERDICT_WAIT seconds (default 7, at most 8) and a verdict that is
-# still pending then is treated as approve, since a notice that waits longer
-# risks the 10 s registration timeout, past which Claude Code kills this
-# process and drops whatever it printed. The grace counts from here, since
-# the sync hook needs the same start-up before it can post; the pending
-# bound counts from the process start ($SECONDS), so the whole run ends
-# inside wait plus one second however slow the start-up was. The staged retire can block later
-# than that (its settle waits up to six seconds twice), and a notice then
-# lands beside its block, as every notice did before the verdict existed.
-# A line whose epoch is older than thirty seconds before this run started is
-# an earlier Stop's: the Stop input carries nothing unique per stop, so two
-# turns that end on the same final message share a key, and the epoch is what
-# keeps the earlier one's verdict from suppressing this one's notice. Lead
-# only: every block the sync hook answers with is the lead's, and only the
-# lead's sync hook writes the file.
-START_SECONDS=$SECONDS
-START_EPOCH=$(date +%s)
-STOP_KEY=$(printf '%s' "$INPUT" | cksum | cut -d' ' -f1)
-_verdict() {  # prints pending, approve or block for this Stop; nothing otherwise
-    local k w t
-    [ -f "$LOCAL/stop-verdict" ] || return 0
-    IFS=' ' read -r k w t < "$LOCAL/stop-verdict" 2>/dev/null || true
-    [ "$k" = "$STOP_KEY" ] || return 0
-    t=$(_num_or "$t" 0)
-    [ "$t" -ge $((START_EPOCH - 30)) ] || return 0
-    case "$w" in pending|approve|block) printf '%s' "$w" ;; esac
-}
-if cs_is_lead; then
-    _wait=$(_num_or "${CS_STOP_VERDICT_WAIT:-}" 7)
-    [ "$_wait" -le 8 ] || _wait=8
-    _grace=2
-    [ "$_grace" -le "$_wait" ] || _grace="$_wait"
-    while :; do
-        _word=$(_verdict)
-        case "$_word" in
-            block) exit 0 ;;
-            approve) break ;;
-            pending) [ "$SECONDS" -lt "$_wait" ] || break ;;
-            *) [ $((SECONDS - START_SECONDS)) -lt "$_grace" ] || break ;;
-        esac
-        sleep 0.1
-    done
-fi
-
+# --- What the transcript records ----------------------------------------------
 # A notice reaches the model as context with the user's next prompt, and
-# Claude Code records what it delivered in the conversation's transcript as an
-# attachment carrying the notice text. A notice this process printed is lost
-# when the process ends before Claude Code reads it, and nothing here can tell
-# the two apart at the time. What this hook guarantees: a cursor is stamped
-# only after its notice was printed, so a notice lost at exit is one the cursor
-# does not record as sent; and a conversation's notice goes out at most twice,
-# the second time on a later Stop where the notice still applies and the
-# transcript does not record the first. What it does not guarantee: that the
-# first was lost (the transcript may record it in a form this check does not
-# find, or Claude Code may read it after this hook's next run), nor that the
-# second is delivered.
+# Claude Code records what it delivered in the conversation's transcript, one
+# JSON object per line, as {"type":"attachment","attachment":{"type":
+# "async_hook_response",...,"response":{"hookSpecificOutput":{"additionalContext":
+# "<the notice>"}}}}. Only that attachment counts as a delivery: the phrase
+# alone also sits in a user message that quotes it, or in a tool result that
+# holds this file, so the lines holding the attachment's type are read as JSON
+# and the phrase is looked for in the notice they carry. A transcript that
+# cannot be read, or a line of it that is not JSON, records no delivery.
 TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || true)
 _delivered() {  # text the transcript records when the notice was delivered
-    [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] && grep -qF -- "$1" "$TRANSCRIPT" 2>/dev/null
+    [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] || return 1
+    grep -F -- '"async_hook_response"' "$TRANSCRIPT" 2>/dev/null | jq -n -e --arg p "$1" \
+        '[inputs | select(.type == "attachment" and .attachment.type == "async_hook_response")
+          | (.attachment.response.hookSpecificOutput.additionalContext // "") | contains($p)] | any' \
+        >/dev/null 2>&1
 }
 # The cursor files are append-only lists, one conversation UUID per line, with
 # "<uuid> again" for a conversation whose notice went out a second time. A tmux
@@ -222,30 +192,15 @@ _cursor() {  # file, uuid
     else printf 'never'
     fi
 }
-# Emits one context notice under its cursor rule and ends the run when it
-# spoke. $1 the cursor file, $2 the text the transcript records on delivery,
-# $3 the notice.
-_context_notice() {  # cursor file, delivered text, notice
-    case "$(_cursor "$1" "$NUDGE_UUID")" in
-        never)
-            _emit_notice "$3"
-            cs_append_inside "$1" printf '%s\n' "$NUDGE_UUID" || true
-            exit 0
-            ;;
-        once)
-            _delivered "$2" && return 0
-            _emit_notice "$3"
-            cs_append_inside "$1" printf '%s again\n' "$NUDGE_UUID" || true
-            exit 0
-            ;;
-    esac
-}
 
-# --- Rotation nudge -----------------------------------------------------------
-# Suggestion to rotate when context runs hot, once per conversation (twice
-# when the transcript does not record the first). The queue gate above stands
-# down for an armed or draining queue, so the drain's context breaker owns
-# hot-context handling during walk-away runs. Cursor: .cs/local/rotate-nudged.
+# --- The context tiers --------------------------------------------------------
+# Decided here, printed below once the sync hook's verdict is in. The tiers
+# run in order and the first that applies takes the slot, which is what keeps
+# the rotation nudge and the context warning from both firing on one Stop;
+# three scripts running side by side could not see each other's decision.
+# CTX_TEXT is the notice, CTX_CURSOR its cursor file, CTX_MARK the text the
+# transcript records when it was delivered.
+CTX_TEXT=""; CTX_CURSOR=""; CTX_MARK=""
 NUDGE_CTX=$(_num_or "${CS_ROTATE_NUDGE_CTX:-}" 65)
 NUDGE_UUID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
 NUDGE_PCT=$(cat "$LOCAL/context-pct" 2>/dev/null | tr -d '[:space:]' || true)
@@ -258,39 +213,49 @@ cs_is_lead || NUDGE_PCT=""
 # The notices arrive with the user's next prompt, not at the end of the turn
 # that raised them, and their wording says so: the reading is the one the
 # previous turn ended on, and the request below is answered.
+#
+# Rotation nudge: suggestion to rotate when context runs hot, once per
+# conversation (twice when the transcript does not record the first). The
+# queue gate above stands down for an armed or draining queue, so the drain's
+# context breaker owns hot-context handling during walk-away runs. Cursor:
+# .cs/local/rotate-nudged.
 if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] && [ "$NUDGE_PCT" -ge "$NUDGE_CTX" ]; then
-    _context_notice "$LOCAL/rotate-nudged" "consider rotating this conversation" \
-        "Context was at ${NUDGE_PCT}% when your previous turn ended, so consider rotating this conversation; this note is carried over with the request below. Tell the user in one line, then answer the request. Once it is answered, or before it if it is large enough to need the headroom, invoke the rotate skill to distill a handoff and arm it; the user then runs /clear to continue in a fresh conversation, without leaving Claude Code. Sent once for this conversation; if now is a bad time, simply continue."
+    CTX_CURSOR="$LOCAL/rotate-nudged"
+    CTX_MARK="consider rotating this conversation"
+    CTX_TEXT="Context was at ${NUDGE_PCT}% when your previous turn ended, so consider rotating this conversation; this note is carried over with the request below. Tell the user in one line, then answer the request. Once it is answered, or before it if it is large enough to need the headroom, invoke the rotate skill to distill a handoff and arm it; the user then runs /clear to continue in a fresh conversation, without leaving Claude Code. Sent once for this conversation; if now is a bad time, simply continue."
 fi
-
-# --- Context warning ----------------------------------------------------------
-# Heads-up when context crosses the wind-down band [warn, nudge), once per
-# conversation (twice when the transcript does not record the first). At or
-# above the nudge threshold the rotation nudge above owns the notice; this
-# tier never fires there. Cursor: .cs/local/ctx-warned.
+# Context warning: heads-up when context crosses the wind-down band [warn,
+# nudge), once per conversation (twice when the transcript does not record
+# the first). At or above the nudge threshold the rotation nudge owns the
+# notice; this tier never fires there. Cursor: .cs/local/ctx-warned.
 WARN_CTX=$(_num_or "${CS_CTX_WARN_CTX:-}" 40)
 if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] \
     && [ "$NUDGE_PCT" -ge "$WARN_CTX" ] && [ "$NUDGE_PCT" -lt "$NUDGE_CTX" ]; then
-    _context_notice "$LOCAL/ctx-warned" "past the comfortable-headroom mark" \
-        "Context was at ${NUDGE_PCT}% when your previous turn ended, past the comfortable-headroom mark; this note is carried over with the request below. Tell the user in one line, so they can steer toward a natural stopping point or plan a rotation, then answer the request; the rotate nudge follows at ${NUDGE_CTX}%. Sent once for this conversation; no other action is needed."
+    CTX_CURSOR="$LOCAL/ctx-warned"
+    CTX_MARK="past the comfortable-headroom mark"
+    CTX_TEXT="Context was at ${NUDGE_PCT}% when your previous turn ended, past the comfortable-headroom mark; this note is carried over with the request below. Tell the user in one line, so they can steer toward a natural stopping point or plan a rotation, then answer the request; the rotate nudge follows at ${NUDGE_CTX}%. Sent once for this conversation; no other action is needed."
 fi
 
+# --- The narrative reminder ---------------------------------------------------
+# Decided here too: REMINDER_DUE is 1 when the newest narrative is stale and
+# no reminder went out within the cooldown, read unlocked here as the cheap
+# answer for the common case and again under the lock before the stamp.
 COOLDOWN_FILE="$META_DIR/.narrative-reminder-cooldown"
 COOLDOWN_SECONDS=300  # 5 minutes
+CURRENT_TIME=$(date +%s)
+REMINDER_DUE=0
 
 # A claude started from inside the session (a `claude -p` the lead's Bash
 # tool ran) inherits the contract and would be told to update the narrative,
 # which is the lead's job; it would also spend the lead's cooldown. A front
 # end that walked in carries no launch pid and is not a nested child.
+_nested=0
 if command -v cs_is_nested_child >/dev/null 2>&1 && cs_is_nested_child; then
-    exit 0
+    _nested=1
 fi
 
-CURRENT_TIME=$(date +%s)
-
 # Cooldown: don't nag if we reminded recently. Returns 0 while the last
-# reminder is within the cooldown. Read here unlocked, as the cheap exit for
-# the common case, and again under the lock below before the stamp is written.
+# reminder is within the cooldown.
 _within_cooldown() {
     local last
     [ -f "$COOLDOWN_FILE" ] || return 1
@@ -301,7 +266,6 @@ _within_cooldown() {
     last=$(_num_or "$(cat "$COOLDOWN_FILE" 2>/dev/null | tr -d '[:space:]')" 0)
     [ $((CURRENT_TIME - last)) -lt "$COOLDOWN_SECONDS" ]
 }
-! _within_cooldown || exit 0
 
 # Per-actor narratives: track the most recently modified narrative.*.md, and
 # note any that has outgrown its byte budget. The same stat pass serves both.
@@ -315,29 +279,29 @@ if command -v _narrative_budget >/dev/null 2>&1; then
     NARRATIVE_MAX=$(_narrative_budget "${CS_NARRATIVE_MAX_BYTES:-}" "$CS_NARRATIVE_MAX_DEFAULT")
 fi
 NARRATIVE_OVER=""
-for _nf in "$META_DIR"/memory/narrative*.md; do
-    [ -f "$_nf" ] || continue
-    # GNU stat is asked first and BSD second, by which one answers rather than
-    # by OSTYPE: Homebrew's coreutils can put GNU stat ahead of the system's on
-    # a Mac, and GNU `stat -f` prints the file system's details, not the mtime.
-    _m=$(_num_or "$(stat -c %Y "$_nf" 2>/dev/null || stat -f %m "$_nf" 2>/dev/null)" 0)
-    if [ "$_m" -ge "$NARRATIVE_MTIME" ]; then
-        NARRATIVE_MTIME="$_m"
-        NARRATIVE_FILE="$_nf"
+if [ "$_nested" = 0 ] && ! _within_cooldown; then
+    for _nf in "$META_DIR"/memory/narrative*.md; do
+        [ -f "$_nf" ] || continue
+        # GNU stat is asked first and BSD second, by which one answers rather than
+        # by OSTYPE: Homebrew's coreutils can put GNU stat ahead of the system's on
+        # a Mac, and GNU `stat -f` prints the file system's details, not the mtime.
+        _m=$(_num_or "$(stat -c %Y "$_nf" 2>/dev/null || stat -f %m "$_nf" 2>/dev/null)" 0)
+        if [ "$_m" -ge "$NARRATIVE_MTIME" ]; then
+            NARRATIVE_MTIME="$_m"
+            NARRATIVE_FILE="$_nf"
+        fi
+        _sz=$(wc -c < "$_nf" 2>/dev/null | tr -d ' ' || echo 0)
+        case "$_sz" in ''|*[!0-9]*) _sz=0 ;; esac
+        if [ -n "$NARRATIVE_MAX" ] && [ "$_sz" -gt "$NARRATIVE_MAX" ]; then
+            NARRATIVE_OVER="${NARRATIVE_OVER} $(_cs_plain_name "$(basename "$_nf")" 160) is $((_sz / 1024)) KB, over the $((NARRATIVE_MAX / 1024)) KB budget — if it is yours, run \`cs -narrative rotate\` before appending."
+        fi
+    done
+    # Nothing to nag about until a narrative file exists, and none while the
+    # newest was updated within the cooldown.
+    if [ -n "$NARRATIVE_FILE" ] && [ $((CURRENT_TIME - NARRATIVE_MTIME)) -ge "$COOLDOWN_SECONDS" ]; then
+        REMINDER_DUE=1
     fi
-    _sz=$(wc -c < "$_nf" 2>/dev/null | tr -d ' ' || echo 0)
-    case "$_sz" in ''|*[!0-9]*) _sz=0 ;; esac
-    if [ -n "$NARRATIVE_MAX" ] && [ "$_sz" -gt "$NARRATIVE_MAX" ]; then
-        NARRATIVE_OVER="${NARRATIVE_OVER} $(_cs_plain_name "$(basename "$_nf")" 160) is $((_sz / 1024)) KB, over the $((NARRATIVE_MAX / 1024)) KB budget — if it is yours, run \`cs -narrative rotate\` before appending."
-    fi
-done
-
-# Nothing to nag about until a narrative file exists
-[ -n "$NARRATIVE_FILE" ] || exit 0
-
-# Recently updated — no reminder needed
-NARRATIVE_AGE=$((CURRENT_TIME - NARRATIVE_MTIME))
-[ "$NARRATIVE_AGE" -ge "$COOLDOWN_SECONDS" ] || exit 0
+fi
 
 # The council advisor nudge rides the narrative reminder rather than speaking
 # on its own: this hook hands the model one notice per run, so a note of its
@@ -384,32 +348,118 @@ EOF
 # Lead only. A tmux teammate is a full claude in the same directory with its
 # own Stop, and the cooldown is one stamp for the session: an ungated nudge
 # lets a teammate consume the lead's slot, and in a walk-away run the lead can
-# stop seeing the suggestion altogether. The plugin probe runs before the lock
-# below: it reads only, and the lock is held for the two stamps alone.
+# stop seeing the suggestion altogether. The plugin probe runs before the
+# verdict wait and the lock below: it reads only.
 _has_council=0; _has_codex=0
-if cs_is_lead; then
+if [ "$REMINDER_DUE" = 1 ] && cs_is_lead; then
     _plugin_is_installed "claude-council@" "commands/advise.md" && _has_council=1
     _plugin_is_installed "codex@" "commands/review.md" && _has_codex=1
 fi
 
-# The two cooldown stamps are read and written under one lock, the library's
-# (cs-shared.sh, _cs_lock): this hook is async, so two of its runs overlap when
-# turns end close together, and without the lock both read a stamp older than
-# the cooldown and both remind. The run that takes the lock second finds the
-# first's stamp and prints nothing. Without the library, without perl, or
-# when the lock file cannot be made (the local directory is unwritable), the
-# stamps are read and written unlocked, as they always were, and a stamp that
+# Nothing to say: no verdict is waited for and no lock taken.
+[ -n "$CTX_TEXT" ] || [ "$REMINDER_DUE" = 1 ] || exit 0
+
+# --- The sync hook's verdict --------------------------------------------------
+# The queue gate above reads the state the drain leaves behind, and a drain
+# that trips a breaker or hands out its last task leaves idle behind and
+# blocks; the staged retire and the mail wake block without touching the
+# queue at all. A notice beside any such block is noise, so this hook waits
+# for the verdict narrative-reminder.sh posts to .cs/local/stop-verdict:
+# "<key> <word> <epoch>", the key cs_stop_key's for the Stop input both hooks
+# receive, the word pending while that hook runs and approve or block at its
+# exit. Claude Code starts the two hooks together and neither runs first by
+# contract, so the wait has two bounds. No line for this Stop within the first
+# two seconds of this process means no verdict is coming (a partial install
+# without the sync hook, or one that predates the verdict), and the notices go
+# ahead as they did before the verdict existed; a pending line extends the
+# wait to CS_STOP_VERDICT_WAIT seconds from the process start (default 7, at
+# most the budget), and a verdict that is still pending then is treated as
+# approve, since a notice that waits longer risks the 10 s registration
+# timeout. The staged retire can block later than that (its settle waits up
+# to six seconds twice), and a notice then lands beside its block, as every
+# notice did before the verdict existed. The key is one per Stop, so an
+# earlier Stop's line is never this one's; its epoch is for a reader. Lead
+# only: every block the sync hook answers with is the lead's, and only the
+# lead's sync hook writes the file.
+_verdict() {  # prints pending, approve or block for this Stop; nothing otherwise
+    local k w t
+    [ -f "$LOCAL/stop-verdict" ] || return 0
+    IFS=' ' read -r k w t < "$LOCAL/stop-verdict" 2>/dev/null || true
+    [ "$k" = "$STOP_KEY" ] || return 0
+    case "$w" in pending|approve|block) printf '%s' "$w" ;; esac
+}
+if cs_is_lead; then
+    _wait=$(_num_or "${CS_STOP_VERDICT_WAIT:-}" 7)
+    [ "$_wait" -le "$BUDGET" ] || _wait=$BUDGET
+    _grace=2
+    [ "$_grace" -le "$_wait" ] || _grace="$_wait"
+    while :; do
+        _word=$(_verdict)
+        case "$_word" in
+            block) exit 0 ;;
+            approve) break ;;
+            pending) [ "$SECONDS" -lt "$_wait" ] || break ;;
+            *) [ "$SECONDS" -lt "$_grace" ] || break ;;
+        esac
+        sleep 0.1
+    done
+fi
+
+# --- The print, under the lock ------------------------------------------------
+# The cursors and the cooldown stamps are read and written under one lock,
+# the library's (cs-shared.sh, _cs_lock), taken here and held across the
+# print: this hook is async, so two of its runs overlap when turns end close
+# together, and without the lock both read a cursor at once, or a stamp older
+# than the cooldown, and both print. The run that takes the lock second finds
+# the first's line and prints nothing. The lock waits only for what is left of
+# the budget, nothing at all once the budget is spent; without the library,
+# without perl, when the lock file cannot be made (the local directory is
+# unwritable) or when a holder keeps it past the budget, the files are read
+# and written unlocked, as they were before the lock existed, and a stamp that
 # cannot be written costs no reminder: the hook fails open. The lock is taken
-# in this process, not a $(...), as its contract asks, and let go before the
-# scan's result is printed. Its file sits in .cs/local/, per-machine state.
+# in this process, not a $(...), as its contract asks. Its file sits in
+# .cs/local/, per-machine state.
 _lock=""
-if command -v _cs_lock >/dev/null 2>&1 && _cs_lock "$LOCAL/stop-notices.mutex.lock" 2>/dev/null; then
+_left=$((BUDGET - SECONDS))
+[ "$_left" -ge 0 ] || _left=0
+if command -v _cs_lock >/dev/null 2>&1 && _cs_lock "$LOCAL/stop-notices.mutex.lock" "$_left" 2>/dev/null; then
     _lock="$LOCAL/stop-notices.mutex.lock"
 fi
 if ! command -v _cs_unlock >/dev/null 2>&1; then _cs_unlock() { :; }; fi
-if _within_cooldown; then
+_done() {  # exit status
     _cs_unlock "$_lock"
-    exit 0
+    exit "$1"
+}
+
+# A context notice goes out at most twice for a conversation: once, and once
+# more on a later Stop where it still applies and the transcript does not
+# record the first (lost at exit, or still to be read: nothing here can tell
+# the two apart). The first print is followed by its cursor line, so a notice
+# lost at exit is one the cursor does not count as sent, and a cursor that
+# cannot be written costs no notice. The repeat is preceded by its "again"
+# line, and goes out only once that line is written: a repeat the cursor
+# cannot record would come back on every Stop, and a lost repeat costs less
+# than an unbounded one.
+if [ -n "$CTX_TEXT" ]; then
+    case "$(_cursor "$CTX_CURSOR" "$NUDGE_UUID")" in
+        never)
+            _emit_notice "$CTX_TEXT"
+            cs_append_inside "$CTX_CURSOR" printf '%s\n' "$NUDGE_UUID" || true
+            _done 0
+            ;;
+        once)
+            if ! _delivered "$CTX_MARK"; then
+                cs_append_inside "$CTX_CURSOR" printf '%s again\n' "$NUDGE_UUID" || _done 0
+                _emit_notice "$CTX_TEXT"
+                _done 0
+            fi
+            ;;
+    esac
+fi
+
+[ "$REMINDER_DUE" = 1 ] || _done 0
+if _within_cooldown; then
+    _done 0
 fi
 cs_write_atomic "$COOLDOWN_FILE" echo "$CURRENT_TIME" || true
 if [ "$((_has_council + _has_codex))" -gt 0 ]; then
@@ -435,7 +485,6 @@ if [ "$((_has_council + _has_codex))" -gt 0 ]; then
         ADVISOR_NUDGE="$ADVISOR_NUDGE You judge whether the moment qualifies; most turns do not."
     fi
 fi
-_cs_unlock "$_lock"
 
 # Sessions whose .cs/ is tracked were committing once per narrative append —
 # 328 such commits in one repo, 74 in a single day, burying the project's own
@@ -457,4 +506,4 @@ NARRATIVE_SHOWN="$META_DIR/memory/$(_cs_plain_name "${NARRATIVE_FILE##*/}" 160)"
 # it is written before the print on purpose: the lock holds it, and a reminder
 # lost at exit comes back after the cooldown rather than twice in a row.
 _emit_notice "Narrative check. This note is carried over from your previous turn, which ended without a narrative note. Before answering the request below, record what that turn found, in your own narrative only (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Newest on disk is $NARRATIVE_SHOWN. (1) If that turn disproved or superseded one of your entries, append a dated correction that names it; never rewrite or delete earlier sections. (2) Append what that turn found as plain dated notes: a decision and its reason, a measured fact, a failed approach, a preference the user stated. A line that only restates routine work, such as \"appended X to Y\" or \"ran the tests\", is not a finding and must not be written. If that turn found nothing worth keeping, say so in one line and answer the request.${COMMIT_CADENCE}${NARRATIVE_OVER}${ADVISOR_NUDGE}"
-exit 0
+_done 0

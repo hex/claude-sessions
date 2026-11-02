@@ -537,13 +537,15 @@ _cs_tmux_title_lock_path() {  # pane
 #   another file once it holds the lock, lets it go and takes the lock on the
 #   file the path names, trying three times in all.
 # - A directory that is missing, or cannot take a new file, refuses at once.
-# - A live holder is waited for, but for no more than five seconds: past that
-#   the caller goes ahead without the lock or gives up, as it chooses, since a
-#   launch or a hook must never stall on a lock a stray process holds.
+# - A live holder is waited for, but for no more than the seconds the second
+#   argument names, five when it is absent (zero tries once and waits for no
+#   one): past that the caller goes ahead without the lock or gives up, as it
+#   chooses, since a launch or a hook must never stall on a lock a stray
+#   process holds.
 # - Without perl nothing is locked, and a line on stderr says so.
 # Returns 0 holding the lock, 1 holding nothing.
-_cs_lock() {  # lock file
-    local lock="$1" rc
+_cs_lock() {  # lock file, [seconds to wait for a live holder]
+    local lock="$1" wait="${2:-5}" rc
     if [ -n "${_CS_LOCK_HELD:-}" ]; then
         echo "cs: cannot lock $lock: this process already holds $_CS_LOCK_HELD" >&2
         return 1
@@ -559,7 +561,7 @@ _cs_lock() {  # lock file
         fi
         { exec 9<>"$lock"; } 2>/dev/null || return 1
         rc=0
-        perl -e "$_CS_LOCK_PERL" "$lock" || rc=$?
+        perl -e "$_CS_LOCK_PERL" "$wait" "$lock" || rc=$?
         case "$rc" in
             0)
                 _CS_LOCK_HELD="$lock"
@@ -582,10 +584,11 @@ _cs_lock() {  # lock file
 }
 
 # _cs_lock's perl, run on the lock file with bash's fd 9 open on it. Exits 0
-# holding the lock; 1 after five seconds of a live holder; 2 when the path is
+# holding the lock; 1 after the seconds $ARGV[0] names of a live holder; 2 when the path
+# ($ARGV[1], last so a test can tell this perl by its argument) is
 # not the regular file fd 9 has open (a link, or another type); 3 when the
 # path names another regular file than fd 9 has, or nothing at all, so the
-# caller opens the path again. The five seconds are read from the clock, not
+# caller opens the path again. The seconds are read from the clock, not
 # counted in polls: a starved CPU wakes each 50 ms poll late, and a hundred
 # late polls would wait twice as long as promised. The clock is the
 # monotonic one, so a wall-clock step during the wait (NTP, a manual date
@@ -598,14 +601,14 @@ open(my $fd, "+<&=", 9) or exit 1;
 my @held = stat($fd);
 exit 2 unless @held && -f _;
 sub path_names_held {
-    my @path = lstat($ARGV[0]);
+    my @path = lstat($ARGV[1]);
     return @path && -f _ && $path[0] == $held[0] && $path[1] == $held[1];
 }
-my @path = lstat($ARGV[0]);
+my @path = lstat($ARGV[1]);
 exit 3 if !@path && $!{ENOENT};
 exit 2 unless @path && -f _;
 exit 3 unless path_names_held();
-my $deadline = now() + 5;
+my $deadline = now() + $ARGV[0];
 while (1) {
     if (flock($fd, LOCK_EX | LOCK_NB)) {
         exit 0 if path_names_held();
@@ -980,6 +983,25 @@ cs_mkdir_inside() {  # dir
             err=$(mkdir "$e" 2>&1) || [ -d "$e" ] || { printf '%s\n' "$err" >&2; return 1; }
         fi
     done
+}
+
+# The key the two Stop hooks (narrative-reminder.sh, stop-notices.sh) agree
+# on for one Stop: the cksum of the Stop input, a dot, and the byte size of the
+# transcript the input names. The input alone repeats across turns (session_id,
+# transcript_path and last_assistant_message can all be the same on two Stops),
+# and the transcript holds the turn's assistant message before Stop fires and
+# takes what the hooks return only after they exit, so its size differs per
+# Stop and both hooks, reading at their start, read one size. A transcript the
+# input does not name, or that cannot be read, leaves the cksum alone as the
+# key, and two such Stops on one input share it. Each hook carries a copy of
+# this function for a partial install without this library, and
+# tests/test_hooks.sh holds the three to one text.
+cs_stop_key() {  # stop input
+    local c t s=""
+    c=$(printf '%s' "$1" | cksum | cut -d' ' -f1)
+    t=$(printf '%s' "$1" | jq -r '.transcript_path // empty' 2>/dev/null) || t=""
+    if [ -n "$t" ] && [ -f "$t" ] && [ -r "$t" ]; then s=$(wc -c < "$t" 2>/dev/null | tr -d ' ') || s=""; fi
+    case "$s" in ''|*[!0-9]*) printf '%s' "$c" ;; *) printf '%s.%s' "$c" "$s" ;; esac
 }
 
 cs_write_atomic() {  # dest, command [args...]

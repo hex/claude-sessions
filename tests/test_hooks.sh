@@ -353,6 +353,19 @@ test_stop_hooks_read_numbers_alike() {
     assert_eq "$a" "$b" "the two Stop hooks hold one _num_or" || return 1
 }
 
+# The key the verdict handshake turns on is cs-shared.sh's cs_stop_key, and
+# each hook carries a copy for a partial install. A copy that drifts keys the
+# two hooks apart, and every verdict is then nobody's.
+test_stop_hooks_key_a_stop_alike() {
+    local lib a b
+    lib=$(sed -n '/^cs_stop_key() {/,/^}/p' "$HOOKS_DIR/cs-shared.sh")
+    a=$(sed -n '/^cs_stop_key() {/,/^}/p' "$HOOKS_DIR/narrative-reminder.sh")
+    b=$(sed -n '/^cs_stop_key() {/,/^}/p' "$HOOKS_DIR/stop-notices.sh")
+    [ -n "$lib" ] || { echo "  FAIL: no cs_stop_key in cs-shared.sh"; return 1; }
+    assert_eq "$lib" "$a" "narrative-reminder.sh's copy is the library's" || return 1
+    assert_eq "$lib" "$b" "stop-notices.sh's copy is the library's" || return 1
+}
+
 # ============================================================================
 # session-auto-approve.sh
 # ============================================================================
@@ -3803,14 +3816,16 @@ run_test test_stop_notices_are_silent_for_a_subagent
 run_test test_stop_notices_are_silent_on_any_other_event
 run_test test_stop_notices_stand_down_while_the_queue_runs
 run_test test_stop_hooks_read_numbers_alike
+run_test test_stop_hooks_key_a_stop_alike
 
 # --- The verdict handshake between the two Stop hooks -----------------------
 # narrative-reminder.sh posts its verdict for the Stop to .cs/local/stop-verdict
-# ("<key> <word> <epoch>", the key the cksum of the Stop input), and
-# stop-notices.sh stands down on a block. The input here is the '{}' _notices
-# feeds the hook.
-_stop_key() {  # input
-    printf '%s' "$1" | cksum | cut -d' ' -f1
+# ("<key> <word> <epoch>", the key cs_stop_key's: the cksum of the Stop input,
+# and after a dot the byte size of the transcript it names, when it names one
+# that can be read), and stop-notices.sh stands down on a block. The input
+# here is the '{}' _notices feeds the hook, which names no transcript.
+_stop_key() {  # input, [transcript size]
+    printf '%s%s' "$(printf '%s' "$1" | cksum | cut -d' ' -f1)" "${2:+.$2}"
 }
 _post_verdict() {  # word, epoch, [key]
     printf '%s %s %s\n' "${3:-$(_stop_key '{}')}" "$1" "$2" > "$CLAUDE_SESSION_META_DIR/local/stop-verdict"
@@ -3836,12 +3851,29 @@ test_stop_notices_stand_down_on_the_sync_hooks_block() {
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
     assert_eq "$expected" "$(stop_notice_text "$output")" "a verdict keyed to another input is ignored" || return 1
-    # A block with this Stop's key but from an earlier Stop (two turns ending on
-    # the same final message) is told apart by its epoch.
-    _post_verdict block "$((now - 31))"
+    # Two Stops on one input (two turns ending on the same final message) are
+    # told apart by the transcript's size: a block posted for the earlier Stop
+    # is not the later one's, whose transcript has grown by the turn between.
+    local t="$TEST_TMPDIR/stop-key-transcript.jsonl" input
+    printf '{"type":"assistant"}\n' > "$t"
+    input=$(jq -nc --arg t "$t" '{transcript_path: $t}')
+    _post_verdict block "$now" "$(_stop_key "$input" "$(wc -c < "$t" | tr -d ' ')")"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
-    assert_eq "$expected" "$(stop_notice_text "$output")" "a block older than thirty seconds is an earlier Stop's" || return 1
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$input")
+    assert_eq "" "$output" "a block keyed to this transcript size silences the notices" || return 1
+    printf '{"type":"assistant"}\n' >> "$t"
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$input")
+    assert_eq "$expected" "$(stop_notice_text "$output")" "the same block is not the next Stop's, whose transcript grew" || return 1
+    # A transcript that cannot be read leaves the cksum alone as the key, in
+    # both hooks: the sync hook's verdict for such a Stop still reaches the
+    # async one.
+    input=$(jq -nc --arg t "$TEST_TMPDIR/no-such-transcript.jsonl" '{transcript_path: $t}')
+    printf '%s' "$input" | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh" > /dev/null
+    assert_eq "$(_stop_key "$input") approve" "$(cut -d' ' -f1,2 "$CLAUDE_SESSION_META_DIR/local/stop-verdict")" "an unreadable transcript keys on the cksum alone" || return 1
+    _post_verdict block "$now" "$(_stop_key "$input")"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$input")
+    assert_eq "" "$output" "the async hook reads that key too" || return 1
     # A teammate's Stop gets no block of its own, so it reads no verdict.
     _post_verdict block "$now"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
@@ -3851,11 +3883,29 @@ test_stop_notices_stand_down_on_the_sync_hooks_block() {
 }
 
 # The sync hook posts pending as soon as it knows the Stop is the lead's and
-# its verdict at exit, through every block it can answer with.
+# its verdict at exit, through every block it can answer with. The pending
+# line is read while the hook still runs: date is shimmed so that its second
+# call, the one the exit trap's verdict makes (the first is the pending
+# post's), waits for a release file.
 test_sync_hook_posts_pending_then_its_verdict() {
     local v="$CLAUDE_SESSION_META_DIR/local/stop-verdict" q="$CLAUDE_SESSION_META_DIR/local/queue" key out
+    local shim="$TEST_TMPDIR/datebin" count="$TEST_TMPDIR/date-calls" go="$TEST_TMPDIR/date-go" pid i
     key=$(_stop_key '{}')
-    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh")
+    mkdir -p "$shim"
+    printf '#!/bin/sh\nn=$(cat "%s" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "%s"\n[ "$n" -lt 2 ] || until [ -f "%s" ]; do sleep 0.05; done\nexec /bin/date "$@"\n' "$count" "$count" "$go" > "$shim/date"
+    chmod +x "$shim/date"
+    rm -f "$v" "$count" "$go"
+    ( echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ PATH="$shim:$PATH" bash "$HOOKS_DIR/narrative-reminder.sh" > "$TEST_TMPDIR/sync-pending.out" 2>&1 ) &
+    pid=$!
+    i=0
+    until [ "$(cut -d' ' -f1,2 "$v" 2>/dev/null)" = "$key pending" ] || [ "$i" -ge 100 ]; do sleep 0.1; i=$((i + 1)); done
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "  FAIL: the sync hook exited before a pending line was read: $(cat "$v" 2>/dev/null)"; return 1
+    fi
+    assert_eq "$key pending" "$(cut -d' ' -f1,2 "$v" 2>/dev/null)" "pending is on disk while the sync hook runs" || { touch "$go"; wait "$pid" 2>/dev/null; return 1; }
+    touch "$go"
+    wait "$pid"
+    out=$(cat "$TEST_TMPDIR/sync-pending.out")
     assert_eq "approve" "$(jq -r '.decision' <<< "$out")" "an idle Stop approves" || return 1
     assert_eq "$key approve" "$(cut -d' ' -f1,2 "$v")" "an approve is posted with the Stop's key" || return 1
     assert_output_contains "$(cut -d' ' -f3 "$v")" '^[0-9][0-9]*$' "the verdict carries its epoch" || return 1
@@ -3884,18 +3934,35 @@ test_sync_hook_posts_pending_then_its_verdict() {
     assert_file_not_exists "$v" "a teammate's Stop posts no verdict" || return 1
 }
 
-# The two hooks side by side, as Claude Code runs them, on the Stop that ends
-# a drain's last task: the drain writes idle and blocks, and the notices must
-# still stand down. The verdict wait is left at its default here.
-test_stop_notices_wait_for_a_drain_that_ends_idle() {
+# The verdict says block only beside a block that was printed: jq is shimmed
+# to fail on the block line alone, and the sync hook, which then prints no
+# block, posts approve from its exit, so the notices are not silenced for a
+# block nobody saw.
+test_sync_hook_posts_approve_when_its_block_fails_to_print() {
+    local v="$CLAUDE_SESSION_META_DIR/local/stop-verdict" q="$CLAUDE_SESSION_META_DIR/local/queue" shim="$TEST_TMPDIR/jqbin" real out rc=0
+    real=$(command -v jq)
+    mkdir -p "$shim" "$q"
+    printf '#!/bin/sh\ncase "$*" in *decision:\\"block\\"*) exit 5 ;; esac\nexec "%s" "$@"\n' "$real" > "$shim/jq"
+    chmod +x "$shim/jq"
+    printf 'write the docs\n' > "$q/0001-task"
+    printf 'armed\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
+    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ PATH="$shim:$PATH" bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null) || rc=$?
+    assert_eq "" "$out" "no block line is printed" || return 1
+    [ "$rc" -ne 0 ] || { echo "  FAIL: a block that could not be printed must not exit 0"; return 1; }
+    assert_eq "$(_stop_key '{}') approve" "$(cut -d' ' -f1,2 "$v")" "the verdict is approve beside no block" || return 1
+}
+
+# The two hooks side by side, as Claude Code runs them, on a Stop the sync
+# hook answers with the mail wake's block: the queue is idle, so the queue
+# gate lets the async hook through and the handshake alone must silence it.
+# The verdict wait is left at its default here.
+test_stop_notices_wait_for_the_mail_wakes_block() {
     echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    local q="$CLAUDE_SESSION_META_DIR/local/queue" sync async
-    mkdir -p "$q"
-    printf 'the last task\n' > "$q/0001-task"
-    printf 'draining\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
-    printf '0001-task\n' > "$CLAUDE_SESSION_META_DIR/local/queue.current"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" "$CLAUDE_SESSION_META_DIR/local/queue.state"
+    local sync async
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local/mail/new"
+    printf '{"from":"peer","body":"hi"}\n' > "$CLAUDE_SESSION_META_DIR/local/mail/new/1.json"
     export CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins"
     ( echo '{}' | env -u CS_STOP_VERDICT_WAIT bash "$HOOKS_DIR/stop-notices.sh" > "$TEST_TMPDIR/async.out" 2>&1 ) &
     async=$!
@@ -3903,9 +3970,62 @@ test_stop_notices_wait_for_a_drain_that_ends_idle() {
     sync=$!
     wait "$sync" "$async"
     unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR
-    assert_output_contains "$(jq -r '.reason' < "$TEST_TMPDIR/sync.out")" "^cs task queue: all tasks complete" "the drain ended" || return 1
-    assert_eq "" "$(cat "$TEST_TMPDIR/async.out")" "no notice beside the drain's final block" || return 1
+    assert_eq "block" "$(jq -r '.decision' < "$TEST_TMPDIR/sync.out")" "the mail wake blocked" || return 1
+    assert_eq "" "$(cat "$TEST_TMPDIR/async.out")" "no notice beside the mail wake's block" || return 1
     assert_file_not_exists "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" "no cooldown spent" || return 1
+}
+
+# The whole run ends inside the hook's budget whatever it waits on: a verdict
+# that stays pending for ever and a lock a stray process never lets go are
+# staged together, and the run still ends inside nine seconds, one object or
+# nothing on stdout, where the 10 s registration timeout would kill it.
+test_stop_notices_end_inside_their_budget() {
+    require_tool perl || return $?
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    local lock="$CLAUDE_SESSION_META_DIR/local/stop-notices.mutex.lock" holder t0 t1 took out
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    : > "$lock"
+    perl -e 'use Fcntl qw(:flock); open(my $f, "+<", $ARGV[0]) or exit 1; flock($f, LOCK_EX) or exit 1; sleep 30' "$lock" &
+    holder=$!
+    _post_verdict pending "$(date +%s)"
+    export CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins"
+    t0=$(date +%s); out=$(env -u CS_STOP_VERDICT_WAIT bash "$HOOKS_DIR/stop-notices.sh" <<< '{}'); t1=$(date +%s)
+    unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR
+    kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null || true
+    took=$((t1 - t0))
+    echo "  measured: pending for ever plus a held lock ${took}s"
+    [ "$took" -le 9 ] || { echo "  FAIL: the run must end inside its budget, took ${took}s"; return 1; }
+    assert_eq "true" "$(jq -s 'length == 1 and (.[0] | type) == "object" and .[0].hookSpecificOutput.hookEventName == "Stop"' <<< "$out")" "one object on stdout, printed unlocked" || return 1
+}
+
+# The context cursor is read and written under the lock: two runs that
+# overlap on a conversation nudged once both find the transcript silent on
+# it, and without the lock both print the repeat and both append "again".
+# stat is shimmed to take a second, so both runs are inside the scan when the
+# other arrives.
+test_stop_notices_repeat_a_context_notice_under_the_lock() {
+    require_tool perl || return $?
+    local shim="$TEST_TMPDIR/slowbin" real n uuid="11111111-1111-1111-1111-111111111111" t="$TEST_TMPDIR/empty-transcript.jsonl"
+    real=$(command -v stat)
+    mkdir -p "$shim"
+    printf '#!/bin/sh\nsleep 1\nexec "%s" "$@"\n' "$real" > "$shim/stat"
+    chmod +x "$shim/stat"
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    : > "$t"
+    printf '70\n' > "$CLAUDE_SESSION_META_DIR/local/context-pct"
+    printf '%s\n' "$uuid" > "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"
+    export CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins"
+    ( jq -nc --arg s "$uuid" --arg t "$t" '{session_id: $s, transcript_path: $t}' | PATH="$shim:$PATH" bash "$HOOKS_DIR/stop-notices.sh" > "$TEST_TMPDIR/run1.out" ) &
+    ( jq -nc --arg s "$uuid" --arg t "$t" '{session_id: $s, transcript_path: $t}' | PATH="$shim:$PATH" bash "$HOOKS_DIR/stop-notices.sh" > "$TEST_TMPDIR/run2.out" ) &
+    wait
+    unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR
+    rm -f "$CLAUDE_SESSION_META_DIR/local/context-pct"
+    n=$(cat "$TEST_TMPDIR/run1.out" "$TEST_TMPDIR/run2.out" | grep -c 'consider rotating this conversation' || true)
+    assert_eq "1" "$n" "two overlapping runs repeat the nudge once" || return 1
+    assert_eq "$uuid
+$uuid again" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor records one repeat" || return 1
 }
 
 # What the wait costs, measured: a lead Stop with no sync hook verdict at all
@@ -3981,10 +4101,10 @@ test_stop_notices_print_one_object_or_nothing_and_exit_zero() {
         out=$(printf '{"session_id":"11111111-1111-1111-1111-111111111111"}\n' | bash "$HOOKS_DIR/stop-notices.sh" 2>"$TEST_TMPDIR/stderr") || rc=$?
         assert_eq "0" "$rc" "$scenario: exit 0" || { unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR; return 1; }
         assert_eq "" "$(cat "$TEST_TMPDIR/stderr")" "$scenario: nothing on stderr" || { unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR; return 1; }
-        n=$(jq -s 'length' <<< "$out" 2>/dev/null || echo unparsable)
+        n=$(jq -s 'length == 1 and (.[0] | type) == "object" and .[0].hookSpecificOutput.hookEventName == "Stop"' <<< "$out" 2>/dev/null || echo unparsable)
         case "$scenario" in
             "nothing due") assert_eq "" "$out" "$scenario: prints nothing" ;;
-            *) assert_eq "1" "$n" "$scenario: stdout parses as exactly one object, got [$out]" ;;
+            *) assert_eq "true" "$n" "$scenario: stdout parses as exactly one Stop object, got [$out]" ;;
         esac || { unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR; return 1; }
     done
     unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR
@@ -4007,7 +4127,10 @@ test_narrative_reminder_is_worded_for_the_next_prompt() {
 
 run_test test_stop_notices_stand_down_on_the_sync_hooks_block
 run_test test_sync_hook_posts_pending_then_its_verdict
-run_test test_stop_notices_wait_for_a_drain_that_ends_idle
+run_test test_sync_hook_posts_approve_when_its_block_fails_to_print
+run_test test_stop_notices_wait_for_the_mail_wakes_block
+run_test test_stop_notices_end_inside_their_budget
+run_test test_stop_notices_repeat_a_context_notice_under_the_lock
 run_test test_stop_notices_verdict_wait_cost
 run_test test_stop_notices_cooldown_is_taken_under_a_lock
 run_test test_stop_notices_print_one_object_or_nothing_and_exit_zero

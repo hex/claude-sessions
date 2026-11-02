@@ -2095,6 +2095,11 @@ run_test test_marker_with_a_backslash_path_is_rejected
 # Cycle 5: context nudge (Stop hook)
 # ============================================================================
 
+# The line Claude Code writes to the transcript when it delivers an async
+# Stop hook's output, in the shape a real transcript holds.
+_delivery_line() {  # notice text
+    jq -nc --arg c "$1" '{type: "attachment", attachment: {type: "async_hook_response", processId: "async_hook_1", hookName: "Stop", hookEvent: "Stop", response: {hookSpecificOutput: {hookEventName: "Stop", additionalContext: $c}}}}'
+}
 _stop_with_ctx() {  # ctx-pct-or-empty, session_id
     if [ -n "$1" ]; then
         printf '%s\n' "$1" > "$CLAUDE_SESSION_META_DIR/local/context-pct"
@@ -2108,7 +2113,7 @@ _stop_with_ctx() {  # ctx-pct-or-empty, session_id
     # the tests for a lost notice feed the hook a transcript of their own.
     local t="$CLAUDE_SESSION_DIR/transcript-$2.jsonl" out rc=0
     out=$(jq -nc --arg s "$2" --arg t "$t" '{session_id: $s, transcript_path: $t}' | bash "$HOOKS_DIR/stop-notices.sh") || rc=$?
-    [ -z "$out" ] || jq -c '{type: "attachment", attachment: {type: "hook_success", hookEvent: "Stop", content: .hookSpecificOutput.additionalContext}}' <<< "$out" >> "$t" 2>/dev/null
+    [ -z "$out" ] || _delivery_line "$(jq -r '.hookSpecificOutput.additionalContext' <<< "$out")" >> "$t" 2>/dev/null
     printf '%s' "$out"
     return "$rc"
 }
@@ -2712,12 +2717,29 @@ test_nudge_is_not_repeated_once_the_transcript_records_it() {
     : > "$t"
     out=$(_stop_with_ctx_and_transcript 65 "$UUID_A" "$t") || return 1
     assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "the first nudge goes out" || return 1
-    # Claude Code records a delivered notice in the transcript as an attachment
-    # carrying its text.
-    jq -nc --arg c "$(stop_notice_text "$out")" '{type: "attachment", attachment: {type: "hook_success", hookEvent: "Stop", content: $c}}' >> "$t"
+    # Claude Code records a delivered notice in the transcript as an
+    # async_hook_response attachment carrying the hook's output.
+    _delivery_line "$(stop_notice_text "$out")" >> "$t"
     out=$(_stop_with_ctx_and_transcript 85 "$UUID_A" "$t") || return 1
     assert_eq "" "$out" "a recorded nudge is not repeated" || return 1
     assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor holds the one send" || return 1
+}
+
+# Only that attachment records a delivery. The notice's words also sit in a
+# user message that quotes them, and in a tool result that holds the hook's
+# source; neither is a delivery, and the repeat still goes out past both.
+test_nudge_is_repeated_when_only_a_message_holds_its_words() {
+    _rot_hook_session "rot-nudge-quoted"
+    local t="$TEST_TMPDIR/transcript-quoted.jsonl" out
+    : > "$t"
+    out=$(_stop_with_ctx_and_transcript 70 "$UUID_A" "$t") || return 1
+    assert_eq "$(_nudge_text 70)" "$(stop_notice_text "$out")" "the first nudge goes out" || return 1
+    jq -nc --arg c "$(stop_notice_text "$out")" '{type: "user", message: {role: "user", content: ("you said: " + $c)}}' >> "$t"
+    jq -nc --arg c "$(cat "$HOOKS_DIR/stop-notices.sh")" '{type: "user", message: {role: "user", content: [{type: "tool_result", content: $c}]}}' >> "$t"
+    out=$(_stop_with_ctx_and_transcript 85 "$UUID_A" "$t") || return 1
+    assert_eq "$(_nudge_text 85)" "$(stop_notice_text "$out")" "a quoted nudge is no delivery" || return 1
+    assert_eq "$UUID_A
+$UUID_A again" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor records the repeat" || return 1
 }
 
 test_ctx_warning_is_repeated_once_when_the_transcript_does_not_record_it() {
@@ -2736,30 +2758,39 @@ $UUID_A again" "$(cat "$CLAUDE_SESSION_META_DIR/local/ctx-warned")" "the cursor 
     _rot_hook_session "rot-warn-recorded"
     : > "$t"
     out=$(_stop_with_ctx_and_transcript 40 "$UUID_B" "$t") || return 1
-    jq -nc --arg c "$(stop_notice_text "$out")" '{type: "attachment", attachment: {type: "hook_success", hookEvent: "Stop", content: $c}}' >> "$t"
+    _delivery_line "$(stop_notice_text "$out")" >> "$t"
     out=$(_stop_with_ctx_and_transcript 45 "$UUID_B" "$t") || return 1
     assert_eq "" "$out" "a recorded warning is not repeated" || return 1
 }
 
-# The cursor is stamped after the notice is printed, never before: a hook
-# killed between the two leaves a notice the cursor does not count as sent.
-# Pinned on the order of the two writes as they reach the file system: the
-# cursor file is made unwritable, and the notice still goes out.
-test_context_cursor_is_stamped_after_the_notice() {
+# The first notice is printed before its cursor line, so a hook killed
+# between the two leaves a notice the cursor does not count as sent; the
+# repeat is printed only after its "again" line, so a cursor that cannot take
+# it sends nothing, and the repeat cannot come back on every Stop. Pinned on
+# the order of the two writes as they reach the file system: the cursor file
+# is made unwritable, and the first notice still goes out while the repeat
+# does not.
+test_context_cursor_order_differs_for_the_first_send_and_the_repeat() {
     _rot_hook_session "rot-cursor-order"
     local out
     printf '%s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"
     _deny_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" || return 77
     out=$(_stop_with_ctx 70 "$UUID_A" 2>/dev/null) || { _allow_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"; return 1; }
     _allow_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"
-    assert_eq "$(_nudge_text 70)" "$(stop_notice_text "$out")" "a cursor that cannot be stamped does not cost the notice" || return 1
+    assert_eq "$(_nudge_text 70)" "$(stop_notice_text "$out")" "a cursor that cannot be stamped does not cost the first notice" || return 1
     assert_eq "$UUID_B" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor is as it was" || return 1
+    _deny_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" || return 77
+    out=$(_stop_with_ctx 70 "$UUID_B" 2>/dev/null) || { _allow_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"; return 1; }
+    _allow_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"
+    assert_eq "" "$out" "a repeat whose again line cannot be written is not sent" || return 1
+    assert_eq "$UUID_B" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor is still as it was" || return 1
 }
 
 run_test test_nudge_is_repeated_once_when_the_transcript_does_not_record_it
 run_test test_nudge_is_not_repeated_once_the_transcript_records_it
+run_test test_nudge_is_repeated_when_only_a_message_holds_its_words
 run_test test_ctx_warning_is_repeated_once_when_the_transcript_does_not_record_it
-run_test test_context_cursor_is_stamped_after_the_notice
+run_test test_context_cursor_order_differs_for_the_first_send_and_the_repeat
 
 run_test test_ctx_warning_survives_an_interleaved_teammate
 run_test test_ctx_warning_rearms_for_new_conversation
