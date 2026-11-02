@@ -1392,7 +1392,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "1a5ee0234c99f3f071b512ce675462c3c8fa4a7a57ef2e3fda1f2eedc0f5388c  bin/cs"
+    "e0e345347639b2a45c978a2e9dd093254d8e8e0bf7196cadc61cff7d90d92036  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "2148a9cf6df5ff9185fa9392b3e186067ce0b395b73f75ca951aa64c0172c17e  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"

@@ -236,7 +236,7 @@ _queue_list() {  # qdir
     for f in "$qdir/queue"/*; do
         [ -f "$f" ] || continue
         n=$((n + 1))
-        [ "$n" -eq 1 ] && echo "Pending ($len)"
+        [ "$n" -eq 1 ] && echo "Queued ($len)"
         text=$(<"$f")
         printf '  %d. %s\n' "$n" "${text//$'\n'/ }"
     done

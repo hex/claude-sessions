@@ -877,7 +877,7 @@ in flight instead of waiting for it to end. `/queue <task>` runs
 `cs -queue add "<task>"` through `$.process.run` by the path the launch
 exports in `CS_BIN` (no shell; the claude process's `PATH` is not the
 launching shell's), and `/queue` alone runs `cs -queue list` and prints it.
-When the list has a `Pending (N)` heading and `.cs/local/queue.state` is not
+When the list has a `Queued (N)` heading and `.cs/local/queue.state` is not
 `armed` or `draining`, the mod then asks through `$.ui.ask` whether to start
 them. Start and Compact then ask how the tasks run (In this
 conversation, In subagents, As workflows; free text under "Other" is refused

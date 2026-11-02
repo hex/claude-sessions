@@ -473,8 +473,8 @@ export function register(on: On, options: PluginOptions) {
       $.ui.toast(TOASTS.queued(task))
       return { text: REPLIES.queued(task) }
     }
-    const pending = /^Pending \((\d+)\)$/m.exec(result.stdout)
-    if (pending && !(await queueRunning($))) void offerToStart($, bin, Number(pending[1]))
+    const queuedHeading = /^Queued \((\d+)\)$/m.exec(result.stdout)
+    if (queuedHeading && !(await queueRunning($))) void offerToStart($, bin, Number(queuedHeading[1]))
     return { text: result.stdout.trimEnd() }
   })
 
