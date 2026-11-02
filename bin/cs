@@ -15210,7 +15210,8 @@ _rotate_force_notice_file() {
 # Mirrors forceThreshold() in mods/cs/hooks/register.tsx: unset is the
 # default, `off` (any case) and zero turn it off, 1 to 100 moves it, and
 # anything else, a number past 100 included, is the default rather than
-# silence. KEEP IN SYNC with that resolver.
+# silence. KEEP IN SYNC with that resolver. The variable carries a settings
+# file's value too: cs_config_load fills every unpinned key before the launch.
 _rotate_force_threshold() {  # -> prints the percentage, or nothing when off
     local raw="${CS_ROTATE_FORCE_CTX-}"
     raw="$(printf '%s' "$raw" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
