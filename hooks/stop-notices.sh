@@ -255,7 +255,9 @@ fi
 # a byte offset into the conversation's transcript and the time it was set.
 # Work is what the transcript records past the offset: WORK_EDITS or more
 # Edit, Write, MultiEdit or NotebookEdit calls, a Bash call whose command holds
-# `git commit`, or WORK_TEXT characters of Claude's own text. The narrative
+# `git commit`, or WORK_TEXT characters of Claude's own text. One edit is
+# work: a benchmark with one edit per turn and a threshold of three never
+# reminded, and the prompt line alone recorded a turn's fact in 8 of 10 runs. The narrative
 # counts as written since the cursor when its mtime is at or past the epoch.
 # The cursor moves to the transcript's end, stamped now, after a reminder and
 # whenever the narrative was written since it; a reminder never goes out
@@ -263,8 +265,8 @@ fi
 # together from both reminding. A conversation with no cursor yet counts from
 # the transcript's start and takes its first timestamp as the epoch; with no
 # stamp to space it from, the floor does not hold its first reminder back.
-WORK_EDITS=3
-WORK_TEXT=2000
+WORK_EDITS=1
+WORK_TEXT=800
 WORK_FLOOR=60
 # The read is bounded to keep the run inside its budget: a gap past this many
 # bytes counts as work without being read.
@@ -636,5 +638,5 @@ else
 fi
 # Worded for where it lands: beside the user's next request, about the turn
 # that ended before it.
-_emit_notice "Narrative check. This note is carried over from your previous turn, which ended without a narrative note. Before answering the request below, record what that turn found, in your own narrative only (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Yours is $NARRATIVE_SHOWN. (1) If that turn disproved or superseded one of your entries, append a dated correction that names it; never rewrite or delete earlier sections. (2) Append what that turn found as plain dated notes: a decision and its reason, a measured fact, a failed approach, a preference the user stated. A line that only restates routine work, such as \"appended X to Y\" or \"ran the tests\", is not a finding and must not be written. If that turn found nothing worth keeping, say so in one line and answer the request.${COMMIT_CADENCE}${NARRATIVE_OVER}${ADVISOR_NUDGE}"
+_emit_notice "Narrative check. This note is carried over from your previous turn, which ended without a narrative note. Before answering the request below, record what that turn found, in your own narrative only (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Yours is $NARRATIVE_SHOWN. (1) If that turn disproved or superseded one of your entries, append a dated correction that names it; never rewrite or delete earlier sections. (2) Append what that turn found as plain dated notes: a decision and its reason, a measured fact, a failed approach, a preference the user stated. A line that only restates routine work, such as \"appended X to Y\" or \"ran the tests\", is not a finding and must not be written. If that turn found nothing worth keeping, say so in one line of your reply, write nothing in the narrative, and answer the request.${COMMIT_CADENCE}${NARRATIVE_OVER}${ADVISOR_NUDGE}"
 _done 0

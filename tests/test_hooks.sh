@@ -60,7 +60,7 @@ _notices() {  # [input]
 # The reminder for a session whose newest narrative is $1, under budget, with
 # no advisor channel installed: the whole text the model is handed.
 _reminder_for() {  # narrative path
-    printf '%s' "Narrative check. This note is carried over from your previous turn, which ended without a narrative note. Before answering the request below, record what that turn found, in your own narrative only (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Yours is $1. (1) If that turn disproved or superseded one of your entries, append a dated correction that names it; never rewrite or delete earlier sections. (2) Append what that turn found as plain dated notes: a decision and its reason, a measured fact, a failed approach, a preference the user stated. A line that only restates routine work, such as \"appended X to Y\" or \"ran the tests\", is not a finding and must not be written. If that turn found nothing worth keeping, say so in one line and answer the request. Never commit narrative appends or anything else under .cs/ on your own, not even beside a project change: cs commits files under .cs/ only in the commit that creates a session and the merge /finish makes, and you commit them only when the user asks. Never push a commit that holds narrative appends unless the user asks. Uncommitted appends are safe — autosave snapshots every edit to a shadow ref."
+    printf '%s' "Narrative check. This note is carried over from your previous turn, which ended without a narrative note. Before answering the request below, record what that turn found, in your own narrative only (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Yours is $1. (1) If that turn disproved or superseded one of your entries, append a dated correction that names it; never rewrite or delete earlier sections. (2) Append what that turn found as plain dated notes: a decision and its reason, a measured fact, a failed approach, a preference the user stated. A line that only restates routine work, such as \"appended X to Y\" or \"ran the tests\", is not a finding and must not be written. If that turn found nothing worth keeping, say so in one line of your reply, write nothing in the narrative, and answer the request. Never commit narrative appends or anything else under .cs/ on your own, not even beside a project change: cs commits files under .cs/ only in the commit that creates a session and the merge /finish makes, and you commit them only when the user asks. Never push a commit that holds narrative appends unless the user asks. Uncommitted appends are safe — autosave snapshots every edit to a shadow ref."
 }
 
 test_stop_notices_are_silent_outside_session() {
@@ -4233,7 +4233,7 @@ test_narrative_reminder_is_worded_for_the_next_prompt() {
     assert_output_contains "$text" "carried over from your previous turn, which ended without a narrative note" "says where it comes from" || return 1
     assert_output_contains "$text" "Before answering the request below, record what that turn found" "asks for that turn's findings first" || return 1
     assert_output_contains "$text" "is not a finding and must not be written" "forbids filler" || return 1
-    assert_output_contains "$text" "If that turn found nothing worth keeping, say so in one line and answer the request" "names the empty case" || return 1
+    assert_output_contains "$text" "If that turn found nothing worth keeping, say so in one line of your reply, write nothing in the narrative, and answer the request" "names the empty case" || return 1
     assert_output_not_contains "$text" "say so in one line and stop" "no longer ends the turn" || return 1
 }
 
@@ -4280,18 +4280,18 @@ _cursor_offset() {
 
 test_work_gate_is_silent_below_its_thresholds() {
     _work_fixture
-    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 2 0 1999
-    assert_eq "" "$(_work_notices)" "two edits and 1999 characters are not work enough" || return 1
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 0 0 799
+    assert_eq "" "$(_work_notices)" "no edit and 799 characters are not work enough" || return 1
     assert_eq "0" "$(_cursor_offset)" "the cursor stays where it was" || return 1
 }
 
 # A fresh cooldown stamp beside each: the work gate does not read it.
-test_work_gate_reminds_after_three_edits() {
+test_work_gate_reminds_after_one_edit() {
     _work_fixture
     date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 0 0
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 1 0 0
     assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
-        "three edits remind" || return 1
+        "one edit reminds" || return 1
     assert_eq "$(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ')" "$(_cursor_offset)" "the cursor moves to the transcript's end" || return 1
 }
 
@@ -4306,9 +4306,9 @@ test_work_gate_reminds_after_a_commit() {
 test_work_gate_reminds_after_long_text() {
     _work_fixture
     date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 0 0 2000
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 0 0 800
     assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
-        "2000 characters of text alone remind" || return 1
+        "800 characters of text alone remind" || return 1
 }
 
 # Work before the cursor is not counted.
@@ -4317,8 +4317,8 @@ test_work_gate_counts_only_past_the_cursor() {
     _transcript_add "$TEST_TMPDIR/transcript.jsonl" 5 1 3000
     printf '%s %s\n' "$(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ')" "$(( $(date +%s) - 300 ))" \
         > "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
-    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 2 0 0
-    assert_eq "" "$(_work_notices)" "two edits past the cursor are not work enough" || return 1
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 0 0 799
+    assert_eq "" "$(_work_notices)" "no edit and 799 characters past the cursor are not work enough" || return 1
 }
 
 test_work_gate_moves_the_cursor_when_the_narrative_was_written() {
@@ -4395,7 +4395,7 @@ run_test test_stop_notices_cooldown_is_taken_under_a_lock
 run_test test_stop_notices_print_one_object_or_nothing_and_exit_zero
 run_test test_narrative_reminder_is_worded_for_the_next_prompt
 run_test test_work_gate_is_silent_below_its_thresholds
-run_test test_work_gate_reminds_after_three_edits
+run_test test_work_gate_reminds_after_one_edit
 run_test test_work_gate_reminds_after_a_commit
 run_test test_work_gate_reminds_after_long_text
 run_test test_work_gate_counts_only_past_the_cursor

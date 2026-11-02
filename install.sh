@@ -1411,7 +1411,7 @@ CS_PAYLOAD_SHA256=(
     "4b91a8478721aaefb2863e77638de6d0616db0b528c64a58cc44e73ab836321e  hooks/session-start.sh"
     "cae9775702513f11b1abff031928047766ab69714e3a9b1db82ff080e186f20b  hooks/autosave-commits.sh"
     "59a45222ec8106787e9e97c7c48acc32b754831ecdc5247fdc40d992f36ee009  hooks/stop-blocks.sh"
-    "bb6ac217884ce48777ec7b43813b9375610792b4673bad8b32fa10c953c7cf87  hooks/stop-notices.sh"
+    "7709e7d4a45e074b73880f203957cfe10b99760835015093bdfa87ae858fdb1f  hooks/stop-notices.sh"
     "a96c77d8f13d893e46116b7d61e517f72bba7f8e10b790517934004be21ae43a  hooks/session-end.sh"
     "81a13835a65f4b4b35bb87493da0df9848de68375ca7ab1525d2d5079cf52bf1  hooks/subagent-context.sh"
     "53b16016dd6d087c3cc3db7e4acf8de6629e149e3b7f326f0731b36809574156  hooks/tool-failure-logger.sh"
