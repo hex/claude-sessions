@@ -1409,7 +1409,7 @@ CS_PAYLOAD_SHA256=(
     "a4486c60d3db91c0a466fb154602eec888ffeb5a9942d74d2c8aac92b8dd7c32  hooks/session-start.sh"
     "cae9775702513f11b1abff031928047766ab69714e3a9b1db82ff080e186f20b  hooks/autosave-commits.sh"
     "277b28d2469f25a0f365cd71bf9b6eedb2973848ef65d7cf60a01d7c4a5c33b4  hooks/narrative-reminder.sh"
-    "6671eba6bbd106cd9550b684cfec988f7186bb70b9fd2c723edfe23fea420709  hooks/stop-notices.sh"
+    "a81006fdfe106b838117ab139e26ac7783371f966aea58e4e1bcfc1169527398  hooks/stop-notices.sh"
     "8377b722bd856d5ca918bb9ffea2cfb3e0a0077ee0b9441a1f52461fd7282739  hooks/session-end.sh"
     "81a13835a65f4b4b35bb87493da0df9848de68375ca7ab1525d2d5079cf52bf1  hooks/subagent-context.sh"
     "53b16016dd6d087c3cc3db7e4acf8de6629e149e3b7f326f0731b36809574156  hooks/tool-failure-logger.sh"
