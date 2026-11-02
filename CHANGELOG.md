@@ -13,6 +13,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Changed
 - `cs -list` prints the cs-tui hint from the listing itself, so `cs -list --bogus` prints only the error.
+- The `cs` band's chat only key reads `filter chat only ●` while on, its dot green, and `filter chat only ○` while off. It read `chat only ●`, the dot in the session's colour.
 - The rotation nudge, the context warning and the narrative reminder no longer draw Claude Code's `Ran N stop hooks` row in the chat. They come from a second `Stop` hook, `stop-notices.sh`, registered as async, and reach Claude as context with your next prompt, so they never start or extend a turn. An armed or draining task queue still gets none of them, and neither does any `Stop` the first hook answers with a block (a drain that ends or parks, a staged retire, a mail wake): that hook posts its verdict to `.cs/local/stop-verdict` and the async one waits for it, two seconds when no verdict is coming and at most eight while one is pending. The notices are worded for where they land, beside your next request and about the turn before it; the narrative reminder asks for what that turn found, says a line that restates routine work is not a finding, and names the empty case. A context notice stamps its cursor after it prints, and goes out once more on a later `Stop` when the transcript does not record the first; the narrative reminder's cooldown is stamped under a lock, so two overlapping runs remind once.
 
 ## 2026.10.11

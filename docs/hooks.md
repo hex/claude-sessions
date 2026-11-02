@@ -534,7 +534,7 @@ colour: `ctrl+x 1 rotate   2 wrap   #4 say four   │││┃` on the narrowest
 that holds it. Chords that differ are spelled whole. In order, and each
 only when it applies, the actions are `rotate` (or `/clear now` once a
 handoff is armed, then `in Ns`, the armed handoff's count, which leaves the
-line before `/clear now` would shrink to its bare key), `wrap`, `chat only`
+line before `/clear now` would shrink to its bare key), `wrap`, `filter chat only`
 and the queue's start press, `▤ run N queued tasks` (`▤ run 1 queued task`
 for one), or in its place the queue count below: `ctrl+x 1 rotate   2 wrap · ▤ run 2 queued tasks`.
 The queue's `▤` draws in the amber the status line gives its queue count. The right edge carries the features
@@ -668,15 +668,15 @@ after it describe the band beside cs-chat-only. The band reads the command
 list without running a status command. The key is a press, as the queue's
 start button is: it answers no chord, only a click and Ctrl+X Tab, and its
 label draws bare after the keys' dim `·`:
-`ctrl+x 1 rotate   2 wrap · chat only ●`. On a line too narrow for every
+`ctrl+x 1 rotate   2 wrap · filter chat only ●`. On a line too narrow for every
 entry it never shortens: it leaves whole, after the queue's start button and
 before the chords.
 
-The key ends in a switch dot: `chat only ●` while on, the dot in the
-session's colour, and `chat only ○` while off, the dot in the line's ink. A
+The key ends in a switch dot: `filter chat only ●` while on, the dot in
+green, and `filter chat only ○` while off, the dot in the line's ink. A
 press asks `cs -vet-session` before it writes, as the other band writers do.
 A refusal leaves the file alone and draws chat only as off. The key reads
-`chat only ●` only while the file holds `on\n` or
+`filter chat only ●` only while the file holds `on\n` or
 is absent, and the band's last `cs -vet-session` answer in this load was not a
 refusal. The band asks at session start in a cs session with `.cs/local`, and
 at every step that acts on the control files, such as a press of the clear,
@@ -1305,7 +1305,7 @@ passes Claude Code's own drawing through.
 
 The switch is per session:
 
-- `chat only`, the cs band's chat only key (see the band above), pressed by
+- `filter chat only`, the cs band's chat only key (see the band above), pressed by
   a click or Ctrl+X Tab, never a chord: this session
   on or off. It shows during a turn too, and leaves the row to a survey or
   an armed handoff.
