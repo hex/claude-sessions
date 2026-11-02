@@ -2101,15 +2101,24 @@ _stop_with_ctx() {  # ctx-pct-or-empty, session_id
     else
         rm -f "$CLAUDE_SESSION_META_DIR/local/context-pct"
     fi
-    echo "{\"session_id\":\"$2\"}" | bash "$HOOKS_DIR/stop-notices.sh"
+    # Claude Code names the conversation's transcript in the Stop input and,
+    # when it delivers a notice with the next prompt, records it there as an
+    # attachment carrying the text. Modelled here, so every notice this helper
+    # prints counts as delivered and a conversation is nudged or warned once;
+    # the tests for a lost notice feed the hook a transcript of their own.
+    local t="$CLAUDE_SESSION_DIR/transcript-$2.jsonl" out rc=0
+    out=$(jq -nc --arg s "$2" --arg t "$t" '{session_id: $s, transcript_path: $t}' | bash "$HOOKS_DIR/stop-notices.sh") || rc=$?
+    [ -z "$out" ] || jq -c '{type: "attachment", attachment: {type: "hook_success", hookEvent: "Stop", content: .hookSpecificOutput.additionalContext}}' <<< "$out" >> "$t" 2>/dev/null
+    printf '%s' "$out"
+    return "$rc"
 }
 
 # The two context notices stop-notices.sh hands the model, whole.
 _nudge_text() {  # reading
-    printf 'Context is at %s%% — consider rotating this conversation. Invoke the rotate skill to distill a handoff and arm it; the user then runs /clear to continue in a fresh conversation, without leaving Claude Code. One-time notice for this conversation; if now is a bad time, simply continue.' "$1"
+    printf 'Context was at %s%% when your previous turn ended, so consider rotating this conversation; this note is carried over with the request below. Tell the user in one line, then answer the request. Once it is answered, or before it if it is large enough to need the headroom, invoke the rotate skill to distill a handoff and arm it; the user then runs /clear to continue in a fresh conversation, without leaving Claude Code. Sent once for this conversation; if now is a bad time, simply continue.' "$1"
 }
 _warning_text() {  # reading, nudge threshold
-    printf 'Context is at %s%% — past the comfortable-headroom mark. Briefly let the user know so they can steer toward a natural stopping point or plan a rotation; the rotate nudge follows at %s%%. One-time notice for this conversation; no action needed now.' "$1" "$2"
+    printf 'Context was at %s%% when your previous turn ended, past the comfortable-headroom mark; this note is carried over with the request below. Tell the user in one line, so they can steer toward a natural stopping point or plan a rotation, then answer the request; the rotate nudge follows at %s%%. Sent once for this conversation; no other action is needed.' "$1" "$2"
 }
 
 test_nudge_fires_once_at_threshold() {
@@ -2672,6 +2681,86 @@ run_test test_force_threshold_past_100_is_the_default_like_the_mod
 run_test test_launch_prints_the_force_notice_once_and_only_with_hooks_on
 run_test test_ctx_warning_fires_once_in_band
 run_test test_ctx_tiers_are_silent_for_a_teammate
+
+# A Stop whose input names a transcript, as Claude Code's does.
+_stop_with_ctx_and_transcript() {  # ctx-pct, session_id, transcript path
+    printf '%s\n' "$1" > "$CLAUDE_SESSION_META_DIR/local/context-pct"
+    jq -nc --arg s "$2" --arg t "$3" '{session_id: $s, transcript_path: $t}' | bash "$HOOKS_DIR/stop-notices.sh"
+}
+
+# A notice the transcript does not record was lost at exit or is still to be
+# read, and the hook cannot tell which: it goes out once more on a later Stop
+# where it still applies, and then never again for that conversation. Without
+# a transcript_path nothing records a delivery, so the second always goes out.
+test_nudge_is_repeated_once_when_the_transcript_does_not_record_it() {
+    _rot_hook_session "rot-nudge-again"
+    local t="$TEST_TMPDIR/transcript-unrecorded.jsonl" out
+    : > "$t"
+    out=$(_stop_with_ctx_and_transcript 70 "$UUID_A" "$t") || return 1
+    assert_eq "$(_nudge_text 70)" "$(stop_notice_text "$out")" "the first nudge goes out" || return 1
+    out=$(_stop_with_ctx_and_transcript 85 "$UUID_A" "$t") || return 1
+    assert_eq "$(_nudge_text 85)" "$(stop_notice_text "$out")" "a second Stop still over the threshold repeats the nudge once" || return 1
+    assert_eq "$UUID_A
+$UUID_A again" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor records the repeat" || return 1
+    out=$(_stop_with_ctx_and_transcript 90 "$UUID_A" "$t") || return 1
+    assert_eq "" "$out" "a third Stop is silent" || return 1
+}
+
+test_nudge_is_not_repeated_once_the_transcript_records_it() {
+    _rot_hook_session "rot-nudge-recorded"
+    local t="$TEST_TMPDIR/transcript.jsonl" out
+    : > "$t"
+    out=$(_stop_with_ctx_and_transcript 65 "$UUID_A" "$t") || return 1
+    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "the first nudge goes out" || return 1
+    # Claude Code records a delivered notice in the transcript as an attachment
+    # carrying its text.
+    jq -nc --arg c "$(stop_notice_text "$out")" '{type: "attachment", attachment: {type: "hook_success", hookEvent: "Stop", content: $c}}' >> "$t"
+    out=$(_stop_with_ctx_and_transcript 85 "$UUID_A" "$t") || return 1
+    assert_eq "" "$out" "a recorded nudge is not repeated" || return 1
+    assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor holds the one send" || return 1
+}
+
+test_ctx_warning_is_repeated_once_when_the_transcript_does_not_record_it() {
+    _rot_hook_session "rot-warn-again"
+    local t="$TEST_TMPDIR/transcript.jsonl" out
+    : > "$t"
+    out=$(_stop_with_ctx_and_transcript 40 "$UUID_A" "$t") || return 1
+    assert_eq "$(_warning_text 40 65)" "$(stop_notice_text "$out")" "the first warning goes out" || return 1
+    out=$(_stop_with_ctx_and_transcript 45 "$UUID_A" "$t") || return 1
+    assert_eq "$(_warning_text 45 65)" "$(stop_notice_text "$out")" "an unrecorded warning is repeated once" || return 1
+    assert_eq "$UUID_A
+$UUID_A again" "$(cat "$CLAUDE_SESSION_META_DIR/local/ctx-warned")" "the cursor records the repeat" || return 1
+    out=$(_stop_with_ctx_and_transcript 50 "$UUID_A" "$t") || return 1
+    assert_eq "" "$out" "a third Stop is silent" || return 1
+    # A recorded first send: no repeat.
+    _rot_hook_session "rot-warn-recorded"
+    : > "$t"
+    out=$(_stop_with_ctx_and_transcript 40 "$UUID_B" "$t") || return 1
+    jq -nc --arg c "$(stop_notice_text "$out")" '{type: "attachment", attachment: {type: "hook_success", hookEvent: "Stop", content: $c}}' >> "$t"
+    out=$(_stop_with_ctx_and_transcript 45 "$UUID_B" "$t") || return 1
+    assert_eq "" "$out" "a recorded warning is not repeated" || return 1
+}
+
+# The cursor is stamped after the notice is printed, never before: a hook
+# killed between the two leaves a notice the cursor does not count as sent.
+# Pinned on the order of the two writes as they reach the file system: the
+# cursor file is made unwritable, and the notice still goes out.
+test_context_cursor_is_stamped_after_the_notice() {
+    _rot_hook_session "rot-cursor-order"
+    local out
+    printf '%s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"
+    _deny_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" || return 77
+    out=$(_stop_with_ctx 70 "$UUID_A" 2>/dev/null) || { _allow_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"; return 1; }
+    _allow_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"
+    assert_eq "$(_nudge_text 70)" "$(stop_notice_text "$out")" "a cursor that cannot be stamped does not cost the notice" || return 1
+    assert_eq "$UUID_B" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor is as it was" || return 1
+}
+
+run_test test_nudge_is_repeated_once_when_the_transcript_does_not_record_it
+run_test test_nudge_is_not_repeated_once_the_transcript_records_it
+run_test test_ctx_warning_is_repeated_once_when_the_transcript_does_not_record_it
+run_test test_context_cursor_is_stamped_after_the_notice
+
 run_test test_ctx_warning_survives_an_interleaved_teammate
 run_test test_ctx_warning_rearms_for_new_conversation
 run_test test_ctx_warning_silent_below_band

@@ -505,6 +505,42 @@ QFAILED_FILE="$QDIR/queue.failed"
 # handed out (the handed-out one removed, or another accepted ahead of it).
 QCURRENT_FILE="$QDIR/queue.current"
 
+# --- Verdict for stop-notices.sh ----------------------------------------------
+# stop-notices.sh runs beside this hook on the same Stop, and its notices must
+# stand down whenever this hook blocks: a drain that trips a breaker or hands
+# out its last task writes idle before it blocks, so the queue state alone
+# tells the async hook nothing, and the staged retire and the mail wake never
+# gated it at all. This hook posts its verdict to .cs/local/stop-verdict, one
+# line: the Stop's key, a word, the epoch it was written. The key is the cksum
+# of the Stop input, which Claude Code hands both hooks byte for byte; the Stop
+# input carries nothing unique per stop (session_id, transcript_path and
+# last_assistant_message all repeat), so two turns ending on the same final
+# message share a key, and the epoch is what keeps a verdict from an earlier
+# Stop from suppressing a later notice. The word is "pending" from the moment
+# this hook knows it is the lead's Stop, and the final word, "approve" or
+# "block", from the EXIT trap, so stop-notices.sh can tell "still deciding"
+# from "no verdict is coming" (a partial install without this hook). Lead only:
+# every block below is the lead's, and a teammate's hook writing the shared
+# file would overwrite the lead's verdict. The file is overwritten per Stop,
+# never appended.
+STOP_VERDICT=approve
+STOP_KEY=""
+_verdict_post() {  # word
+    cs_write_atomic "$LOCAL/stop-verdict" printf '%s %s %s\n' "$STOP_KEY" "$1" "$(date +%s)" || true
+}
+if [ "$HOOK_EVENT" = "Stop" ] && _mail_is_lead; then
+    STOP_KEY=$(printf '%s' "$INPUT" | cksum | cut -d' ' -f1)
+    _verdict_post pending
+    trap '_verdict_post "$STOP_VERDICT"' EXIT
+fi
+# Every block this hook answers with goes through here, so the verdict can
+# never say approve beside a block.
+_stop_block() {  # reason
+    STOP_VERDICT=block
+    jq -nc --arg r "$1" '{decision:"block", reason:$r}'
+    exit 0
+}
+
 # Record the queue state. An absent state file reads as idle, so when idle
 # cannot be written the file is removed instead, rather than leave a run that
 # ended recorded as draining. Any other state that cannot be recorded ends this
@@ -666,8 +702,7 @@ _qpark() {  # kind reading limit remaining note
         reason="cs task queue: circuit breaker tripped — $kind at $reading (threshold $limit). The queue is parked with $remaining task(s) remaining$note; nothing was lost."
     fi
     reason="$reason Summarize the walk-away run so far and anything that needs the user's attention. They can re-arm with: cs -queue start."
-    jq -nc --arg r "$reason" '{decision:"block", reason:$r}'
-    exit 0
+    _stop_block "$reason"
 }
 
 # Only the lead's Stop advances the queue. A tmux teammate shares the
@@ -690,8 +725,7 @@ _qpark() {  # kind reading limit remaining note
 # at. Lead only, for the reason the queue drain is: a teammate's Stop would
 # race the lead to the same removal.
 _retire_report() {  # reason
-    jq -nc --arg r "$1" '{decision:"block", reason:$r}'
-    exit 0
+    _stop_block "$1"
 }
 # Wait up to six seconds for the run <run>.run names, then read its output:
 # a run still going returns 1 and keeps everything; a re-stage (the
@@ -802,8 +836,7 @@ First task:
 $(_qtask_frame "$TASK")
 
 $RUN_MODE$SCOPE"
-        jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
-        exit 0
+        _stop_block "$REASON"
     fi
 
     if [ "$QSTATE" = "draining" ]; then
@@ -885,8 +918,7 @@ $RUN_MODE$SCOPE"
                 _notify_spawner "queue drained: $DONE_COUNT task(s) done"
                 rm -f "$LOCAL/spawned-by"
                 rm -f "$QDIR/failures"
-                jq -nc '{decision:"block", reason:"cs task queue: all tasks complete. Mark the final native task completed, then give the user a brief summary of what the walk-away run accomplished and anything that needs their attention."}'
-                exit 0
+                _stop_block "cs task queue: all tasks complete. Mark the final native task completed, then give the user a brief summary of what the walk-away run accomplished and anything that needs their attention."
             fi
             if [ -n "$TRIP" ]; then
                 set -- $TRIP
@@ -903,8 +935,7 @@ Task:
 $(_qtask_frame "$NEXT")
 
 $RUN_MODE$SCOPE"
-            jq -nc --arg r "$REASON" '{decision:"block", reason:$r}'
-            exit 0
+            _stop_block "$REASON"
         else
             # pop failed: disarm rather than re-inject the same task (fail-safe)
             _qstate_write idle
@@ -926,6 +957,7 @@ if [ -n "$MAILDIR" ] && _mail_is_lead; then
 fi
 _mail_apply_silencers
 if [ "$MAIL_FRESH" = 1 ]; then
+    STOP_VERDICT=block
     jq -nc --arg r "Unread cross-session mail ($MAIL_UNREAD)$(_mail_from_clause). $MAIL_REASON_TAIL" \
         '{decision: "block", reason: $r}'
     # Emit first, record second: a kill in between costs one duplicate wake,

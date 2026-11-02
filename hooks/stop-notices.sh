@@ -92,9 +92,11 @@ _num_or() {  # value, default -> prints value if a plain integer, else default
     case "${1:-}" in ''|*[!0-9]*|????????????????*) echo "$2";; *) echo "$((10#$1))";; esac
 }
 
+# Prints the one notice. The caller stamps its cursor after this and exits:
+# a notice is lost when this process ends before Claude Code reads it, so a
+# cursor stamped first would record as sent a notice nobody received.
 _emit_notice() {  # text
     jq -nc --arg c "$1" '{hookSpecificOutput: {hookEventName: "Stop", additionalContext: $c}}'
-    exit 0
 }
 
 # Only run in cs sessions
@@ -136,11 +138,114 @@ if [ -n "$_qdir" ] && cs_is_lead; then
     done
 fi
 
+# --- The sync hook's verdict --------------------------------------------------
+# The queue gate above reads the state the drain leaves behind, and a drain
+# that trips a breaker or hands out its last task leaves idle behind and
+# blocks; the staged retire and the mail wake block without touching the
+# queue at all. A notice beside any such block is noise, so this hook waits
+# for the verdict narrative-reminder.sh posts to .cs/local/stop-verdict:
+# "<key> <word> <epoch>", the key the cksum of the Stop input both hooks
+# receive, the word pending while that hook runs and approve or block at its
+# exit. Claude Code starts the two hooks together and neither runs first by
+# contract, so the wait has two bounds. No line for this Stop within the first
+# two seconds means no verdict is coming (a partial install without the sync
+# hook, or one that predates the verdict), and the notices go ahead as they
+# did before the verdict existed; a pending line extends the wait to
+# CS_STOP_VERDICT_WAIT seconds (default 7, at most 8) and a verdict that is
+# still pending then is treated as approve, since a notice that waits longer
+# risks the 10 s registration timeout, past which Claude Code kills this
+# process and drops whatever it printed. The grace counts from here, since
+# the sync hook needs the same start-up before it can post; the pending
+# bound counts from the process start ($SECONDS), so the whole run ends
+# inside wait plus one second however slow the start-up was. The staged retire can block later
+# than that (its settle waits up to six seconds twice), and a notice then
+# lands beside its block, as every notice did before the verdict existed.
+# A line whose epoch is older than thirty seconds before this run started is
+# an earlier Stop's: the Stop input carries nothing unique per stop, so two
+# turns that end on the same final message share a key, and the epoch is what
+# keeps the earlier one's verdict from suppressing this one's notice. Lead
+# only: every block the sync hook answers with is the lead's, and only the
+# lead's sync hook writes the file.
+START_SECONDS=$SECONDS
+START_EPOCH=$(date +%s)
+STOP_KEY=$(printf '%s' "$INPUT" | cksum | cut -d' ' -f1)
+_verdict() {  # prints pending, approve or block for this Stop; nothing otherwise
+    local k w t
+    [ -f "$LOCAL/stop-verdict" ] || return 0
+    IFS=' ' read -r k w t < "$LOCAL/stop-verdict" 2>/dev/null || true
+    [ "$k" = "$STOP_KEY" ] || return 0
+    t=$(_num_or "$t" 0)
+    [ "$t" -ge $((START_EPOCH - 30)) ] || return 0
+    case "$w" in pending|approve|block) printf '%s' "$w" ;; esac
+}
+if cs_is_lead; then
+    _wait=$(_num_or "${CS_STOP_VERDICT_WAIT:-}" 7)
+    [ "$_wait" -le 8 ] || _wait=8
+    _grace=2
+    [ "$_grace" -le "$_wait" ] || _grace="$_wait"
+    while :; do
+        _word=$(_verdict)
+        case "$_word" in
+            block) exit 0 ;;
+            approve) break ;;
+            pending) [ "$SECONDS" -lt "$_wait" ] || break ;;
+            *) [ $((SECONDS - START_SECONDS)) -lt "$_grace" ] || break ;;
+        esac
+        sleep 0.1
+    done
+fi
+
+# A notice reaches the model as context with the user's next prompt, and
+# Claude Code records what it delivered in the conversation's transcript as an
+# attachment carrying the notice text. A notice this process printed is lost
+# when the process ends before Claude Code reads it, and nothing here can tell
+# the two apart at the time. What this hook guarantees: a cursor is stamped
+# only after its notice was printed, so a notice lost at exit is one the cursor
+# does not record as sent; and a conversation's notice goes out at most twice,
+# the second time on a later Stop where the notice still applies and the
+# transcript does not record the first. What it does not guarantee: that the
+# first was lost (the transcript may record it in a form this check does not
+# find, or Claude Code may read it after this hook's next run), nor that the
+# second is delivered.
+TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null || true)
+_delivered() {  # text the transcript records when the notice was delivered
+    [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] && grep -qF -- "$1" "$TRANSCRIPT" 2>/dev/null
+}
+# The cursor files are append-only lists, one conversation UUID per line, with
+# "<uuid> again" for a conversation whose notice went out a second time. A tmux
+# teammate shares this directory and runs the same Stop, so a single-slot
+# cursor let each teammate's stop cancel the lead's notice and re-arm it every
+# turn. Prints never, once or twice.
+_cursor() {  # file, uuid
+    if grep -qx "$2 again" "$1" 2>/dev/null; then printf 'twice'
+    elif grep -qx "$2" "$1" 2>/dev/null; then printf 'once'
+    else printf 'never'
+    fi
+}
+# Emits one context notice under its cursor rule and ends the run when it
+# spoke. $1 the cursor file, $2 the text the transcript records on delivery,
+# $3 the notice.
+_context_notice() {  # cursor file, delivered text, notice
+    case "$(_cursor "$1" "$NUDGE_UUID")" in
+        never)
+            _emit_notice "$3"
+            cs_append_inside "$1" printf '%s\n' "$NUDGE_UUID" || true
+            exit 0
+            ;;
+        once)
+            _delivered "$2" && return 0
+            _emit_notice "$3"
+            cs_append_inside "$1" printf '%s again\n' "$NUDGE_UUID" || true
+            exit 0
+            ;;
+    esac
+}
+
 # --- Rotation nudge -----------------------------------------------------------
-# One-time suggestion to rotate when context runs hot. The queue gate above
-# stands down for an armed or draining queue, so the drain's context breaker
-# owns hot-context handling during walk-away runs. Cursor: the conversation
-# UUID last nudged, machine-local.
+# Suggestion to rotate when context runs hot, once per conversation (twice
+# when the transcript does not record the first). The queue gate above stands
+# down for an armed or draining queue, so the drain's context breaker owns
+# hot-context handling during walk-away runs. Cursor: .cs/local/rotate-nudged.
 NUDGE_CTX=$(_num_or "${CS_ROTATE_NUDGE_CTX:-}" 65)
 NUDGE_UUID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
 NUDGE_PCT=$(cat "$LOCAL/context-pct" 2>/dev/null | tr -d '[:space:]' || true)
@@ -150,27 +255,24 @@ case "$NUDGE_PCT" in ''|*[!0-9]*) NUDGE_PCT="";; esac
 # someone else's context as its own, so for any other claude both tiers
 # below see no reading at all.
 cs_is_lead || NUDGE_PCT=""
+# The notices arrive with the user's next prompt, not at the end of the turn
+# that raised them, and their wording says so: the reading is the one the
+# previous turn ended on, and the request below is answered.
 if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] && [ "$NUDGE_PCT" -ge "$NUDGE_CTX" ]; then
-    # Append-only list of nudged conversations: a tmux teammate shares this
-    # directory and runs the same Stop, so a single-slot cursor let each
-    # teammate's stop cancel the lead's notice and re-arm it every turn.
-    if ! grep -qx "$NUDGE_UUID" "$LOCAL/rotate-nudged" 2>/dev/null; then
-        cs_append_inside "$LOCAL/rotate-nudged" printf '%s\n' "$NUDGE_UUID" || true
-        _emit_notice "Context is at ${NUDGE_PCT}% — consider rotating this conversation. Invoke the rotate skill to distill a handoff and arm it; the user then runs /clear to continue in a fresh conversation, without leaving Claude Code. One-time notice for this conversation; if now is a bad time, simply continue."
-    fi
+    _context_notice "$LOCAL/rotate-nudged" "consider rotating this conversation" \
+        "Context was at ${NUDGE_PCT}% when your previous turn ended, so consider rotating this conversation; this note is carried over with the request below. Tell the user in one line, then answer the request. Once it is answered, or before it if it is large enough to need the headroom, invoke the rotate skill to distill a handoff and arm it; the user then runs /clear to continue in a fresh conversation, without leaving Claude Code. Sent once for this conversation; if now is a bad time, simply continue."
 fi
 
 # --- Context warning ----------------------------------------------------------
-# One-time heads-up when context crosses the wind-down band [warn, nudge).
-# At or above the nudge threshold the rotation nudge above owns the notice;
-# this tier never fires there. Cursor: append-only list of warned UUIDs.
+# Heads-up when context crosses the wind-down band [warn, nudge), once per
+# conversation (twice when the transcript does not record the first). At or
+# above the nudge threshold the rotation nudge above owns the notice; this
+# tier never fires there. Cursor: .cs/local/ctx-warned.
 WARN_CTX=$(_num_or "${CS_CTX_WARN_CTX:-}" 40)
 if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] \
     && [ "$NUDGE_PCT" -ge "$WARN_CTX" ] && [ "$NUDGE_PCT" -lt "$NUDGE_CTX" ]; then
-    if ! grep -qx "$NUDGE_UUID" "$LOCAL/ctx-warned" 2>/dev/null; then
-        cs_append_inside "$LOCAL/ctx-warned" printf '%s\n' "$NUDGE_UUID" || true
-        _emit_notice "Context is at ${NUDGE_PCT}% — past the comfortable-headroom mark. Briefly let the user know so they can steer toward a natural stopping point or plan a rotation; the rotate nudge follows at ${NUDGE_CTX}%. One-time notice for this conversation; no action needed now."
-    fi
+    _context_notice "$LOCAL/ctx-warned" "past the comfortable-headroom mark" \
+        "Context was at ${NUDGE_PCT}% when your previous turn ended, past the comfortable-headroom mark; this note is carried over with the request below. Tell the user in one line, so they can steer toward a natural stopping point or plan a rotation, then answer the request; the rotate nudge follows at ${NUDGE_CTX}%. Sent once for this conversation; no other action is needed."
 fi
 
 COOLDOWN_FILE="$META_DIR/.narrative-reminder-cooldown"
@@ -186,18 +288,20 @@ fi
 
 CURRENT_TIME=$(date +%s)
 
-# Cooldown: don't nag if we reminded recently
-if [ -f "$COOLDOWN_FILE" ]; then
+# Cooldown: don't nag if we reminded recently. Returns 0 while the last
+# reminder is within the cooldown. Read here unlocked, as the cheap exit for
+# the common case, and again under the lock below before the stamp is written.
+_within_cooldown() {
+    local last
+    [ -f "$COOLDOWN_FILE" ] || return 1
     # The stamp is data whatever wrote it: the Bash tool reaches the .cs root
     # without the permission hook, and arithmetic runs a command substitution
     # held in an operand. Anything but a plain number reads as 0, a reminder
     # long past.
-    LAST_REMINDER=$(_num_or "$(cat "$COOLDOWN_FILE" 2>/dev/null | tr -d '[:space:]')" 0)
-    ELAPSED=$((CURRENT_TIME - LAST_REMINDER))
-    if [ "$ELAPSED" -lt "$COOLDOWN_SECONDS" ]; then
-        exit 0
-    fi
-fi
+    last=$(_num_or "$(cat "$COOLDOWN_FILE" 2>/dev/null | tr -d '[:space:]')" 0)
+    [ $((CURRENT_TIME - last)) -lt "$COOLDOWN_SECONDS" ]
+}
+! _within_cooldown || exit 0
 
 # Per-actor narratives: track the most recently modified narrative.*.md, and
 # note any that has outgrown its byte budget. The same stat pass serves both.
@@ -280,38 +384,58 @@ EOF
 # Lead only. A tmux teammate is a full claude in the same directory with its
 # own Stop, and the cooldown is one stamp for the session: an ungated nudge
 # lets a teammate consume the lead's slot, and in a walk-away run the lead can
-# stop seeing the suggestion altogether.
+# stop seeing the suggestion altogether. The plugin probe runs before the lock
+# below: it reads only, and the lock is held for the two stamps alone.
+_has_council=0; _has_codex=0
 if cs_is_lead; then
-    _has_council=0; _has_codex=0
     _plugin_is_installed "claude-council@" "commands/advise.md" && _has_council=1
     _plugin_is_installed "codex@" "commands/review.md" && _has_codex=1
-    if [ "$((_has_council + _has_codex))" -gt 0 ]; then
-        _adv_last=0
-        if [ -f "$ADVISOR_COOLDOWN_FILE" ]; then
-            _adv_last=$(_num_or "$(cat "$ADVISOR_COOLDOWN_FILE" 2>/dev/null | tr -d '[:space:]')" 0)
-            _adv_last=$((10#$_adv_last))
-        fi
-        if [ "$((CURRENT_TIME - _adv_last))" -ge "$ADVISOR_COOLDOWN_SECONDS" ]; then
-            cs_write_atomic "$ADVISOR_COOLDOWN_FILE" echo "$CURRENT_TIME" || true
-            # One note and one cooldown slot however many channels are present:
-            # two independent nudges would double the appended text and race
-            # the same stamp.
-            ADVISOR_NUDGE=" Standing note: at a real decision point — about to commit to an approach, stuck after repeated attempts, or about to call the work done — a second opinion is available."
-            if [ "$_has_council" -eq 1 ]; then
-                ADVISOR_NUDGE="$ADVISOR_NUDGE \`/claude-council:advise\` puts this conversation to external models; it sends a digest to third-party providers, so ask the user before running it and show them what would go."
-            fi
-            if [ "$_has_codex" -eq 1 ]; then
-                # review and adversarial-review carry disable-model-invocation,
-                # so they are the user's to type; offer them, never run them.
-                ADVISOR_NUDGE="$ADVISOR_NUDGE Offer \`/codex:review\` before calling built work done — the user runs it, you cannot. \`/codex:rescue\` is yours to invoke when genuinely stuck."
-            fi
-            ADVISOR_NUDGE="$ADVISOR_NUDGE You judge whether the moment qualifies; most turns do not."
-        fi
-    fi
 fi
 
-# Update cooldown marker and remind
+# The two cooldown stamps are read and written under one lock, the library's
+# (cs-shared.sh, _cs_lock): this hook is async, so two of its runs overlap when
+# turns end close together, and without the lock both read a stamp older than
+# the cooldown and both remind. The run that takes the lock second finds the
+# first's stamp and prints nothing. Without the library, without perl, or
+# when the lock file cannot be made (the local directory is unwritable), the
+# stamps are read and written unlocked, as they always were, and a stamp that
+# cannot be written costs no reminder: the hook fails open. The lock is taken
+# in this process, not a $(...), as its contract asks, and let go before the
+# scan's result is printed. Its file sits in .cs/local/, per-machine state.
+_lock=""
+if command -v _cs_lock >/dev/null 2>&1 && _cs_lock "$LOCAL/stop-notices.mutex.lock" 2>/dev/null; then
+    _lock="$LOCAL/stop-notices.mutex.lock"
+fi
+if ! command -v _cs_unlock >/dev/null 2>&1; then _cs_unlock() { :; }; fi
+if _within_cooldown; then
+    _cs_unlock "$_lock"
+    exit 0
+fi
 cs_write_atomic "$COOLDOWN_FILE" echo "$CURRENT_TIME" || true
+if [ "$((_has_council + _has_codex))" -gt 0 ]; then
+    _adv_last=0
+    if [ -f "$ADVISOR_COOLDOWN_FILE" ]; then
+        _adv_last=$(_num_or "$(cat "$ADVISOR_COOLDOWN_FILE" 2>/dev/null | tr -d '[:space:]')" 0)
+        _adv_last=$((10#$_adv_last))
+    fi
+    if [ "$((CURRENT_TIME - _adv_last))" -ge "$ADVISOR_COOLDOWN_SECONDS" ]; then
+        cs_write_atomic "$ADVISOR_COOLDOWN_FILE" echo "$CURRENT_TIME" || true
+        # One note and one cooldown slot however many channels are present:
+        # two independent nudges would double the appended text and race
+        # the same stamp.
+        ADVISOR_NUDGE=" Standing note: at a real decision point — about to commit to an approach, stuck after repeated attempts, or about to call the work done — a second opinion is available."
+        if [ "$_has_council" -eq 1 ]; then
+            ADVISOR_NUDGE="$ADVISOR_NUDGE \`/claude-council:advise\` puts this conversation to external models; it sends a digest to third-party providers, so ask the user before running it and show them what would go."
+        fi
+        if [ "$_has_codex" -eq 1 ]; then
+            # review and adversarial-review carry disable-model-invocation,
+            # so they are the user's to type; offer them, never run them.
+            ADVISOR_NUDGE="$ADVISOR_NUDGE Offer \`/codex:review\` before calling built work done — the user runs it, you cannot. \`/codex:rescue\` is yours to invoke when genuinely stuck."
+        fi
+        ADVISOR_NUDGE="$ADVISOR_NUDGE You judge whether the moment qualifies; most turns do not."
+    fi
+fi
+_cs_unlock "$_lock"
 
 # Sessions whose .cs/ is tracked were committing once per narrative append —
 # 328 such commits in one repo, 74 in a single day, burying the project's own
@@ -328,4 +452,9 @@ COMMIT_CADENCE=" Never commit narrative appends or anything else under .cs/ on y
 # .cs/memory is tracked, so a clone chooses the narrative's file name: it is
 # printed as a plain name.
 NARRATIVE_SHOWN="$META_DIR/memory/$(_cs_plain_name "${NARRATIVE_FILE##*/}" 160)"
-_emit_notice "Narrative check. Update only your own narrative (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Newest on disk is $NARRATIVE_SHOWN. (1) If recent work disproved or superseded one of your entries, append a dated correction that names it — never rewrite or delete earlier sections. (2) Append any new findings as plain dated notes. If nothing needs changing, say so in one line and stop.${COMMIT_CADENCE}${NARRATIVE_OVER}${ADVISOR_NUDGE}"
+# Worded for where it lands: beside the user's next request, about the turn
+# that ended before it. The cooldown stamp above is this notice's cursor, and
+# it is written before the print on purpose: the lock holds it, and a reminder
+# lost at exit comes back after the cooldown rather than twice in a row.
+_emit_notice "Narrative check. This note is carried over from your previous turn, which ended without a narrative note. Before answering the request below, record what that turn found, in your own narrative only (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Newest on disk is $NARRATIVE_SHOWN. (1) If that turn disproved or superseded one of your entries, append a dated correction that names it; never rewrite or delete earlier sections. (2) Append what that turn found as plain dated notes: a decision and its reason, a measured fact, a failed approach, a preference the user stated. A line that only restates routine work, such as \"appended X to Y\" or \"ran the tests\", is not a finding and must not be written. If that turn found nothing worth keeping, say so in one line and answer the request.${COMMIT_CADENCE}${NARRATIVE_OVER}${ADVISOR_NUDGE}"
+exit 0
