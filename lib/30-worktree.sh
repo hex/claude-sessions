@@ -1172,7 +1172,7 @@ force: $force_word" ] || error "No stage at $stage records retiring $task at $sh
     else
         pid=$(_foreign_live_lock_pid "$base_name" "$base_dir/.cs")
         if [ -n "$pid" ]; then
-            error "Base session '$base_name' is open elsewhere (PID $pid); run /finish $task from that conversation"
+            error "Base session '$base_name' is live elsewhere (PID $pid); run /finish $task from that conversation"
         fi
     fi
     pid=$(_foreign_live_lock_pid "$wt_name" "$wt_dir/.cs")
@@ -1183,8 +1183,8 @@ force: $force_word" ] || error "No stage at $stage records retiring $task at $sh
         # once that conversation's lock is gone. Every refusal below runs
         # then as it would now.
         _write_retire_stage "$stage" "$sha" "$force" \
-            || error "The feature is landed, but its worktree is still here: the '$wt_name' conversation is open in it (PID $pid), and cs could not stage its removal at $stage. Close that session yourself (/exit there), then run /finish $task here again and it will be removed."
-        printf "staged %s %s: the '%s' conversation is open in its worktree (PID %s); the worktree and branch are removed from this session once that conversation closes\n" \
+            || error "The feature is landed, but its worktree is still here: the '$wt_name' conversation is live in it (PID $pid), and cs could not stage its removal at $stage. Close that session yourself (/exit there), then run /finish $task here again and it will be removed."
+        printf "staged %s %s: the '%s' conversation is live in its worktree (PID %s); the worktree and branch are removed from this session once that conversation closes\n" \
             "$task" "$sha" "$wt_name" "$pid"
         return 0
     fi
@@ -1634,7 +1634,7 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote [--ci-green]
     # conversation is a refusal, never a wait.
     local pid
     pid=$(_foreign_live_lock_pid "$base_name" "$base_dir/.cs")
-    [ -z "$pid" ] || error "Base session '$base_name' is open elsewhere (PID $pid); run /finish $task from that conversation"
+    [ -z "$pid" ] || error "Base session '$base_name' is live elsewhere (PID $pid); run /finish $task from that conversation"
 
     local commit
     commit=$(git -C "$base_dir" rev-parse -q --verify "$sha^{commit}" 2>/dev/null) \
