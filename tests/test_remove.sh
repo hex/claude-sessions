@@ -1051,6 +1051,23 @@ test_remove_refuses_a_served_session_with_and_without_force() {
 }" "cs -rm refuses the served session with and without --force, naming the server" || return 1
 }
 
+# A feature session's server runs as `remote-control --name base+feature`,
+# the name cs hands claude, so the served check looks for that form.
+test_remove_refuses_a_served_feature_session() {
+    local dir out rc=0 spid
+    dir=$(create_test_session "myproj@feat")
+    perl -e 'sleep 60' remote-control --name myproj+feat --permission-mode default > /dev/null 2>&1 &
+    spid=$!
+    printf '%s\n' "$spid" > "$dir/.cs/session.lock"
+    printf '%s\n' "$spid" > "$dir/.cs/local/remote.pid"
+    out=$("$CS_BIN" -rm "myproj@feat" --force </dev/null 2>&1) || rc=$?
+    { kill "$spid"; wait "$spid"; } 2>/dev/null
+    assert_eq "1" "$rc" "cs -rm refuses" || return 1
+    assert_eq "Error: Session myproj@feat is served by cs myproj@feat --remote (remote-control PID $spid); stop it first with Ctrl-C in its window, or close the window." \
+        "$out" "naming the server" || return 1
+    assert_dir "$dir" "the session stays" || return 1
+}
+
 # An idle session goes from inside another one exactly as it does today.
 test_remove_idle_other_session_from_inside_a_session() {
     local dir
