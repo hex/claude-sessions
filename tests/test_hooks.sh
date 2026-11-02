@@ -4161,6 +4161,141 @@ test_narrative_reminder_is_worded_for_the_next_prompt() {
     assert_output_not_contains "$text" "say so in one line and stop" "no longer ends the turn" || return 1
 }
 
+# --- The work gate -----------------------------------------------------------
+# The reminder goes out for work the transcript records past the
+# conversation's cursor (.cs/local/narrative-cursor.<session_id>, "<offset>
+# <epoch>"), when the actor's own narrative was not written since the cursor.
+
+WORK_SID="0b1e2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+
+# Appends to transcript $1, as Claude Code writes one: $2 Edit calls, $3 Bash
+# calls that commit, and $4 characters of Claude's text.
+_transcript_add() {  # path edits commits chars
+    local i
+    for ((i = 0; i < $2; i++)); do
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"a.txt"}}]}}\n' >> "$1"
+    done
+    for ((i = 0; i < $3; i++)); do
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git commit -m wip"}}]}}\n' >> "$1"
+    done
+    if [ "$4" -gt 0 ]; then
+        jq -nc --arg t "$(printf '%*s' "$4" '' | tr ' ' a)" '{type:"assistant",message:{role:"assistant",content:[{type:"text",text:$t}]}}' >> "$1"
+    fi
+}
+
+# Alice's stale narrative, no cooldown, and a cursor at the transcript's start
+# set five minutes ago.
+_work_fixture() {
+    printf 'alice\n' > "$CLAUDE_SESSION_META_DIR/local/identity"
+    echo "# Session narrative (alice)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    : > "$TEST_TMPDIR/transcript.jsonl"
+    printf '0 %s\n' "$(( $(date +%s) - 300 ))" > "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+}
+
+_work_notices() {
+    CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$(jq -nc --arg s "$WORK_SID" --arg t "$TEST_TMPDIR/transcript.jsonl" '{session_id: $s, transcript_path: $t}')"
+}
+
+_cursor_offset() {
+    cut -d' ' -f1 "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+}
+
+test_work_gate_is_silent_below_its_thresholds() {
+    _work_fixture
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 2 0 1999
+    assert_eq "" "$(_work_notices)" "two edits and 1999 characters are not work enough" || return 1
+    assert_eq "0" "$(_cursor_offset)" "the cursor stays where it was" || return 1
+}
+
+# A fresh cooldown stamp beside each: the work gate does not read it.
+test_work_gate_reminds_after_three_edits() {
+    _work_fixture
+    date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 0 0
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "three edits remind" || return 1
+    assert_eq "$(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ')" "$(_cursor_offset)" "the cursor moves to the transcript's end" || return 1
+}
+
+test_work_gate_reminds_after_a_commit() {
+    _work_fixture
+    date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 0 1 0
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "a commit alone reminds" || return 1
+}
+
+test_work_gate_reminds_after_long_text() {
+    _work_fixture
+    date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 0 0 2000
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "2000 characters of text alone remind" || return 1
+}
+
+# Work before the cursor is not counted.
+test_work_gate_counts_only_past_the_cursor() {
+    _work_fixture
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 5 1 3000
+    printf '%s %s\n' "$(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ')" "$(( $(date +%s) - 300 ))" \
+        > "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 2 0 0
+    assert_eq "" "$(_work_notices)" "two edits past the cursor are not work enough" || return 1
+}
+
+test_work_gate_moves_the_cursor_when_the_narrative_was_written() {
+    _work_fixture
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 1 2000
+    touch "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    assert_eq "" "$(_work_notices)" "a narrative written since the cursor gets no reminder" || return 1
+    assert_eq "$(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ')" "$(_cursor_offset)" "the cursor moves to the transcript's end" || return 1
+}
+
+# Two Stops close together, each after work: the first reminds and the
+# second, inside the floor, does not.
+test_work_gate_floor_keeps_close_stops_to_one_reminder() {
+    _work_fixture
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 0 0
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "the first Stop reminds" || return 1
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 0 0
+    assert_eq "" "$(_work_notices)" "the second, inside the floor, does not" || return 1
+}
+
+# No cursor yet: the count runs from the transcript's start and the epoch is
+# its first timestamp, so a narrative written since the conversation began
+# counts as written.
+test_work_gate_starts_a_conversation_at_its_first_timestamp() {
+    _work_fixture
+    rm -f "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+    jq -nc --arg ts "$(date -u -v-2M '+%Y-%m-%dT%H:%M:%S.000Z' 2>/dev/null || date -u -d '2 minutes ago' '+%Y-%m-%dT%H:%M:%S.000Z')" \
+        '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}' > "$TEST_TMPDIR/transcript.jsonl"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 0 0
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "a narrative older than the conversation is reminded" || return 1
+    rm -f "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+    touch "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    assert_eq "" "$(_work_notices)" "a narrative written during the conversation is not" || return 1
+}
+
+# A transcript that cannot be read leaves the clock to decide: the cooldown
+# stamp holds a reminder back, and without one a stale narrative is reminded.
+test_work_gate_falls_back_to_the_clock_without_a_transcript() {
+    _work_fixture
+    local input
+    input=$(jq -nc --arg s "$WORK_SID" --arg t "$TEST_TMPDIR/missing.jsonl" '{session_id: $s, transcript_path: $t}')
+    date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    assert_eq "" "$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$input")" "a fresh cooldown holds the reminder back" || return 1
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" \
+        "$(stop_notice_text "$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$input")")" \
+        "past the cooldown a stale narrative is reminded" || return 1
+    assert_file_exists "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" "the clock path stamps its cooldown" || return 1
+}
+
+
 run_test test_stop_notices_stand_down_on_the_sync_hooks_block
 run_test test_sync_hook_posts_pending_then_its_verdict
 run_test test_sync_hook_posts_approve_when_its_block_fails_to_print
@@ -4171,6 +4306,15 @@ run_test test_stop_notices_verdict_wait_cost
 run_test test_stop_notices_cooldown_is_taken_under_a_lock
 run_test test_stop_notices_print_one_object_or_nothing_and_exit_zero
 run_test test_narrative_reminder_is_worded_for_the_next_prompt
+run_test test_work_gate_is_silent_below_its_thresholds
+run_test test_work_gate_reminds_after_three_edits
+run_test test_work_gate_reminds_after_a_commit
+run_test test_work_gate_reminds_after_long_text
+run_test test_work_gate_counts_only_past_the_cursor
+run_test test_work_gate_moves_the_cursor_when_the_narrative_was_written
+run_test test_work_gate_floor_keeps_close_stops_to_one_reminder
+run_test test_work_gate_starts_a_conversation_at_its_first_timestamp
+run_test test_work_gate_falls_back_to_the_clock_without_a_transcript
 
 run_test test_auto_approve_allows_cs_metadata_write
 run_test test_auto_approve_allows_cs_edit

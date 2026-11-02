@@ -109,7 +109,8 @@ line naming what it left for you to commit (of `.cs/`, `.gitignore` and
 `.gitattributes`, and the root files the migration moved into `.cs/`, those
 git shows as changed or untracked). `.cs/.narrative-reminder-cooldown` is a
 similar gitignored transient at the `.cs/` root — the narrative reminder's
-5-minute cooldown stamp.
+5-minute cooldown stamp, read only when the `Stop` input names no transcript
+the hook can read.
 
 `CLAUDE.local.md`, also at the session root, carries the cs session protocol:
 it is machine-local and gitignored, cs regenerates it on each machine, and a
@@ -151,6 +152,7 @@ removes anything, except the prompt hook's launch mark in `scope-prompt.trace`.
 | `lead-pid` | The lead's claim on its launch: `<launch pid> <claude pid> <conversation id>`, written by the SessionStart hook of the claude `cs` launched, on every source. The hooks read it to tell that claude from a `claude -p` or a mod process it started when the two pids differ (the resume arm, a `CLAUDE_CODE_BIN` that forks claude). Every launch removes it before claude starts. The lead's SessionEnd, other than at a `/clear` or `/resume`, marks it ended (`<launch pid> <claude pid> <conversation id> ended`) and leaves it, so a claude that another SessionEnd hook starts stays a guest, while the lead still runs and after it exits. Claimers take turns on `lead-pid.mutex.lock` beside it. See [hooks.md](hooks.md#how-a-hook-finds-its-session-cs-resolvesh). |
 | `presence` | This session's advertised status (`cs -status`): a single line read by `cs -live`. Falls back to the README objective when unset. |
 | `pending-handoff` | Basename of the `.cs/handoffs/` file to rotate into — armed by the `rotate` skill (for `/clear`) or by the `r` answer at the resume prompt. Consumed and cleared by the next SessionStart whose source is `startup` or `clear`; left armed on any other source; disarmed by any other resume-prompt answer. |
+| `narrative-cursor.<session_id>` | One per conversation, one line `<offset> <epoch>`: how far into the conversation's transcript `stop-notices.sh` has counted work for the narrative reminder, and when it set that. Written under `stop-notices.mutex.lock` after a reminder and whenever the actor's narrative was written since the epoch. |
 | `rotate-nudged` | Conversation UUIDs `stop-notices.sh` has nudged to rotate, one per line, written under `stop-notices.mutex.lock` after the notice is printed; a `<uuid> again` line records the one repeat the hook sends when the transcript does not record the first, written before the repeat is printed. Keeps the 65%-context nudge to at most twice per conversation. |
 | `cs.heartbeat` | UTC timestamp of the last session start at which the cs mod ran — `cs -doctor` reports the mod from this file, never from the plugin directory being present. |
 | `cs-update.heartbeat` | UTC timestamp of the last session start at which the cs-update mod ran, written by the mod's `session.start` when Claude Code loads it — `cs -doctor` reads it the same way it reads `cs.heartbeat`, never the plugin directory being present. |

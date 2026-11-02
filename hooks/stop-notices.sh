@@ -237,13 +237,46 @@ if [ -n "$NUDGE_PCT" ] && [ -n "$NUDGE_UUID" ] \
 fi
 
 # --- The narrative reminder ---------------------------------------------------
-# Decided here too: REMINDER_DUE is 1 when this actor's own narrative is stale
-# and no reminder went out within the cooldown, read unlocked here as the cheap
-# answer for the common case and again under the lock before the stamp.
+# Decided here too: REMINDER_DUE is 1 when the conversation did work since its
+# narrative cursor and this actor's own narrative was not written since then,
+# read unlocked here as the cheap answer for the common case and again under
+# the lock before the cursor moves.
+#
+# The cursor, .cs/local/narrative-cursor.<session_id>, holds "<offset> <epoch>":
+# a byte offset into the conversation's transcript and the time it was set.
+# Work is what the transcript records past the offset: WORK_EDITS or more
+# Edit, Write, MultiEdit or NotebookEdit calls, a Bash call whose command holds
+# `git commit`, or WORK_TEXT characters of Claude's own text. The narrative
+# counts as written since the cursor when its mtime is at or past the epoch.
+# The cursor moves to the transcript's end, stamped now, after a reminder and
+# whenever the narrative was written since it; a reminder never goes out
+# within WORK_FLOOR seconds of the epoch, which keeps two Stops close together
+# from both reminding. A conversation with no cursor yet counts from the
+# transcript's start and takes its first timestamp as the epoch.
+WORK_EDITS=3
+WORK_TEXT=2000
+WORK_FLOOR=60
+# The read is bounded to keep the run inside its budget: a gap past this many
+# bytes counts as work without being read.
+WORK_READ_MAX=4194304
+# Without a transcript to read (none named, none on disk, a session_id that is
+# not a plain id) there is no work to count, and the reminder falls back to
+# the clock: at most once per COOLDOWN_SECONDS, stamped in COOLDOWN_FILE, and
+# only when the narrative is older than that.
 COOLDOWN_FILE="$META_DIR/.narrative-reminder-cooldown"
 COOLDOWN_SECONDS=300  # 5 minutes
 CURRENT_TIME=$(date +%s)
 REMINDER_DUE=0
+CURSOR_FILE=""
+CURSOR_MOVE=0
+case "$NUDGE_UUID" in
+    ''|*[!A-Za-z0-9-]*) ;;
+    *)
+        if [ -n "$TRANSCRIPT" ] && [ -f "$TRANSCRIPT" ] && [ -r "$TRANSCRIPT" ]; then
+            CURSOR_FILE="$LOCAL/narrative-cursor.$NUDGE_UUID"
+        fi
+        ;;
+esac
 
 # A claude started from inside the session (a `claude -p` the lead's Bash
 # tool ran) inherits the contract and would be told to update the narrative,
@@ -267,6 +300,71 @@ _within_cooldown() {
     [ $((CURRENT_TIME - last)) -lt "$COOLDOWN_SECONDS" ]
 }
 
+# The cursor's line as read, so the run under the lock can tell whether
+# another run moved it in between. Data whatever wrote it: read, never run.
+_cursor_line() {
+    local l=""
+    [ -f "$CURSOR_FILE" ] || return 0
+    IFS= read -r l < "$CURSOR_FILE" 2>/dev/null || true
+    printf '%s' "$l"
+}
+
+# The work gate. Sets REMINDER_DUE, or CURSOR_MOVE when the narrative was
+# written since the cursor, and CURSOR_SEEN and TRANSCRIPT_SIZE for the write
+# under the lock. A count jq cannot make leaves the clock to decide.
+CURSOR_SEEN=""
+TRANSCRIPT_SIZE=0
+_work_gate() {
+    local off ep counts edits commits chars
+    CURSOR_SEEN=$(_cursor_line)
+    TRANSCRIPT_SIZE=$(_num_or "$(wc -c < "$TRANSCRIPT" 2>/dev/null | tr -d ' ')" 0)
+    if [ -f "$CURSOR_FILE" ]; then
+        IFS=' ' read -r off ep _ <<EOF
+$CURSOR_SEEN
+EOF
+        off=$(_num_or "${off:-}" 0); ep=$(_num_or "${ep:-}" 0)
+    else
+        off=0
+        ep=$(_num_or "$(head -n 20 "$TRANSCRIPT" 2>/dev/null | jq -R -n -r '
+            [inputs | fromjson? // empty | .timestamp? // empty | strings
+             | sub("\\.[0-9]+"; "") | (fromdateiso8601? // empty)] | first // 0' 2>/dev/null)" 0)
+    fi
+    # A transcript shorter than the offset was rewritten: count it whole.
+    [ "$off" -le "$TRANSCRIPT_SIZE" ] || off=0
+    if [ "$NARRATIVE_MTIME" -gt 0 ] && [ "$NARRATIVE_MTIME" -ge "$ep" ]; then
+        CURSOR_MOVE=1
+        return 0
+    fi
+    [ $((CURRENT_TIME - ep)) -ge "$WORK_FLOOR" ] || return 0
+    if [ $((TRANSCRIPT_SIZE - off)) -gt "$WORK_READ_MAX" ]; then
+        REMINDER_DUE=1
+        return 0
+    fi
+    # The slice can start inside a line; a line that is not JSON is skipped.
+    counts=$(tail -c +$((off + 1)) "$TRANSCRIPT" 2>/dev/null | jq -R -n -r '
+        [inputs | fromjson? // empty | select(type == "object" and .type == "assistant")
+         | .message.content? | arrays | .[] | objects] as $c
+        | [([$c[] | select(.type == "tool_use" and (.name == "Edit" or .name == "Write" or .name == "MultiEdit" or .name == "NotebookEdit"))] | length),
+           ([$c[] | select(.type == "tool_use" and .name == "Bash" and ((.input.command? // "") | tostring | contains("git commit")))] | length),
+           ([$c[] | select(.type == "text") | (.text? // "") | tostring | length] | add // 0)]
+        | @tsv' 2>/dev/null) || counts=""
+    IFS=$'\t' read -r edits commits chars _ <<EOF
+$counts
+EOF
+    case "${edits:-}${commits:-}${chars:-}" in
+        ''|*[!0-9]*)
+            CURSOR_FILE=""
+            if ! _within_cooldown && [ $((CURRENT_TIME - NARRATIVE_MTIME)) -ge "$COOLDOWN_SECONDS" ]; then
+                REMINDER_DUE=1
+            fi
+            return 0
+            ;;
+    esac
+    if [ "$edits" -ge "$WORK_EDITS" ] || [ "$commits" -ge 1 ] || [ "$chars" -ge "$WORK_TEXT" ]; then
+        REMINDER_DUE=1
+    fi
+}
+
 # Per-actor narratives. Freshness is read from this actor's own narrative
 # alone: a teammate's write says nothing about whether this claude kept its
 # notes, and it shares the directory. The actor is named by the rules
@@ -287,7 +385,7 @@ if command -v _narrative_budget >/dev/null 2>&1; then
     NARRATIVE_MAX=$(_narrative_budget "${CS_NARRATIVE_MAX_BYTES:-}" "$CS_NARRATIVE_MAX_DEFAULT")
 fi
 NARRATIVE_OVER=""
-if [ "$_nested" = 0 ] && ! _within_cooldown; then
+if [ "$_nested" = 0 ] && { [ -n "$CURSOR_FILE" ] || ! _within_cooldown; }; then
     for _nf in "$META_DIR"/memory/narrative*.md; do
         [ -f "$_nf" ] || continue
         # GNU stat is asked first and BSD second, by which one answers rather than
@@ -302,9 +400,10 @@ if [ "$_nested" = 0 ] && ! _within_cooldown; then
             NARRATIVE_OVER="${NARRATIVE_OVER} $(_cs_plain_name "$(basename "$_nf")" 160) is $((_sz / 1024)) KB, over the $((NARRATIVE_MAX / 1024)) KB budget — if it is yours, run \`cs -narrative rotate\` before appending."
         fi
     done
-    # None while the own narrative was updated within the cooldown; a missing
-    # one reads as never updated.
-    if [ $((CURRENT_TIME - NARRATIVE_MTIME)) -ge "$COOLDOWN_SECONDS" ]; then
+    # A missing own narrative reads as never written.
+    if [ -n "$CURSOR_FILE" ]; then
+        _work_gate
+    elif [ $((CURRENT_TIME - NARRATIVE_MTIME)) -ge "$COOLDOWN_SECONDS" ]; then
         REMINDER_DUE=1
     fi
 fi
@@ -362,8 +461,9 @@ if [ "$REMINDER_DUE" = 1 ] && cs_is_lead; then
     _plugin_is_installed "codex@" "commands/review.md" && _has_codex=1
 fi
 
-# Nothing to say: no verdict is waited for and no lock taken.
-[ -n "$CTX_TEXT" ] || [ "$REMINDER_DUE" = 1 ] || exit 0
+# Nothing to say and no cursor to move: no verdict is waited for and no lock
+# taken.
+[ -n "$CTX_TEXT" ] || [ "$REMINDER_DUE" = 1 ] || [ "$CURSOR_MOVE" = 1 ] || exit 0
 
 # --- The sync hook's verdict --------------------------------------------------
 # The queue gate above reads the state the drain leaves behind, and a drain
@@ -463,11 +563,20 @@ if [ -n "$CTX_TEXT" ]; then
     esac
 fi
 
-[ "$REMINDER_DUE" = 1 ] || _done 0
-if _within_cooldown; then
-    _done 0
+# The cursor moves before the print, as the stamp does: a reminder lost at
+# exit then waits for more work rather than coming back on the next Stop. A
+# cursor another run moved since it was read means that run decided.
+if [ -n "$CURSOR_FILE" ]; then
+    [ "$(_cursor_line)" = "$CURSOR_SEEN" ] || _done 0
+    cs_write_atomic "$CURSOR_FILE" printf '%s %s\n' "$TRANSCRIPT_SIZE" "$CURRENT_TIME" || true
+    [ "$REMINDER_DUE" = 1 ] || _done 0
+else
+    [ "$REMINDER_DUE" = 1 ] || _done 0
+    if _within_cooldown; then
+        _done 0
+    fi
+    cs_write_atomic "$COOLDOWN_FILE" echo "$CURRENT_TIME" || true
 fi
-cs_write_atomic "$COOLDOWN_FILE" echo "$CURRENT_TIME" || true
 if [ "$((_has_council + _has_codex))" -gt 0 ]; then
     _adv_last=0
     if [ -f "$ADVISOR_COOLDOWN_FILE" ]; then
@@ -513,8 +622,6 @@ else
     NARRATIVE_SHOWN="$META_DIR/memory/narrative.<actor>.md"
 fi
 # Worded for where it lands: beside the user's next request, about the turn
-# that ended before it. The cooldown stamp above is this notice's cursor, and
-# it is written before the print on purpose: the lock holds it, and a reminder
-# lost at exit comes back after the cooldown rather than twice in a row.
+# that ended before it.
 _emit_notice "Narrative check. This note is carried over from your previous turn, which ended without a narrative note. Before answering the request below, record what that turn found, in your own narrative only (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Yours is $NARRATIVE_SHOWN. (1) If that turn disproved or superseded one of your entries, append a dated correction that names it; never rewrite or delete earlier sections. (2) Append what that turn found as plain dated notes: a decision and its reason, a measured fact, a failed approach, a preference the user stated. A line that only restates routine work, such as \"appended X to Y\" or \"ran the tests\", is not a finding and must not be written. If that turn found nothing worth keeping, say so in one line and answer the request.${COMMIT_CADENCE}${NARRATIVE_OVER}${ADVISOR_NUDGE}"
 _done 0
