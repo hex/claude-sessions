@@ -1392,12 +1392,12 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "ce40b4ad4e875e33bb42c4e96999b39ca784f046b1c4c74b4d60dadd29955d2e  bin/cs"
+    "f2c6e1b50ea95ff587b6469ace41c93771f748e30a8026a5cde1861c7e82e658  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "2b4582243e40e9b34638edbaf9327fec2ec9c7ecb09f972d2cfe4a2dfdd7dbf8  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
-    "d8f0afd224999d6304f2fea173930796785920da387718a0ec33daac7bccefc0  hooks/cs-shared.sh"
+    "1d62dc807674084c3b7c32c39c34bf207e7c89b982d9010216841e77ad7962cf  hooks/cs-shared.sh"
     "022b2fd0394509be0de564838d3347ff493b4bb750eae1521ff4b341d5571e62  hooks/cs-config.sh"
     "50d63ce0995e68fddd8503700c15f9585d11938c9cd3872a883146de7707c765  hooks/cs-iterm-tab.py"
     "21988bf58bb6fea15c6435445f4abc3a38f4c4a9a7db78c4ff4797650709ba3f  hooks/memory-index-guard.sh"
@@ -1406,7 +1406,7 @@ CS_PAYLOAD_SHA256=(
     "8be7cf198e9e950cb11eeb5d02231bb3e168aa078018495a1a8832186334bbc2  hooks/prompt-rewriter-vendor.sh"
     "1fa475982564ec70f12bf5295b874989dd95f89224f27bb6be4854cc5b8674e3  hooks/wrap-sweep.md"
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
-    "a4486c60d3db91c0a466fb154602eec888ffeb5a9942d74d2c8aac92b8dd7c32  hooks/session-start.sh"
+    "6dd2959b6ce5de8124782bd98e1ed9b0f66d379fa0c827e9c04bbe084a1dd95b  hooks/session-start.sh"
     "cae9775702513f11b1abff031928047766ab69714e3a9b1db82ff080e186f20b  hooks/autosave-commits.sh"
     "786f06a2fdcf48299e05fb654549334b5bc317c1776e9ba5e41ff87ae8035386  hooks/narrative-reminder.sh"
     "aa920977404b19dd136c6f780d219aa929b7ba1be65f60b034e3b6a820bb8528  hooks/stop-notices.sh"

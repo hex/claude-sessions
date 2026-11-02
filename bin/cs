@@ -1999,8 +1999,26 @@ live_lock_pid() {  # meta_dir
     echo "$pid"
 }
 
+# The name claude is given for session <name>: the same, with a '+' for the
+# '@' of a feature session. Claude Code's SendMessage refuses any address
+# with an '@' in it (its old teammate syntax), so a peer could never message
+# a `base@feature` conversation; ListAgents shows the '+' form and a message
+# to it lands. Only what claude shows and what reads claude's argv back
+# (the live-duplicate guard, _remote_server_pid) use this form; the session
+# directory, CLAUDE_SESSION_NAME, cs -msg and every cs surface keep the '@'.
+# '+' is outside the characters either half of a session name may hold, so
+# the mapped name of a feature session never reads as a plain session's.
+# What reads argv back matches the '@' spelling too: a claude or a server
+# launched before cs mapped the name still runs under it. Verified on Claude
+# Code 2.1.316: a '+' name is listed by ListAgents, receives a SendMessage
+# and resumes by name.
+cs_claude_name() {  # session_name
+    printf '%s\n' "${1//@/+}"
+}
+
 # The pid of the remote-control server serving session <name>, from its
-# .cs/local/remote.pid, when that pid runs `remote-control --name <name>`.
+# .cs/local/remote.pid, when that pid runs `remote-control --name <name>`
+# (the name claude is given, cs_claude_name).
 # Fails otherwise. A server whose release never ran (its process group
 # killed with SIGKILL, a crash, a restart) leaves the file behind, and its pid
 # can later belong to any program, so a running pid alone proves nothing; the
@@ -2010,13 +2028,14 @@ live_lock_pid() {  # meta_dir
 # asks about one pid. cs's opens, cs -rm, cs -live, cs -doctor and the
 # SessionEnd hook all decide "served" here.
 _remote_server_pid() {  # meta_dir, session_name
-    local f="$1/local/remote.pid" pid="" args
+    local f="$1/local/remote.pid" pid="" args name
+    name=$(cs_claude_name "$2")
     [ -f "$f" ] || return 1
     IFS= read -r pid < "$f" 2>/dev/null || true
     case "$pid" in ''|*[!0-9]*) return 1 ;; esac
     args=$(ps -ww -o args= -p "$pid" 2>/dev/null) || return 1
     case " $args " in
-        *" remote-control --name $2 "*) printf '%s' "$pid" ;;
+        *" remote-control --name $name "*|*" remote-control --name $2 "*) printf '%s' "$pid" ;;
         *) return 1 ;;
     esac
 }
@@ -4474,6 +4493,9 @@ validate_session_name() {
         # -uninstall would run that verb rather than open, and -rm would reach
         # remove_session.
         -*) error "Session name cannot start with a hyphen" ;;
+        # The name Claude Code shows for a feature session (cs_claude_name);
+        # the user read it there and typed it here.
+        *+*) error "$name is the name Claude Code shows for feature session ${name//+/@}; cs takes ${name//+/@}" ;;
     esac
 
     if ! [[ "$name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
@@ -4492,6 +4514,7 @@ validate_session_ref() {  # name
         '') error "Session name cannot be empty" ;;
         .|..) error "Session name cannot be '.' or '..'" ;;
         */*|*\\*) error "Session name cannot contain a path separator: $1" ;;
+        *+*) error "$1 is the name Claude Code shows for feature session ${1//+/@}; cs takes ${1//+/@}" ;;
     esac
 }
 
@@ -7876,7 +7899,7 @@ _exec_fresh_rebind() {
     export CS_CLAUDE_SESSION_ID="$new_uuid"
     [ -z "$old_uuid" ] || export CS_FRESH_REBIND=1
     # shellcheck disable=SC2086
-    exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid" ${launch_prompt:+"$launch_prompt"}
+    exec $CLAUDE_CODE_BIN --name "$(cs_claude_name "$session_name")" --session-id "$new_uuid" ${launch_prompt:+"$launch_prompt"}
 }
 
 # Resolve a SPECIFIC session's actor slug from its own dir, bypassing $CS_ACTOR
@@ -14386,6 +14409,8 @@ _remove_one_session() {
     # worktree name (<base>@<task>) has an @ but never a slash, so it passes.
     case "$session_name" in
         .|..|*/*) error "Invalid session name: $session_name" ;;
+        # The name Claude Code shows for a feature session (cs_claude_name).
+        *+*) error "$session_name is the name Claude Code shows for feature session ${session_name//+/@}; cs takes ${session_name//+/@}" ;;
     esac
 
     local session_dir="$SESSIONS_ROOT/$session_name"
@@ -15204,6 +15229,10 @@ launch_claude_code() {
     local session_dir="$2"
     local is_new="$3"
     local force="${4:-}"
+    # What claude is told the session is called, and what ps shows for a
+    # running one (cs_claude_name).
+    local claude_name
+    claude_name=$(cs_claude_name "$session_name")
     local merge_feature="${5:-}"
     # Set for `cs <name> --remote`: the permission mode the server passes to
     # the sessions it starts. Empty for every other open.
@@ -15326,7 +15355,11 @@ launch_claude_code() {
                 fi
             done
         fi
+        # Both spellings of the name: a claude launched before cs mapped the
+        # '@' still runs under it (cs_claude_name).
         if [ -n "$_hit" ] \
+            || [[ "$_ps_out" == *"--name $claude_name "* ]] \
+            || [[ "$_ps_out" == *"--name $claude_name"$'\n'* ]] \
             || [[ "$_ps_out" == *"--name $session_name "* ]] \
             || [[ "$_ps_out" == *"--name $session_name"$'\n'* ]]; then
             error "Session $session_name is already running elsewhere${claude_session_id:+ (UUID $claude_session_id)}. Use --force to override."
@@ -16021,7 +16054,7 @@ EOF
             # Unquoted on purpose here and below: CLAUDE_CODE_BIN may carry
             # flags after the command, and _claude_bin_word checks that word.
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN --name "$session_name" --resume "$resume_id" ${launch_prompt:+"$launch_prompt"}
+            exec $CLAUDE_CODE_BIN --name "$claude_name" --resume "$resume_id" ${launch_prompt:+"$launch_prompt"}
         fi
         # Otherwise claude decides whether the conversation resumes, and cs
         # stays to start a fresh one if it cannot and to detach a vault.
@@ -16030,7 +16063,7 @@ EOF
         SECONDS=0
         local rc=0
         # shellcheck disable=SC2086
-        $CLAUDE_CODE_BIN --name "$session_name" --resume "$resume_id" ${launch_prompt:+"$launch_prompt"} || rc=$?
+        $CLAUDE_CODE_BIN --name "$claude_name" --resume "$resume_id" ${launch_prompt:+"$launch_prompt"} || rc=$?
         # A claude can end because its session was removed under it
         # (cs -rm --force while it ran). The fresh start below would write
         # .cs/local/state again with mkdir -p and launch a claude in a
@@ -16061,12 +16094,12 @@ EOF
         #     always writes one; handled defensively): naked exec.
         if [ "$is_new" = "true" ] && [ -n "$claude_session_id" ]; then
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${launch_prompt:+"$launch_prompt"}
+            exec $CLAUDE_CODE_BIN --name "$claude_name" --session-id "$claude_session_id" ${launch_prompt:+"$launch_prompt"}
         elif [ "$is_new" = "false" ]; then
             _exec_fresh_rebind "$session_dir" declined-resume "" "$spawn_kick" "$merge_kick"
         else
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN --name "$session_name" ${launch_prompt:+"$launch_prompt"}
+            exec $CLAUDE_CODE_BIN --name "$claude_name" ${launch_prompt:+"$launch_prompt"}
         fi
     fi
 }
@@ -16443,7 +16476,7 @@ _remote_release_after() {  # pid, meta_dir
 # window nobody sees, so the server would wait there; same-dir runs the
 # sessions it starts in the session dir, where worktree mode would run them
 # outside it. --name stays right after the verb: _remote_server_pid matches
-# `remote-control --name <name>`.
+# `remote-control --name <name>`, the name claude is given (cs_claude_name).
 _serve_remote() {  # session_name, session_dir, permission_mode
     local name="$1" dir="$2" mode="$3" meta="$2/.cs"
     # remote-control refuses to start while an API key is set.
@@ -16455,7 +16488,7 @@ _serve_remote() {  # session_name, session_dir, permission_mode
     printf '%s\n' "$$" > "$meta/local/remote.pid" || error "could not write $meta/local/remote.pid"
     _remote_release_after "$$" "$meta" < /dev/null > /dev/null 2>&1 &
     info "Serving $name through claude remote-control (permission mode $mode). Ctrl-C or closing the window stops it."
-    exec "$_CS_REMOTE_BIN" remote-control --name "$name" --permission-mode "$mode" --spawn=same-dir
+    exec "$_CS_REMOTE_BIN" remote-control --name "$(cs_claude_name "$name")" --permission-mode "$mode" --spawn=same-dir
 }
 run_secrets() {
     local secrets_script

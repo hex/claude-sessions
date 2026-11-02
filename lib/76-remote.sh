@@ -230,7 +230,7 @@ _remote_release_after() {  # pid, meta_dir
 # window nobody sees, so the server would wait there; same-dir runs the
 # sessions it starts in the session dir, where worktree mode would run them
 # outside it. --name stays right after the verb: _remote_server_pid matches
-# `remote-control --name <name>`.
+# `remote-control --name <name>`, the name claude is given (cs_claude_name).
 _serve_remote() {  # session_name, session_dir, permission_mode
     local name="$1" dir="$2" mode="$3" meta="$2/.cs"
     # remote-control refuses to start while an API key is set.
@@ -242,5 +242,5 @@ _serve_remote() {  # session_name, session_dir, permission_mode
     printf '%s\n' "$$" > "$meta/local/remote.pid" || error "could not write $meta/local/remote.pid"
     _remote_release_after "$$" "$meta" < /dev/null > /dev/null 2>&1 &
     info "Serving $name through claude remote-control (permission mode $mode). Ctrl-C or closing the window stops it."
-    exec "$_CS_REMOTE_BIN" remote-control --name "$name" --permission-mode "$mode" --spawn=same-dir
+    exec "$_CS_REMOTE_BIN" remote-control --name "$(cs_claude_name "$name")" --permission-mode "$mode" --spawn=same-dir
 }

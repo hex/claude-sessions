@@ -671,8 +671,26 @@ live_lock_pid() {  # meta_dir
     echo "$pid"
 }
 
+# The name claude is given for session <name>: the same, with a '+' for the
+# '@' of a feature session. Claude Code's SendMessage refuses any address
+# with an '@' in it (its old teammate syntax), so a peer could never message
+# a `base@feature` conversation; ListAgents shows the '+' form and a message
+# to it lands. Only what claude shows and what reads claude's argv back
+# (the live-duplicate guard, _remote_server_pid) use this form; the session
+# directory, CLAUDE_SESSION_NAME, cs -msg and every cs surface keep the '@'.
+# '+' is outside the characters either half of a session name may hold, so
+# the mapped name of a feature session never reads as a plain session's.
+# What reads argv back matches the '@' spelling too: a claude or a server
+# launched before cs mapped the name still runs under it. Verified on Claude
+# Code 2.1.316: a '+' name is listed by ListAgents, receives a SendMessage
+# and resumes by name.
+cs_claude_name() {  # session_name
+    printf '%s\n' "${1//@/+}"
+}
+
 # The pid of the remote-control server serving session <name>, from its
-# .cs/local/remote.pid, when that pid runs `remote-control --name <name>`.
+# .cs/local/remote.pid, when that pid runs `remote-control --name <name>`
+# (the name claude is given, cs_claude_name).
 # Fails otherwise. A server whose release never ran (its process group
 # killed with SIGKILL, a crash, a restart) leaves the file behind, and its pid
 # can later belong to any program, so a running pid alone proves nothing; the
@@ -682,13 +700,14 @@ live_lock_pid() {  # meta_dir
 # asks about one pid. cs's opens, cs -rm, cs -live, cs -doctor and the
 # SessionEnd hook all decide "served" here.
 _remote_server_pid() {  # meta_dir, session_name
-    local f="$1/local/remote.pid" pid="" args
+    local f="$1/local/remote.pid" pid="" args name
+    name=$(cs_claude_name "$2")
     [ -f "$f" ] || return 1
     IFS= read -r pid < "$f" 2>/dev/null || true
     case "$pid" in ''|*[!0-9]*) return 1 ;; esac
     args=$(ps -ww -o args= -p "$pid" 2>/dev/null) || return 1
     case " $args " in
-        *" remote-control --name $2 "*) printf '%s' "$pid" ;;
+        *" remote-control --name $name "*|*" remote-control --name $2 "*) printf '%s' "$pid" ;;
         *) return 1 ;;
     esac
 }

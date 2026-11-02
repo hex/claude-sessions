@@ -430,7 +430,7 @@ _exec_fresh_rebind() {
     export CS_CLAUDE_SESSION_ID="$new_uuid"
     [ -z "$old_uuid" ] || export CS_FRESH_REBIND=1
     # shellcheck disable=SC2086
-    exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$new_uuid" ${launch_prompt:+"$launch_prompt"}
+    exec $CLAUDE_CODE_BIN --name "$(cs_claude_name "$session_name")" --session-id "$new_uuid" ${launch_prompt:+"$launch_prompt"}
 }
 
 # Resolve a SPECIFIC session's actor slug from its own dir, bypassing $CS_ACTOR

@@ -202,6 +202,10 @@ launch_claude_code() {
     local session_dir="$2"
     local is_new="$3"
     local force="${4:-}"
+    # What claude is told the session is called, and what ps shows for a
+    # running one (cs_claude_name).
+    local claude_name
+    claude_name=$(cs_claude_name "$session_name")
     local merge_feature="${5:-}"
     # Set for `cs <name> --remote`: the permission mode the server passes to
     # the sessions it starts. Empty for every other open.
@@ -324,7 +328,11 @@ launch_claude_code() {
                 fi
             done
         fi
+        # Both spellings of the name: a claude launched before cs mapped the
+        # '@' still runs under it (cs_claude_name).
         if [ -n "$_hit" ] \
+            || [[ "$_ps_out" == *"--name $claude_name "* ]] \
+            || [[ "$_ps_out" == *"--name $claude_name"$'\n'* ]] \
             || [[ "$_ps_out" == *"--name $session_name "* ]] \
             || [[ "$_ps_out" == *"--name $session_name"$'\n'* ]]; then
             error "Session $session_name is already running elsewhere${claude_session_id:+ (UUID $claude_session_id)}. Use --force to override."
@@ -1019,7 +1027,7 @@ EOF
             # Unquoted on purpose here and below: CLAUDE_CODE_BIN may carry
             # flags after the command, and _claude_bin_word checks that word.
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN --name "$session_name" --resume "$resume_id" ${launch_prompt:+"$launch_prompt"}
+            exec $CLAUDE_CODE_BIN --name "$claude_name" --resume "$resume_id" ${launch_prompt:+"$launch_prompt"}
         fi
         # Otherwise claude decides whether the conversation resumes, and cs
         # stays to start a fresh one if it cannot and to detach a vault.
@@ -1028,7 +1036,7 @@ EOF
         SECONDS=0
         local rc=0
         # shellcheck disable=SC2086
-        $CLAUDE_CODE_BIN --name "$session_name" --resume "$resume_id" ${launch_prompt:+"$launch_prompt"} || rc=$?
+        $CLAUDE_CODE_BIN --name "$claude_name" --resume "$resume_id" ${launch_prompt:+"$launch_prompt"} || rc=$?
         # A claude can end because its session was removed under it
         # (cs -rm --force while it ran). The fresh start below would write
         # .cs/local/state again with mkdir -p and launch a claude in a
@@ -1059,12 +1067,12 @@ EOF
         #     always writes one; handled defensively): naked exec.
         if [ "$is_new" = "true" ] && [ -n "$claude_session_id" ]; then
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN --name "$session_name" --session-id "$claude_session_id" ${launch_prompt:+"$launch_prompt"}
+            exec $CLAUDE_CODE_BIN --name "$claude_name" --session-id "$claude_session_id" ${launch_prompt:+"$launch_prompt"}
         elif [ "$is_new" = "false" ]; then
             _exec_fresh_rebind "$session_dir" declined-resume "" "$spawn_kick" "$merge_kick"
         else
             # shellcheck disable=SC2086
-            exec $CLAUDE_CODE_BIN --name "$session_name" ${launch_prompt:+"$launch_prompt"}
+            exec $CLAUDE_CODE_BIN --name "$claude_name" ${launch_prompt:+"$launch_prompt"}
         fi
     fi
 }
