@@ -42,6 +42,12 @@ if ! command -v cs_append_inside >/dev/null 2>&1; then
     cs_append_inside() { local f="$1"; shift; { "$@" >> "$f"; } 2>/dev/null; }
     cs_mkdir_inside() { mkdir -p "$1" 2>/dev/null; }
 fi
+# The lock claim is cs-shared.sh's; without the library the same two steps
+# run here, so a kept old library never leaves the hook with mkdir alone.
+if ! command -v cs_take_dir_lock >/dev/null 2>&1; then
+    cs_take_dir_lock() { mkdir "$1" 2>/dev/null || return 1; ( set -C; : > "$1/.claim" ) 2>/dev/null || return 1; }
+    cs_release_dir_lock() { rm -f "$1/.claim" 2>/dev/null; rmdir "$1" 2>/dev/null; }
+fi
 if ! command -v cs_resolve_session >/dev/null 2>&1; then
     cs_resolve_session() {
         [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${CLAUDE_SESSION_DIR:-}" ]
@@ -129,12 +135,12 @@ autosave_to_shadow_ref() {
     # resolved above. lib/30-worktree.sh spells the same path; a test pins both.
     LOCK_DIR="$GIT_DIR/cs/integrate.lock"
     mkdir -p "$GIT_DIR/cs" 2>/dev/null || return 0
-    mkdir "$LOCK_DIR" 2>/dev/null || return 0
+    cs_take_dir_lock "$LOCK_DIR" || return 0
     (
         # EXIT does not fire on TERM/INT (measured: exit 143, no cleanup), so
         # both get a handler that releases and then exits.
-        trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
-        trap 'rmdir "$LOCK_DIR" 2>/dev/null; exit 143' TERM INT
+        trap 'cs_release_dir_lock "$LOCK_DIR"' EXIT
+        trap 'cs_release_dir_lock "$LOCK_DIR"; exit 143' TERM INT
 
         TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
 

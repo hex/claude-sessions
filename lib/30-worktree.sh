@@ -1687,7 +1687,7 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote [--ci-green]
     # flight than another integrate. Five tries a second apart outlast that
     # and still refuse promptly on a genuinely held lock.
     local tries=0
-    while ! mkdir "$lock" 2>/dev/null; do
+    while ! cs_take_dir_lock "$lock"; do
         tries=$((tries + 1))
         if [ "$tries" -ge 5 ]; then
             error "Another integrate or an in-flight autosave holds $lock; wait a few seconds and re-run. Remove that directory only if it persists with no cs running"

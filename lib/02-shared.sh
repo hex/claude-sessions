@@ -982,6 +982,24 @@ _cs_mkdir_spelling_refused() {  # dir, nearest existing level
 # running for a session removed under it, so the levels to make must lie below
 # an existing .cs and must not themselves hold a .cs, judged by spelling as the
 # session is; a directory that already exists makes nothing and gets only the
+# Take directory $1 as a mutex, or fail with status 1 while another holder
+# has it. A bare mkdir is not a claim: Ubuntu 26.04's uutils mkdir exits 0
+# when a racing mkdirat returns EEXIST, so two takers can both read success
+# (measured 2026-11-02, four racers, one real create). The claim file inside
+# settles that race in bash's own O_EXCL open: exactly one writer creates
+# it, and a taker whose mkdir reported success but whose claim is refused
+# leaves the directory to the one that holds it. Release with
+# cs_release_dir_lock, or remove the directory whole.
+cs_take_dir_lock() {  # dir
+    mkdir "$1" 2>/dev/null || return 1
+    ( set -C; : > "$1/.claim" ) 2>/dev/null || return 1
+}
+
+cs_release_dir_lock() {  # dir
+    rm -f "$1/.claim" 2>/dev/null
+    rmdir "$1" 2>/dev/null
+}
+
 # link check. The levels to make do not exist yet, so the nearest one that does
 # is what gets resolved: a link there carries every level made below it. Each
 # level is then made on its own, never with mkdir -p: a session removed after

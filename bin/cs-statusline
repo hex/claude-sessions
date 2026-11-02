@@ -1990,16 +1990,20 @@ _refresh_usage() {
     if [ -d "$lock" ]; then
         _file_age "$lock"
         if [ -n "${_AGE:-}" ] && [ "$_AGE" -gt 120 ]; then
-            mv "$lock" "$lock.reclaimed.$$" 2>/dev/null && rmdir "$lock.reclaimed.$$" 2>/dev/null
+            mv "$lock" "$lock.reclaimed.$$" 2>/dev/null && rm -rf "$lock.reclaimed.$$" 2>/dev/null
         fi
     fi
+    # mkdir alone is not the claim: Ubuntu 26.04's uutils mkdir exits 0 when a
+    # racing mkdirat returns EEXIST. The noclobber create of the claim file
+    # inside is bash's own O_EXCL open, so exactly one refresher wins it.
     mkdir "$lock" 2>/dev/null || return 0
+    ( set -C; : > "$lock/.claim" ) 2>/dev/null || return 0
     # The trap body is evaluated at exit, by which point a `local` is long out
     # of scope; the path has to survive in a global for the release to fire.
     _USAGE_LOCK="$lock"
     _USAGE_TMP="$dir/.resp.$$ $dir/.hdr.$$"
     # shellcheck disable=SC2064
-    trap 'rm -f ${_USAGE_TMP:-} 2>/dev/null; rmdir "${_USAGE_LOCK:-}" 2>/dev/null' EXIT
+    trap 'rm -f ${_USAGE_TMP:-} 2>/dev/null; rm -f "${_USAGE_LOCK:-}/.claim" 2>/dev/null; rmdir "${_USAGE_LOCK:-}" 2>/dev/null' EXIT
     # Sweep anything a SIGKILLed predecessor left behind — the EXIT trap cannot
     # fire for that one, and nothing else ever prunes this directory.
     find "$dir" -maxdepth 1 -type f -name '.resp.*' -mmin +5 -delete 2>/dev/null

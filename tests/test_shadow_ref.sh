@@ -193,6 +193,25 @@ test_autosave_skips_while_the_integrate_lock_is_held() {
     assert_dir "$CLAUDE_SESSION_DIR/.git/cs/integrate.lock" "the hook must not remove a lock it does not hold" || return 1
 }
 
+# The hook's lock take is the claim, not the mkdir: with a mkdir that says yes
+# to a directory an integrate holds (Ubuntu 26.04's uutils mkdir, racing), the
+# hook must still skip the snapshot and leave the lock to its holder.
+test_autosave_skips_a_held_lock_although_mkdir_lies() {
+    local shim="$TEST_TMPDIR/liar" real_mkdir
+    real_mkdir=$(command -v mkdir)
+    mkdir -p "$shim" "$CLAUDE_SESSION_DIR/.git/cs/integrate.lock"
+    : > "$CLAUDE_SESSION_DIR/.git/cs/integrate.lock/.claim"
+    printf '#!/usr/bin/env bash\n[ -d "${!#}" ] && exit 0\nexec "%s" "$@"\n' "$real_mkdir" > "$shim/mkdir"
+    chmod +x "$shim/mkdir"
+    echo "## New Finding" >> "$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"
+    echo '{"session_id":"22222222-2222-2222-2222-222222222222","tool_name":"Edit","tool_input":{"file_path":"'"$CLAUDE_SESSION_DIR/.cs/memory/narrative.md"'"}}' \
+        | PATH="$shim:$PATH" bash "$HOOKS_DIR/autosave-commits.sh"
+    if git -C "$CLAUDE_SESSION_DIR" rev-parse -q --verify refs/worktree/cs/session/22222222-2222-2222-2222-222222222222 >/dev/null 2>&1; then
+        echo "  FAIL: no snapshot may be written while the integrate lock is held"; return 1
+    fi
+    assert_file_exists "$CLAUDE_SESSION_DIR/.git/cs/integrate.lock/.claim" "the holder's claim stays" || return 1
+}
+
 test_autosave_holds_the_lock_during_the_snapshot_and_releases_it() {
     # Observe the lock at write-tree time through a git shim; a release
     # assertion alone passes when no lock is ever taken.
@@ -965,6 +984,7 @@ run_test test_autosave_stamps_base_head
 run_test test_autosave_writes_per_conversation_ref
 run_test test_autosave_labels_the_head_it_started_from
 run_test test_autosave_skips_while_the_integrate_lock_is_held
+run_test test_autosave_skips_a_held_lock_although_mkdir_lies
 run_test test_autosave_holds_the_lock_during_the_snapshot_and_releases_it
 run_test test_autosave_skips_malformed_session_id
 run_test test_session_end_deletes_shadow_ref

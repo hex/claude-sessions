@@ -441,6 +441,27 @@ test_path_helpers_print_what_dirname_and_basename_print() {
     done
 }
 
+# A mkdir that reports success for a directory another taker just made (Ubuntu
+# 26.04's uutils mkdir, racing) must not hand two takers the same lock: the
+# claim file inside decides, and the loser leaves the directory alone.
+test_dir_lock_claim_survives_a_mkdir_that_lies() {
+    local shim="$TEST_TMPDIR/liar" lock="$TEST_TMPDIR/held.lock" real_mkdir rc
+    real_mkdir=$(command -v mkdir)
+    mkdir -p "$shim"
+    printf '#!/usr/bin/env bash\n[ -d "${!#}" ] && exit 0\nexec "%s" "$@"\n' "$real_mkdir" > "$shim/mkdir"
+    chmod +x "$shim/mkdir"
+    rc=0; (. "$HOOKS_DIR/cs-shared.sh"; PATH="$shim:$PATH" cs_take_dir_lock "$lock") || rc=$?
+    assert_eq "0" "$rc" "the first taker gets the lock" || return 1
+    assert_file_exists "$lock/.claim" "and holds it through the claim file" || return 1
+    rc=0; (. "$HOOKS_DIR/cs-shared.sh"; PATH="$shim:$PATH" cs_take_dir_lock "$lock") || rc=$?
+    assert_eq "1" "$rc" "a second taker is refused although its mkdir said yes" || return 1
+    assert_file_exists "$lock/.claim" "and the holder's claim stays" || return 1
+    (. "$HOOKS_DIR/cs-shared.sh"; cs_release_dir_lock "$lock")
+    [ ! -d "$lock" ] || { echo "  FAIL: a release removes the claim and the directory"; return 1; }
+    rc=0; (. "$HOOKS_DIR/cs-shared.sh"; cs_take_dir_lock "$lock") || rc=$?
+    assert_eq "0" "$rc" "and the lock can be taken again" || return 1
+}
+
 # The key the verdict handshake turns on is cs-shared.sh's cs_stop_key, and
 # each hook carries a copy for a partial install. A copy that drifts keys the
 # two hooks apart, and every verdict is then nobody's.
@@ -3954,6 +3975,7 @@ run_test test_stop_hooks_read_numbers_alike
 run_test test_stop_hooks_parse_libraries_alike
 run_test test_stop_hooks_parse_a_library_again_once_it_changes
 run_test test_path_helpers_print_what_dirname_and_basename_print
+run_test test_dir_lock_claim_survives_a_mkdir_that_lies
 run_test test_stop_hooks_key_a_stop_alike
 
 # --- The verdict handshake between the two Stop hooks -----------------------

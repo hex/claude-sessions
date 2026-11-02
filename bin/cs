@@ -970,6 +970,7 @@ CS_KNOWN_SHA256=(
     8205baffaa49541819c3d1332d09bb3c8d2350e5581a9e985cd7b510abdae915
     8215e7edcd39a00908c680efe267e8c8e3406848028ea88c6efb86e703c6915a
     821a90a9d8d12faee67f0bb5f02b523dd9d26faf5f1e59a7584f78c779249914
+    82317d0619150e8323c6b80d6ddbaaa17463ab225e128d9081d0d3e165249c21
     82562272acd4229914b3df4610dda33fa4959a10f4adbbdc7c2f9102ba1cea5c
     828ab9b4321b7d94ab91a12f73ff04a8376ad56dda500bc6e8613e435b0eb8bc
     82ee7999f35577e940ccaf8d0d0ad6e35fc85d1921f0cc08309e166b7174ef3e
@@ -1278,6 +1279,7 @@ CS_KNOWN_SHA256=(
     dfe308bbd64274d52e10431b0b640e7a898ba5b553a6622fee81bc2dcac4bc68
     e041a10fd7f99b825fa340a5148302da6aada2dae9840258d9699f2fb9d22869
     e064a3f323ea96b2b47cf1e5b7ee1810d374b9807b8f04923a32af42a80fe352
+    e1d127ff4b828a434a3ddc4b57e3274f2d3ac94a7675680e44fda6eedf006553
     e209d54d089fea0a64f8bfb6f75d0edf224aa6711abb567b2063742d42d54063
     e27adef4f90f2b42d0be3b3c03180f32844e82884b3608bc1ed971c51e444ab6
     e29be4c968f48400458a1d6625be931e6910820fede0ce7e0dedacedbd130366
@@ -2350,6 +2352,24 @@ _cs_mkdir_spelling_refused() {  # dir, nearest existing level
 # running for a session removed under it, so the levels to make must lie below
 # an existing .cs and must not themselves hold a .cs, judged by spelling as the
 # session is; a directory that already exists makes nothing and gets only the
+# Take directory $1 as a mutex, or fail with status 1 while another holder
+# has it. A bare mkdir is not a claim: Ubuntu 26.04's uutils mkdir exits 0
+# when a racing mkdirat returns EEXIST, so two takers can both read success
+# (measured 2026-11-02, four racers, one real create). The claim file inside
+# settles that race in bash's own O_EXCL open: exactly one writer creates
+# it, and a taker whose mkdir reported success but whose claim is refused
+# leaves the directory to the one that holds it. Release with
+# cs_release_dir_lock, or remove the directory whole.
+cs_take_dir_lock() {  # dir
+    mkdir "$1" 2>/dev/null || return 1
+    ( set -C; : > "$1/.claim" ) 2>/dev/null || return 1
+}
+
+cs_release_dir_lock() {  # dir
+    rm -f "$1/.claim" 2>/dev/null
+    rmdir "$1" 2>/dev/null
+}
+
 # link check. The levels to make do not exist yet, so the nearest one that does
 # is what gets resolved: a link there carries every level made below it. Each
 # level is then made on its own, never with mkdir -p: a session removed after
@@ -6271,7 +6291,7 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote [--ci-green]
     # flight than another integrate. Five tries a second apart outlast that
     # and still refuse promptly on a genuinely held lock.
     local tries=0
-    while ! mkdir "$lock" 2>/dev/null; do
+    while ! cs_take_dir_lock "$lock"; do
         tries=$((tries + 1))
         if [ "$tries" -ge 5 ]; then
             error "Another integrate or an in-flight autosave holds $lock; wait a few seconds and re-run. Remove that directory only if it persists with no cs running"

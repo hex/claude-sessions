@@ -371,7 +371,9 @@ if [ -n "$parallel" ]; then
     # concurrency is invisible in the output. Failures are recorded as marker
     # files because a background subshell cannot append to the parent's array.
     # The lanes share one queue: each walks the whole list and runs a suite
-    # only when its mkdir of that position's claim succeeds, which is atomic,
+    # only when its noclobber open of that position's claim file succeeds: bash's
+    # own O_EXCL create, atomic on every filesystem and in no external tool's
+    # hands (Ubuntu 26.04's uutils mkdir exits 0 on a racing EEXIST),
     # so every suite runs exactly once and a lane that finishes takes the next
     # unclaimed suite, so no lane idles while another still has a share. The
     # queue holds positions in selected[], longest suite first
@@ -390,7 +392,7 @@ EOF_QUEUE
         (
             q=0
             while [ "$q" -lt "$total" ]; do
-                mkdir "$logdir/$q.claim" 2>/dev/null && run_suite "${queue[$q]}"
+                ( set -C; : > "$logdir/$q.claim" ) 2>/dev/null && run_suite "${queue[$q]}"
                 q=$((q + 1))
             done
         ) &
