@@ -2255,6 +2255,25 @@ test_session_start_is_silent_when_narratives_fit() {
     assert_output_not_contains "$context" "OVER BUDGET" "no warning within budget" || return 1
 }
 
+# A feature session has two addresses: cs's, with the '@', and the one Claude
+# Code's own tools take, with a '+'. The context names both, so the model
+# never hands a peer the spelling SendMessage refuses; a plain session has one
+# name and gets no such line.
+test_session_start_names_both_addresses_of_a_feature_session() {
+    session_start_setup
+    local context
+    context=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | CLAUDE_SESSION_NAME="myproj@fix-auth" bash "$HOOKS_DIR/session-start.sh" 2>/dev/null \
+        | jq -r '.hookSpecificOutput.additionalContext') || return 1
+    assert_output_contains "$context" "^Claude Code's own tools (ListAgents, SendMessage) know this session as myproj+fix-auth; cs (cs -msg, cs -rm, the directory) takes myproj@fix-auth.$" \
+        "a feature session's context names both spellings" || return 1
+    context=$(echo '{"session_id":"s","source":"startup","cwd":"'"$CLAUDE_SESSION_DIR"'","hook_event_name":"SessionStart"}' \
+        | bash "$HOOKS_DIR/session-start.sh" 2>/dev/null \
+        | jq -r '.hookSpecificOutput.additionalContext') || return 1
+    assert_output_not_contains "$context" "know this session as" \
+        "a plain session gets no such line" || return 1
+}
+
 # A leading zero in the override is a plain integer to the validator and an
 # octal literal to the arithmetic that renders the budget in KB; `08` is not
 # octal, and under errexit that abort would end the hook before its JSON.
@@ -5292,5 +5311,7 @@ test_advisor_nudge_stays_silent_for_a_teammate() {
 }
 
 run_test test_advisor_nudge_stays_silent_for_a_teammate
+
+run_test test_session_start_names_both_addresses_of_a_feature_session
 
 report_results

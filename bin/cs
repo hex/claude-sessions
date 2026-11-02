@@ -2005,6 +2005,10 @@ live_lock_pid() {  # meta_dir
 # directory, CLAUDE_SESSION_NAME, cs -msg and every cs surface keep the '@'.
 # '+' is outside the characters either half of a session name may hold, so
 # the mapped name of a feature session never reads as a plain session's.
+# What reads argv back matches the '@' spelling too: a claude or a server
+# launched before cs mapped the name still runs under it. Verified on Claude
+# Code 2.1.316: a '+' name is listed by ListAgents, receives a SendMessage
+# and resumes by name.
 cs_claude_name() {  # session_name
     printf '%s\n' "${1//@/+}"
 }
@@ -2028,7 +2032,7 @@ _remote_server_pid() {  # meta_dir, session_name
     case "$pid" in ''|*[!0-9]*) return 1 ;; esac
     args=$(ps -ww -o args= -p "$pid" 2>/dev/null) || return 1
     case " $args " in
-        *" remote-control --name $name "*) printf '%s' "$pid" ;;
+        *" remote-control --name $name "*|*" remote-control --name $2 "*) printf '%s' "$pid" ;;
         *) return 1 ;;
     esac
 }
@@ -4466,6 +4470,9 @@ validate_session_name() {
         # -uninstall would run that verb rather than open, and -rm would reach
         # remove_session.
         -*) error "Session name cannot start with a hyphen" ;;
+        # The name Claude Code shows for a feature session (cs_claude_name);
+        # the user read it there and typed it here.
+        *+*) error "$name is the name Claude Code shows for feature session ${name//+/@}; cs takes ${name//+/@}" ;;
     esac
 
     if ! [[ "$name" =~ ^[a-zA-Z0-9._-]+$ ]]; then
@@ -4484,6 +4491,7 @@ validate_session_ref() {  # name
         '') error "Session name cannot be empty" ;;
         .|..) error "Session name cannot be '.' or '..'" ;;
         */*|*\\*) error "Session name cannot contain a path separator: $1" ;;
+        *+*) error "$1 is the name Claude Code shows for feature session ${1//+/@}; cs takes ${1//+/@}" ;;
     esac
 }
 
@@ -14377,6 +14385,8 @@ _remove_one_session() {
     # worktree name (<base>@<task>) has an @ but never a slash, so it passes.
     case "$session_name" in
         .|..|*/*) error "Invalid session name: $session_name" ;;
+        # The name Claude Code shows for a feature session (cs_claude_name).
+        *+*) error "$session_name is the name Claude Code shows for feature session ${session_name//+/@}; cs takes ${session_name//+/@}" ;;
     esac
 
     local session_dir="$SESSIONS_ROOT/$session_name"
@@ -15321,9 +15331,13 @@ launch_claude_code() {
                 fi
             done
         fi
+        # Both spellings of the name: a claude launched before cs mapped the
+        # '@' still runs under it (cs_claude_name).
         if [ -n "$_hit" ] \
             || [[ "$_ps_out" == *"--name $claude_name "* ]] \
-            || [[ "$_ps_out" == *"--name $claude_name"$'\n'* ]]; then
+            || [[ "$_ps_out" == *"--name $claude_name"$'\n'* ]] \
+            || [[ "$_ps_out" == *"--name $session_name "* ]] \
+            || [[ "$_ps_out" == *"--name $session_name"$'\n'* ]]; then
             error "Session $session_name is already running elsewhere${claude_session_id:+ (UUID $claude_session_id)}. Use --force to override."
         fi
     fi

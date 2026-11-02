@@ -146,7 +146,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 
 - An already-open base offers existing features, a new feature, a forced launch, the picker, or cancellation.
 - Each feature has its own conversation, color, task list, and recovery refs, and shares the base's secrets.
-- Claude Code is told the feature's name with a `+` for the `@` (`myproj+fix-auth`), since its SendMessage tool refuses an address with an `@`; that is the name ListAgents and the `/resume` picker show, and the one a peer session messages. Everywhere in cs, `CLAUDE_SESSION_NAME` and `cs -msg` included, the feature keeps its `@` name.
+- Claude Code is told the feature's name with a `+` for the `@` (`myproj+fix-auth`), since its SendMessage tool refuses an address with an `@`; that is the name ListAgents and the `/resume` picker show, and the one a peer session messages. Everywhere in cs, `CLAUDE_SESSION_NAME` and `cs -msg` included, the feature keeps its `@` name; the `+` form typed into cs is refused by name with the `@` form, and the session's context names both. A feature or its `--remote` server launched before this spelling still counts as running under its `@` name.
 - The base needs a commit. See [tracked-mode prerequisites](session-layout.md#machine-local-files-cslocal-gitignored) before creating a feature.
 - A dirty base asks before branching from its last commit, or refuses without a terminal.
 - With ignored `.cs/`, the feature inherits memory topics, `MEMORY.md`, plans, and summary, but not narratives, local state, or timeline.

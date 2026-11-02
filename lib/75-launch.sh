@@ -328,9 +328,13 @@ launch_claude_code() {
                 fi
             done
         fi
+        # Both spellings of the name: a claude launched before cs mapped the
+        # '@' still runs under it (cs_claude_name).
         if [ -n "$_hit" ] \
             || [[ "$_ps_out" == *"--name $claude_name "* ]] \
-            || [[ "$_ps_out" == *"--name $claude_name"$'\n'* ]]; then
+            || [[ "$_ps_out" == *"--name $claude_name"$'\n'* ]] \
+            || [[ "$_ps_out" == *"--name $session_name "* ]] \
+            || [[ "$_ps_out" == *"--name $session_name"$'\n'* ]]; then
             error "Session $session_name is already running elsewhere${claude_session_id:+ (UUID $claude_session_id)}. Use --force to override."
         fi
     fi

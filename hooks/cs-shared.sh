@@ -677,6 +677,10 @@ live_lock_pid() {  # meta_dir
 # directory, CLAUDE_SESSION_NAME, cs -msg and every cs surface keep the '@'.
 # '+' is outside the characters either half of a session name may hold, so
 # the mapped name of a feature session never reads as a plain session's.
+# What reads argv back matches the '@' spelling too: a claude or a server
+# launched before cs mapped the name still runs under it. Verified on Claude
+# Code 2.1.316: a '+' name is listed by ListAgents, receives a SendMessage
+# and resumes by name.
 cs_claude_name() {  # session_name
     printf '%s\n' "${1//@/+}"
 }
@@ -700,7 +704,7 @@ _remote_server_pid() {  # meta_dir, session_name
     case "$pid" in ''|*[!0-9]*) return 1 ;; esac
     args=$(ps -ww -o args= -p "$pid" 2>/dev/null) || return 1
     case " $args " in
-        *" remote-control --name $name "*) printf '%s' "$pid" ;;
+        *" remote-control --name $name "*|*" remote-control --name $2 "*) printf '%s' "$pid" ;;
         *) return 1 ;;
     esac
 }
