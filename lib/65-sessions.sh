@@ -504,9 +504,8 @@ _remove_one_session() {
     # worktree name (<base>@<task>) has an @ but never a slash, so it passes.
     case "$session_name" in
         .|..|*/*) error "Invalid session name: $session_name" ;;
-        # The name Claude Code shows for a feature session (cs_claude_name).
-        *+*) error "$session_name is the name Claude Code shows for feature session ${session_name//+/@}; cs takes ${session_name//+/@}" ;;
     esac
+    cs_refuse_claude_name "$session_name"
 
     local session_dir="$SESSIONS_ROOT/$session_name"
 

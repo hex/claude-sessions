@@ -1798,6 +1798,11 @@ export const WRAP_ACTION = 'strip:jump2'
 // else this session's file, else this machine's, the last `1` or `0` line of
 // a file winning, and off when none says (KEEP IN SYNC with readFilterChat in
 // mods/cs-filter-chat/hooks/session.ts and _cs_config_read in lib/03-config.sh).
+// Read from the files at each render, not from fileSettings: cs-filter-chat's
+// /filter-chat writes the setting through cs and invalidates ui.render with no
+// turn boundary, and fileSettings is read only at session start and turn
+// edges, so the key would show the old value until the next prompt and a
+// press would flip from it. The two mods cannot import each other's reader.
 async function readFilterChat($: EngineInterface): Promise<boolean> {
   const pin = await $.env.get('CS_FILTER_CHAT')
   if (pin) return pin === '1'

@@ -33,6 +33,7 @@ test_mod_manifest_declares_one_config_row_the_you_ink() {
     local manifest="$MOD/.claude-plugin/plugin.json" code
     assert_eq '["youInk"]' "$(jq -c '.userConfig | keys' "$manifest")" "one userConfig field" || return 1
     assert_eq "string remember" "$(jq -r '.userConfig.youInk | "\(.type) \(.default)"' "$manifest")" "a string field, remember by default" || return 1
+    assert_eq "cs: Filter chat: your lines' colour" "$(jq -r '.userConfig.youInk.title' "$manifest")" "titled cs: and its label, as every cs mod's row is" || return 1
     code="$(sed -n "s/^export const YOU_INKS = \[\(.*\)\] as const .*/\1/p" "$MOD/hooks/settings.ts" | tr -d "' ")"
     assert_eq "remember,planMode,success,merged,error,text" "$code" "settings.ts YOU_INKS" || return 1
     assert_eq "$code" "$(jq -r '.userConfig.youInk.options | join(",")' "$manifest")" "the manifest's options are YOU_INKS, in order" || return 1

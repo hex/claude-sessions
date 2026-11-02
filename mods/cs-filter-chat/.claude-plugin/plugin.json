@@ -8,7 +8,7 @@
   "userConfig": {
     "youInk": {
       "type": "string",
-      "title": "Filter chat: your lines' colour",
+      "title": "cs: Filter chat: your lines' colour",
       "description": "The colour filter chat draws your messages in: remember is blue, planMode teal, success green, merged violet, error red, text your theme's text colour. Each follows your theme.",
       "required": false,
       "default": "remember",
