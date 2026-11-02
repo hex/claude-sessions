@@ -9,7 +9,7 @@ import { labels, marks, slashCommand } from './words'
 type Elements = ReturnType<EngineInterface['ui']['resolve']>
 
 /** §13 table as theme keys: the engine resolves each key in the person's theme on every draw, so the inks follow auto, light, dark and the colour-blind and ANSI themes. */
-export const INKS = { you: 'planMode', violet: 'merged', red: 'error', plain: 'text' } as const satisfies Record<'you' | Tone, ThemeKey>
+export const INKS = { you: 'remember', violet: 'merged', red: 'error', plain: 'text' } as const satisfies Record<'you' | Tone, ThemeKey>
 export type Inks = typeof INKS
 
 /** What every tree needs: elements, inks, and the engine's margin (2 on the terminal, 0 on desktop). */
@@ -27,14 +27,14 @@ export function drawCommandOutput(v: { readonly text: string; readonly isErrored
   return <Box paddingLeft={pen.pad} flexDirection="row"><Box width={2}><Text dimColor>{marks.dot}</Text></Box><Text color={v.isErrored ? pen.ink.red : undefined} dimColor={!v.isErrored}>{v.text}</Text></Box>
 }
 
-/** Your line: ❯ in the you ink in the margin, then your text, a slash command's name in that ink and its arguments dim (§3.1). */
+/** Your line: a bold ❯ in the you ink in the margin, then your text, a slash command's name in that ink and its arguments dim (§3.1). */
 export function drawUser(v: Extract<UserVerdict, { draw: 'you' }>, pen: Pen): RenderElement {
   const { Box, Text } = pen.el
   const command = slashCommand(v.text)
   const text = command
     ? <Box flexGrow={1} flexDirection="row" gap={1}><Text color={pen.ink.you}>{command.name}</Text>{command.args ? <Text dimColor>{command.args}</Text> : null}</Box>
     : <Box flexGrow={1}><Text color={pen.ink.you}>{v.text}</Text></Box>
-  return <Box flexDirection="column" marginTop={1}><Box flexDirection="row"><Box width={pen.pad}><Text color={pen.ink.you}>{labels.you}</Text></Box>{text}</Box></Box>
+  return <Box flexDirection="column" marginTop={1}><Box flexDirection="row"><Box width={pen.pad}><Text bold color={pen.ink.you}>{labels.you}</Text></Box>{text}</Box></Box>
 }
 
 /**
