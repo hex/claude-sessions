@@ -626,7 +626,8 @@ together: the `/config` rows of `cs`, `cs-update` and `cs-mermaid`, then every
 setting `cs -config list` names. Type to filter the rows, then press Enter on
 one to open its choices under it: a new value, `Default` (which removes it from
 the file that holds it), or `Keep`; the scope line under the keys says which
-file a write goes to. A setting your environment pins is read-only there. See
+file a write goes to. An on/off setting no file holds, and a `/config` toggle,
+flip at once instead. A setting your environment pins is read-only there. See
 [the panel mod](hooks.md#cs-panel-not-a-hook-script--a-claude-code-mod).
 
 The release-notes pane is a Claude Code `/config` row, `cs-update.showReleaseNotes`

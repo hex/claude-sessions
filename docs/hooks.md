@@ -1276,8 +1276,9 @@ it does on a row, so `Keep` stays a Button under it. Selecting another row,
 editing the filter or closing the pane closes the chooser too. No Button
 offers the value the row already has. The mobile app draws no Input and no
 Select, so there you cannot type a value, a typed setting's chooser offers
-only `Default` and `Keep`, and a setting with choices offers its other values
-as Buttons ahead of those.
+only `Default` and `Keep`, a setting with choices offers its other values as
+Buttons ahead of those, and an on/off setting a file holds offers `Turn on` or
+`Turn off` there.
 
 A change goes where the value lives when this session's file holds it: cs
 writes it there. Any other value goes to the file the scope line names, or to
@@ -1287,10 +1288,10 @@ row shows. cs's own checker judges a typed value.
 - An on/off setting no file holds flips at once: no chooser opens, and cs
   writes 1, which turns a flag's feature on and an off flag's feature off. As
   after any write, cs's line is the toast and the pane reads cs again.
-- An on/off setting a file holds offers `Turn on` or `Turn off`, then
-  `Default (<default>)` and `Keep`, since the default and the file matter
-  there. A flag that turns its feature off at 1 says these in the feature's
-  words: `Turn off` writes 1, `Turn on` writes 0, which cs reads as unset,
+- An on/off setting a file holds offers its picker of `on` and `off`, its
+  state selected, then `Default (<default>)` and `Keep`, since the default and
+  the file matter there. A flag that turns its feature off at 1 lists its
+  feature's states: `off` writes 1, `on` writes 0, which cs reads as unset,
   and its default is `on`.
 - A setting with choices offers its picker, then `Default` while a file holds
   the value, then `Keep`.
