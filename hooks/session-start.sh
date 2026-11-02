@@ -831,6 +831,9 @@ NUMSTAT
         fi
     fi
 
+    # Unconditional, so it also prints when nothing above had anything to report.
+    DYNAMIC="${DYNAMIC}The conversation before this one may have finished actions its summary does not show; check git log, cs -msg log and the remote before repeating a push, a merge, an install or a message.${_NL}"
+
     if [ -n "$DYNAMIC" ]; then
         # %s, not %b: escapes in interpolated content are data. Scrubbed once
         # here because DYNAMIC carries text cs did not write — a sibling
