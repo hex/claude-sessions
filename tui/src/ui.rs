@@ -186,8 +186,6 @@ fn cursor_wrap_spans(
         .collect()
 }
 
-/// "1 file", "2 files". Counts reach the merge screen from git, so one is an
-/// ordinary value rather than an edge case.
 /// A readiness record's STATE cell: `_feature_state_sentence`'s table
 /// (lib/30-worktree.sh), which a test runs against this copy, in its colour.
 fn feature_state_cell(f: &FeatureRow, p: Palette) -> (String, Color) {
@@ -205,6 +203,8 @@ fn feature_state_cell(f: &FeatureRow, p: Palette) -> (String, Color) {
     }
 }
 
+/// "1 file", "2 files". Counts reach the merge screen from git, so one is an
+/// ordinary value rather than an edge case.
 fn plural(n: u32, noun: &str) -> String {
     if n == 1 {
         format!("{n} {noun}")
