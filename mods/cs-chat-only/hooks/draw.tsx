@@ -2,6 +2,7 @@
 // ABOUTME: No decisions and no $ calls but resolve; a Button never sits inside a Text (the engine refuses the whole tree).
 import type { EngineInterface, RenderElement, ThemeKey } from 'claude-code'
 
+import type { YouInk } from './settings'
 import type { UserVerdict } from './verdict'
 import type { ErrorLine, Tone } from './words'
 import { labels, marks, slashCommand } from './words'
@@ -9,8 +10,9 @@ import { labels, marks, slashCommand } from './words'
 type Elements = ReturnType<EngineInterface['ui']['resolve']>
 
 /** §13 table as theme keys: the engine resolves each key in the person's theme on every draw, so the inks follow auto, light, dark and the colour-blind and ANSI themes. */
-export const INKS = { you: 'remember', violet: 'merged', red: 'error', plain: 'text' } as const satisfies Record<'you' | Tone, ThemeKey>
-export type Inks = typeof INKS
+export const INKS = { violet: 'merged', red: 'error', plain: 'text' } as const satisfies Record<Tone, ThemeKey>
+/** The error tones' fixed inks, and the you ink the /config row names (settings.youInkOf). */
+export type Inks = typeof INKS & { readonly you: YouInk }
 
 /** What every tree needs: elements, inks, and the engine's margin (2 on the terminal, 0 on desktop). */
 export type Pen = {

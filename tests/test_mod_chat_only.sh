@@ -23,8 +23,19 @@ test_mod_manifest_names_the_plugin_and_its_module_and_declares_no_state() {
     assert_file_exists "$MOD/hooks/$module" "the named module exists" || return 1
     # The switch is a file the mod reads, never $.state: no state types to declare.
     assert_eq "false" "$(jq 'has("types")' "$manifest")" "no state types" || return 1
-    # No install switch (ruling 1): the on/off is the session's .cs/local/chat-only, never a /config row.
-    assert_eq "false" "$(jq 'has("userConfig")' "$manifest")" "no userConfig" || return 1
+}
+
+# No install switch (ruling 1): the on/off is the session's .cs/local/chat-only,
+# never a /config row. The one /config row is the you ink, a pick of the theme
+# keys settings.ts YOU_INKS lists (the mod throws on a manifest option it
+# lacks), remember by default.
+test_mod_manifest_declares_one_config_row_the_you_ink() {
+    local manifest="$MOD/.claude-plugin/plugin.json" code
+    assert_eq '["youInk"]' "$(jq -c '.userConfig | keys' "$manifest")" "one userConfig field" || return 1
+    assert_eq "string remember" "$(jq -r '.userConfig.youInk | "\(.type) \(.default)"' "$manifest")" "a string field, remember by default" || return 1
+    code="$(sed -n "s/^export const YOU_INKS = \[\(.*\)\] as const .*/\1/p" "$MOD/hooks/settings.ts" | tr -d "' ")"
+    assert_eq "remember,planMode,success,merged,error,text" "$code" "settings.ts YOU_INKS" || return 1
+    assert_eq "$code" "$(jq -r '.userConfig.youInk.options | join(",")' "$manifest")" "the manifest's options are YOU_INKS, in order" || return 1
 }
 
 # Chat only is experimental: the mod's source stays here, and the installer,
@@ -117,6 +128,7 @@ test_mod_unit_tests_pass_under_the_engine_test_kit() {
 }
 
 run_test test_mod_manifest_names_the_plugin_and_its_module_and_declares_no_state
+run_test test_mod_manifest_declares_one_config_row_the_you_ink
 run_test test_mod_is_kept_out_of_the_installer
 run_test test_mod_source_never_spells_the_refused_events_or_command_run
 run_test test_mod_validate_inventories_the_one_shape

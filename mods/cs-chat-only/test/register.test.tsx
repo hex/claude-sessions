@@ -12,7 +12,7 @@ const BAND = { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 90, 
 test('register installs the command, the band press and every chat only render site, and no other hook', () => {
   const seen: { event: string; matcher: unknown }[] = []
   const record = (event: string, matcher: unknown) => { seen.push({ event, matcher: typeof matcher === 'function' ? undefined : matcher }) }
-  register(record as unknown as On)
+  register(record as unknown as On, { youInk: 'remember' })
   expect(seen.find(entry => entry.event === 'ui.press')?.matcher).toEqual({ plugin: BAND_PLUGIN, element: BAND_ELEMENT })
   expect(seen).toEqual([
     { event: 'session.start', matcher: undefined },

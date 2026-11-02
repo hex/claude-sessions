@@ -1,14 +1,14 @@
 // ABOUTME: cs-chat-only mod: while chat only is on in this session, the chat shows your messages and Claude's replies and nothing of the work between them. On by default; a session cs -vet-session refuses gets Claude Code's own drawing.
 // ABOUTME: On/off comes from cs's band key (a ui.press hook reads the file after next) or /chat-only. PAINTERS is the one table of render sites; site() is the one caller of next().
-import type { EngineInterface, On, RenderComponent, RenderElement, RenderInput } from 'claude-code'
+import type { EngineInterface, On, PluginOptions, RenderComponent, RenderElement, RenderInput } from 'claude-code'
 
 import { applyChatOnly, chatOnlyRecord, newLoad, readChatOnly, writeChatOnly } from './session'
 import type { Load } from './session'
-import { parseChatOnlyArgs } from './settings'
+import { parseChatOnlyArgs, youInkOf } from './settings'
 import type { ChatOnlyCommand } from './settings'
 import { decideCommandOutput, decideUser, sessionModes } from './verdict'
 import { INKS, NOTHING, drawCommandOutput, drawError, drawReply, drawUser } from './draw'
-import type { Pen } from './draw'
+import type { Inks, Pen } from './draw'
 import { commands, errorLine, replies } from './words'
 
 type $ = EngineInterface
@@ -19,10 +19,17 @@ type $ = EngineInterface
 // A per-session toggle is not a reload: it is a file this load reads.
 let load: Load = newLoad()
 
-/** No install switch: register() always registers the one shape, and each render hook returns the engine's drawing while chat only is off in this session. */
-export function register(on: On) {
+/**
+ * No install switch: register() always registers the one shape, and each render
+ * hook returns the engine's drawing while chat only is off in this session.
+ * `options` carries only the you ink (the /config row cs-chat-only.youInk).
+ * Claude Code reloads the mod when it changes and calls register() again with
+ * the new value; the hooks close over each call's inks.
+ */
+export function register(on: On, options: PluginOptions) {
+  const ink: Inks = { ...INKS, you: youInkOf(options) }
   load = newLoad()
-  registerChatOnly(on)
+  registerChatOnly(on, ink)
 }
 
 /**
@@ -75,7 +82,7 @@ async function performNow($: $, cmd: ChatOnlyCommand): Promise<string> {
  * stream. Every hook is registered whatever this session's switch says; the
  * switch decides what they draw, never what is registered.
  */
-function registerChatOnly(on: On) {
+function registerChatOnly(on: On, ink: Inks) {
   // Commands do not survive a reload (spike Q2, measured): every load registers it.
   // cs's band shows the chat only key only while $.command.list() lists
   // /chat-only from plugin cs-chat-only, reads it when the band is evaluated
@@ -118,7 +125,7 @@ function registerChatOnly(on: On) {
     return result
   })
 
-  sites(on, PAINTERS)
+  sites(on, PAINTERS, ink)
 }
 
 // ---------------------------------------------------------------------------
@@ -209,14 +216,14 @@ export const PAINTERS = {
  *     0.15-0.44 s).
  *   - a throw draws the engine's component (IDX:4102); next has already run.
  */
-async function site<C extends Hooked>($: $, e: RenderInput<C>, next: (e: RenderInput<C>) => Promise<RenderElement>, paint: Painter<C>): Promise<RenderElement> {
+async function site<C extends Hooked>($: $, e: RenderInput<C>, next: (e: RenderInput<C>) => Promise<RenderElement>, paint: Painter<C>, ink: Inks): Promise<RenderElement> {
   let drawn: Promise<RenderElement> | undefined
   const engine = (props?: Props<C>) => drawn ??= next(props ? { ...e, props: { ...e.props, ...props } } : e)
   try {
     if ('isExpanded' in e.props && e.props.isExpanded) return await engine()
     const on = load.on ?? await chatOnlyRecord(load, $)
     if (!on) return await engine()
-    const pen: Pen = { el: $.ui.resolve(e), ink: INKS, pad: e.surface === 'terminal' ? 2 : 0 }
+    const pen: Pen = { el: $.ui.resolve(e), ink, pad: e.surface === 'terminal' ? 2 : 0 }
     const decision = paint(e, pen)
     switch (decision.kind) {
       case 'engine': return await engine()
@@ -230,15 +237,15 @@ async function site<C extends Hooked>($: $, e: RenderInput<C>, next: (e: RenderI
   }
 }
 
-/** Installs every typed table entry through site(), with literal matchers for the engine's scan. */
-function sites(on: On, table: PainterTable): void {
-  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => { return site<'UserMessage'>($, e, next, table.UserMessage) })
-  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => { return site<'AssistantMessage'>($, e, next, table.AssistantMessage) })
-  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => { return site<'ToolUse'>($, e, next, table.ToolUse) })
-  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => { return site<'ToolGroup'>($, e, next, table.ToolGroup) })
-  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => { return site<'ToolResult'>($, e, next, table.ToolResult) })
-  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => { return site<'ToolProgress'>($, e, next, table.ToolProgress) })
-  on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => { return site<'TurnDuration'>($, e, next, table.TurnDuration) })
-  on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => { return site<'CommandOutput'>($, e, next, table.CommandOutput) })
-  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => { return site<'SessionMode'>($, e, next, table.SessionMode) })
+/** Installs every typed table entry through site(), with literal matchers for the engine's scan and this load's inks. */
+function sites(on: On, table: PainterTable, ink: Inks): void {
+  on('ui.render', { component: 'UserMessage' }, async ($, e, next) => { return site<'UserMessage'>($, e, next, table.UserMessage, ink) })
+  on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => { return site<'AssistantMessage'>($, e, next, table.AssistantMessage, ink) })
+  on('ui.render', { component: 'ToolUse' }, async ($, e, next) => { return site<'ToolUse'>($, e, next, table.ToolUse, ink) })
+  on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => { return site<'ToolGroup'>($, e, next, table.ToolGroup, ink) })
+  on('ui.render', { component: 'ToolResult' }, async ($, e, next) => { return site<'ToolResult'>($, e, next, table.ToolResult, ink) })
+  on('ui.render', { component: 'ToolProgress' }, async ($, e, next) => { return site<'ToolProgress'>($, e, next, table.ToolProgress, ink) })
+  on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => { return site<'TurnDuration'>($, e, next, table.TurnDuration, ink) })
+  on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => { return site<'CommandOutput'>($, e, next, table.CommandOutput, ink) })
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => { return site<'SessionMode'>($, e, next, table.SessionMode, ink) })
 }

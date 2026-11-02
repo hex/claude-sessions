@@ -1,5 +1,6 @@
-// ABOUTME: cs-chat-only's switch: the per-session file .cs/local/chat-only (cs's band writes it too), what its text means, and the /chat-only grammar.
+// ABOUTME: cs-chat-only's switch: the per-session file .cs/local/chat-only (cs's band writes it too), what its text means, and the /chat-only grammar; and its one /config row, the you ink.
 // ABOUTME: Pure. Chat only is on by default: no file reads on, `on\n` on, `off\n` off, and any other text off with its problem named.
+import type { PluginOptions, ThemeKey } from 'claude-code'
 
 /**
  * The per-session truth, shared with cs's band. Relative to
@@ -71,4 +72,27 @@ export function parseChatOnlyArgs(args: string): ChatOnlyCommand {
   if (word === 'on' || word === 'off') return { kind: 'switch', on: word === 'on' }
   if (word === 'status') return { kind: 'status' }
   return { kind: 'usage' }
+}
+
+/**
+ * The /config row `cs-chat-only.youInk`, the manifest's one userConfig field:
+ * the theme key your lines draw in, remember by default. Each key passes 4.5:1
+ * on the light and dark themes' backgrounds. KEEP IN SYNC with the manifest's
+ * `options`; tests/test_mod_chat_only.sh compares the two.
+ */
+export const YOU_INK_OPTION = 'youInk'
+export const YOU_INKS = ['remember', 'planMode', 'success', 'merged', 'error', 'text'] as const satisfies readonly ThemeKey[]
+export type YouInk = typeof YOU_INKS[number]
+
+/**
+ * The you ink register's options name. Claude Code holds a stored value to
+ * the manifest's options before the mod loads (one outside them reads as the
+ * default, and Claude Code says so), so a value YOU_INKS lacks means the
+ * manifest and YOU_INKS differ: it throws, naming the value.
+ */
+export function youInkOf(options: PluginOptions): YouInk {
+  const value = options[YOU_INK_OPTION]
+  const ink = YOU_INKS.find(key => key === value)
+  if (ink === undefined) throw new Error(`cs-chat-only option ${YOU_INK_OPTION} is ${JSON.stringify(value)}, not one of ${YOU_INKS.join(', ')}: the manifest's options and settings.YOU_INKS differ`)
+  return ink
 }

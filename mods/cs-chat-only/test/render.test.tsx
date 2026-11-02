@@ -2,6 +2,7 @@
 // ABOUTME: Test hooks supply the session's switch and retain an observable engine drawing beneath chat only.
 import { expect, test } from 'claude-code/testing'
 import type { On, PromptOrigin } from 'claude-code'
+import { YOU_INKS } from '../hooks/settings'
 
 /** A cs session whose chat only file says on and which cs trusts. */
 function session(on: On) {
@@ -78,6 +79,32 @@ test('UserMessage draws your text in the you ink, and a slash command with its n
   expect([args?.text, args?.props.dimColor]).toEqual(['status now', true])
   await plain.unmount()
   await command.unmount()
+})
+
+// The /config row cs-chat-only.youInk names the you ink; the tests above load
+// with no value set, so they draw the manifest's default, remember.
+for (const ink of YOU_INKS) {
+  test(`with the you ink set to ${ink}, UserMessage draws the bold ❯, your text and a slash command's name in ${ink}`, { options: { youInk: ink } }, async ($, on) => {
+    session(on)
+    on('ui.render', { component: 'UserMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine prompt' }))
+    const plain = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', requestId: 'plain', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
+    const command = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', requestId: 'command', props: { text: '/chat-only status now', origin: { kind: 'composer' }, isExpanded: false } })
+    const mark = await plain.find({ type: 'Text', text: '❯' })
+    const text = await plain.find({ type: 'Text', text: 'Read the notes' })
+    const name = await command.find({ type: 'Text', text: '/chat-only' })
+    const args = await command.find({ type: 'Text', text: 'status now' })
+    expect([mark?.props.color, mark?.props.bold, text?.props.color, name?.props.color, args?.props.color, args?.props.dimColor]).toEqual([ink, true, ink, ink, undefined, true])
+    await plain.unmount()
+    await command.unmount()
+  })
+}
+
+test('a stored you ink outside the row\'s options draws in remember: Claude Code reads it as the default before the mod loads', { options: { youInk: 'chartreuse' } }, async ($, on) => {
+  session(on)
+  on('ui.render', { component: 'UserMessage' }, ($, e) => $.ui.resolve(e).Text({ children: 'engine prompt' }))
+  const row = await $.ui.mount({ plugin: 'cs-chat-only', surface: 'terminal', component: 'UserMessage', props: { text: 'Read the notes', origin: { kind: 'composer' }, isExpanded: false } })
+  expect([(await row.find({ type: 'Text', text: '❯' }))?.props.color, (await row.find({ type: 'Text', text: 'Read the notes' }))?.props.color]).toEqual(['remember', 'remember'])
+  await row.unmount()
 })
 
 test('an expanded row (ctrl+o, --verbose) keeps the engine drawing', async ($, on) => {
