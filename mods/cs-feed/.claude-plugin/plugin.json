@@ -1,7 +1,0 @@
-{
-  "name": "cs-feed",
-  "version": "0.1.0",
-  "types": "./hooks/state.d.ts",
-  "description": "Restyles the chat: your messages, Claude's replies, and one line per turn for the work. Off in every session until you turn it on there: the band's feed key (ctrl+x 3) or /feed on.",
-  "author": { "name": "cs" }
-}

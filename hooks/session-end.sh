@@ -211,7 +211,7 @@ fi
 
 # A feature whose retire /finish staged in the base: the base's Stop hook runs
 # it once this lock is gone, and a base idle at its prompt has no Stop coming,
-# so this end tells it by mail, which wakes an idle lead (narrative-reminder.sh,
+# so this end tells it by mail, which wakes an idle lead (stop-blocks.sh,
 # the mail wake). Only a real end of the lead's conversation: a /clear or
 # /resume keeps the lock, and the retire would only re-stage. The stage is
 # looked for under the base's directory in the sessions root, where every

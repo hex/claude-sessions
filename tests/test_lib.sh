@@ -39,6 +39,11 @@ unset CS_CLAUDE_DIR CLAUDE_ENV_FILE 2>/dev/null || true
 # launch takes the lead's claim; inherited from a lead's launch, it would turn
 # the claim on for a test that models a launch without it.
 unset CLAUDE_PID CS_LEAD_PID CS_LEAD_CLAIM 2>/dev/null || true
+# stop-notices.sh waits for stop-blocks.sh's verdict on the same Stop
+# before it speaks, up to CS_STOP_VERDICT_WAIT seconds. A suite runs the two
+# hooks one at a time, so the verdict never comes and every lead Stop would
+# pay the whole wait; the handshake tests set the wait themselves.
+export CS_STOP_VERDICT_WAIT=0
 
 # --- State ---
 TESTS_RUN=0
@@ -602,6 +607,21 @@ assert_output_not_contains() {
         echo "  FAIL: $msg"
         return 1
     fi
+}
+
+# The text of the one notice stop-notices.sh printed: its output must be exactly
+# one {"hookSpecificOutput":{"hookEventName":"Stop","additionalContext":<text>}}
+# and nothing else. Any other output, a block or approve decision among it,
+# prints "not a notice" alone, so neither an exact nor a contains assert on the
+# text can pass on it; the output itself goes to stderr for the failure log.
+stop_notice_text() {  # hook output
+    jq -sre 'if length == 1 and (.[0] | type) == "object"
+                and (.[0] | keys) == ["hookSpecificOutput"]
+                and (.[0].hookSpecificOutput | keys) == ["additionalContext", "hookEventName"]
+                and .[0].hookSpecificOutput.hookEventName == "Stop"
+                and (.[0].hookSpecificOutput.additionalContext | type) == "string"
+             then .[0].hookSpecificOutput.additionalContext else error end' <<< "$1" 2>/dev/null \
+        || { printf 'not a notice'; printf '    hook output: %s\n' "$1" >&2; }
 }
 
 # --- Terminal Helpers ---

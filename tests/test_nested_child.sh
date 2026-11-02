@@ -18,6 +18,7 @@ _nested_setup() {
     mkdir -p "$CLAUDE_SESSION_META_DIR/memory" "$CLAUDE_SESSION_META_DIR/local"
     # A narrative older than the reminder's cooldown, so the lead WOULD be
     # reminded: that is what makes the child's silence a measurement.
+    printf 'alice\n' > "$CLAUDE_SESSION_META_DIR/local/identity"
     printf '# narrative\n' > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     touch -t 202601010000 "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     unset CS_RESOLVED_FROM 2>/dev/null || true
@@ -25,15 +26,24 @@ _nested_setup() {
 
 _stop_hook() {  # CS_LEAD_PID CLAUDE_PID
     printf '{"session_id":"s","hook_event_name":"Stop","stop_hook_active":false}' \
-        | CS_RESOLVED_FROM=env CS_LEAD_PID="$1" CLAUDE_PID="$2" bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null
+        | CS_RESOLVED_FROM=env CS_LEAD_PID="$1" CLAUDE_PID="$2" bash "$HOOKS_DIR/stop-blocks.sh" 2>/dev/null
+}
+
+# The same Stop, handed to the hook that carries the narrative reminder. No
+# plugin record, so the lead's reminder carries no advisor note.
+_stop_notices() {  # CS_LEAD_PID CLAUDE_PID
+    printf '{"session_id":"s","hook_event_name":"Stop","stop_hook_active":false}' \
+        | CS_RESOLVED_FROM=env CS_LEAD_PID="$1" CLAUDE_PID="$2" CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" \
+            bash "$HOOKS_DIR/stop-notices.sh" 2>/dev/null
 }
 
 # Positive control: the lead is reminded, so the fixture reaches the block.
 test_the_lead_gets_the_narrative_reminder() {
     _nested_setup
     local out
-    out=$(_stop_hook "$$" "$$")
-    assert_output_contains "$out" '"decision":"block"' "the lead is reminded on a stale narrative" || return 1
+    out=$(_stop_notices "$$" "$$")
+    assert_output_contains "$(stop_notice_text "$out")" "^Narrative check\. .* Yours is $CLAUDE_SESSION_META_DIR/memory/narrative\.alice\.md\. " \
+        "the lead is reminded on a stale narrative, as additionalContext" || return 1
 }
 
 # A `claude -p` the lead's Bash tool ran inherits the contract; it is not the
@@ -44,9 +54,9 @@ test_a_nested_child_is_not_reminded() {
     sleep 300 &
     local lead=$!
     local out
-    out=$(_stop_hook "$lead" "$$")
+    out=$(_stop_notices "$lead" "$$")
     kill "$lead" 2>/dev/null
-    assert_eq '{"decision": "approve"}' "$out" "a nested child's Stop passes silently" || return 1
+    assert_eq '' "$out" "a nested child's Stop prints nothing" || return 1
     assert_not_exists "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
         "the child must not spend the lead's reminder cooldown" || return 1
 }
@@ -503,7 +513,7 @@ test_a_claim_that_is_a_link_or_a_directory_names_no_lead() {
             | CS_RESOLVED_FROM=env CS_LEAD_PID="$launch" CLAUDE_PID="$1" CS_NO_ROTATION_WAKE=1 CS_NO_ITERM2=1 \
                 bash "$HOOKS_DIR/session-start.sh" >/dev/null 2>>"$3"
         printf '{"session_id":"%s","hook_event_name":"Stop","stop_hook_active":false}' "$2" \
-            | CS_RESOLVED_FROM=env CS_LEAD_PID="$launch" CLAUDE_PID="$1" bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>>"$3"
+            | CS_RESOLVED_FROM=env CS_LEAD_PID="$launch" CLAUDE_PID="$1" bash "$HOOKS_DIR/stop-blocks.sh" >/dev/null 2>>"$3"
         printf '{"session_id":"%s","reason":"other"}\n' "$2" \
             | CS_RESOLVED_FROM=env CS_LEAD_PID="$launch" CLAUDE_PID="$1" bash "$HOOKS_DIR/session-end.sh" >/dev/null 2>>"$3"
     }

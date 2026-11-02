@@ -26,6 +26,9 @@ setup() {
     export CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_DIR/.cs"
     mkdir -p "$CLAUDE_SESSION_META_DIR"/{local,memory}
     touch "$CLAUDE_SESSION_META_DIR/local/session.log"
+    # The actor the narrative reminder takes for its own, so its narrative is
+    # narrative.alice.md whatever git identity the machine has.
+    printf 'alice\n' > "$CLAUDE_SESSION_META_DIR/local/identity"
 }
 
 teardown() {
@@ -36,7 +39,7 @@ teardown() {
 }
 
 # ============================================================================
-# narrative-reminder.sh
+# stop-notices.sh — narrative reminder
 # ============================================================================
 
 _backdate() {
@@ -44,39 +47,61 @@ _backdate() {
     touch -t "$(date -v-10M '+%Y%m%d%H%M.%S' 2>/dev/null || date -d '10 minutes ago' '+%Y%m%d%H%M.%S' 2>/dev/null)" "$1" 2>/dev/null || true
 }
 
-test_narrative_reminder_approves_outside_session() {
-    local output
-    output=$(echo '{}' | CLAUDE_SESSION_NAME= bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "approve" "Should approve outside a cs session" || return 1
+# Runs stop-notices.sh on input $1 (default {}) and prints what it printed,
+# then EXIT=<status> when it did not exit 0, so an assert on the output also
+# fails for a hook that died. stop_notice_text (test_lib.sh) reads the notice.
+_notices() {  # [input]
+    local input='{}' rc=0
+    [ "$#" -eq 0 ] || input="$1"
+    printf '%s\n' "$input" | bash "$HOOKS_DIR/stop-notices.sh" || rc=$?
+    [ "$rc" = 0 ] || printf 'EXIT=%s\n' "$rc"
 }
 
-test_narrative_reminder_approves_when_recently_modified() {
-    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "approve" "Should approve when narrative recently modified" || return 1
+# The reminder for a session whose newest narrative is $1, under budget, with
+# no advisor channel installed: the whole text the model is handed.
+_reminder_for() {  # narrative path
+    printf '%s' "Narrative check. This note is carried over from your previous turn, which ended without a narrative note. Before answering the request below, record what that turn found, in your own narrative only (run \`cs -whoami\` if unsure which actor you are; never edit a teammate's narrative). Yours is $1. (1) If that turn disproved or superseded one of your entries, append a dated correction that names it; never rewrite or delete earlier sections. (2) Append what that turn found as plain dated notes: a decision and its reason, a measured fact, a failed approach, a preference the user stated. A line that only restates routine work, such as \"appended X to Y\" or \"ran the tests\", is not a finding and must not be written. If that turn found nothing worth keeping, say so in one line of your reply, write nothing in the narrative, and answer the request. Never commit narrative appends or anything else under .cs/ on your own, not even beside a project change: cs commits files under .cs/ only in the commit that creates a session and the merge /finish makes, and you commit them only when the user asks. Never push a commit that holds narrative appends unless the user asks. Uncommitted appends are safe — autosave snapshots every edit to a shadow ref."
 }
 
-test_narrative_reminder_blocks_when_stale() {
+test_stop_notices_are_silent_outside_session() {
+    # A stale narrative, so inside the session the reminder would fire.
     echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    local output
+    output=$(CLAUDE_SESSION_NAME= _notices)
+    assert_eq "" "$output" "Should print nothing outside a cs session" || return 1
+}
+
+test_narrative_reminder_is_silent_when_recently_modified() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "block" "Should block when narrative is stale" || return 1
-    assert_output_contains "$output" "narrative.md" "Reminder should point at narrative.md" || return 1
+    output=$(_notices)
+    assert_eq "" "$output" "Should print nothing when the narrative was recently modified" || return 1
+}
+
+# The reminder reaches the model as context with the next prompt, never as a
+# block: an async hook draws no stop-hook row in the chat.
+test_narrative_reminder_fires_when_stale() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$output")" \
+        "a stale narrative gets the whole reminder, as additionalContext" || return 1
 }
 
 test_narrative_reminder_tracks_per_actor() {
-    rm -f "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    printf 'alex\n' > "$CLAUDE_SESSION_META_DIR/local/identity"
     echo "# Session narrative (alex)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alex.md"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alex.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "block" "Should block on stale per-actor narrative" || return 1
-    assert_output_contains "$output" "narrative.alex.md" "Reminder should point at the per-actor narrative" || return 1
+    output=$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alex.md")" "$(stop_notice_text "$output")" \
+        "the reminder points at the per-actor narrative" || return 1
 }
 
 # Homebrew's coreutils can put GNU stat ahead of the system's on a Mac, and GNU
@@ -99,26 +124,26 @@ test_narrative_reminder_reads_mtimes_with_gnu_stat_on_a_mac() {
     mkdir -p "$shim"
     printf '#!/bin/sh\nexec "%s" "$@"\n' "$gnu" > "$shim/stat"
     chmod +x "$shim/stat"
-    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    output=$(echo '{}' | PATH="$shim:$PATH" OSTYPE=darwin24 bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_eq '{"decision": "approve"}' "$output" "a fresh narrative is left alone with GNU stat first on a Mac" || return 1
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    output=$(PATH="$shim:$PATH" OSTYPE=darwin24 _notices)
+    assert_eq "" "$output" "a fresh narrative is left alone with GNU stat first on a Mac" || return 1
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    output=$(echo '{}' | PATH="$shim:$PATH" OSTYPE=darwin24 bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" '"decision":"block"' "a stale narrative is found with GNU stat first on a Mac" || return 1
-    assert_output_contains "$output" "narrative.md" "the reminder points at the narrative" || return 1
+    output=$(PATH="$shim:$PATH" OSTYPE=darwin24 CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$output")" \
+        "a stale narrative is found with GNU stat first on a Mac" || return 1
 }
 
 test_narrative_reminder_asks_for_appended_corrections_not_rewrites() {
     echo "# Session narrative (alice)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "append a dated correction" "corrections are appended" || return 1
-    assert_output_contains "$output" "never rewrite or delete earlier sections" "earlier sections are immutable" || return 1
-    assert_output_not_contains "$output" "correct or remove them" "the in-place instruction is gone" || return 1
+    local text
+    text=$(stop_notice_text "$(_notices)")
+    assert_output_contains "$text" "append a dated correction" "corrections are appended" || return 1
+    assert_output_contains "$text" "never rewrite or delete earlier sections" "earlier sections are immutable" || return 1
+    assert_output_not_contains "$text" "correct or remove them" "the in-place instruction is gone" || return 1
 }
 
 test_narrative_reminder_flags_a_narrative_over_budget() {
@@ -127,9 +152,9 @@ test_narrative_reminder_flags_a_narrative_over_budget() {
     _backdate "$nf"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     local output
-    output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=2048 bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "narrative.alice.md is 2 KB, over the 2 KB budget" "names the file and the budget" || return 1
-    assert_output_contains "$output" "cs -narrative rotate" "points at the rotation" || return 1
+    output=$(CS_NARRATIVE_MAX_BYTES=2048 CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "$(_reminder_for "$nf") narrative.alice.md is 2 KB, over the 2 KB budget — if it is yours, run \`cs -narrative rotate\` before appending." \
+        "$(stop_notice_text "$output")" "names the file and the budget, and points at the rotation" || return 1
 }
 
 # .cs/memory is tracked, so a clone chooses a narrative's file name, and the
@@ -142,11 +167,12 @@ test_narrative_reminder_names_a_narrative_as_a_plain_name() {
     local nf="$CLAUDE_SESSION_META_DIR/memory/narrative.a$bad.md" partial="$TEST_TMPDIR/partial-hooks"
     { echo "# Session narrative"; head -c 3000 /dev/zero | tr '\0' 'x'; echo; } > "$nf"
     _backdate "$nf"
+    printf 'a%s\n' "$bad" > "$CLAUDE_SESSION_META_DIR/local/identity"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    local reason newest
-    reason=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=2048 bash "$HOOKS_DIR/narrative-reminder.sh" | jq -r '.reason')
-    newest=$(sed -n 's/.*Newest on disk is \([^ ]*\) .*/\1/p' <<< "$reason")
-    assert_eq "narrative.a$shown.md." "${newest##*/}" "the reason names the newest narrative as a plain name" || return 1
+    local reason yours
+    reason=$(stop_notice_text "$(CS_NARRATIVE_MAX_BYTES=2048 _notices)")
+    yours=$(sed -n 's/.*Yours is \([^ ]*\) .*/\1/p' <<< "$reason")
+    assert_eq "narrative.ae-1mb-e-0m.md." "${yours##*/}" "the reason names the actor's narrative by its slug, a plain name" || return 1
     assert_output_contains "$reason" " narrative\.a$shown\.md is 2 KB, over the 2 KB budget" \
         "the reason names the narrative over budget as a plain name" || return 1
     assert_no_escape_bytes "$reason" "no escape byte reaches Claude" || return 1
@@ -154,9 +180,9 @@ test_narrative_reminder_names_a_narrative_as_a_plain_name() {
     cp "$HOOKS_DIR"/*.sh "$partial/"
     rm "$partial/cs-shared.sh"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    reason=$(echo '{}' | bash "$partial/narrative-reminder.sh" | jq -r '.reason')
-    newest=$(sed -n 's/.*Newest on disk is \([^ ]*\) .*/\1/p' <<< "$reason")
-    assert_eq "?." "${newest##*/}" "without the library the reason withholds the name" || return 1
+    reason=$(stop_notice_text "$(echo '{}' | bash "$partial/stop-notices.sh")")
+    yours=$(sed -n 's/.*Yours is \([^ ]*\) .*/\1/p' <<< "$reason")
+    assert_eq "narrative.<actor>.md." "${yours##*/}" "without the library the reason names no actor" || return 1
     assert_no_escape_bytes "$reason" "no escape byte reaches Claude without the library" || return 1
 }
 
@@ -168,9 +194,9 @@ test_narrative_reminder_reads_a_leading_zero_budget_as_decimal() {
     _backdate "$nf"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     local output
-    output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=08 bash "$HOOKS_DIR/narrative-reminder.sh" 2>"$TEST_TMPDIR/stderr")
+    output=$(CS_NARRATIVE_MAX_BYTES=08 _notices 2>"$TEST_TMPDIR/stderr")
     assert_file_not_contains "$TEST_TMPDIR/stderr" "value too great for base" "no octal abort" || return 1
-    assert_output_contains "$output" "narrative.alice.md is 2 KB, over the 0 KB budget" "the override is decimal 8" || return 1
+    assert_output_contains "$(stop_notice_text "$output")" "narrative.alice.md is 2 KB, over the 0 KB budget" "the override is decimal 8" || return 1
 }
 
 test_narrative_reminder_is_silent_about_budget_when_under() {
@@ -179,9 +205,9 @@ test_narrative_reminder_is_silent_about_budget_when_under() {
     _backdate "$nf"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "block" "the reminder itself still fires" || return 1
-    assert_output_not_contains "$output" "over the" "no budget line under budget" || return 1
+    output=$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "$(_reminder_for "$nf")" "$(stop_notice_text "$output")" \
+        "the reminder fires, with no budget line under budget" || return 1
 }
 
 test_narrative_reminder_survives_an_unreadable_narrative() {
@@ -191,9 +217,10 @@ test_narrative_reminder_survives_an_unreadable_narrative() {
     chmod 000 "$nf"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    output=$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
     chmod 644 "$nf"
-    assert_output_contains "$output" "decision" "the hook still answers with JSON when a narrative cannot be read" || return 1
+    assert_eq "$(_reminder_for "$nf")" "$(stop_notice_text "$output")" \
+        "the hook still reminds, and exits 0, when a narrative cannot be read" || return 1
 }
 
 test_narrative_reminder_budget_line_covers_a_teammates_file() {
@@ -204,24 +231,24 @@ test_narrative_reminder_budget_line_covers_a_teammates_file() {
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.bob.md"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    local output
-    output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=2048 bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "narrative.bob.md is 2 KB" "names bob's file" || return 1
-    assert_output_contains "$output" "if it is yours" "leaves ownership to the reader" || return 1
+    local text
+    text=$(stop_notice_text "$(CS_NARRATIVE_MAX_BYTES=2048 _notices)")
+    assert_output_contains "$text" " narrative\.bob\.md is 2 KB, over the 2 KB budget — if it is yours, run" \
+        "names bob's file and leaves ownership to the reader" || return 1
 }
 
 test_stop_raises_attention_marker() {
     # Turn end raises the machine-local attention flag the statusline shows
     # until the user next interacts. Lives in .cs/local/ (never git-synced).
     rm -rf "$CLAUDE_SESSION_META_DIR/local"
-    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || true
+    echo '{}' | bash "$HOOKS_DIR/stop-blocks.sh" >/dev/null 2>&1 || true
     assert_file_exists "$CLAUDE_SESSION_META_DIR/local/attention" \
         "Stop hook should raise the attention marker" || return 1
 }
 
 test_stop_no_attention_marker_for_subagents() {
     rm -rf "$CLAUDE_SESSION_META_DIR/local"
-    echo '{"agent_id":"sub-1"}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null 2>&1 || true
+    echo '{"agent_id":"sub-1"}' | bash "$HOOKS_DIR/stop-blocks.sh" >/dev/null 2>&1 || true
     assert_file_not_exists "$CLAUDE_SESSION_META_DIR/local/attention" \
         "subagent stops must not raise the attention marker" || return 1
 }
@@ -231,8 +258,8 @@ test_narrative_reminder_respects_cooldown() {
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "approve" "Fresh cooldown should suppress the reminder" || return 1
+    output=$(_notices)
+    assert_eq "" "$output" "Fresh cooldown should suppress the reminder" || return 1
 }
 
 # The stamp sits at the .cs root, where a write needs no approval, so its
@@ -241,24 +268,190 @@ test_narrative_reminder_respects_cooldown() {
 # the hook runs under set -u, which stops on an unset name before the
 # substitution is reached.
 test_narrative_reminder_reads_its_cooldown_stamp_as_data() {
-    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     printf 'PATH[$(:>%s)]' "$TEST_TMPDIR/ran-from-stamp" > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null)
+    output=$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices 2>/dev/null)
     assert_file_not_exists "$TEST_TMPDIR/ran-from-stamp" "A cooldown stamp's content must never run" || return 1
-    assert_output_contains "$output" "block" "A stamp that is not a time counts as no stamp: the reminder fires" || return 1
-    assert_output_contains "$output" "narrative.md" "Reminder should point at narrative.md" || return 1
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$output")" \
+        "A stamp that is not a time counts as no stamp: the reminder fires" || return 1
 }
 
-test_narrative_reminder_approves_for_subagent() {
+# Freshness is the actor's own narrative: a teammate writing theirs says
+# nothing about whether this claude kept its notes.
+test_narrative_reminder_reads_freshness_from_the_actors_own_narrative() {
+    printf 'alice\n' > "$CLAUDE_SESSION_META_DIR/local/identity"
+    local own="$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md" output
+    echo "# Session narrative (alice)" > "$own"
+    _backdate "$own"
+    echo "# Session narrative (bob)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.bob.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    output=$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "$(_reminder_for "$own")" "$(stop_notice_text "$output")" \
+        "a teammate's fresh narrative leaves the actor's stale one reminded" || return 1
+    touch "$own"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    output=$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "" "$output" "the actor's own fresh narrative silences the reminder" || return 1
+}
+
+# No narrative on disk is a narrative never written: the reminder names the
+# file the actor's notes belong in.
+test_narrative_reminder_fires_with_no_narrative_at_all() {
+    printf 'alice\n' > "$CLAUDE_SESSION_META_DIR/local/identity"
+    rm -f "$CLAUDE_SESSION_META_DIR"/memory/narrative*.md "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local output
+    output=$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$output")" \
+        "with no narrative at all the reminder goes out" || return 1
+}
+
+test_stop_notices_are_silent_for_a_subagent() {
     echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     local output
-    output=$(echo '{"agent_id":"sub-1"}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "approve" "Subagent should always approve" || return 1
-    assert_output_not_contains "$output" "block" "Subagent should never be blocked" || return 1
+    output=$(_notices '{"agent_id":"sub-1"}')
+    assert_eq "" "$output" "A subagent's Stop prints nothing" || return 1
+    assert_file_not_exists "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+        "A subagent's Stop spends no cooldown" || return 1
+}
+
+# The hook is registered for Stop alone; any other event that reaches it is
+# answered with nothing, however stale the narrative.
+test_stop_notices_are_silent_on_any_other_event() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    local event output
+    for event in FileChanged CwdChanged SessionStart UserPromptSubmit SubagentStop; do
+        rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+        output=$(_notices "{\"hook_event_name\":\"$event\"}")
+        assert_eq "" "$output" "$event prints nothing" || return 1
+    done
+    assert_file_not_exists "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+        "no other event spends the cooldown" || return 1
+    output=$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices '{"hook_event_name":"Stop"}')
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$output")" \
+        "the same fixture on Stop reminds" || return 1
+}
+
+# A walk-away run owns the turn loop: stop-blocks.sh hands out the next
+# task as a block, so the lead's Stop with a task queued and the queue armed
+# or draining gets no notice. An idle, absent or unknown state, an empty queue
+# whatever its state, and a teammate's Stop are not gated.
+test_stop_notices_stand_down_while_the_queue_runs() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    local q="$CLAUDE_SESSION_META_DIR/local/queue" state output expected
+    expected=$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")
+    mkdir -p "$q"
+    printf 'write the docs\n' > "$q/0001-task"
+    for state in armed draining; do
+        printf '%s\n' "$state" > "$CLAUDE_SESSION_META_DIR/local/queue.state"
+        rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+        output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+        assert_eq "" "$output" "a queue $state with a task queued gets no notice" || return 1
+        assert_file_not_exists "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+            "a queue $state spends no cooldown" || return 1
+    done
+    for state in idle absent banana; do
+        if [ "$state" = absent ]; then
+            rm -f "$CLAUDE_SESSION_META_DIR/local/queue.state"
+        else
+            printf '%s\n' "$state" > "$CLAUDE_SESSION_META_DIR/local/queue.state"
+        fi
+        rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+        output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+        assert_eq "$expected" "$(stop_notice_text "$output")" "a queue.state of $state lets the reminder through" || return 1
+    done
+    printf 'armed\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    output=$(env -u CS_LEAD_PID -u CLAUDE_PID CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" \
+        bash "$HOOKS_DIR/stop-notices.sh" <<< '{}')
+    assert_eq "$expected" "$(stop_notice_text "$output")" "a teammate's Stop, which drains nothing, is not gated" || return 1
+    rm -f "$q/0001-task"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "$expected" "$(stop_notice_text "$output")" "an armed queue with no task in it gates nothing" || return 1
+}
+
+# stop-blocks.sh and stop-notices.sh each carry _num_or, since a hook
+# runs on a partial install without the shared library. The two must read a
+# number the same way.
+test_stop_hooks_read_numbers_alike() {
+    local a b
+    a=$(sed -n '/^_num_or() {/,/^}/p' "$HOOKS_DIR/stop-blocks.sh")
+    b=$(sed -n '/^_num_or() {/,/^}/p' "$HOOKS_DIR/stop-notices.sh")
+    [ -n "$a" ] || { echo "  FAIL: no _num_or in stop-blocks.sh"; return 1; }
+    assert_eq "$a" "$b" "the two Stop hooks hold one _num_or" || return 1
+}
+
+# Each hook carries _cs_parses because it runs before any library is sourced.
+test_stop_hooks_parse_libraries_alike() {
+    local a b
+    a=$(sed -n '/^_cs_parses() {/,/^}/p' "$HOOKS_DIR/stop-blocks.sh")
+    b=$(sed -n '/^_cs_parses() {/,/^}/p' "$HOOKS_DIR/stop-notices.sh")
+    [ -n "$a" ] || { echo "  FAIL: no _cs_parses in stop-blocks.sh"; return 1; }
+    assert_eq "$a" "$b" "the two Stop hooks hold one _cs_parses" || return 1
+}
+
+# A library ending in a syntax error, whose line ahead of it leaves a mark when
+# the file is sourced: the mark says the parse check let the file through.
+_library_that_marks_when_sourced() {  # file, mark
+    printf ': > "%s"\nif\n' "$2" > "$1"
+}
+
+# bash -n is memoized per file version. The memo holds while the file is older;
+# a file written since is read again, and a file that fails records nothing.
+test_stop_hooks_parse_a_library_again_once_it_changes() {
+    local hook dir lib mark home old=202001010000
+    for hook in stop-blocks.sh stop-notices.sh; do
+        dir="$TEST_TMPDIR/parse-$hook" lib="$dir/cs-resolve.sh" mark="$dir/sourced" home="$dir/home"
+        mkdir -p "$home"
+        cp "$HOOKS_DIR/$hook" "$HOOKS_DIR/cs-shared.sh" "$dir/"
+
+        _library_that_marks_when_sourced "$lib" "$mark"
+        touch -t "$old" "$lib"
+        echo '{}' | HOME="$home" bash "$dir/$hook" >/dev/null 2>&1 || true
+        echo '{}' | HOME="$home" bash "$dir/$hook" >/dev/null 2>&1 || true
+        assert_file_not_exists "$mark" "$hook: a library that fails the check is not sourced, and the failure records no memo" || return 1
+
+        printf ': sound\n' > "$lib"
+        touch -t "$old" "$lib"
+        echo '{}' | HOME="$home" bash "$dir/$hook" >/dev/null 2>&1 || true
+        _library_that_marks_when_sourced "$lib" "$mark"
+        touch -t "$old" "$lib"
+        echo '{}' | HOME="$home" bash "$dir/$hook" >/dev/null 2>&1 || true
+        assert_file_exists "$mark" "$hook: a file older than its memo is not parsed again" || return 1
+
+        rm -f "$mark"
+        touch "$lib"
+        echo '{}' | HOME="$home" bash "$dir/$hook" >/dev/null 2>&1 || true
+        assert_file_not_exists "$mark" "$hook: a file written since its memo is parsed again" || return 1
+    done
+}
+
+test_path_helpers_print_what_dirname_and_basename_print() {
+    local row path dir base
+    for row in 'a|.|a' '/a|/|a' 'a/b|a|b' '/a/b|/a|b' 'a/b/|a|b' 'a//b|a|b' '/|/|/' '-x|.|-x' './-x|.|-x' '/a/b/c.d|/a/b|c.d'; do
+        path=${row%%|*} base=${row##*|} dir=${row#*|} dir=${dir%|*}
+        assert_eq "$dir" "$(. "$HOOKS_DIR/cs-shared.sh"; _cs_path_dir "$path")" "directory of $path" || return 1
+        assert_eq "$base" "$(. "$HOOKS_DIR/cs-shared.sh"; _cs_path_base "$path")" "name of $path" || return 1
+    done
+}
+
+# The key the verdict handshake turns on is cs-shared.sh's cs_stop_key, and
+# each hook carries a copy for a partial install. A copy that drifts keys the
+# two hooks apart, and every verdict is then nobody's.
+test_stop_hooks_key_a_stop_alike() {
+    local lib a b
+    lib=$(sed -n '/^cs_stop_key() {/,/^}/p' "$HOOKS_DIR/cs-shared.sh")
+    a=$(sed -n '/^cs_stop_key() {/,/^}/p' "$HOOKS_DIR/stop-blocks.sh")
+    b=$(sed -n '/^cs_stop_key() {/,/^}/p' "$HOOKS_DIR/stop-notices.sh")
+    [ -n "$lib" ] || { echo "  FAIL: no cs_stop_key in cs-shared.sh"; return 1; }
+    assert_eq "$lib" "$a" "stop-blocks.sh's copy is the library's" || return 1
+    assert_eq "$lib" "$b" "stop-notices.sh's copy is the library's" || return 1
 }
 
 # ============================================================================
@@ -3672,9 +3865,9 @@ echo ""
 # Discoveries archiver
 
 # Session auto-approve
-run_test test_narrative_reminder_approves_outside_session
-run_test test_narrative_reminder_approves_when_recently_modified
-run_test test_narrative_reminder_blocks_when_stale
+run_test test_stop_notices_are_silent_outside_session
+run_test test_narrative_reminder_is_silent_when_recently_modified
+run_test test_narrative_reminder_fires_when_stale
 run_test test_narrative_reminder_tracks_per_actor
 run_test test_narrative_reminder_reads_mtimes_with_gnu_stat_on_a_mac
 run_test test_narrative_reminder_asks_for_appended_corrections_not_rewrites
@@ -3691,9 +3884,10 @@ test_narrative_reminder_skips_the_budget_check_without_the_shared_library() {
     cp "$HOOKS_DIR"/*.sh "$partial/"
     rm "$partial/cs-shared.sh"
     local output
-    output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=2048 bash "$partial/narrative-reminder.sh")
-    assert_output_contains "$output" "Narrative check" "the reminder itself still fires" || return 1
-    assert_output_not_contains "$output" "over the" "no budget warning without the budget" || return 1
+    output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=2048 CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" bash "$partial/stop-notices.sh")
+    # Without the library the actor is unknown, and the narrative is named by its pattern.
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.<actor>.md")" "$(stop_notice_text "$output")" \
+        "the reminder itself still fires, with no budget warning without the budget" || return 1
 }
 
 # The tracked-files notice is one hook run's answer. A value that came in with
@@ -3707,14 +3901,21 @@ test_stop_ignores_an_inherited_tracked_files_notice_without_the_shared_library()
     mkdir -p "$partial"
     cp "$HOOKS_DIR"/*.sh "$partial/"
     rm "$partial/cs-shared.sh"
-    local plain inherited
+    local hook plain inherited
+    for hook in stop-blocks.sh stop-notices.sh; do
+        rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+        plain=$(echo '{}' | CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" bash "$partial/$hook")
+        rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+        inherited=$(echo '{}' | CS_TRACKED_FILES_NOTICE="x is tracked in git" CS_TRACKED_FILES_META="$CLAUDE_SESSION_META_DIR" \
+            CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" bash "$partial/$hook")
+        assert_eq "$plain" "$inherited" "$hook: an inherited notice changes nothing" || return 1
+    done
+    assert_eq '{"decision": "approve"}' "$(echo '{}' | bash "$partial/stop-blocks.sh")" \
+        "stop-blocks.sh approves the stop" || return 1
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    plain=$(echo '{}' | bash "$partial/narrative-reminder.sh")
-    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
-    inherited=$(echo '{}' | CS_TRACKED_FILES_NOTICE="x is tracked in git" CS_TRACKED_FILES_META="$CLAUDE_SESSION_META_DIR" \
-        bash "$partial/narrative-reminder.sh")
-    assert_output_contains "$plain" "Narrative check" "the reminder fires" || return 1
-    assert_eq "$plain" "$inherited" "an inherited notice changes nothing" || return 1
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.<actor>.md")" \
+        "$(stop_notice_text "$(echo '{}' | CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" bash "$partial/stop-notices.sh")")" \
+        "stop-notices.sh reminds" || return 1
 }
 
 run_test test_narrative_reminder_flags_a_narrative_over_budget
@@ -3729,9 +3930,9 @@ test_narrative_reminder_reads_a_double_zero_budget_as_the_default() {
     _backdate "$nf"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     local output
-    output=$(echo '{}' | CS_NARRATIVE_MAX_BYTES=00 bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "Narrative check" "the reminder itself still fires" || return 1
-    assert_output_not_contains "$output" "over the" "00 is the default budget, and 3 KB is under it" || return 1
+    output=$(CS_NARRATIVE_MAX_BYTES=00 CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "$(_reminder_for "$nf")" "$(stop_notice_text "$output")" \
+        "00 is the default budget, and 3 KB is under it: the reminder carries no budget line" || return 1
 }
 
 run_test test_narrative_reminder_skips_the_budget_check_without_the_shared_library
@@ -3742,9 +3943,494 @@ run_test test_narrative_reminder_survives_an_unreadable_narrative
 run_test test_narrative_reminder_budget_line_covers_a_teammates_file
 run_test test_narrative_reminder_respects_cooldown
 run_test test_narrative_reminder_reads_its_cooldown_stamp_as_data
+run_test test_narrative_reminder_reads_freshness_from_the_actors_own_narrative
+run_test test_narrative_reminder_fires_with_no_narrative_at_all
 run_test test_stop_raises_attention_marker
 run_test test_stop_no_attention_marker_for_subagents
-run_test test_narrative_reminder_approves_for_subagent
+run_test test_stop_notices_are_silent_for_a_subagent
+run_test test_stop_notices_are_silent_on_any_other_event
+run_test test_stop_notices_stand_down_while_the_queue_runs
+run_test test_stop_hooks_read_numbers_alike
+run_test test_stop_hooks_parse_libraries_alike
+run_test test_stop_hooks_parse_a_library_again_once_it_changes
+run_test test_path_helpers_print_what_dirname_and_basename_print
+run_test test_stop_hooks_key_a_stop_alike
+
+# --- The verdict handshake between the two Stop hooks -----------------------
+# stop-blocks.sh posts its verdict for the Stop to .cs/local/stop-verdict
+# ("<key> <word> <epoch>", the key cs_stop_key's: the cksum of the Stop input,
+# and after a dot the byte size of the transcript it names, when it names one
+# that can be read), and stop-notices.sh stands down on a block. The input
+# here is the '{}' _notices feeds the hook, which names no transcript.
+_stop_key() {  # input, [transcript size]
+    printf '%s%s' "$(printf '%s' "$1" | cksum | cut -d' ' -f1)" "${2:+.$2}"
+}
+_post_verdict() {  # word, epoch, [key]
+    printf '%s %s %s\n' "${3:-$(_stop_key '{}')}" "$1" "$2" > "$CLAUDE_SESSION_META_DIR/local/stop-verdict"
+}
+
+test_stop_notices_stand_down_on_the_sync_hooks_block() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    local output expected now
+    expected=$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")
+    now=$(date +%s)
+    _post_verdict block "$now"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "" "$output" "a block verdict for this Stop silences the notices" || return 1
+    assert_file_not_exists "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
+        "a silenced run spends no cooldown" || return 1
+    _post_verdict approve "$now"
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "$expected" "$(stop_notice_text "$output")" "an approve verdict lets the reminder through" || return 1
+    # A block for another Stop's input is not this Stop's.
+    _post_verdict block "$now" "$(_stop_key '{"session_id":"other"}')"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)
+    assert_eq "$expected" "$(stop_notice_text "$output")" "a verdict keyed to another input is ignored" || return 1
+    # Two Stops on one input (two turns ending on the same final message) are
+    # told apart by the transcript's size: a block posted for the earlier Stop
+    # is not the later one's, whose transcript has grown by the turn between.
+    local t="$TEST_TMPDIR/stop-key-transcript.jsonl" input
+    printf '{"type":"assistant"}\n' > "$t"
+    input=$(jq -nc --arg t "$t" '{transcript_path: $t}')
+    _post_verdict block "$now" "$(_stop_key "$input" "$(wc -c < "$t" | tr -d ' ')")"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$input")
+    assert_eq "" "$output" "a block keyed to this transcript size silences the notices" || return 1
+    printf '{"type":"assistant"}\n' >> "$t"
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$input")
+    assert_eq "$expected" "$(stop_notice_text "$output")" "the same block is not the next Stop's, whose transcript grew" || return 1
+    # A transcript that cannot be read leaves the cksum alone as the key, in
+    # both hooks: the sync hook's verdict for such a Stop still reaches the
+    # async one.
+    input=$(jq -nc --arg t "$TEST_TMPDIR/no-such-transcript.jsonl" '{transcript_path: $t}')
+    printf '%s' "$input" | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh" > /dev/null
+    assert_eq "$(_stop_key "$input") approve" "$(cut -d' ' -f1,2 "$CLAUDE_SESSION_META_DIR/local/stop-verdict")" "an unreadable transcript keys on the cksum alone" || return 1
+    _post_verdict block "$now" "$(_stop_key "$input")"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$input")
+    assert_eq "" "$output" "the async hook reads that key too" || return 1
+    # A teammate's Stop gets no block of its own, so it reads no verdict.
+    _post_verdict block "$now"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    output=$(env -u CS_LEAD_PID -u CLAUDE_PID CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" \
+        bash "$HOOKS_DIR/stop-notices.sh" <<< '{}')
+    assert_eq "$expected" "$(stop_notice_text "$output")" "a teammate's Stop ignores the lead's verdict" || return 1
+}
+
+# The sync hook posts pending as soon as it knows the Stop is the lead's and
+# its verdict at exit, through every block it can answer with. The pending
+# line is read while the hook still runs: date is shimmed so that its second
+# call, the one the exit trap's verdict makes (the first is the pending
+# post's), waits for a release file.
+test_sync_hook_posts_pending_then_its_verdict() {
+    local v="$CLAUDE_SESSION_META_DIR/local/stop-verdict" q="$CLAUDE_SESSION_META_DIR/local/queue" key out
+    local shim="$TEST_TMPDIR/datebin" count="$TEST_TMPDIR/date-calls" go="$TEST_TMPDIR/date-go" pid i
+    key=$(_stop_key '{}')
+    mkdir -p "$shim"
+    printf '#!/bin/sh\nn=$(cat "%s" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "%s"\n[ "$n" -lt 2 ] || until [ -f "%s" ]; do sleep 0.05; done\nexec /bin/date "$@"\n' "$count" "$count" "$go" > "$shim/date"
+    chmod +x "$shim/date"
+    rm -f "$v" "$count" "$go"
+    ( echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ PATH="$shim:$PATH" bash "$HOOKS_DIR/stop-blocks.sh" > "$TEST_TMPDIR/sync-pending.out" 2>&1 ) &
+    pid=$!
+    i=0
+    until [ "$(cut -d' ' -f1,2 "$v" 2>/dev/null)" = "$key pending" ] || [ "$i" -ge 100 ]; do sleep 0.1; i=$((i + 1)); done
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "  FAIL: the sync hook exited before a pending line was read: $(cat "$v" 2>/dev/null)"; return 1
+    fi
+    assert_eq "$key pending" "$(cut -d' ' -f1,2 "$v" 2>/dev/null)" "pending is on disk while the sync hook runs" || { touch "$go"; wait "$pid" 2>/dev/null; return 1; }
+    touch "$go"
+    wait "$pid"
+    out=$(cat "$TEST_TMPDIR/sync-pending.out")
+    assert_eq "approve" "$(jq -r '.decision' <<< "$out")" "an idle Stop approves" || return 1
+    assert_eq "$key approve" "$(cut -d' ' -f1,2 "$v")" "an approve is posted with the Stop's key" || return 1
+    assert_output_contains "$(cut -d' ' -f3 "$v")" '^[0-9][0-9]*$' "the verdict carries its epoch" || return 1
+    mkdir -p "$q"
+    printf 'write the docs\n' > "$q/0001-task"
+    printf 'armed\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
+    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh")
+    assert_eq "block" "$(jq -r '.decision' <<< "$out")" "an armed queue blocks" || return 1
+    assert_eq "$key block" "$(cut -d' ' -f1,2 "$v")" "the drain's block is posted" || return 1
+    # The last task done: the drain writes idle AND blocks, which the queue
+    # state alone could not tell the async hook.
+    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh")
+    assert_output_contains "$(jq -r '.reason' <<< "$out")" "^cs task queue: all tasks complete" "the last task ends the drain" || return 1
+    assert_eq "idle" "$(cat "$CLAUDE_SESSION_META_DIR/local/queue.state" 2>/dev/null || echo idle)" "the queue reads idle" || return 1
+    assert_eq "$key block" "$(cut -d' ' -f1,2 "$v")" "the final drain's block is posted beside idle" || return 1
+    # The mail wake blocks too.
+    rm -f "$CLAUDE_SESSION_META_DIR/local/queue.state"
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local/mail/new"
+    printf '{"from":"peer","body":"hi"}\n' > "$CLAUDE_SESSION_META_DIR/local/mail/new/1.json"
+    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/stop-blocks.sh")
+    assert_eq "block" "$(jq -r '.decision' <<< "$out")" "unread mail blocks" || return 1
+    assert_eq "$key block" "$(cut -d' ' -f1,2 "$v")" "the mail wake's block is posted" || return 1
+    # A teammate's Stop writes nothing: the file would be the lead's.
+    rm -f "$v"
+    out=$(echo '{}' | env -u CS_LEAD_PID -u CLAUDE_PID bash "$HOOKS_DIR/stop-blocks.sh")
+    assert_file_not_exists "$v" "a teammate's Stop posts no verdict" || return 1
+}
+
+# The verdict says block only beside a block that was printed: jq is shimmed
+# to fail on the block line alone, and the sync hook, which then prints no
+# block, posts approve from its exit, so the notices are not silenced for a
+# block nobody saw.
+test_sync_hook_posts_approve_when_its_block_fails_to_print() {
+    local v="$CLAUDE_SESSION_META_DIR/local/stop-verdict" q="$CLAUDE_SESSION_META_DIR/local/queue" shim="$TEST_TMPDIR/jqbin" real out rc=0
+    real=$(command -v jq)
+    mkdir -p "$shim" "$q"
+    printf '#!/bin/sh\ncase "$*" in *decision:\\"block\\"*) exit 5 ;; esac\nexec "%s" "$@"\n' "$real" > "$shim/jq"
+    chmod +x "$shim/jq"
+    printf 'write the docs\n' > "$q/0001-task"
+    printf 'armed\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
+    out=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ PATH="$shim:$PATH" bash "$HOOKS_DIR/stop-blocks.sh" 2>/dev/null) || rc=$?
+    assert_eq "" "$out" "no block line is printed" || return 1
+    [ "$rc" -ne 0 ] || { echo "  FAIL: a block that could not be printed must not exit 0"; return 1; }
+    assert_eq "$(_stop_key '{}') approve" "$(cut -d' ' -f1,2 "$v")" "the verdict is approve beside no block" || return 1
+}
+
+# The two hooks side by side, as Claude Code runs them, on a Stop the sync
+# hook answers with the mail wake's block: the queue is idle, so the queue
+# gate lets the async hook through and the handshake alone must silence it.
+# The verdict wait is left at its default here.
+test_stop_notices_wait_for_the_mail_wakes_block() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" "$CLAUDE_SESSION_META_DIR/local/queue.state"
+    local sync async
+    mkdir -p "$CLAUDE_SESSION_META_DIR/local/mail/new"
+    printf '{"from":"peer","body":"hi"}\n' > "$CLAUDE_SESSION_META_DIR/local/mail/new/1.json"
+    export CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins"
+    ( echo '{}' | env -u CS_STOP_VERDICT_WAIT bash "$HOOKS_DIR/stop-notices.sh" > "$TEST_TMPDIR/async.out" 2>&1 ) &
+    async=$!
+    ( echo '{}' | bash "$HOOKS_DIR/stop-blocks.sh" > "$TEST_TMPDIR/sync.out" 2>&1 ) &
+    sync=$!
+    wait "$sync" "$async"
+    unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR
+    assert_eq "block" "$(jq -r '.decision' < "$TEST_TMPDIR/sync.out")" "the mail wake blocked" || return 1
+    assert_eq "" "$(cat "$TEST_TMPDIR/async.out")" "no notice beside the mail wake's block" || return 1
+    assert_file_not_exists "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" "no cooldown spent" || return 1
+}
+
+# The whole run ends inside the hook's budget whatever it waits on: a verdict
+# that stays pending for ever and a lock a stray process never lets go are
+# staged together, and the run still ends inside nine seconds, one object or
+# nothing on stdout, where the 10 s registration timeout would kill it.
+test_stop_notices_end_inside_their_budget() {
+    require_tool perl || return $?
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    local lock="$CLAUDE_SESSION_META_DIR/local/stop-notices.mutex.lock" holder t0 t1 took out
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    : > "$lock"
+    perl -e 'use Fcntl qw(:flock); open(my $f, "+<", $ARGV[0]) or exit 1; flock($f, LOCK_EX) or exit 1; sleep 30' "$lock" &
+    holder=$!
+    _post_verdict pending "$(date +%s)"
+    export CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins"
+    t0=$(date +%s); out=$(env -u CS_STOP_VERDICT_WAIT bash "$HOOKS_DIR/stop-notices.sh" <<< '{}'); t1=$(date +%s)
+    unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR
+    kill "$holder" 2>/dev/null; wait "$holder" 2>/dev/null || true
+    took=$((t1 - t0))
+    echo "  measured: pending for ever plus a held lock ${took}s"
+    [ "$took" -le 9 ] || { echo "  FAIL: the run must end inside its budget, took ${took}s"; return 1; }
+    assert_eq "true" "$(jq -s 'length == 1 and (.[0] | type) == "object" and .[0].hookSpecificOutput.hookEventName == "Stop"' <<< "$out")" "one object on stdout, printed unlocked" || return 1
+}
+
+# The context cursor is read and written under the lock: two runs that
+# overlap on a conversation nudged once both find the transcript silent on
+# it, and without the lock both print the repeat and both append "again".
+# stat is shimmed to take a second, so both runs are inside the scan when the
+# other arrives.
+test_stop_notices_repeat_a_context_notice_under_the_lock() {
+    require_tool perl || return $?
+    local shim="$TEST_TMPDIR/slowbin" real n uuid="11111111-1111-1111-1111-111111111111" t="$TEST_TMPDIR/empty-transcript.jsonl"
+    real=$(command -v stat)
+    mkdir -p "$shim"
+    printf '#!/bin/sh\nsleep 1\nexec "%s" "$@"\n' "$real" > "$shim/stat"
+    chmod +x "$shim/stat"
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    : > "$t"
+    printf '70\n' > "$CLAUDE_SESSION_META_DIR/local/context-pct"
+    printf '%s\n' "$uuid" > "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"
+    export CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins"
+    ( jq -nc --arg s "$uuid" --arg t "$t" '{session_id: $s, transcript_path: $t}' | PATH="$shim:$PATH" bash "$HOOKS_DIR/stop-notices.sh" > "$TEST_TMPDIR/run1.out" ) &
+    ( jq -nc --arg s "$uuid" --arg t "$t" '{session_id: $s, transcript_path: $t}' | PATH="$shim:$PATH" bash "$HOOKS_DIR/stop-notices.sh" > "$TEST_TMPDIR/run2.out" ) &
+    wait
+    unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR
+    rm -f "$CLAUDE_SESSION_META_DIR/local/context-pct"
+    n=$(cat "$TEST_TMPDIR/run1.out" "$TEST_TMPDIR/run2.out" | grep -c 'consider rotating this conversation' || true)
+    assert_eq "1" "$n" "two overlapping runs repeat the nudge once" || return 1
+    assert_eq "$uuid
+$uuid again" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor records one repeat" || return 1
+}
+
+# What the wait costs, measured: a lead Stop with no sync hook verdict at all
+# pays the two-second grace, one with an approve posted pays nothing, and both
+# end well inside the hook's 10 s registration timeout. A CS_STOP_VERDICT_WAIT
+# past 8 is clamped so a pending verdict cannot hold the hook to the timeout.
+test_stop_notices_verdict_wait_cost() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    local t0 t1 none approved pending
+    export CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" "$CLAUDE_SESSION_META_DIR/local/stop-verdict"
+    t0=$(date +%s); env -u CS_STOP_VERDICT_WAIT bash "$HOOKS_DIR/stop-notices.sh" <<< '{}' > /dev/null; t1=$(date +%s)
+    none=$((t1 - t0))
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    _post_verdict approve "$(date +%s)"
+    t0=$(date +%s); env -u CS_STOP_VERDICT_WAIT bash "$HOOKS_DIR/stop-notices.sh" <<< '{}' > /dev/null; t1=$(date +%s)
+    approved=$((t1 - t0))
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    _post_verdict pending "$(date +%s)"
+    t0=$(date +%s); CS_STOP_VERDICT_WAIT=60 bash "$HOOKS_DIR/stop-notices.sh" <<< '{}' > /dev/null; t1=$(date +%s)
+    pending=$((t1 - t0))
+    unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR
+    echo "  measured: no verdict ${none}s, approve ${approved}s, pending at a 60 s override ${pending}s"
+    # Lower bounds prove the waits happen; the upper bounds leave a slow
+    # runner room and still sit inside the 10 s registration timeout.
+    [ "$none" -ge 2 ] && [ "$none" -le 4 ] || { echo "  FAIL: no verdict should cost the 2 s grace, took ${none}s"; return 1; }
+    [ "$approved" -le 1 ] || { echo "  FAIL: an approve should cost nothing, took ${approved}s"; return 1; }
+    [ "$pending" -ge 7 ] && [ "$pending" -le 9 ] || { echo "  FAIL: a pending verdict is waited for 8 s at most, took ${pending}s"; return 1; }
+}
+
+# Two runs of the async hook overlap when turns end close together. The
+# cooldown stamp is read and written under the library's lock, so one reminds
+# and the other, finding the stamp, prints nothing. stat is shimmed to take a
+# second, so both runs are inside the scan when the other arrives.
+test_stop_notices_cooldown_is_taken_under_a_lock() {
+    require_tool perl || return $?
+    local shim="$TEST_TMPDIR/slowbin" real n
+    real=$(command -v stat)
+    mkdir -p "$shim"
+    printf '#!/bin/sh\nsleep 1\nexec "%s" "$@"\n' "$real" > "$shim/stat"
+    chmod +x "$shim/stat"
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    export CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins"
+    ( echo '{}' | PATH="$shim:$PATH" bash "$HOOKS_DIR/stop-notices.sh" > "$TEST_TMPDIR/run1.out" ) &
+    ( echo '{}' | PATH="$shim:$PATH" bash "$HOOKS_DIR/stop-notices.sh" > "$TEST_TMPDIR/run2.out" ) &
+    wait
+    unset CLAUDE_CONFIG_DIR
+    n=$(cat "$TEST_TMPDIR/run1.out" "$TEST_TMPDIR/run2.out" | grep -c 'Narrative check' || true)
+    assert_eq "1" "$n" "two overlapping runs remind once" || return 1
+    assert_file_exists "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" "the one reminder stamped the cooldown" || return 1
+}
+
+# Whatever it has to say, the hook prints exactly one JSON object or nothing,
+# and exits 0: Claude Code takes the first object it can parse and drops the
+# rest, and a non-zero exit reaches the model as a hook error with the stderr.
+test_stop_notices_print_one_object_or_nothing_and_exit_zero() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    local out rc n scenario
+    export CS_LEAD_PID=$$ CLAUDE_PID=$$ CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins"
+    for scenario in "nudge and reminder due" "warning and reminder due" "reminder only" "nothing due"; do
+        rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" "$CLAUDE_SESSION_META_DIR/local/ctx-warned"
+        case "$scenario" in
+            "nudge and reminder due") printf '70\n' > "$CLAUDE_SESSION_META_DIR/local/context-pct" ;;
+            "warning and reminder due") printf '50\n' > "$CLAUDE_SESSION_META_DIR/local/context-pct" ;;
+            "reminder only") rm -f "$CLAUDE_SESSION_META_DIR/local/context-pct" ;;
+            "nothing due") rm -f "$CLAUDE_SESSION_META_DIR/local/context-pct"; touch "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md" ;;
+        esac
+        rc=0
+        out=$(printf '{"session_id":"11111111-1111-1111-1111-111111111111"}\n' | bash "$HOOKS_DIR/stop-notices.sh" 2>"$TEST_TMPDIR/stderr") || rc=$?
+        assert_eq "0" "$rc" "$scenario: exit 0" || { unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR; return 1; }
+        assert_eq "" "$(cat "$TEST_TMPDIR/stderr")" "$scenario: nothing on stderr" || { unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR; return 1; }
+        n=$(jq -s 'length == 1 and (.[0] | type) == "object" and .[0].hookSpecificOutput.hookEventName == "Stop"' <<< "$out" 2>/dev/null || echo unparsable)
+        case "$scenario" in
+            "nothing due") assert_eq "" "$out" "$scenario: prints nothing" ;;
+            *) assert_eq "true" "$n" "$scenario: stdout parses as exactly one Stop object, got [$out]" ;;
+        esac || { unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR; return 1; }
+    done
+    unset CS_LEAD_PID CLAUDE_PID CLAUDE_CONFIG_DIR
+}
+
+# The reminder lands beside the user's next request, about the turn before it,
+# and must not invite filler.
+test_narrative_reminder_is_worded_for_the_next_prompt() {
+    echo "# Session narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    local text
+    text=$(stop_notice_text "$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices)")
+    assert_output_contains "$text" "carried over from your previous turn, which ended without a narrative note" "says where it comes from" || return 1
+    assert_output_contains "$text" "Before answering the request below, record what that turn found" "asks for that turn's findings first" || return 1
+    assert_output_contains "$text" "is not a finding and must not be written" "forbids filler" || return 1
+    assert_output_contains "$text" "If that turn found nothing worth keeping, say so in one line of your reply, write nothing in the narrative, and answer the request" "names the empty case" || return 1
+    assert_output_not_contains "$text" "say so in one line and stop" "no longer ends the turn" || return 1
+}
+
+# --- The work gate -----------------------------------------------------------
+# The reminder goes out for work the transcript records past the
+# conversation's cursor (.cs/local/narrative-cursor.<session_id>, "<offset>
+# <epoch>"), when the actor's own narrative was not written since the cursor.
+
+WORK_SID="0b1e2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+
+# Appends to transcript $1, as Claude Code writes one: $2 Edit calls, $3 Bash
+# calls that commit, and $4 characters of Claude's text.
+_transcript_add() {  # path edits commits chars
+    local i
+    for ((i = 0; i < $2; i++)); do
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Edit","input":{"file_path":"a.txt"}}]}}\n' >> "$1"
+    done
+    for ((i = 0; i < $3; i++)); do
+        printf '{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"git commit -m wip"}}]}}\n' >> "$1"
+    done
+    if [ "$4" -gt 0 ]; then
+        jq -nc --arg t "$(printf '%*s' "$4" '' | tr ' ' a)" '{type:"assistant",message:{role:"assistant",content:[{type:"text",text:$t}]}}' >> "$1"
+    fi
+}
+
+# Alice's stale narrative, no cooldown, and a cursor at the transcript's start
+# set five minutes ago.
+_work_fixture() {
+    printf 'alice\n' > "$CLAUDE_SESSION_META_DIR/local/identity"
+    echo "# Session narrative (alice)" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    : > "$TEST_TMPDIR/transcript.jsonl"
+    printf '0 %s\n' "$(( $(date +%s) - 300 ))" > "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+}
+
+_work_notices() {
+    CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$(jq -nc --arg s "$WORK_SID" --arg t "$TEST_TMPDIR/transcript.jsonl" '{session_id: $s, transcript_path: $t}')"
+}
+
+_cursor_offset() {
+    cut -d' ' -f1 "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+}
+
+test_work_gate_is_silent_below_its_thresholds() {
+    _work_fixture
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 0 0 799
+    assert_eq "" "$(_work_notices)" "no edit and 799 characters are not work enough" || return 1
+    assert_eq "0" "$(_cursor_offset)" "the cursor stays where it was" || return 1
+}
+
+# A fresh cooldown stamp beside each: the work gate does not read it.
+test_work_gate_reminds_after_one_edit() {
+    _work_fixture
+    date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 1 0 0
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "one edit reminds" || return 1
+    assert_eq "$(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ')" "$(_cursor_offset)" "the cursor moves to the transcript's end" || return 1
+}
+
+test_work_gate_reminds_after_a_commit() {
+    _work_fixture
+    date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 0 1 0
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "a commit alone reminds" || return 1
+}
+
+test_work_gate_reminds_after_long_text() {
+    _work_fixture
+    date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 0 0 800
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "800 characters of text alone remind" || return 1
+}
+
+# Work before the cursor is not counted.
+test_work_gate_counts_only_past_the_cursor() {
+    _work_fixture
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 5 1 3000
+    printf '%s %s\n' "$(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ')" "$(( $(date +%s) - 300 ))" \
+        > "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 0 0 799
+    assert_eq "" "$(_work_notices)" "no edit and 799 characters past the cursor are not work enough" || return 1
+}
+
+test_work_gate_moves_the_cursor_when_the_narrative_was_written() {
+    _work_fixture
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 1 2000
+    touch "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    assert_eq "" "$(_work_notices)" "a narrative written since the cursor gets no reminder" || return 1
+    assert_eq "$(wc -c < "$TEST_TMPDIR/transcript.jsonl" | tr -d ' ')" "$(_cursor_offset)" "the cursor moves to the transcript's end" || return 1
+}
+
+# Two Stops close together, each after work: the first reminds and the
+# second, inside the floor, does not.
+test_work_gate_floor_keeps_close_stops_to_one_reminder() {
+    _work_fixture
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 0 0
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "the first Stop reminds" || return 1
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 0 0
+    assert_eq "" "$(_work_notices)" "the second, inside the floor, does not" || return 1
+}
+
+# No cursor yet: the count runs from the transcript's start and the epoch is
+# its first timestamp, so a narrative written since the conversation began
+# counts as written.
+test_work_gate_starts_a_conversation_at_its_first_timestamp() {
+    _work_fixture
+    rm -f "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+    jq -nc --arg ts "$(date -u -v-2M '+%Y-%m-%dT%H:%M:%S.000Z' 2>/dev/null || date -u -d '2 minutes ago' '+%Y-%m-%dT%H:%M:%S.000Z')" \
+        '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}' > "$TEST_TMPDIR/transcript.jsonl"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 0 0
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "a narrative older than the conversation is reminded" || return 1
+    rm -f "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+    touch "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    assert_eq "" "$(_work_notices)" "a narrative written during the conversation is not" || return 1
+}
+
+# The floor spaces a reminder from the cursor's last stamp; a conversation with
+# no cursor has had none, so a busy first turn is reminded however short.
+test_work_gate_reminds_a_first_turn_shorter_than_the_floor() {
+    _work_fixture
+    rm -f "$CLAUDE_SESSION_META_DIR/local/narrative-cursor.$WORK_SID"
+    jq -nc --arg ts "$(date -u -v-10S '+%Y-%m-%dT%H:%M:%S.000Z' 2>/dev/null || date -u -d '10 seconds ago' '+%Y-%m-%dT%H:%M:%S.000Z')" \
+        '{type:"user",timestamp:$ts,message:{role:"user",content:"go"}}' > "$TEST_TMPDIR/transcript.jsonl"
+    _transcript_add "$TEST_TMPDIR/transcript.jsonl" 3 0 0
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$(_work_notices)")" \
+        "three edits in a first turn of ten seconds remind" || return 1
+}
+
+# A transcript that cannot be read leaves the clock to decide: the cooldown
+# stamp holds a reminder back, and without one a stale narrative is reminded.
+test_work_gate_falls_back_to_the_clock_without_a_transcript() {
+    _work_fixture
+    local input
+    input=$(jq -nc --arg s "$WORK_SID" --arg t "$TEST_TMPDIR/missing.jsonl" '{session_id: $s, transcript_path: $t}')
+    date +%s > "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    assert_eq "" "$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$input")" "a fresh cooldown holds the reminder back" || return 1
+    rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" \
+        "$(stop_notice_text "$(CLAUDE_CONFIG_DIR="$TEST_TMPDIR/no-plugins" _notices "$input")")" \
+        "past the cooldown a stale narrative is reminded" || return 1
+    assert_file_exists "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" "the clock path stamps its cooldown" || return 1
+}
+
+
+run_test test_stop_notices_stand_down_on_the_sync_hooks_block
+run_test test_sync_hook_posts_pending_then_its_verdict
+run_test test_sync_hook_posts_approve_when_its_block_fails_to_print
+run_test test_stop_notices_wait_for_the_mail_wakes_block
+run_test test_stop_notices_end_inside_their_budget
+run_test test_stop_notices_repeat_a_context_notice_under_the_lock
+run_test test_stop_notices_verdict_wait_cost
+run_test test_stop_notices_cooldown_is_taken_under_a_lock
+run_test test_stop_notices_print_one_object_or_nothing_and_exit_zero
+run_test test_narrative_reminder_is_worded_for_the_next_prompt
+run_test test_work_gate_is_silent_below_its_thresholds
+run_test test_work_gate_reminds_after_one_edit
+run_test test_work_gate_reminds_after_a_commit
+run_test test_work_gate_reminds_after_long_text
+run_test test_work_gate_counts_only_past_the_cursor
+run_test test_work_gate_moves_the_cursor_when_the_narrative_was_written
+run_test test_work_gate_floor_keeps_close_stops_to_one_reminder
+run_test test_work_gate_starts_a_conversation_at_its_first_timestamp
+run_test test_work_gate_reminds_a_first_turn_shorter_than_the_floor
+run_test test_work_gate_falls_back_to_the_clock_without_a_transcript
+
 run_test test_auto_approve_allows_cs_metadata_write
 run_test test_auto_approve_allows_cs_edit
 run_test test_auto_approve_ignores_non_cs_path
@@ -4212,6 +4898,8 @@ _identity_hook() {  # [source]
 }
 
 _seed_identity_git() {  # email
+    # The git identity decides only where no identity file outranks it.
+    rm -f "$CLAUDE_SESSION_META_DIR/local/identity"
     git -C "$CLAUDE_SESSION_DIR" init -q 2>/dev/null || mkdir -p "$CLAUDE_SESSION_DIR"
     git -C "$CLAUDE_SESSION_DIR" config user.email "$1" 2>/dev/null
 }
@@ -4649,7 +5337,7 @@ SEAM
             CS_RESOLVED_FROM=env CS_LEAD_PID=$$ CLAUDE_PID=$$ \
             BASH_ENV="$seam" CS_TEST_REMOVE_AT="$1" CS_TEST_REMOVE_DIR="$w/root/ending" \
             CS_TEST_STEPS_FILE="$w/steps" \
-            "$sh" "$HOOKS_DIR/narrative-reminder.sh" \
+            "$sh" "$HOOKS_DIR/stop-blocks.sh" \
             <<< '{"hook_event_name":"Stop","session_id":"11111111-2222-4333-8444-555555555555"}' \
             > "$w/out" 2>/dev/null
         echo $? > "$w/rc"
@@ -4985,8 +5673,14 @@ run_test test_session_start_publishes_the_contract_to_a_teammate
 
 
 # ============================================================================
-# narrative-reminder.sh — council advisor nudge
+# stop-notices.sh — council advisor nudge
 # ============================================================================
+
+# The advisor note's opening and closing sentences, around each channel's own.
+ADVISOR_HEAD=" Standing note: at a real decision point — about to commit to an approach, stuck after repeated attempts, or about to call the work done — a second opinion is available."
+ADVISOR_COUNCIL=" \`/claude-council:advise\` puts this conversation to external models; it sends a digest to third-party providers, so ask the user before running it and show them what would go."
+ADVISOR_CODEX=" Offer \`/codex:review\` before calling built work done — the user runs it, you cannot. \`/codex:rescue\` is yours to invoke when genuinely stuck."
+ADVISOR_TAIL=" You judge whether the moment qualifies; most turns do not."
 
 # A fake plugin install record plus the command file it points at. Both halves
 # matter: the record can name a directory a later uninstall removed.
@@ -5005,46 +5699,46 @@ JSON
 test_advisor_nudge_is_silent_without_the_council_plugin() {
     export CLAUDE_CONFIG_DIR="$TEST_TMPDIR/empty-claude"
     mkdir -p "$CLAUDE_CONFIG_DIR"
-    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
 
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    # Never advertise a command the user cannot run.
-    assert_output_not_contains "$output" "claude-council" \
-        "Should not mention the council when the plugin is absent" || return 1
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices)
     unset CLAUDE_CONFIG_DIR
+    # Never advertise a command the user cannot run.
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$output")" \
+        "The lead's reminder carries no note when no plugin is installed" || return 1
 }
 
 test_advisor_nudge_appears_when_the_council_is_installed() {
     _install_fake_council
-    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
           "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "claude-council:advise" \
-        "Should name the command when the plugin is installed" || return 1
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices)
     unset CLAUDE_CONFIG_DIR
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")$ADVISOR_HEAD$ADVISOR_COUNCIL$ADVISOR_TAIL" \
+        "$(stop_notice_text "$output")" "Should name the command when the plugin is installed" || return 1
 }
 
 test_advisor_nudge_is_silent_when_the_recorded_path_is_gone() {
     _install_fake_council
     # An uninstall removes the directory; the record can outlive it.
     rm -rf "$TEST_TMPDIR/claude/plugins/cache/hex-plugins/claude-council/2026.9.9"
-    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
           "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_not_contains "$output" "claude-council" \
-        "A stale install record should not produce a suggestion" || return 1
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices)
     unset CLAUDE_CONFIG_DIR
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$output")" \
+        "A stale install record should not produce a suggestion" || return 1
 }
 
 test_advisor_nudge_tells_the_model_to_ask_before_sending() {
@@ -5055,25 +5749,25 @@ test_advisor_nudge_tells_the_model_to_ask_before_sending() {
           "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    # Suggest, never send: the conversation goes to third parties.
-    assert_output_contains "$output" "ask" \
-        "The nudge must say to ask before sending" || return 1
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices)
     unset CLAUDE_CONFIG_DIR
+    # Suggest, never send: the conversation goes to third parties.
+    assert_output_contains "$(stop_notice_text "$output")" "so ask the user before running it and show them what would go" \
+        "The nudge must say to ask before sending" || return 1
 }
 
 test_advisor_nudge_does_not_repeat_within_its_cooldown() {
     _install_fake_council
-    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     date +%s > "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
 
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_not_contains "$output" "claude-council" \
-        "A fresh cooldown should suppress the nudge" || return 1
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices)
     unset CLAUDE_CONFIG_DIR
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$output")" \
+        "A fresh cooldown should suppress the nudge" || return 1
 }
 
 # The codex plugin ships its own commands; the record key and the probe file
@@ -5092,19 +5786,17 @@ JSON
 
 test_advisor_nudge_names_codex_when_only_codex_is_installed() {
     _install_fake_codex
-    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
           "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "codex:review" \
-        "Should name the codex review command when codex is installed" || return 1
-    # The council is absent here; naming it would advertise a missing command.
-    assert_output_not_contains "$output" "claude-council" \
-        "Should not name the council when only codex is installed" || return 1
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices)
     unset CLAUDE_CONFIG_DIR
+    # The council is absent here; naming it would advertise a missing command.
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")$ADVISOR_HEAD$ADVISOR_CODEX$ADVISOR_TAIL" \
+        "$(stop_notice_text "$output")" "Should name the codex commands, and not the council, when only codex is installed" || return 1
 }
 
 run_test test_advisor_nudge_names_codex_when_only_codex_is_installed
@@ -5120,22 +5812,17 @@ test_advisor_nudge_names_both_channels_when_both_are_installed() {
   "codex@openai-codex": [{"scope": "user", "installPath": "$codex", "version": "1.0.6"}]}}
 JSON
     export CLAUDE_CONFIG_DIR="$root"
-    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
           "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
-    assert_output_contains "$output" "claude-council:advise" \
-        "Both installed: the council command should still be named" || return 1
-    assert_output_contains "$output" "codex:review" \
-        "Both installed: the codex command should also be named" || return 1
-    # One note, one slot: a second standing note would double the text.
-    local heads
-    heads=$(printf '%s' "$output" | grep -o "Standing note" | wc -l | tr -d ' ')
-    assert_eq "1" "$heads" "Both installed should still emit one standing note" || return 1
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices)
     unset CLAUDE_CONFIG_DIR
+    # One note, one slot: a second standing note would double the text.
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")$ADVISOR_HEAD$ADVISOR_COUNCIL$ADVISOR_CODEX$ADVISOR_TAIL" \
+        "$(stop_notice_text "$output")" "Both installed: one standing note naming both channels" || return 1
 }
 
 run_test test_advisor_nudge_names_both_channels_when_both_are_installed
@@ -5154,7 +5841,7 @@ test_advisor_nudge_cooldown_lands_in_the_machine_local_dir() {
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
           "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
-    echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" >/dev/null
+    CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices >/dev/null
 
     # Per-machine state belongs under .cs/local/, which every session already
     # gitignores. A new stamp at the session root would ride into a git-synced
@@ -5169,8 +5856,8 @@ test_advisor_nudge_cooldown_lands_in_the_machine_local_dir() {
 }
 
 test_advisor_nudge_survives_an_unset_home() {
-    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
 
     # A bare $HOME under `set -u` aborts the hook before it emits, losing the
@@ -5178,13 +5865,15 @@ test_advisor_nudge_survives_an_unset_home() {
     # property; this path must not reintroduce the class.
     local output
     # env -i, not env -u: an ambient CLAUDE_CONFIG_DIR makes the $HOME
-    # expansion unreachable, so the test passes without proving anything.
+    # expansion unreachable, so the test passes without proving anything. The
+    # plugin probe runs for the lead alone, so the lead is modelled too.
     output=$(echo '{}' | env -i PATH="$PATH" \
         CLAUDE_SESSION_NAME="$CLAUDE_SESSION_NAME" \
         CLAUDE_SESSION_DIR="$CLAUDE_SESSION_DIR" \
         CLAUDE_SESSION_META_DIR="$CLAUDE_SESSION_META_DIR" \
-        bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null)
-    assert_output_contains "$output" "Narrative check" \
+        CS_LEAD_PID=$$ CLAUDE_PID=$$ \
+        bash "$HOOKS_DIR/stop-notices.sh" 2>/dev/null)
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$output")" \
         "Hook should still emit its reminder with HOME unset" || return 1
 }
 
@@ -5198,7 +5887,7 @@ test_reminder_carries_the_commit_cadence() {
     # fires AT the append, so the rule rides with it as well as in the
     # session protocol, which is read once at startup and stale by then.
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null)
+    output=$(stop_notice_text "$(_notices 2>/dev/null)")
     # The session protocol's cs:session-commits rule says the same: cs commits
     # files under .cs/ only in the create commit and /finish's integrate merge,
     # and the model commits them only when the user asks (Alex, 2026-10-14:
@@ -5209,7 +5898,7 @@ test_reminder_carries_the_commit_cadence() {
         "no commit is named for appends to ride in" || return 1
     # Naming the safe alternative matters: without it the instruction reads as
     # a reason to delay appends, which loses work the autosave ref already holds.
-    assert_output_contains "$output" "autosave" \
+    assert_output_contains "$output" "Uncommitted appends are safe — autosave snapshots every edit to a shadow ref." \
         "Cadence should say uncommitted appends are safe" || return 1
     # A session whose own notes say to push after each commit pushed every
     # narrative commit to a deploy branch, one redeploy each. The reminder
@@ -5242,9 +5931,9 @@ JSON
           "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices)
     unset CLAUDE_CONFIG_DIR
-    assert_output_contains "$output" "claude-council:advise" \
+    assert_output_contains "$(stop_notice_text "$output")" "claude-council:advise" \
         "Should find a usable record that is not the first entry" || return 1
 }
 
@@ -5266,30 +5955,31 @@ JSON
           "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh")
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices)
     unset CLAUDE_CONFIG_DIR
-    assert_output_contains "$output" "claude-council:advise" \
+    assert_output_contains "$(stop_notice_text "$output")" "claude-council:advise" \
         "Marketplace name should not gate detection" || return 1
 }
 
 test_advisor_nudge_survives_an_unwritable_cooldown_dir() {
     _install_fake_council
-    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     rm -rf "$CLAUDE_SESSION_META_DIR/local"
     mkdir -p "$CLAUDE_SESSION_META_DIR/local"
+    printf 'alice\n' > "$CLAUDE_SESSION_META_DIR/local/identity"
     _deny_writes "$CLAUDE_SESSION_META_DIR/local" || return 77
 
     # Hooks fail open: a stamp that cannot be written must never cost the user
     # the reminder it rides on. The stamp is written for the lead only, so the
     # lead is modelled inline rather than inherited from an earlier test.
     local output
-    output=$(echo '{}' | CS_LEAD_PID=$$ CLAUDE_PID=$$ bash "$HOOKS_DIR/narrative-reminder.sh" 2>"$TEST_TMPDIR/stderr")
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices 2>"$TEST_TMPDIR/stderr")
     _allow_writes "$CLAUDE_SESSION_META_DIR/local"
     unset CLAUDE_CONFIG_DIR
-    assert_output_contains "$output" "Narrative check" \
-        "An unwritable cooldown dir must not lose the reminder" || return 1
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")$ADVISOR_HEAD$ADVISOR_COUNCIL$ADVISOR_TAIL" \
+        "$(stop_notice_text "$output")" "An unwritable cooldown dir must not lose the reminder" || return 1
     # A trailing 2>/dev/null applies after the `>` has already reported, so
     # the failed write must be silenced by the braced form or it reaches the
     # user's terminal as noise from a hook that meant to fail quietly.
@@ -5299,16 +5989,17 @@ test_advisor_nudge_survives_an_unwritable_cooldown_dir() {
 
 test_advisor_nudge_tolerates_a_padded_cooldown_stamp() {
     _install_fake_council
-    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown"
     # A leading zero is a valid integer to _num_or but octal to $(( )).
     printf '0%s' "$(date +%s)" > "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     local output
-    output=$(echo '{}' | bash "$HOOKS_DIR/narrative-reminder.sh" 2>/dev/null)
+    output=$(CS_LEAD_PID=$$ CLAUDE_PID=$$ _notices 2>/dev/null)
     unset CLAUDE_CONFIG_DIR
-    assert_output_contains "$output" "Narrative check" \
+    # The padded stamp is a fresh one, read as decimal: the note waits.
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$output")" \
         "A padded stamp must not break the arithmetic" || return 1
 }
 
@@ -5320,20 +6011,24 @@ run_test test_advisor_nudge_tolerates_a_padded_cooldown_stamp
 
 test_advisor_nudge_stays_silent_for_a_teammate() {
     _install_fake_council
-    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
-    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.md"
+    echo "# narrative" > "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
+    _backdate "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md"
     rm -f "$CLAUDE_SESSION_META_DIR/.narrative-reminder-cooldown" \
           "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown"
 
     # A tmux teammate is a full claude in the same directory with its own Stop.
     # It shares the one cooldown stamp, so an ungated nudge lets a teammate
     # consume the lead's 30-minute slot — and in a walk-away run the lead can
-    # stop seeing the suggestion entirely.
+    # stop seeing the suggestion entirely. tmux starts a teammate, so
+    # CS_LEAD_PID is absent from its environment: it is reminded like anyone,
+    # with no note.
     local output
-    output=$(echo '{}' | CS_LEAD_PID=1 CLAUDE_PID=99999 \
-        bash "$HOOKS_DIR/narrative-reminder.sh")
+    output=$(echo '{}' | env -u CS_LEAD_PID CLAUDE_PID=99999 \
+        bash "$HOOKS_DIR/stop-notices.sh")
     unset CLAUDE_CONFIG_DIR
-    assert_output_not_contains "$output" "claude-council" \
+    assert_eq "$(_reminder_for "$CLAUDE_SESSION_META_DIR/memory/narrative.alice.md")" "$(stop_notice_text "$output")" \
+        "A teammate is reminded without the note" || return 1
+    assert_file_not_exists "$CLAUDE_SESSION_META_DIR/local/.advisor-nudge-cooldown" \
         "A teammate should not consume the lead's nudge slot" || return 1
 }
 

@@ -43,8 +43,12 @@ _rot_session() {  # name
 # Ambient env + session dir for driving hooks directly (no cs launch).
 _rot_hook_session() {  # name
     local dir="$CS_SESSIONS_ROOT/$1"
-    mkdir -p "$dir/.cs/local"
+    mkdir -p "$dir/.cs/local" "$dir/.cs/memory"
     touch "$dir/.cs/local/session.log"
+    # The actor's own narrative, just written, so the narrative reminder stays
+    # out of the Stop notices these tests read.
+    printf 'alice\n' > "$dir/.cs/local/identity"
+    printf '# narrative\n' > "$dir/.cs/memory/narrative.alice.md"
     # Model a cs-launched lead: rotation events come from the rebind, which the
     # hook performs only for the claude cs exec'd into, matched by pid.
     export CS_LEAD_PID=$$
@@ -1784,13 +1788,13 @@ test_the_kick_is_rewritten_until_delivered() {
 }
 
 # --- the wake itself ----------------------------------------------------------
-# Drives narrative-reminder's FileChanged branch as this session's lead. The
+# Drives stop-blocks.sh's FileChanged branch as this session's lead. The
 # payload rides on stderr and delivery IS the exit code, so streams pass
 # through untouched.
 _rot_filechanged() {  # file_path, [event]
     jq -nc --arg p "$1" --arg e "${2:-add}" \
         '{hook_event_name: "FileChanged", file_path: $p, event: $e}' \
-        | bash "$HOOKS_DIR/narrative-reminder.sh"
+        | bash "$HOOKS_DIR/stop-blocks.sh"
 }
 
 _arm_kick() {  # returns the kick file path on stdout
@@ -2095,29 +2099,47 @@ run_test test_marker_with_a_backslash_path_is_rejected
 # Cycle 5: context nudge (Stop hook)
 # ============================================================================
 
+# The line Claude Code writes to the transcript when it delivers an async
+# Stop hook's output, in the shape a real transcript holds.
+_delivery_line() {  # notice text
+    jq -nc --arg c "$1" '{type: "attachment", attachment: {type: "async_hook_response", processId: "async_hook_1", hookName: "Stop", hookEvent: "Stop", response: {hookSpecificOutput: {hookEventName: "Stop", additionalContext: $c}}}}'
+}
 _stop_with_ctx() {  # ctx-pct-or-empty, session_id
     if [ -n "$1" ]; then
         printf '%s\n' "$1" > "$CLAUDE_SESSION_META_DIR/local/context-pct"
     else
         rm -f "$CLAUDE_SESSION_META_DIR/local/context-pct"
     fi
-    echo "{\"session_id\":\"$2\"}" | bash "$HOOKS_DIR/narrative-reminder.sh"
+    # Claude Code names the conversation's transcript in the Stop input and,
+    # when it delivers a notice with the next prompt, records it there as an
+    # attachment carrying the text. Modelled here, so every notice this helper
+    # prints counts as delivered and a conversation is nudged or warned once;
+    # the tests for a lost notice feed the hook a transcript of their own.
+    local t="$CLAUDE_SESSION_DIR/transcript-$2.jsonl" out rc=0
+    out=$(jq -nc --arg s "$2" --arg t "$t" '{session_id: $s, transcript_path: $t}' | bash "$HOOKS_DIR/stop-notices.sh") || rc=$?
+    [ -z "$out" ] || _delivery_line "$(jq -r '.hookSpecificOutput.additionalContext' <<< "$out")" >> "$t" 2>/dev/null
+    printf '%s' "$out"
+    return "$rc"
+}
+
+# The two context notices stop-notices.sh hands the model, whole.
+_nudge_text() {  # reading
+    printf 'Context was at %s%% when your previous turn ended, so consider rotating this conversation; this note is carried over with the request below. Tell the user in one line, then answer the request. Once it is answered, or before it if it is large enough to need the headroom, invoke the rotate skill to distill a handoff and arm it; the user then runs /clear to continue in a fresh conversation, without leaving Claude Code. Sent once for this conversation; if now is a bad time, simply continue.' "$1"
+}
+_warning_text() {  # reading, nudge threshold
+    printf 'Context was at %s%% when your previous turn ended, past the comfortable-headroom mark; this note is carried over with the request below. Tell the user in one line, so they can steer toward a natural stopping point or plan a rotation, then answer the request; the rotate nudge follows at %s%%. Sent once for this conversation; no other action is needed.' "$1" "$2"
 }
 
 test_nudge_fires_once_at_threshold() {
     _rot_hook_session "rot-nudge"
     local out
     out=$(_stop_with_ctx 65 "$UUID_A") || return 1
-    assert_output_contains "$out" '"decision":"block"' "nudge delivered as a block" || return 1
-    assert_output_contains "$out" "rotate skill" "nudge names the rotate skill" || return 1
-    assert_output_contains "$out" "Context is at 65%" "nudge names the reading" || return 1
+    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" \
+        "the nudge names the reading and the rotate skill, as additionalContext" || return 1
     assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" | tr -d '[:space:]')" \
         "cursor records the nudged conversation" || return 1
     out=$(_stop_with_ctx 85 "$UUID_A") || return 1
-    if grep -q "rotate skill" <<< "$out"; then
-        echo "  FAIL: same conversation must not be nudged twice"
-        return 1
-    fi
+    assert_eq "" "$out" "same conversation must not be nudged twice" || return 1
 }
 
 test_nudge_rearms_for_new_conversation() {
@@ -2125,27 +2147,18 @@ test_nudge_rearms_for_new_conversation() {
     _stop_with_ctx 65 "$UUID_A" >/dev/null || return 1
     local out
     out=$(_stop_with_ctx 65 "$UUID_B") || return 1
-    assert_output_contains "$out" "rotate skill" "new conversation UUID re-arms the nudge" || return 1
+    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "new conversation UUID re-arms the nudge" || return 1
 }
 
 test_nudge_silent_below_threshold_and_without_signal() {
     _rot_hook_session "rot-nudge-quiet"
     local out
     out=$(_stop_with_ctx 64 "$UUID_A") || return 1
-    if grep -q "rotate skill" <<< "$out"; then
-        echo "  FAIL: 64 must not nudge at default threshold"
-        return 1
-    fi
+    assert_eq "$(_warning_text 64 65)" "$(stop_notice_text "$out")" "64 warns and does not nudge at the default threshold" || return 1
     out=$(_stop_with_ctx "" "$UUID_A") || return 1
-    if grep -q "rotate skill" <<< "$out"; then
-        echo "  FAIL: missing context-pct must never nudge"
-        return 1
-    fi
+    assert_eq "" "$out" "missing context-pct must never nudge" || return 1
     out=$(_stop_with_ctx "hot" "$UUID_A") || return 1
-    if grep -q "rotate skill" <<< "$out"; then
-        echo "  FAIL: non-numeric context-pct must never nudge"
-        return 1
-    fi
+    assert_eq "" "$out" "non-numeric context-pct must never nudge" || return 1
 }
 
 test_nudge_threshold_override() {
@@ -2153,25 +2166,20 @@ test_nudge_threshold_override() {
     export CS_ROTATE_NUDGE_CTX=90
     local out
     out=$(_stop_with_ctx 85 "$UUID_A") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
-    if grep -q "rotate skill" <<< "$out"; then
-        unset CS_ROTATE_NUDGE_CTX
-        echo "  FAIL: 85 under a 90 override must not nudge"
-        return 1
-    fi
     # 85 lands in the warning band, whose copy promises the nudge. The promise
     # is the effective threshold or it is a lie: a literal cannot pass here.
-    assert_output_contains "$out" "follows at 90%" \
-        "the warning promises the nudge at the overridden threshold" || return 1
+    assert_eq "$(_warning_text 85 90)" "$(stop_notice_text "$out")" \
+        "85 under a 90 override warns, promising the nudge at the overridden threshold" || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     out=$(_stop_with_ctx 90 "$UUID_A") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     unset CS_ROTATE_NUDGE_CTX
-    assert_output_contains "$out" "rotate skill" "90 at a 90 override nudges" || return 1
+    assert_eq "$(_nudge_text 90)" "$(stop_notice_text "$out")" "90 at a 90 override nudges" || return 1
     # A non-numeric override falls back to the default, so the fallback is only
     # pinned by readings that straddle it: 80 would pass under any default at or
     # below 80, including the 80 this branch replaced.
     _rot_hook_session "rot-nudge-env2"
     export CS_ROTATE_NUDGE_CTX=banana
     out=$(_stop_with_ctx 65 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
-    assert_output_contains "$out" "rotate skill" "non-numeric override falls back to 65" || return 1
+    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "non-numeric override falls back to 65" || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     _rot_hook_session "rot-nudge-env3"
     out=$(_stop_with_ctx 64 "$UUID_A") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     unset CS_ROTATE_NUDGE_CTX
@@ -2185,9 +2193,12 @@ test_nudge_threshold_override() {
     export CS_ROTATE_NUDGE_CTX=99999999999999999999
     out=$(_stop_with_ctx 65 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     unset CS_ROTATE_NUDGE_CTX
-    assert_output_contains "$out" "rotate skill" "a 64-bit-overflowing override falls back to 65" || return 1
+    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "a 64-bit-overflowing override falls back to 65" || return 1
 }
 
+# The two Stop hooks run side by side: stop-blocks.sh drains, and
+# stop-notices.sh stands down for the queue whether its state still reads
+# armed or the drain has already moved it to draining.
 test_nudge_yields_to_queue_drain() {
     _rot_hook_session "rot-nudge-queue"
     mkdir -p "$CLAUDE_SESSION_META_DIR/local/queue"
@@ -2195,11 +2206,14 @@ test_nudge_yields_to_queue_drain() {
     printf 'armed\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
     local out
     out=$(_stop_with_ctx 80 "$UUID_A") || return 1
-    assert_output_contains "$out" "cs task queue" "queue owns the turn loop" || return 1
-    if grep -q "rotate skill" <<< "$out"; then
-        echo "  FAIL: nudge must yield to an armed queue"
-        return 1
-    fi
+    assert_eq "" "$out" "the nudge yields to an armed queue" || return 1
+    out=$(echo "{\"session_id\":\"$UUID_A\"}" | bash "$HOOKS_DIR/stop-blocks.sh") || return 1
+    assert_eq "block" "$(jq -r '.decision' <<< "$out")" "the drain takes the turn" || return 1
+    assert_output_contains "$(jq -r '.reason' <<< "$out")" "^cs task queue: starting a walk-away run" "queue owns the turn loop" || return 1
+    assert_eq "draining" "$(tr -d '[:space:]' < "$CLAUDE_SESSION_META_DIR/local/queue.state")" "the drain started" || return 1
+    out=$(_stop_with_ctx 80 "$UUID_A") || return 1
+    assert_eq "" "$out" "the nudge yields to a draining queue" || return 1
+    assert_file_not_exists "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" "a yielded nudge spends no cursor" || return 1
 }
 
 run_test test_nudge_fires_once_at_threshold
@@ -2447,17 +2461,12 @@ test_ctx_warning_fires_once_in_band() {
     _rot_hook_session "rot-warn"
     local out
     out=$(_stop_with_ctx 40 "$UUID_A") || return 1
-    assert_output_contains "$out" '"decision":"block"' "warning delivered as a block" || return 1
-    assert_output_contains "$out" "Context is at 40%" "warning names the reading" || return 1
-    assert_output_contains "$out" "natural stopping point" "warning carries the frozen copy" || return 1
-    assert_output_contains "$out" "follows at 65%" "warning promises the nudge at its real threshold" || return 1
+    assert_eq "$(_warning_text 40 65)" "$(stop_notice_text "$out")" \
+        "the warning names the reading and promises the nudge at its real threshold, as additionalContext" || return 1
     assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/ctx-warned" | tr -d '[:space:]')" \
         "cursor records the warned conversation" || return 1
     out=$(_stop_with_ctx 40 "$UUID_A") || return 1
-    if grep -q "stopping point" <<< "$out"; then
-        echo "  FAIL: same conversation must not be warned twice"
-        return 1
-    fi
+    assert_eq "" "$out" "same conversation must not be warned twice" || return 1
 }
 
 test_ctx_warning_rearms_for_new_conversation() {
@@ -2465,37 +2474,23 @@ test_ctx_warning_rearms_for_new_conversation() {
     _stop_with_ctx 60 "$UUID_A" >/dev/null || return 1
     local out
     out=$(_stop_with_ctx 60 "$UUID_B") || return 1
-    assert_output_contains "$out" "stopping point" "new conversation UUID re-arms the warning" || return 1
+    assert_eq "$(_warning_text 60 65)" "$(stop_notice_text "$out")" "new conversation UUID re-arms the warning" || return 1
 }
 
 test_ctx_warning_silent_below_band() {
     _rot_hook_session "rot-warn-low"
     local out
     out=$(_stop_with_ctx 39 "$UUID_A") || return 1
-    if grep -q "stopping point" <<< "$out"; then
-        echo "  FAIL: 39 must not warn at default threshold"
-        return 1
-    fi
+    assert_eq "" "$out" "39 must not warn at default threshold" || return 1
 }
 
 test_ctx_warning_yields_to_nudge_at_high_ctx() {
     _rot_hook_session "rot-warn-high"
     local out
     out=$(_stop_with_ctx 80 "$UUID_A") || return 1
-    assert_output_contains "$out" "rotate skill" "nudge owns readings at its threshold" || return 1
-    if grep -q "stopping point" <<< "$out"; then
-        echo "  FAIL: warning must not fire at or above the nudge threshold"
-        return 1
-    fi
+    assert_eq "$(_nudge_text 80)" "$(stop_notice_text "$out")" "nudge owns readings at its threshold, alone" || return 1
     out=$(_stop_with_ctx 85 "$UUID_A") || return 1
-    if grep -q "stopping point" <<< "$out"; then
-        echo "  FAIL: after the nudge, the warning may not fire"
-        return 1
-    fi
-    if grep -q "rotate skill" <<< "$out"; then
-        echo "  FAIL: after the nudge, the nudge may not fire again"
-        return 1
-    fi
+    assert_eq "" "$out" "after the nudge, neither the warning nor the nudge fires" || return 1
 }
 
 test_ctx_warning_threshold_override() {
@@ -2503,47 +2498,36 @@ test_ctx_warning_threshold_override() {
     export CS_CTX_WARN_CTX=50
     local out
     out=$(_stop_with_ctx 45 "$UUID_A") || { unset CS_CTX_WARN_CTX; return 1; }
-    if grep -q "stopping point" <<< "$out"; then
-        unset CS_CTX_WARN_CTX
-        echo "  FAIL: 45 under a 50 override must not warn"
-        return 1
-    fi
+    assert_eq "" "$out" "45 under a 50 override must not warn" || { unset CS_CTX_WARN_CTX; return 1; }
     out=$(_stop_with_ctx 50 "$UUID_A") || { unset CS_CTX_WARN_CTX; return 1; }
     unset CS_CTX_WARN_CTX
-    assert_output_contains "$out" "stopping point" "50 at a 50 override warns" || return 1
+    assert_eq "$(_warning_text 50 65)" "$(stop_notice_text "$out")" "50 at a 50 override warns" || return 1
     _rot_hook_session "rot-warn-env2"
     export CS_CTX_WARN_CTX=banana
     out=$(_stop_with_ctx 40 "$UUID_B") || { unset CS_CTX_WARN_CTX; return 1; }
     unset CS_CTX_WARN_CTX
-    assert_output_contains "$out" "stopping point" "non-numeric override falls back to 40" || return 1
+    assert_eq "$(_warning_text 40 65)" "$(stop_notice_text "$out")" "non-numeric override falls back to 40" || return 1
 }
 
 test_ctx_warning_escalates_to_nudge_same_conversation() {
     _rot_hook_session "rot-warn-escalate"
     local out
     out=$(_stop_with_ctx 60 "$UUID_A") || return 1
-    assert_output_contains "$out" "stopping point" "warning fires first at 60" || return 1
+    assert_eq "$(_warning_text 60 65)" "$(stop_notice_text "$out")" "warning fires first at 60" || return 1
     out=$(_stop_with_ctx 80 "$UUID_A") || return 1
-    assert_output_contains "$out" "rotate skill" "nudge still escalates after the warning" || return 1
-    if grep -q "stopping point" <<< "$out"; then
-        echo "  FAIL: the 80 reading belongs to the nudge alone"
-        return 1
-    fi
+    assert_eq "$(_nudge_text 80)" "$(stop_notice_text "$out")" "the 80 reading belongs to the nudge alone" || return 1
 }
 
 test_ctx_warning_band_edges() {
     _rot_hook_session "rot-warn-edges"
     local out
     out=$(_stop_with_ctx 64 "$UUID_A") || return 1
-    assert_output_contains "$out" "stopping point" "64 is inside the band" || return 1
+    assert_eq "$(_warning_text 64 65)" "$(stop_notice_text "$out")" "64 is inside the band" || return 1
     _rot_hook_session "rot-warn-edge65"
     out=$(_stop_with_ctx 65 "$UUID_B") || return 1
-    assert_output_contains "$out" "rotate skill" "the nudge owns exactly 65 under defaults" || return 1
+    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "the nudge owns exactly 65 under defaults" || return 1
     out=$(_stop_with_ctx 65 "$UUID_B") || return 1
-    if grep -q "stopping point" <<< "$out"; then
-        echo "  FAIL: exactly the nudge threshold is outside the band even when the nudge is spent"
-        return 1
-    fi
+    assert_eq "" "$out" "exactly the nudge threshold is outside the band even when the nudge is spent" || return 1
 }
 
 # A tmux-backed teammate is a full claude sharing this session directory: its
@@ -2558,18 +2542,12 @@ test_ctx_warning_survives_an_interleaved_teammate() {
     _stop_with_ctx 60 "$UUID_B" >/dev/null || return 1
     local out
     out=$(_stop_with_ctx 60 "$UUID_A") || return 1
-    if grep -q "stopping point" <<< "$out"; then
-        echo "  FAIL: a teammate's warning must not re-arm the lead's"
-        return 1
-    fi
+    assert_eq "" "$out" "a teammate's warning must not re-arm the lead's" || return 1
     out=$(_stop_with_ctx 85 "$UUID_A") || return 1
-    assert_output_contains "$out" "consider rotating" "the nudge still fires once for A" || return 1
+    assert_eq "$(_nudge_text 85)" "$(stop_notice_text "$out")" "the nudge still fires once for A" || return 1
     _stop_with_ctx 85 "$UUID_B" >/dev/null || return 1
     out=$(_stop_with_ctx 85 "$UUID_A") || return 1
-    if grep -q "consider rotating" <<< "$out"; then
-        echo "  FAIL: a teammate's nudge must not re-arm the lead's"
-        return 1
-    fi
+    assert_eq "" "$out" "a teammate's nudge must not re-arm the lead's" || return 1
 }
 
 # context-pct holds the LEAD's reading only (the status line writes it for the
@@ -2580,29 +2558,23 @@ test_ctx_warning_survives_an_interleaved_teammate() {
 # this keeps the reading with the conversation it describes.
 _stop_with_ctx_as_teammate() {  # ctx-pct, session_id
     printf '%s\n' "$1" > "$CLAUDE_SESSION_META_DIR/local/context-pct"
-    echo "{\"session_id\":\"$2\"}" | CLAUDE_PID=999999 bash "$HOOKS_DIR/narrative-reminder.sh"
+    echo "{\"session_id\":\"$2\"}" | CLAUDE_PID=999999 bash "$HOOKS_DIR/stop-notices.sh"
 }
 
 test_ctx_tiers_are_silent_for_a_teammate() {
     _rot_hook_session "rot-ctx-teammate"
     local out
     out=$(_stop_with_ctx_as_teammate 64 "$UUID_B") || return 1
-    if grep -q "stopping point" <<< "$out"; then
-        echo "  FAIL: a teammate must not be warned with the lead's reading"
-        return 1
-    fi
+    assert_eq "" "$out" "a teammate must not be warned with the lead's reading" || return 1
     if grep -qx "$UUID_B" "$CLAUDE_SESSION_META_DIR/local/ctx-warned" 2>/dev/null; then
         echo "  FAIL: a teammate must not spend a warning cursor on the lead's reading"
         return 1
     fi
     out=$(_stop_with_ctx_as_teammate 85 "$UUID_B") || return 1
-    if grep -q "consider rotating" <<< "$out"; then
-        echo "  FAIL: a teammate must not be nudged to rotate on the lead's reading"
-        return 1
-    fi
+    assert_eq "" "$out" "a teammate must not be nudged to rotate on the lead's reading" || return 1
     # The lead, same directory, same reading: the notice is its.
     out=$(_stop_with_ctx 64 "$UUID_A") || return 1
-    assert_output_contains "$out" "stopping point" "the lead is still warned" || return 1
+    assert_eq "$(_warning_text 64 65)" "$(stop_notice_text "$out")" "the lead is still warned" || return 1
 }
 
 # Forced rotation ships on. A machine that has not been told so gets one
@@ -2718,6 +2690,112 @@ run_test test_force_threshold_past_100_is_the_default_like_the_mod
 run_test test_launch_prints_the_force_notice_once_and_only_with_hooks_on
 run_test test_ctx_warning_fires_once_in_band
 run_test test_ctx_tiers_are_silent_for_a_teammate
+
+# A Stop whose input names a transcript, as Claude Code's does.
+_stop_with_ctx_and_transcript() {  # ctx-pct, session_id, transcript path
+    printf '%s\n' "$1" > "$CLAUDE_SESSION_META_DIR/local/context-pct"
+    jq -nc --arg s "$2" --arg t "$3" '{session_id: $s, transcript_path: $t}' | bash "$HOOKS_DIR/stop-notices.sh"
+}
+
+# A notice the transcript does not record was lost at exit or is still to be
+# read, and the hook cannot tell which: it goes out once more on a later Stop
+# where it still applies, and then never again for that conversation. Without
+# a transcript_path nothing records a delivery, so the second always goes out.
+test_nudge_is_repeated_once_when_the_transcript_does_not_record_it() {
+    _rot_hook_session "rot-nudge-again"
+    local t="$TEST_TMPDIR/transcript-unrecorded.jsonl" out
+    : > "$t"
+    out=$(_stop_with_ctx_and_transcript 70 "$UUID_A" "$t") || return 1
+    assert_eq "$(_nudge_text 70)" "$(stop_notice_text "$out")" "the first nudge goes out" || return 1
+    out=$(_stop_with_ctx_and_transcript 85 "$UUID_A" "$t") || return 1
+    assert_eq "$(_nudge_text 85)" "$(stop_notice_text "$out")" "a second Stop still over the threshold repeats the nudge once" || return 1
+    assert_eq "$UUID_A
+$UUID_A again" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor records the repeat" || return 1
+    out=$(_stop_with_ctx_and_transcript 90 "$UUID_A" "$t") || return 1
+    assert_eq "" "$out" "a third Stop is silent" || return 1
+}
+
+test_nudge_is_not_repeated_once_the_transcript_records_it() {
+    _rot_hook_session "rot-nudge-recorded"
+    local t="$TEST_TMPDIR/transcript.jsonl" out
+    : > "$t"
+    out=$(_stop_with_ctx_and_transcript 65 "$UUID_A" "$t") || return 1
+    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "the first nudge goes out" || return 1
+    # Claude Code records a delivered notice in the transcript as an
+    # async_hook_response attachment carrying the hook's output.
+    _delivery_line "$(stop_notice_text "$out")" >> "$t"
+    out=$(_stop_with_ctx_and_transcript 85 "$UUID_A" "$t") || return 1
+    assert_eq "" "$out" "a recorded nudge is not repeated" || return 1
+    assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor holds the one send" || return 1
+}
+
+# Only that attachment records a delivery. The notice's words also sit in a
+# user message that quotes them, and in a tool result that holds the hook's
+# source; neither is a delivery, and the repeat still goes out past both.
+test_nudge_is_repeated_when_only_a_message_holds_its_words() {
+    _rot_hook_session "rot-nudge-quoted"
+    local t="$TEST_TMPDIR/transcript-quoted.jsonl" out
+    : > "$t"
+    out=$(_stop_with_ctx_and_transcript 70 "$UUID_A" "$t") || return 1
+    assert_eq "$(_nudge_text 70)" "$(stop_notice_text "$out")" "the first nudge goes out" || return 1
+    jq -nc --arg c "$(stop_notice_text "$out")" '{type: "user", message: {role: "user", content: ("you said: " + $c)}}' >> "$t"
+    jq -nc --arg c "$(cat "$HOOKS_DIR/stop-notices.sh")" '{type: "user", message: {role: "user", content: [{type: "tool_result", content: $c}]}}' >> "$t"
+    out=$(_stop_with_ctx_and_transcript 85 "$UUID_A" "$t") || return 1
+    assert_eq "$(_nudge_text 85)" "$(stop_notice_text "$out")" "a quoted nudge is no delivery" || return 1
+    assert_eq "$UUID_A
+$UUID_A again" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor records the repeat" || return 1
+}
+
+test_ctx_warning_is_repeated_once_when_the_transcript_does_not_record_it() {
+    _rot_hook_session "rot-warn-again"
+    local t="$TEST_TMPDIR/transcript.jsonl" out
+    : > "$t"
+    out=$(_stop_with_ctx_and_transcript 40 "$UUID_A" "$t") || return 1
+    assert_eq "$(_warning_text 40 65)" "$(stop_notice_text "$out")" "the first warning goes out" || return 1
+    out=$(_stop_with_ctx_and_transcript 45 "$UUID_A" "$t") || return 1
+    assert_eq "$(_warning_text 45 65)" "$(stop_notice_text "$out")" "an unrecorded warning is repeated once" || return 1
+    assert_eq "$UUID_A
+$UUID_A again" "$(cat "$CLAUDE_SESSION_META_DIR/local/ctx-warned")" "the cursor records the repeat" || return 1
+    out=$(_stop_with_ctx_and_transcript 50 "$UUID_A" "$t") || return 1
+    assert_eq "" "$out" "a third Stop is silent" || return 1
+    # A recorded first send: no repeat.
+    _rot_hook_session "rot-warn-recorded"
+    : > "$t"
+    out=$(_stop_with_ctx_and_transcript 40 "$UUID_B" "$t") || return 1
+    _delivery_line "$(stop_notice_text "$out")" >> "$t"
+    out=$(_stop_with_ctx_and_transcript 45 "$UUID_B" "$t") || return 1
+    assert_eq "" "$out" "a recorded warning is not repeated" || return 1
+}
+
+# The first notice is printed before its cursor line, so a hook killed
+# between the two leaves a notice the cursor does not count as sent; the
+# repeat is printed only after its "again" line, so a cursor that cannot take
+# it sends nothing, and the repeat cannot come back on every Stop. Pinned on
+# the order of the two writes as they reach the file system: the cursor file
+# is made unwritable, and the first notice still goes out while the repeat
+# does not.
+test_context_cursor_order_differs_for_the_first_send_and_the_repeat() {
+    _rot_hook_session "rot-cursor-order"
+    local out
+    printf '%s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"
+    _deny_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" || return 77
+    out=$(_stop_with_ctx 70 "$UUID_A" 2>/dev/null) || { _allow_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"; return 1; }
+    _allow_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"
+    assert_eq "$(_nudge_text 70)" "$(stop_notice_text "$out")" "a cursor that cannot be stamped does not cost the first notice" || return 1
+    assert_eq "$UUID_B" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor is as it was" || return 1
+    _deny_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" || return 77
+    out=$(_stop_with_ctx 70 "$UUID_B" 2>/dev/null) || { _allow_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"; return 1; }
+    _allow_writes "$CLAUDE_SESSION_META_DIR/local/rotate-nudged"
+    assert_eq "" "$out" "a repeat whose again line cannot be written is not sent" || return 1
+    assert_eq "$UUID_B" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged")" "the cursor is still as it was" || return 1
+}
+
+run_test test_nudge_is_repeated_once_when_the_transcript_does_not_record_it
+run_test test_nudge_is_not_repeated_once_the_transcript_records_it
+run_test test_nudge_is_repeated_when_only_a_message_holds_its_words
+run_test test_ctx_warning_is_repeated_once_when_the_transcript_does_not_record_it
+run_test test_context_cursor_order_differs_for_the_first_send_and_the_repeat
+
 run_test test_ctx_warning_survives_an_interleaved_teammate
 run_test test_ctx_warning_rearms_for_new_conversation
 run_test test_ctx_warning_silent_below_band

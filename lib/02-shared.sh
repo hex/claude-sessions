@@ -535,13 +535,15 @@ _cs_tmux_title_lock_path() {  # pane
 #   another file once it holds the lock, lets it go and takes the lock on the
 #   file the path names, trying three times in all.
 # - A directory that is missing, or cannot take a new file, refuses at once.
-# - A live holder is waited for, but for no more than five seconds: past that
-#   the caller goes ahead without the lock or gives up, as it chooses, since a
-#   launch or a hook must never stall on a lock a stray process holds.
+# - A live holder is waited for, but for no more than the seconds the second
+#   argument names, five when it is absent (zero tries once and waits for no
+#   one): past that the caller goes ahead without the lock or gives up, as it
+#   chooses, since a launch or a hook must never stall on a lock a stray
+#   process holds.
 # - Without perl nothing is locked, and a line on stderr says so.
 # Returns 0 holding the lock, 1 holding nothing.
-_cs_lock() {  # lock file
-    local lock="$1" rc
+_cs_lock() {  # lock file, [seconds to wait for a live holder]
+    local lock="$1" wait="${2:-5}" rc
     if [ -n "${_CS_LOCK_HELD:-}" ]; then
         echo "cs: cannot lock $lock: this process already holds $_CS_LOCK_HELD" >&2
         return 1
@@ -557,7 +559,7 @@ _cs_lock() {  # lock file
         fi
         { exec 9<>"$lock"; } 2>/dev/null || return 1
         rc=0
-        perl -e "$_CS_LOCK_PERL" "$lock" || rc=$?
+        perl -e "$_CS_LOCK_PERL" "$wait" "$lock" || rc=$?
         case "$rc" in
             0)
                 _CS_LOCK_HELD="$lock"
@@ -580,10 +582,11 @@ _cs_lock() {  # lock file
 }
 
 # _cs_lock's perl, run on the lock file with bash's fd 9 open on it. Exits 0
-# holding the lock; 1 after five seconds of a live holder; 2 when the path is
+# holding the lock; 1 after the seconds $ARGV[0] names of a live holder; 2 when the path
+# ($ARGV[1], last so a test can tell this perl by its argument) is
 # not the regular file fd 9 has open (a link, or another type); 3 when the
 # path names another regular file than fd 9 has, or nothing at all, so the
-# caller opens the path again. The five seconds are read from the clock, not
+# caller opens the path again. The seconds are read from the clock, not
 # counted in polls: a starved CPU wakes each 50 ms poll late, and a hundred
 # late polls would wait twice as long as promised. The clock is the
 # monotonic one, so a wall-clock step during the wait (NTP, a manual date
@@ -596,14 +599,14 @@ open(my $fd, "+<&=", 9) or exit 1;
 my @held = stat($fd);
 exit 2 unless @held && -f _;
 sub path_names_held {
-    my @path = lstat($ARGV[0]);
+    my @path = lstat($ARGV[1]);
     return @path && -f _ && $path[0] == $held[0] && $path[1] == $held[1];
 }
-my @path = lstat($ARGV[0]);
+my @path = lstat($ARGV[1]);
 exit 3 if !@path && $!{ENOENT};
 exit 2 unless @path && -f _;
 exit 3 unless path_names_held();
-my $deadline = now() + 5;
+my $deadline = now() + $ARGV[0];
 while (1) {
     if (flock($fd, LOCK_EX | LOCK_NB)) {
         exit 0 if path_names_held();
@@ -731,6 +734,29 @@ _cs_file_mode() {  # path
 # file removed, and returns the failing status. Callers that want a message
 # add it: hooks source this file, and `error` is cs's alone.
 # Usage: cs_write_atomic <dest> <command> [args...]
+# What dirname and basename print for a path, without starting either: every
+# write a hook makes asks both, more than once.
+_cs_path_dir() {  # path
+    local p="$1"
+    while [ "$p" != "${p%/}" ] && [ -n "${p%/}" ]; do p=${p%/}; done
+    case "$p" in
+        /*/*|[!/]*/*) ;;
+        /*) printf '/\n'; return ;;
+        *) printf '.\n'; return ;;
+    esac
+    p=${p%/*}
+    while [ "$p" != "${p%/}" ]; do p=${p%/}; done
+    printf '%s\n' "${p:-/}"
+}
+_cs_path_base() {  # path
+    local p="$1"
+    while [ "$p" != "${p%/}" ] && [ -n "${p%/}" ]; do p=${p%/}; done
+    case "$p" in
+        /|//*) printf '/\n'; return ;;
+    esac
+    printf '%s\n' "${p##*/}"
+}
+
 # Where a write to a path lands: its symlinks followed, 16 hops as
 # cs_write_atomic follows them, and its directory resolved physically, so a
 # linked parent counts too. Fails when that directory does not exist, and
@@ -751,7 +777,7 @@ _cs_write_target() {  # path
         link=${link%x}
         case "$link" in
             /*) dest="$link" ;;
-            *) dest="$(dirname -- "$dest")/$link" ;;
+            *) dest="$(_cs_path_dir "$dest")/$link" ;;
         esac
         case "$dest" in *"$nl"/*|*"$nl") return 3 ;; esac
         hops=$((hops + 1))
@@ -770,9 +796,9 @@ _cs_write_target() {  # path
     # collapse `link/..` to the link's own parent, not the target's. The x
     # keeps a directory's trailing newline; the name after it keeps it from
     # the caller's $(...).
-    dir=$(cd -P -- "$(dirname -- "$dest")" 2>/dev/null && pwd -P && printf x) || return 1
+    dir=$(cd -P -- "$(_cs_path_dir "$dest")" 2>/dev/null && pwd -P && printf x) || return 1
     dir=${dir%"$nl"x}
-    printf '%s/%s\n' "${dir%/}" "$(basename -- "$dest")"
+    printf '%s/%s\n' "${dir%/}" "$(_cs_path_base "$dest")"
 }
 
 # True when .cs at <root> is a submodule or nested repository, whose files
@@ -999,21 +1025,41 @@ cs_mkdir_inside() {  # dir
     done
 }
 
+# The key the two Stop hooks (stop-blocks.sh, stop-notices.sh) agree
+# on for one Stop: the cksum of the Stop input, a dot, and the byte size of the
+# transcript the input names. The input alone repeats across turns (session_id,
+# transcript_path and last_assistant_message can all be the same on two Stops),
+# and the transcript holds the turn's assistant message before Stop fires and
+# takes what the hooks return only after they exit, so its size differs per
+# Stop and both hooks, reading at their start, read one size. A transcript the
+# input does not name, or that cannot be read, leaves the cksum alone as the
+# key, and two such Stops on one input share it. The caller hands in the path
+# from its one read of the input. Each hook carries a copy of
+# this function for a partial install without this library, and
+# tests/test_hooks.sh holds the three to one text.
+cs_stop_key() {  # stop input, the transcript path it names
+    local c t="$2" s=""
+    c=$(printf '%s' "$1" | cksum)
+    c=${c%% *}
+    if [ -n "$t" ] && [ -f "$t" ] && [ -r "$t" ]; then s=$(wc -c < "$t" 2>/dev/null) || s=""; s=${s//[[:space:]]/}; fi
+    case "$s" in ''|*[!0-9]*) printf '%s' "$c" ;; *) printf '%s.%s' "$c" "$s" ;; esac
+}
+
 cs_write_atomic() {  # dest, command [args...]
     local dest="$1"; shift
     (
         local dir tmp mode link hops=0
         ! _cs_refuses_write cs_write_atomic "$dest" || exit 1
         [ -z "${CS_WRITE_QUIET:-}" ] || exec 2>/dev/null
-        # readlink, dirname and basename below take dest without --: a
-        # relative dest starting with a dash fails at them or at mktemp and
-        # writes nothing, so that spelling is accepted, not re-fixed.
+        # readlink and mv below take dest without --: a relative dest
+        # starting with a dash fails at them and writes nothing, so that
+        # spelling is accepted, not re-fixed.
         while [ -L "$dest" ] && [ "$hops" -lt 16 ]; do
             link=$(readlink -n "$dest" && printf x) || exit 1
             link=${link%x}
             case "$link" in
                 /*) dest="$link" ;;
-                *) dest="$(dirname "$dest")/$link" ;;
+                *) dest="$(_cs_path_dir "$dest")/$link" ;;
             esac
             hops=$((hops + 1))
         done
@@ -1021,8 +1067,8 @@ cs_write_atomic() {  # dest, command [args...]
             echo "cs_write_atomic: $dest is a directory" >&2
             exit 1
         fi
-        dir=$(dirname "$dest")
-        tmp=$(mktemp "$dir/.cs-tmp.$(basename "$dest").XXXXXX") || exit 1
+        dir=$(_cs_path_dir "$dest")
+        tmp=$(mktemp "$dir/.cs-tmp.$(_cs_path_base "$dest").XXXXXX") || exit 1
         trap 'rm -f "$tmp"' EXIT
         "$@" > "$tmp" || exit $?
         if [ -f "$dest" ]; then

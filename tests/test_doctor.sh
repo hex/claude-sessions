@@ -245,26 +245,26 @@ test_doctor_warns_on_wrap_pass_drift() {
 # ./install.sh replaces a deployed copy cs wrote and keeps one it did not (the
 # user's edit), so the drift row's advice follows what the install will do:
 # run it for cs's own copy; for a copy kept as the user's, move it aside first.
-# The record names session-start.sh as cs's; narrative-reminder.sh is not in
+# The record names session-start.sh as cs's; stop-blocks.sh is not in
 # it and is no content cs ever shipped.
 test_doctor_drift_advice_follows_whose_the_deployed_copy_is() {
     local home="$TEST_TMPDIR/drift-home" checkout="$TEST_TMPDIR/keptco" deployed digest output
     deployed="$home/.claude/hooks/cs"
     make_fake_checkout "$checkout" "$deployed"
     echo 'echo source' > "$checkout/hooks/session-start.sh"
-    echo 'echo source' > "$checkout/hooks/narrative-reminder.sh"
+    echo 'echo source' > "$checkout/hooks/stop-blocks.sh"
     echo 'echo an-older-cs-build' > "$deployed/session-start.sh"
-    echo 'echo the-users-edit' > "$deployed/narrative-reminder.sh"
-    chmod +x "$deployed/session-start.sh" "$deployed/narrative-reminder.sh"
+    echo 'echo the-users-edit' > "$deployed/stop-blocks.sh"
+    chmod +x "$deployed/session-start.sh" "$deployed/stop-blocks.sh"
     digest=$(shasum -a 256 "$deployed/session-start.sh" | cut -d' ' -f1)
     printf '%s  .claude/hooks/cs/session-start.sh\n' "$digest" > "$deployed/.installed"
 
     output=$(cd "$checkout" && HOME="$home" CS_HOOKS_DIR="$deployed" "$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "Hook drift: deployed copy differs from source: session-start.sh (run ./install.sh)$" \
         "cs's own copy: run the installer" || { echo "$output"; return 1; }
-    assert_output_contains "$output" "Hook drift: deployed copy differs from source: narrative-reminder.sh (kept as yours, so ./install.sh does not replace it; move it aside, then run ./install.sh to get cs's copy)$" \
+    assert_output_contains "$output" "Hook drift: deployed copy differs from source: stop-blocks.sh (kept as yours, so ./install.sh does not replace it; move it aside, then run ./install.sh to get cs's copy)$" \
         "the user's copy: move it aside first" || { echo "$output"; return 1; }
-    assert_output_not_contains "$output" "narrative-reminder.sh.*(run ./install.sh)$" \
+    assert_output_not_contains "$output" "stop-blocks.sh.*(run ./install.sh)$" \
         "the user's copy is not offered the plain advice" || { echo "$output"; return 1; }
 }
 
@@ -334,19 +334,21 @@ test_doctor_warns_on_mod_tips_drift() {
         "a tips file the installer never copied is drift" || return 1
 }
 
-# A mod the installer keeps out (CS_MODS_KEPT_OUT, cs-feed) is never deployed,
-# so its source is not drift: no "not deployed" row names it.
-test_doctor_drift_skips_a_kept_out_mod() {
+# cs-filter-chat ships, so its source is drift until the installer has deployed it.
+test_doctor_drift_holds_cs_filter_chat_to_its_deployed_copy() {
     local checkout="$TEST_TMPDIR/keptmodco" deployed="$TEST_TMPDIR/keptmoddep" skills="$TEST_TMPDIR/keptmodskills"
     make_fake_checkout "$checkout" "$deployed"
-    mkdir -p "$checkout/mods/cs/hooks" "$checkout/mods/cs-feed/hooks" "$skills/cs/hooks"
+    mkdir -p "$checkout/mods/cs/hooks" "$checkout/mods/cs-filter-chat/hooks" "$skills/cs/hooks"
     echo 'export const CRIT_PERCENT = 65' > "$checkout/mods/cs/hooks/register.tsx"
     cp "$checkout/mods/cs/hooks/register.tsx" "$skills/cs/hooks/register.tsx"
-    echo 'export const FEED = 1' > "$checkout/mods/cs-feed/hooks/register.tsx"
+    echo 'export const FILTER_CHAT = 1' > "$checkout/mods/cs-filter-chat/hooks/register.tsx"
     local output
     output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" CS_SKILLS_DIR="$skills" "$CS_BIN" -doctor 2>&1) || true
-    assert_output_contains "$output" "Deploy drift" "the scan ran to its verdict" || return 1
-    assert_output_not_contains "$output" "Mod drift" "the kept-out mod is not drift" || return 1
+    assert_output_contains "$output" "Mod drift: not deployed: cs-filter-chat/hooks/register.tsx" "an undeployed filter chat file is drift" || return 1
+    mkdir -p "$skills/cs-filter-chat/hooks"
+    cp "$checkout/mods/cs-filter-chat/hooks/register.tsx" "$skills/cs-filter-chat/hooks/register.tsx"
+    output=$(cd "$checkout" && CS_HOOKS_DIR="$deployed" CS_SKILLS_DIR="$skills" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "Mod drift" "the deployed copy is not drift" || return 1
 }
 
 test_doctor_drift_skipped_outside_checkout() {
@@ -1618,7 +1620,7 @@ run_test test_doctor_warns_on_undeployed_hook
 run_test test_doctor_drift_silent_when_in_sync
 run_test test_doctor_warns_on_mod_drift
 run_test test_doctor_warns_on_mod_tips_drift
-run_test test_doctor_drift_skips_a_kept_out_mod
+run_test test_doctor_drift_holds_cs_filter_chat_to_its_deployed_copy
 run_test test_doctor_drift_skipped_outside_checkout
 run_test test_doctor_warns_on_command_drift
 run_test test_doctor_warns_on_skill_script_drift
@@ -1962,6 +1964,13 @@ test_doctor_lists_every_context_injecting_hook_with_its_switch() {
     assert_output_contains "$output" "CS_DATE_REMINDER_DISABLE" "Should name the date reminder off-switch" || return 1
     assert_output_contains "$output" "CS_REWRITE_DISABLE" "Should name the rewriter off-switch" || return 1
     assert_output_contains "$output" ".cs/local/disabled" "Should name the hooks' off-switch" || return 1
+    # The four turn-end notices ride stop-notices.sh; each row names it.
+    local label row hook
+    for label in "narrative" "council nudge" "ctx warning" "rotate nudge"; do
+        row=$(grep -E "^ +(on|off) +$label +[^ ]+ +off: " <<< "$output" | head -1)
+        hook=$(awk '{print $1}' <<< "${row#*"$label"}")
+        assert_eq "stop-notices" "$hook" "the $label row names the hook that carries it" || return 1
+    done
 }
 
 _doctor_diagrams_row() {
