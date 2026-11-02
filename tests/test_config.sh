@@ -442,7 +442,7 @@ test_list_porcelain_equals_the_golden_record() {
     assert_eq "0" "$rc" "list --porcelain exits 0" || return 1
     assert_eq "" "$(cat "$TEST_TMPDIR/err")" "and says nothing on stderr" || return 1
     assert_eq "$(cat "$SCRIPT_DIR/fixtures/config-porcelain.txt")" "$out" "stdout is the golden record" || return 1
-    assert_eq "41" "$(printf '%s\n' "$out" | awk -F'\t' 'NF == 12' | wc -l | tr -d ' ')" "41 records of 12 fields" || return 1
+    assert_eq "42" "$(printf '%s\n' "$out" | awk -F'\t' 'NF == 12' | wc -l | tr -d ' ')" "42 records of 12 fields" || return 1
 }
 
 # A key that turns something off (*_NO_*, *_DISABLE) has an inverted edit
@@ -718,7 +718,7 @@ test_the_picker_gets_the_theme_from_a_file() {
 test_every_reader_loads_the_settings_before_its_first_read() {
     local keys f got read load bad=""
     keys=$(sed -n "/^_CS_CONFIG_SPEC=(/,/^)/s/^    '\(CS_[A-Z0-9_]*\)|.*/\1/p" "$REPO/lib/03-config.sh" | paste -sd'|' -)
-    assert_eq "41" "$(printf '%s\n' "$keys" | awk -F'|' '{ print NF }')" "the allow-list's 41 keys" || return 1
+    assert_eq "42" "$(printf '%s\n' "$keys" | awk -F'|' '{ print NF }')" "the allow-list's 42 keys" || return 1
     for f in "$REPO"/hooks/*.sh "$REPO"/bin/cs-statusline "$REPO"/bin/cs-subagent-statusline "$REPO"/bin/cs-secrets; do
         case "${f##*/}" in cs-config.sh|cs-shared.sh) continue ;; esac
         got=$(awk -v keys="$keys" '

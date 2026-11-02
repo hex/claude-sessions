@@ -16,6 +16,7 @@ CS_SCOPE_BUDGET_MS	Prompts	Scope scan budget (ms)	text	-	1500	now	applies at you
 CS_OBJECTIVE_CAPTURE_DISABLE	Prompts	Objective capture	flagoff	-	off	now	applies at your next prompt	-	default	-	Records the first real prompt of a session as its objective in .cs/README.md.
 CS_DATE_REMINDER_DISABLE	Prompts	Date reminder	flagoff	-	off	now	applies at your next prompt	-	default	-	Tells Claude the new date when a conversation runs past midnight.
 CS_CLARIFY_DISABLE	Prompts	Clarifying questions	flagoff	-	off	now	applies at your next prompt	-	default	-	Asks Claude to question an unclear request instead of guessing; a leading ~ skips one prompt.
+CS_NARRATIVE_PROMPT_DISABLE	Prompts	Narrative line	flagoff	-	off	now	applies at your next prompt	-	default	-	Asks Claude, on each prompt, to note a finding in its narrative before it answers.
 CS_CTX_WARN_CTX	Rotation	Context warning %	text	-	40	now	applies when the next turn ends	-	default	-	Context use at which Claude tells you, once, that the conversation is filling up.
 CS_ROTATE_BUTTON_CTX	Rotation	Rotate button from %	text	-	the warn %	now	applies by your next prompt	-	default	-	Context use from which the band above the prompt shows the rotate key, Ctrl+X 1.
 CS_ROTATE_NUDGE_CTX	Rotation	Rotation nudge %	text	-	65	now	applies when the next turn ends	-	default	-	Context use at which Claude suggests, once, writing a handoff and going on after /clear.

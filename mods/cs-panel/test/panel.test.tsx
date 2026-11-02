@@ -37,11 +37,11 @@ function edited(key: string, fields: Record<number, string>, porcelain = GOLDEN)
   return porcelain.replace(line, line.split('\t').map((field, i) => fields[i + 1] ?? field).join('\t'))
 }
 
-test('the golden porcelain parses to its 41 settings in cs\'s order, cs\'s words kept and `-` read as none', () => {
+test('the golden porcelain parses to its 42 settings in cs\'s order, cs\'s words kept and `-` read as none', () => {
   const settings = settingsOf(GOLDEN)
-  expect(settings.length).toBe(41)
+  expect(settings.length).toBe(42)
   expect(settings[0]?.key).toBe('CS_STATUSLINE_DISABLE')
-  expect(settings[40]?.key).toBe('CS_NARRATIVE_KEEP_BYTES')
+  expect(settings[41]?.key).toBe('CS_NARRATIVE_KEEP_BYTES')
   expect(settings[1]).toEqual({ key: 'CS_STATUSLINE_LAYOUT', group: 'Status line', label: 'Layout', edit: 'choice', choices: ['quiet', 'band', 'capsules'],
     fallback: 'quiet', when: 'now', whenText: 'applies at the next repaint', value: 'band', source: 'machine', ignored: undefined,
     describe: 'How the status line looks: plain text, one full-width band of colour, or capsules.' })
@@ -61,7 +61,7 @@ test('a flag the shell pins to a word other than 1 parses and draws that word, a
   const pinned = edited('CS_NERD_FONTS', { 9: '0', 10: 'shell' })
   expect(pinned).not.toBe(GOLDEN)
   const settings = settingsOf(pinned)
-  expect(settings.length).toBe(41)
+  expect(settings.length).toBe(42)
   expect(settings.find(s => s.key === 'CS_NERD_FONTS')).toMatchObject({ value: '0', source: 'shell' })
   const { lines } = await drawer($, on)(viewOf({ selected: 'cs:CS_NERD_FONTS', lines: linesOf(modRowsOf(MOD_ROWS), settings, new Map(), 'Mods') }))
   expect(cardIn(lines)).toEqual(['▍ selected · Nerd Font glyphs', '▍ Shows Nerd Font icons in cs banners and session lists;…',
@@ -304,12 +304,12 @@ const COLOURS = { ink: 'text', mut: 'inactive', faint: 'subtle', soft: 'subtle',
 const VERSION = '2026.10.11'
 
 // The masthead's words and lines and the column header with its rule at the
-// dock's 58 columns: 46 settings of which the golden's five files and shell
+// dock's 58 columns: 47 settings of which the golden's five files and shell
 // override (the launch's Theme is none); the session name does not fit beside them.
-const WORDS_AT_58 = 'claude-sessions 2026.10.11 · 46 settings · 5 overrides'
+const WORDS_AT_58 = 'claude-sessions 2026.10.11 · 47 settings · 5 overrides'
 const MASTHEAD_AT_58 = boxed(58, WORDS_AT_58)
 // The masthead's words at 80 columns, the session name too.
-const WORDS_AT_80 = 'claude-sessions 2026.10.11 · 46 settings · 5 overrides · alpha'
+const WORDS_AT_80 = 'claude-sessions 2026.10.11 · 47 settings · 5 overrides · alpha'
 const HEAD_AT_58 = [`  ${'Setting'.padEnd(40)}  Value`, soft(58)]
 // The column header at 72 columns and up: the source and applies columns
 // return, the name has 26 cells and applies the rest.
@@ -347,6 +347,7 @@ const GOLDEN_AT_58 = [
   at58('Objective capture', '● on'),
   at58('Date reminder', '● on'),
   at58('Clarifying questions', '● on'),
+  at58('Narrative line', '● on'),
   '',
   group('Rotation'),
   at58('Context warning %', '40%'),
@@ -387,9 +388,9 @@ const GOLDEN_AT_58 = [
   at58('Budget (bytes)', '131072'),
   at58('Tail kept (bytes)', '65536'),
 ]
-// The lines the golden draws at 80 rows and up: 46 rows, 10 headlines and the
+// The lines the golden draws at 80 rows and up: 47 rows, 10 headlines and the
 // 9 empty lines above all but the first.
-const GOLDEN_LINES = 65
+const GOLDEN_LINES = 66
 
 test('the golden porcelain and the mod rows draw under the masthead, the search box and the column header, Mods first, each row exactly the body wide, and the first row\'s footer under a rule', async ($, on) => {
   const draw = drawer($, on)
@@ -408,7 +409,7 @@ test('the golden porcelain and the mod rows draw under the masthead, the search 
     scopeLine(),
   ])
   const rows = rowsOf(tree)
-  expect(rows.length).toBe(46)
+  expect(rows.length).toBe(47)
   expect(rows.filter(line => line.length !== 58)).toEqual([])
   // A percent setting is known by its label's `%`, not by a list of keys: a
   // percent set in a file draws its % whichever key it is.
@@ -503,10 +504,10 @@ test('the footer\'s second line is what the setting does, in ink, cut with … w
     '▍ How many prompts the band draws as bars.', '▍ 10 · mod · changing it reloads cs (an armed rotation', '▍ countdown starts over)', '▍ cs.bandBars', hint(), scopeLine()])
 })
 
-test('every row, headline, line of the masthead, the card and the field fits 24, 40, 58, 60 and 80 columns, and 46 rows in 15 lines keep the selected row drawn', async ($, on) => {
+test('every row, headline, line of the masthead, the card and the field fits 24, 40, 58, 60 and 80 columns, and 47 rows in 15 lines keep the selected row drawn', async ($, on) => {
   const draw = drawer($, on)
   const ids: RowId[] = [...modRowsOf(MOD_ROWS).map(m => `mod:${m.key}` as const), ...settingsOf(GOLDEN).map(s => `cs:${s.key}` as const)]
-  expect(ids.length).toBe(46)
+  expect(ids.length).toBe(47)
   for (const columns of [24, 40, 58, 60, 80]) {
     for (const selected of ids) {
       const { lines, label, tree } = await draw(viewOf({ columns, bodyRows: 15, selected }), selected)
@@ -533,7 +534,7 @@ test('every row, headline, line of the masthead, the card and the field fits 24,
     soft(24), '▍ selected · Layout', '▍ band · machine ·…', scopeLine(24)])
   // With no session name there is no scope line, and at 13 the keys' line stays.
   expect((await draw(viewOf({ columns: 24, bodyRows: 13, selected: 'cs:CS_STATUSLINE_LAYOUT', hasSelf: false }))).lines.slice(-1)).toEqual([hint('Enter change', 24)])
-  // 65 lines (46 rows, 10 headlines, the 9 empty lines above all but the
+  // 66 lines (47 rows, 10 headlines, the 9 empty lines above all but the
   // first) in the 11 lines of 19 the masthead, the search box and the column
   // header leave: a footer of a one-line value and a two-line description
   // takes eight and leaves the window 3, a mod row's two-line value and no
@@ -545,7 +546,7 @@ test('every row, headline, line of the masthead, the card and the field fits 24,
   expect(await at('cs:CS_STATUSLINE_LAYOUT')).toEqual([...top,
     '+6 above',
     at58('Layout', 'band', true),
-    '+39 below',
+    '+40 below',
     soft(58), '▍ selected · Layout', '▍ How the status line looks: plain text, one full-width', '▍ band of colour, or capsules.',
     '▍ band · machine · applies at the next repaint', '▍ CS_STATUSLINE_LAYOUT', hint(), scopeLine(),
   ])
@@ -553,19 +554,19 @@ test('every row, headline, line of the masthead, the card and the field fits 24,
     group('Mods'),
     at58('Band: prompt bars', '○ off', true),
     at58('Band: named prompt', 'latest'),
-    '+44 below',
+    '+45 below',
     soft(58), '▍ selected · Band: prompt bars', '▍ ○ off · mod · changing it reloads cs (an armed rotation', '▍ countdown starts over)', '▍ cs.bandPrompts', hint('Enter flip'),
     scopeLine(),
   ])
   expect(await at('cs:CS_NO_FUNCTION_HOOKS')).toEqual([...top,
-    '+40 above',
+    '+41 above',
     at58('Mods', '● on', true),
     '+5 below',
     soft(58), '▍ selected · Mods', '▍ Lets a launch load mods, the cs band and settings pane…', '▍ ● on · default · change it from a shell: cs -config set',
     '▍ CS_NO_FUNCTION_HOOKS 1 loads no mod from the next…', '▍ CS_NO_FUNCTION_HOOKS', hint('shell only'), scopeLine(),
   ])
   expect(await at('cs:CS_NARRATIVE_KEEP_BYTES')).toEqual([...top,
-    '+44 above',
+    '+45 above',
     at58('Budget (bytes)', '131072'),
     at58('Tail kept (bytes)', '65536', true),
     soft(58), '▍ selected · Tail kept (bytes)', '▍ How much of the newest narrative stays in the live file', '▍ when it rotates.',
@@ -574,9 +575,9 @@ test('every row, headline, line of the masthead, the card and the field fits 24,
   // Two lines more give the window five: the selected row, one either side,
   // and the counts, or the headline that stands for +0 above.
   expect((await at('cs:CS_STATUSLINE_DISABLE', 21)).slice(8, -8)).toEqual(['+5 above', group('Status line'), at58('Status line', '● on', true),
-    at58('Layout', 'band'), '+39 below'])
+    at58('Layout', 'band'), '+40 below'])
   expect((await at('cs:CS_STATUSLINE_LAYOUT', 21)).slice(8, -8)).toEqual(['+5 above', at58('Status line', '● on'), at58('Layout', 'band', true),
-    at58('Segments', 'logo,session,notes'), '+38 below'])
+    at58('Segments', 'logo,session,notes'), '+39 below'])
   expect(ringOf(viewOf({ columns: 58, bodyRows: 21, selected: 'cs:CS_STATUSLINE_DISABLE' })).keys)
     .toEqual(['filter', 'cs:CS_STATUSLINE_DISABLE', 'cs:CS_STATUSLINE_LAYOUT', 'reset', 'scope:session', 'scope:machine'])
   expect(ringOf(viewOf({ columns: 58, bodyRows: 19, selected: 'mod:cs.bandPrompts', hasField: false })).keys)
@@ -589,7 +590,7 @@ test('a drawing that moves the element the ring was put on sends the ring back t
   // control and the scope line's two Buttons.
   expect(short('cs:CS_STATUSLINE_LAYOUT')).toEqual({ keys: ['filter', 'cs:CS_STATUSLINE_DISABLE', 'cs:CS_STATUSLINE_LAYOUT', 'cs:CS_STATUSLINE_SEGMENTS', 'reset',
     'scope:session', 'scope:machine'], selected: 'cs:CS_STATUSLINE_LAYOUT' })
-  expect(ringOf(viewOf()).keys.length).toBe(50)
+  expect(ringOf(viewOf()).keys.length).toBe(51)
   // The field holds the first place in every drawing, so typing moves nothing.
   expect(ringBack({ key: 'filter', at: 0 }, short('cs:CS_STATUSLINE_LAYOUT', 'scope'))).toBe(undefined)
   // LAYOUT keeps the third place under DISABLE's window, which starts at the group's headline.
@@ -622,31 +623,31 @@ test('the filter keeps the rows whose label, key or group holds the text in any 
   expect(shown('mods')).toEqual(['Mods', 'mod:cs.bandPrompts', 'mod:cs.bandPrompt', 'mod:cs.bandBars', 'mod:cs-update.showReleaseNotes', 'mod:cs-mermaid.drawDiagrams',
     'Launch', 'cs:CS_NO_FUNCTION_HOOKS'])
   expect(shown('zzz')).toEqual([])
-  expect(shown('').length).toBe(56)
+  expect(shown('').length).toBe(57)
   expect(shown('  ')).toEqual(shown(''))
 })
 
 // The column header's line while the filter holds text: the heads, cut where
-// they leave the count no room, and how many rows the filter shows of all 46
+// they leave the count no room, and how many rows the filter shows of all 47
 // at the right edge.
 const counted = (columns: number, heads: string, count: string) => `${cut(heads, columns - count.length - 1).padEnd(columns - count.length)}${count}`
 
 test('filtered, the masthead keeps its counts, the column header says how many rows show of all of them, the window counts the rows shown, and no match says so with no footer', async ($, on) => {
   const draw = drawer($, on)
   const lines = async (filter: string, columns = 58) => (await draw(viewOf({ bodyRows: 19, filter, columns }))).lines.map(line => line.trimEnd())
-  expect(await lines('status')).toEqual([...MASTHEAD_AT_58, ...field(58, 'status'), counted(58, HEAD_AT_58[0] ?? '', '10 of 46'), soft(58),
+  expect(await lines('status')).toEqual([...MASTHEAD_AT_58, ...field(58, 'status'), counted(58, HEAD_AT_58[0] ?? '', '10 of 47'), soft(58),
     group('Status line'),
     at58('Status line', '● on', true),
     '+9 below',
     soft(58), '▍ selected · Status line', '▍ Draws the line under the prompt with the session,', '▍ branch, model, context and usage limits.',
     '▍ ● on · default · applies at the next repaint', '▍ CS_STATUSLINE_DISABLE', hint('Enter flip'), scopeLine(),
   ])
-  expect(await lines('zzz')).toEqual([...MASTHEAD_AT_58, ...field(58, 'zzz'), counted(58, HEAD_AT_58[0] ?? '', '0 of 46'), soft(58), 'no setting matches zzz'])
-  expect((await lines('context', 24))[6]).toBe('  Setting    Va… 4 of 46')
+  expect(await lines('zzz')).toEqual([...MASTHEAD_AT_58, ...field(58, 'zzz'), counted(58, HEAD_AT_58[0] ?? '', '0 of 47'), soft(58), 'no setting matches zzz'])
+  expect((await lines('context', 24))[6]).toBe('  Setting    Va… 4 of 47')
   const { tree } = await draw(viewOf({ filter: 'scope' }))
   const header = (((tree as Node).children ?? []) as Node[]).find(part => textOf(part).startsWith('  Setting'))
   expect((header?.children ?? []).map(run => [textOf(run), (run as Node).props?.color, (run as Node).props?.weight]))
-    .toEqual([[HEAD_AT_58[0]?.padEnd(51), COLOURS.mut, 'bold'], ['3 of 46', COLOURS.mut, undefined]])
+    .toEqual([[HEAD_AT_58[0]?.padEnd(51), COLOURS.mut, 'bold'], ['3 of 47', COLOURS.mut, undefined]])
 })
 
 // ── The look ─────────────────────────────────────────────────────────────
@@ -678,16 +679,16 @@ test('the masthead is the wordmark, cs\'s version, how many settings, how many a
   const set = (porcelain: string) => settingsOf(porcelain).filter(s => s.source === 'session' || s.source === 'machine' || s.source === 'shell').map(s => s.key)
   expect([set(THREE), set(ONE), set(NONE)]).toEqual([['CS_STATUSLINE_LAYOUT', 'CS_SCOPE_DISABLE', 'CS_NO_MAIL_WAKE'], ['CS_STATUSLINE_LAYOUT'], []])
   for (const [porcelain, overrides] of [[THREE, '3 overrides'], [ONE, '1 override'], [NONE, '0 overrides']] as const) {
-    expect(await words({ porcelain, columns: 80 })).toBe(`claude-sessions 2026.10.11 · 46 settings · ${overrides} · alpha`)
-    expect(await words({ porcelain, columns: 58 })).toBe(`claude-sessions 2026.10.11 · 46 settings · ${overrides}`)
+    expect(await words({ porcelain, columns: 80 })).toBe(`claude-sessions 2026.10.11 · 47 settings · ${overrides} · alpha`)
+    expect(await words({ porcelain, columns: 58 })).toBe(`claude-sessions 2026.10.11 · 47 settings · ${overrides}`)
     expect(await words({ porcelain, columns: 40 })).toBe('claude-sessions 2026.10.11')
     expect(await words({ porcelain, columns: 24 })).toBe('claude-sessions')
   }
-  expect(await words({ columns: 80, hasSelf: false })).toBe('claude-sessions 2026.10.11 · 46 settings · 5 overrides')
-  expect(await words({ columns: 80, session: 'a-very-long-session-name-for-this-test' })).toBe('claude-sessions 2026.10.11 · 46 settings · 5 overrides')
+  expect(await words({ columns: 80, hasSelf: false })).toBe('claude-sessions 2026.10.11 · 47 settings · 5 overrides')
+  expect(await words({ columns: 80, session: 'a-very-long-session-name-for-this-test' })).toBe('claude-sessions 2026.10.11 · 47 settings · 5 overrides')
   expect(await words({ columns: 16 })).toBe('claude-sess…')
   // Until cs tells its version, the masthead goes on without it.
-  expect(await words({ columns: 58, version: undefined })).toBe('claude-sessions · 46 settings · 5 overrides · alpha')
+  expect(await words({ columns: 58, version: undefined })).toBe('claude-sessions · 47 settings · 5 overrides · alpha')
 })
 
 test('the masthead draws install.sh.in\'s banner on no background: its top border and left side rust, its right side and bottom border gold, the wordmark bold letter by letter from rust to gold, the counts in ink and the version, the dots and the session muted', async ($, on) => {
@@ -697,7 +698,7 @@ test('the masthead draws install.sh.in\'s banner on no background: its top borde
   const dot = [' · ', COLOURS.mut]
   expect(mastheadIn(tree)).toEqual([
     [[`╭${'─'.repeat(78)}╮`, COLOURS.rust]],
-    [['│', COLOURS.rust], [' '], ...wordmark, [' ', COLOURS.mut], ['2026.10.11', COLOURS.mut], dot, ['46 settings', COLOURS.ink], dot, ['5 overrides', COLOURS.ink],
+    [['│', COLOURS.rust], [' '], ...wordmark, [' ', COLOURS.mut], ['2026.10.11', COLOURS.mut], dot, ['47 settings', COLOURS.ink], dot, ['5 overrides', COLOURS.ink],
       dot, ['alpha', COLOURS.mut], [' '.repeat(80 - 3 - WORDS_AT_80.length)], ['│', COLOURS.gold]],
     [[`╰${'─'.repeat(78)}╯`, COLOURS.gold]],
   ])
@@ -712,7 +713,7 @@ test('with an update pending, a second line in the masthead says which cs is ava
   expect((await lines({})).slice(0, 4)).toEqual(boxed(58, WORDS_AT_58, 'cs 2026.10.12 available · run cs -update'))
   expect((await lines({ columns: 40 })).slice(0, 4)).toEqual(boxed(40, 'claude-sessions 2026.10.11', 'cs 2026.10.12 available'))
   expect((await lines({ columns: 24 })).slice(0, 4)).toEqual(boxed(24, 'claude-sessions', 'cs 2026.10.12 avail…'))
-  expect((await lines({ version: undefined })).slice(0, 4)).toEqual(boxed(58, 'claude-sessions · 46 settings · 5 overrides · alpha', 'cs 2026.10.12 available · run cs -update'))
+  expect((await lines({ version: undefined })).slice(0, 4)).toEqual(boxed(58, 'claude-sessions · 47 settings · 5 overrides · alpha', 'cs 2026.10.12 available · run cs -update'))
   const { tree } = await draw(viewOf({ update: '2026.10.12' }))
   expect(mastheadIn(tree, 4).slice(2)).toEqual([
     [['│', COLOURS.rust], [' '], ['cs ', COLOURS.mut], ['2026.10.12', COLOURS.amber], [' available', COLOURS.mut], [' · ', COLOURS.mut], ['run cs -update', COLOURS.mut],
@@ -726,7 +727,7 @@ test('with an update pending, a second line in the masthead says which cs is ava
   expect([layout.slice(4, 7), layout.length]).toEqual([field(58), 9 + GOLDEN_LINES + 8])
   // cs already at the pending version, as after an update installed from this
   // conversation, draws no update line; nothing pending draws none.
-  expect((await draw(viewOf({ version: '2026.10.12', update: '2026.10.12' }))).lines.slice(0, 3)).toEqual(boxed(58, 'claude-sessions 2026.10.12 · 46 settings · 5 overrides'))
+  expect((await draw(viewOf({ version: '2026.10.12', update: '2026.10.12' }))).lines.slice(0, 3)).toEqual(boxed(58, 'claude-sessions 2026.10.12 · 47 settings · 5 overrides'))
   expect((await draw(viewOf())).lines.slice(0, 3)).toEqual(MASTHEAD_AT_58)
 })
 
@@ -825,15 +826,15 @@ test('each row is a row Box the body wide of the marker Text and one plain Butto
   expect(rowsOf(tree).filter(line => line.startsWith('▌ '))).toEqual([`▌ ${'Layout'.padEnd(40)}  ${'band'.padEnd(14)}`])
   // The rows' Buttons, the footer's reset control and its scope line's two.
   const buttons = nodesOf(tree).filter(n => n.type === 'Button')
-  expect(buttons.length).toBe(49)
+  expect(buttons.length).toBe(50)
   expect(buttons.flatMap(b => (b.children ?? []).map(c => typeof c === 'string' ? 'string' : (c as Node).type)).filter(type => type !== 'Text')).toEqual([])
   const labels = rowBoxes(tree).map(box => {
     const key = String(((box.children ?? []).find(c => (c as Node).type === 'Button') as Node).props.key)
     const label = runsOf(tree, key)[1]
     return [label?.color, label?.dimColor]
   })
-  expect(rowBoxes(tree).length).toBe(46)
-  expect(labels).toEqual(Array.from({ length: 46 }, () => [COLOURS.ink, undefined]))
+  expect(rowBoxes(tree).length).toBe(47)
+  expect(labels).toEqual(Array.from({ length: 47 }, () => [COLOURS.ink, undefined]))
   // A background under a focused element draws as a slab: no node of the pane has one.
   expect(nodesOf(tree).filter(n => n.props?.backgroundColor !== undefined).map(n => n.type)).toEqual([])
 })
@@ -842,7 +843,7 @@ test('the field is a search box right under the masthead, over the column header
   const draw = drawer($, on)
   const parts = ((await draw(viewOf({ filter: 'scope' }))).tree as Node).children as Node[]
   const at = parts.findIndex(part => (part.children ?? []).some(child => (child as Node).type === 'Input'))
-  expect([...parts.slice(at - MASTHEAD_LINES, at), parts[at + 1]].map(part => textOf(part).trimEnd())).toEqual([...MASTHEAD_AT_58, counted(58, HEAD_AT_58[0] ?? '', '3 of 46')])
+  expect([...parts.slice(at - MASTHEAD_LINES, at), parts[at + 1]].map(part => textOf(part).trimEnd())).toEqual([...MASTHEAD_AT_58, counted(58, HEAD_AT_58[0] ?? '', '3 of 47')])
   expect([parts[at]?.type, parts[at]?.props]).toEqual(['Box', { borderStyle: 'round', borderColor: COLOURS.soft, paddingX: 1, flexDirection: 'row', width: 58 }])
   const [input, ...rest] = (parts[at]?.children ?? []) as Node[]
   expect([input?.type, input?.props.key, input?.props.value, input?.props.placeholder, input?.props.autoFocus, input?.props.submitLabel, rest.length])
@@ -904,7 +905,7 @@ test('the keys\' line is a row Box ending in the reset control, one plain Button
   expect((button?.children ?? []).map(c => [(c as Node).type, textOf(c), (c as Node).props.color])).toEqual([['Text', 'reset all…', COLOURS.mut]])
   expect(lines.at(-2)).toBe('  ↑↓ move · Enter flip · Esc close              reset all…')
   expect(lines.slice(6, 8)).toEqual([HEAD_AT_58[0]?.padEnd(58), soft(58)])
-  expect((await draw(viewOf({ filter: 'scope' }))).lines[6]).toBe(counted(58, HEAD_AT_58[0] ?? '', '3 of 46'))
+  expect((await draw(viewOf({ filter: 'scope' }))).lines[6]).toBe(counted(58, HEAD_AT_58[0] ?? '', '3 of 47'))
   // At 24 columns the keys give up their end to leave a cell before it.
   expect((await draw(viewOf({ columns: 24 }))).lines.at(-2)).toBe('  ↑↓ move · … reset all…')
   const hasReset = async (over: Partial<PanelView>) => nodesOf((await draw(viewOf(over))).tree).some(n => n.props?.key === 'reset')
@@ -1038,7 +1039,7 @@ test('the window counts the chooser\'s lines, a picker with the ring on it open 
   expect(await at('cs:CS_STATUSLINE_CTX_WARN', 14, '50')).toEqual({ lines: [...top, at58('Context warn %', '50%', true), '    50', options('Default (40)', 'Keep 50'),
     soft(58), '▍ selected · Context warn %', '▍ 50% · session · applies at the next repaint'],
     keys: ['filter', 'cs:CS_STATUSLINE_CTX_WARN', 'typed', 'option:Default (40)', 'option:Keep 50'] })
-  expect(await at('cs:CS_STATUSLINE_CTX_WARN', 12, '50')).toEqual({ lines: [...top, at58('Context warn %', '50%', true), '    50', options('Default (40)', 'Keep 50'), '+34 below'],
+  expect(await at('cs:CS_STATUSLINE_CTX_WARN', 12, '50')).toEqual({ lines: [...top, at58('Context warn %', '50%', true), '    50', options('Default (40)', 'Keep 50'), '+35 below'],
     keys: ['filter', 'cs:CS_STATUSLINE_CTX_WARN', 'typed', 'option:Default (40)', 'option:Keep 50'] })
   // The picker draws eight options and a line for the rest: 20 rows hold the selected row and its eleven lines.
   const nine = edited('CS_REWRITE_PROVIDER', { 5: [...PROVIDERS, 'local'].join(',') })
@@ -1279,13 +1280,13 @@ test('an arrow, the wheel or a page key moves the selection by its rows, held to
   expect(bodyLines(await pane.drawn()).map(line => line.trimEnd())).toEqual([...MASTHEAD_AT_58, ...field(58), ...HEAD_AT_58,
     '+5 above',
     at58('Status line', '● on', true),
-    '+40 below',
+    '+41 below',
     soft(58), '▍ selected · Status line', '▍ Draws the line under the prompt with the session,', '▍ branch, model, context and usage limits.',
     '▍ ● on · default · applies at the next repaint', '▍ CS_STATUSLINE_DISABLE', hint('Enter flip'), scopeLine(),
   ])
   const last ={ card: '▍ selected · Tail kept (bytes)', selected: [at58('Tail kept (bytes)', '65536', true)], ring: ['cs:CS_NARRATIVE_KEEP_BYTES'] }
   expect([await scroll(1000), await shown()]).toEqual([{}, last])
-  expect(bodyLines(await pane.drawn()).slice(-13).map(line => line.trimEnd())).toEqual([...HEAD_AT_58, '+44 above', at58('Budget (bytes)', '131072'),
+  expect(bodyLines(await pane.drawn()).slice(-13).map(line => line.trimEnd())).toEqual([...HEAD_AT_58, '+45 above', at58('Budget (bytes)', '131072'),
     at58('Tail kept (bytes)', '65536', true), soft(58), '▍ selected · Tail kept (bytes)', '▍ How much of the newest narrative stays in the live file',
     '▍ when it rotates.', '▍ 65536 · default · applies when the next turn ends', '▍ CS_NARRATIVE_KEEP_BYTES', hint(), scopeLine()])
   expect([await scroll(1), await shown()]).toEqual([{}, last])
@@ -1701,13 +1702,13 @@ test('a failed or unreadable porcelain and unreadable /config rows keep the rows
   }
   const card = ['▍ selected · Band: prompt bars', '▍ ○ off · mod · changing it reloads cs (an armed rotation countdown starts over)', '▍ cs.bandPrompts', hint('Enter flip', 80),
     scopeLine(80)]
-  expect(await read({ exitCode: 1, stderr: 'warming up\nError: boom\n' })).toEqual({ above: ['cs -config list exited 1: Error: boom'], card, rows: 46 })
-  expect(await read({ stdout: 'oops\n' })).toEqual({ above: ['cs -config list gave a line the panel cannot read: oops'], card, rows: 46 })
-  expect(await read({ stdout: '' })).toEqual({ above: ['cs -config list printed no settings'], card, rows: 46 })
+  expect(await read({ exitCode: 1, stderr: 'warming up\nError: boom\n' })).toEqual({ above: ['cs -config list exited 1: Error: boom'], card, rows: 47 })
+  expect(await read({ stdout: 'oops\n' })).toEqual({ above: ['cs -config list gave a line the panel cannot read: oops'], card, rows: 47 })
+  expect(await read({ stdout: '' })).toEqual({ above: ['cs -config list printed no settings'], card, rows: 47 })
   w.rowsDeny = 'the menu is busy'
-  expect(await read({ stdout: GOLDEN })).toEqual({ above: ['the /config rows could not be read: cs-panel: $.config.list: the menu is busy'], card, rows: 46 })
+  expect(await read({ stdout: GOLDEN })).toEqual({ above: ['the /config rows could not be read: cs-panel: $.config.list: the menu is busy'], card, rows: 47 })
   w.rowsDeny = undefined
-  expect(await read({ stdout: GOLDEN })).toEqual({ above: [], card, rows: 46 })
+  expect(await read({ stdout: GOLDEN })).toEqual({ above: [], card, rows: 47 })
   const runs = w.runs.length
   await $.turn.complete({ ...DONE, agentId: 'a1' })
   await clock.settle()
@@ -1740,9 +1741,9 @@ test('typing in the field shows the rows it matches as it changes, keeps the sel
   expect(await type('scope')).toEqual({ card: '▍ selected · Scope scan budget (ms)', rows: [grounding, trace, selected(budget)] })
   const lines = bodyLines(await pane.drawn()).map(line => line.trimEnd())
   expect([lines[1], lines.slice(3, 6), lines.slice(6, 9)]).toEqual([boxed(80, WORDS_AT_80)[1], field(80, 'scope'),
-    [counted(80, headAt(80).trimEnd(), '3 of 46'), soft(80), group('Prompts', 80)]])
+    [counted(80, headAt(80).trimEnd(), '3 of 47'), soft(80), group('Prompts', 80)]])
   expect(await type('TRACE')).toEqual({ card: '▍ selected · Scope trace', rows: [selected(trace)] })
-  expect((await type('')).rows.length).toBe(46)
+  expect((await type('')).rows.length).toBe(47)
   expect(await type('scope')).toEqual({ card: '▍ selected · Scope scan budget (ms)', rows: [grounding, trace, selected(budget)] })
   expect([await scroll(-1), await scroll(-1), await scroll(5), await scroll(-5)])
     .toEqual(['▍ selected · Scope trace', '▍ selected · Scope grounding', '▍ selected · Scope scan budget (ms)', '▍ selected · Scope grounding'])
@@ -1758,7 +1759,7 @@ test('typing in the field shows the rows it matches as it changes, keeps the sel
   await $.command.run({ ...COMMAND, command: 'close-panel' })
   expect(await $.command.run(COMMAND)).toEqual({ text: REPLIES.opened })
   await pane.redraw()
-  expect([(await pane.find({ key: 'filter' }))?.props.value, rowsOf(await pane.drawn()).length]).toEqual(['', 46])
+  expect([(await pane.find({ key: 'filter' }))?.props.value, rowsOf(await pane.drawn()).length]).toEqual(['', 47])
 })
 
 test('the first porcelain failing draws the mod rows and why, with no settings rows', async ($, on) => {
@@ -1780,7 +1781,7 @@ test('the masthead draws the version cs -version prints, asked once a load when 
   }
   const words = async () => { await pane.redraw(); return bodyLines(await pane.drawn())[1] }
   const asked = () => w.runs.filter(argv => argv.join(' ') === ASK_VERSION.join(' ')).length
-  const unversioned = boxed(80, 'claude-sessions · 46 settings · 5 overrides · alpha')[1]
+  const unversioned = boxed(80, 'claude-sessions · 47 settings · 5 overrides · alpha')[1]
   expect([await words(), w.logs, asked()]).toEqual([unversioned, ['cs -version exited 1: boom'], 1])
   answers.version = { stdout: 'claude-sessions 2026.10.11\n' }
   await reopen()

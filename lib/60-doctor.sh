@@ -970,6 +970,7 @@ _doctor_check_hook_authority() {
     _doctor_authority_row "clarify"       "scope-prompt"       'CS_CLARIFY_DISABLE=1'           "${CS_CLARIFY_DISABLE:-}" CS_CLARIFY_DISABLE
     _doctor_authority_row "date reminder" "scope-prompt"       'CS_DATE_REMINDER_DISABLE=1'     "${CS_DATE_REMINDER_DISABLE:-}" CS_DATE_REMINDER_DISABLE
     _doctor_authority_row "objective"     "scope-prompt"       'CS_OBJECTIVE_CAPTURE_DISABLE=1' "${CS_OBJECTIVE_CAPTURE_DISABLE:-}" CS_OBJECTIVE_CAPTURE_DISABLE
+    _doctor_authority_row "narrative line" "scope-prompt"      'CS_NARRATIVE_PROMPT_DISABLE=1'  "${CS_NARRATIVE_PROMPT_DISABLE:-}" CS_NARRATIVE_PROMPT_DISABLE
     _doctor_authority_row "rewrite"       "prompt-rewriter"    'CS_REWRITE_DISABLE=1'           "${CS_REWRITE_DISABLE:-}" CS_REWRITE_DISABLE
     _doctor_authority_row "narrative"     "stop-notices"       '.cs/local/disabled'             ""
     _doctor_authority_row "council nudge" "stop-notices"       '.cs/local/disabled or uninstall the plugin' ""

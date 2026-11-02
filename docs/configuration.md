@@ -181,6 +181,11 @@ export CS_DATE_REMINDER_DISABLE="1"
 # silence the questions. Skip a single turn instead with a leading ~ .
 export CS_CLARIFY_DISABLE="1"
 
+# Opt a session out of the narrative line: the one sentence scope-prompt adds to
+# the lead's every prompt, asking Claude to note a finding in its own narrative
+# before its final answer (see hooks.md). CS_SCOPE_DISABLE silences it too.
+export CS_NARRATIVE_PROMPT_DISABLE="1"
+
 # Opt a session out of prompt rewriting (ctrl+g in the composer; see hooks.md).
 # Separate from CS_CLARIFY_DISABLE: the questions and the rewriter are
 # independent. When set, cs leaves your $EDITOR alone entirely.
@@ -473,6 +478,7 @@ stays with its session.
 | `CS_OBJECTIVE_CAPTURE_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
 | `CS_DATE_REMINDER_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
 | `CS_CLARIFY_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
+| `CS_NARRATIVE_PROMPT_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
 | `CS_CTX_WARN_CTX` | a whole number of 1 to 3 digits | 40 | when the next turn ends |
 | `CS_ROTATE_NUDGE_CTX` | a whole number of 1 to 3 digits | 65 | when the next turn ends |
 | `CS_QUEUE_MAX_FAILURES` | a whole number of 1 to 3 digits | 5 | when the next turn ends |

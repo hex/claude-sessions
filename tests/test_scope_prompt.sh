@@ -1258,4 +1258,50 @@ run_test test_sub_second_budget_is_the_default_on_a_second_resolution_clock
 run_test test_a_clock_from_the_environment_is_read_as_data
 run_test test_failed_emission_leaves_the_digest_cursor_unspent
 
+# --- Narrative line (lead only) ---
+
+NARRATIVE_LINE_TEXT="If this turn produces a finding worth keeping (a decision and its reason, a measured fact, a failed approach, a preference the user states), append it to your own narrative before your final answer; routine work is not a finding."
+
+# The lead: CLAUDE_PID equals the launch pid cs exported.
+test_narrative_line_goes_to_the_lead_in_one_object() {
+    local out ac
+    out=$(CS_LEAD_PID=4242 CLAUDE_PID=4242 run_hook "good morning")
+    assert_eq "1" "$(printf '%s' "$out" | jq -s 'length')" "stdout is one JSON object" || return 1
+    ac=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$ac" "$NARRATIVE_LINE_TEXT" "the lead's prompt carries the narrative line" || return 1
+    git -C "$CLAUDE_SESSION_DIR" commit -q --allow-empty -m seed
+    out=$(CS_LEAD_PID=4242 CLAUDE_PID=4242 run_hook "implement a retry wrapper in src/api.ts")
+    assert_eq "1" "$(printf '%s' "$out" | jq -s 'length')" "stdout is one JSON object beside the scope block" || return 1
+    ac=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')
+    assert_output_contains "$ac" "$NARRATIVE_LINE_TEXT" "the line rides beside the scope block" || return 1
+    assert_output_contains "$ac" "## Scope (auto-grounded)" "the scope block still goes out" || return 1
+}
+
+# A tmux teammate: Claude Code stamps its CLAUDE_PID, and its environment has no CS_LEAD_PID.
+test_narrative_line_skips_a_teammate() {
+    local ac
+    ac=$(CLAUDE_PID=4243 run_hook "good morning" | jq -r '.hookSpecificOutput.additionalContext // empty')
+    assert_output_not_contains "$ac" "append it to your own narrative" "a teammate gets no narrative line" || return 1
+}
+
+# A nested `claude -p`: it inherits CS_LEAD_PID but its own CLAUDE_PID differs.
+test_narrative_line_skips_a_nested_child() {
+    local ac
+    ac=$(CS_LEAD_PID=4242 CLAUDE_PID=4243 run_hook "good morning" | jq -r '.hookSpecificOutput.additionalContext // empty')
+    assert_output_not_contains "$ac" "append it to your own narrative" "a nested child gets no narrative line" || return 1
+}
+
+test_narrative_line_disabled_by_its_flag_and_by_scope_disable() {
+    local ac
+    ac=$(CS_NARRATIVE_PROMPT_DISABLE=1 CS_LEAD_PID=4242 CLAUDE_PID=4242 run_hook "good morning" | jq -r '.hookSpecificOutput.additionalContext // empty')
+    assert_output_not_contains "$ac" "append it to your own narrative" "CS_NARRATIVE_PROMPT_DISABLE=1 silences the line" || return 1
+    ac=$(CS_SCOPE_DISABLE=1 CS_LEAD_PID=4242 CLAUDE_PID=4242 run_hook "good morning" | jq -r '.hookSpecificOutput.additionalContext // empty')
+    assert_output_not_contains "$ac" "append it to your own narrative" "CS_SCOPE_DISABLE=1 silences the line" || return 1
+}
+
+run_test test_narrative_line_goes_to_the_lead_in_one_object
+run_test test_narrative_line_skips_a_teammate
+run_test test_narrative_line_skips_a_nested_child
+run_test test_narrative_line_disabled_by_its_flag_and_by_scope_disable
+
 report_results
