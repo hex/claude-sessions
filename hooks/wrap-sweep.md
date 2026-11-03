@@ -13,7 +13,7 @@ Both are written in parallel from the conversation — narrative is not the upst
 
 ## Steps
 
-Before anything else, from the session root, snapshot the index and the archive (step 5) so step 5
+Before anything else, from the session root, snapshot the index and the archive (step 6) so step 6
 can check this sweep's rewrites against them:
 
 ```sh
@@ -22,7 +22,40 @@ bash ~/.claude/hooks/cs/memory-index-guard.sh snapshot
 
 1. **Review the conversation in your context.** Look at what the user has said and what was decided or learned across this whole session — not just the most recent turn.
 
-2. **For each of the four memory categories** (`user`, `feedback`, `project`, `reference`), ask: is there a durable fact in this conversation that meets ALL three bars?
+2. **Retro: where did this session struggle?** Before weighing facts, list the moments the work went
+   badly: a file or fact that took several tool calls to find, a mistake a tool could have caught
+   before you did, a reviewer or gate that missed a judgment call, a tool call that cost far more than
+   it returned, a steering line in `CLAUDE.md` or a skill that changed nothing, a step that stalled for
+   want of access to a log or a value, a skill that would have helped and never fired, and what did not
+   happen but should have: a verification skipped or self-reported, a caller or sibling consumer the
+   fix never reached. Each candidate names the moment it comes from: the turn, the command, the error
+   line. **Discard any candidate you cannot trace to one moment**: late in a long
+   session the categories invite generic advice, and an untraceable candidate is that. A smooth
+   session lists nothing, and says so.
+
+   Rank what survives, most costly first, and route each to the fix that stops the repeat:
+
+   | Struggle | Fix |
+   |---|---|
+   | Slow to find a file or fact | A navigation pointer in a file every session already reads (`CLAUDE.md`, a README) |
+   | A mistake a tool could have caught | A check: a test, lint, hook or CI lane (step 4's check rule decides which) |
+   | A gate or review missed a judgment call | A rule in the reviewing skill or standards doc, not in `CLAUDE.md` |
+   | A tool call that cost far more than it returned | Streamline or replace the tool |
+   | A steering line that changed nothing | Delete it |
+   | A skill that would have helped and never fired | Tune that skill's description, not its body |
+   | Stalled for want of a log or a value | Widen access: tee the log to a file, expose the value |
+
+   A fix lands in a file this session read or a skill it ran, never in one it only could have used.
+   Before proposing a rule, read where it would go: if the guidance is already there, the fix is its
+   wording or placement so it fires, never a second copy, and if it is there and clear, the session's
+   problem was execution, and there is no fix to file.
+
+   **Propose, never apply.** This pass edits nothing outside `.cs/memory/`: add one task per surviving
+   candidate, named for its fix and carrying its moment, the way step 4 adds a task for a check.
+   The user picks what to build. A candidate that is also a durable fact still goes through step 4's
+   bars; the task does not replace the entry, and the entry does not replace the task.
+
+3. **For each of the four memory categories** (`user`, `feedback`, `project`, `reference`), ask: is there a durable fact in this conversation that meets ALL three bars?
 
    a. **Durable** — still true / still relevant in three months. Not "I'm tired today." Not "we tried approach X for this one PR."
    b. **Surprising or non-obvious** — not derivable from the code, the README, or what a future session would already know from CLAUDE.md.
@@ -42,19 +75,19 @@ bash ~/.claude/hooks/cs/memory-index-guard.sh snapshot
    | A durable constraint you discover while working ("X silently fails on Y", "the harness disables Z") | `project_*.md` |
    | "Linear project X / Grafana board at Y / the #channel for Z / docs at URL" | `reference_*.md` |
 
-3. **Writing memory entries — INTERPRET, don't transcribe.**
-   - Read the matching `.cs/memory/<bucket>_*.md` file first to check for duplicates in any form — paraphrase, near-duplicate, superset. If something similar exists, skip; do not append. But if the new fact contradicts or materially extends an existing entry, update that entry in place (and its pointer, in `MEMORY.md` or in step 5's archive) rather than skipping or writing a duplicate.
+4. **Writing memory entries — INTERPRET, don't transcribe.**
+   - Read the matching `.cs/memory/<bucket>_*.md` file first to check for duplicates in any form — paraphrase, near-duplicate, superset. If something similar exists, skip; do not append. But if the new fact contradicts or materially extends an existing entry, update that entry in place (and its pointer, in `MEMORY.md` or in step 6's archive) rather than skipping or writing a duplicate.
    - For new entries, name the file `<bucket>_<short_slug>.md` and match the frontmatter shape of the existing entries in that bucket (the dedup read above shows you the current format); if the bucket has no existing entries, copy the frontmatter shape from any other bucket's entries. Then write a concise paraphrase capturing the essence in your own words.
    - One entry per durable fact. If a fact plausibly fits two buckets, pick the more specific one — do not cross-post.
    - **A measured claim names what it was measured on.** A fact that holds because you ran something (a Claude Code build, a cs version, an app, a flag) writes that in the body, as `measured on Claude Code <version>, <YYYY-MM-DD>`, the version from `claude --version` and the date from `date`, never from memory. Without it the entry reads as timeless, and a later session trusts it after the thing it measured has changed. With it, that session knows to re-measure once the version has moved. A discovered constraint ("X silently fails on Y") is measured and gets the line; a fact the user stated does not.
-   - **Name the entry it supersedes.** Before writing, find the existing entry the new fact contradicts or materially extends, in `MEMORY.md` or the archive, and update that entry and its pointer instead of adding a second. The dedup read finds the same fact in other words; this looks for an older fact the new one overturns. Decide it for every entry, and write the answer in step 6's report: a new entry ends in `supersedes: <file>` or `supersedes: none`; an entry updated in place ends in `updated in place`.
+   - **Name the entry it supersedes.** Before writing, find the existing entry the new fact contradicts or materially extends, in `MEMORY.md` or the archive, and update that entry and its pointer instead of adding a second. The dedup read finds the same fact in other words; this looks for an older fact the new one overturns. Decide it for every entry, and write the answer in step 7's report: a new entry ends in `supersedes: <file>` or `supersedes: none`; an entry updated in place ends in `updated in place`.
    - After writing an entry, add a one-line pointer for it to `.cs/memory/MEMORY.md`, matching the existing `- [title](file.md): one-line summary` lines and appending to the list. The index is what future sessions load; an unindexed entry is never read again.
    - **Facts about a person MUST be keyed to that person, never asserted about whoever is present.** The durable buckets are shared by every actor on this session while only narratives are per-actor, so "the user is Dana, not Kim" is false on every other machine the moment it is written, and it reads as settled fact to the actor who loads it next. Write `actor <slug> is Dana Marsh, machine /Users/dmarsh` instead: keyed facts stay true everywhere and cannot be misapplied, because they do not claim anyone is present. This governs the `MEMORY.md` pointer line as much as the entry body — pointers load at startup while the entries they name are read lazily, so a pointer saying "session user is Dana" reaches context even when nothing opens the file. Never write an unconditional present-tense identity or presence claim in either place.
    - **Could a check carry it instead?** For a `feedback` or `project` fact that states a rule (do X, never Y, X silently fails on Y), ask whether a mechanical check could enforce it: a test, a lint or grep guard that fails CI, a hook that refuses the action, a type or schema, or a script that replaces the manual step. It counts only when all three hold: deciding compliance needs no judgment about who, when or which; the check, run against the current tree today, would match no legitimate code, so it needs no allowlist; and nothing already enforces it (search the tests, hooks and CI first). A rule that needs judgment to apply (taste, timing, what to ask the user) has no check. An entry that only describes how something behaves (a measurement, what a tool does) is not a rule, even when a defensive check could be built around it; when it also prescribes what to do, judge the prescription. When a check counts, add a task to build it and keep the memory entry as written.
 
-4. **Narrative sweep — looser bar.** Resolve `<actor>` with `cs -whoami` first, then append only to your own narrative file. If a substantive finding from this session is not yet in your narrative (`.cs/memory/narrative.<actor>.md`), append it as a dated section. Substantive = something a future session resuming this work would want to know.
+5. **Narrative sweep — looser bar.** Resolve `<actor>` with `cs -whoami` first, then append only to your own narrative file. If a substantive finding from this session is not yet in your narrative (`.cs/memory/narrative.<actor>.md`), append it as a dated section. Substantive = something a future session resuming this work would want to know.
 
-5. **Keep the index under budget.** `MEMORY.md` loads in full at every session start against two hard
+6. **Keep the index under budget.** `MEMORY.md` loads in full at every session start against two hard
    limits, bytes and lines; past either, Claude Code loads only part of the file and the entries beyond
    the cut are never read again. After writing any pointer — and once per sweep even if you wrote none,
    since another actor may have pushed it over — check:
@@ -112,7 +145,7 @@ bash ~/.claude/hooks/cs/memory-index-guard.sh snapshot
    It also appends the archive's own pointer to `MEMORY.md`, for example
    `- [Memory archive](reference_memory_archive.md): pointers moved out of this index; open it when a subject is not listed here`.
    Never edit the archive's frontmatter after that: a pass changes the archive only by appending
-   a pointer line, updating one in step 3, or deleting one on `duplicate:`. `check` names each pointer this sweep moved as
+   a pointer line, updating one in step 4, or deleting one on `duplicate:`. `check` names each pointer this sweep moved as
    `demoted:` and passes it.
 
    Rewording shortens a line's bytes, never the number of lines: over the line budget, demotion is the
@@ -140,7 +173,7 @@ bash ~/.claude/hooks/cs/memory-index-guard.sh snapshot
    the entry is a rule that has to fire before a proposal, its demotion broke the rule
    above: delete the archive's copy. Otherwise delete the `MEMORY.md` copy. Delete that one line and
    keep the other copy as it stands, even when the two differ: an entry whose meaning changed gets its
-   pointer updated in step 3, never here. On `dangling:`, stop and ask: entries are
+   pointer updated in step 4, never here. On `dangling:`, stop and ask: entries are
    never deleted, so a pointer whose file is gone means a rename or a lost file only the user can
    account for. If the index is past repair, run
    `bash ~/.claude/hooks/cs/memory-index-guard.sh restore` to return it to the snapshot, then redo this
@@ -163,16 +196,16 @@ bash ~/.claude/hooks/cs/memory-index-guard.sh snapshot
    this step exists to prevent. Ask of each line: would someone acting on this pointer alone do the
    right thing?
 
-6. **Write quietly.** No chat summary. List the files you wrote (one line each; a new entry ends in `supersedes: <file>` or `supersedes: none`, an entry updated in place ends in `updated in place`) or say "nothing to add" if the session didn't warrant entries.
+7. **Write quietly.** No chat summary. List the files you wrote (one line each; a new entry ends in `supersedes: <file>` or `supersedes: none`, an entry updated in place ends in `updated in place`) or say "nothing to add" if the session didn't warrant entries.
 
 ## When NOT to write a strict-bucket entry
 
-(These exclusions apply to the strict buckets; the narrative keeps its looser bar from step 4.)
+(These exclusions apply to the strict buckets; the narrative keeps its looser bar from step 5.)
 
 - Routine debugging that produced a fix — the fix is in the code; the commit message has the context.
 - Boilerplate code or simple CRUD work.
 - Restatements of existing memory entries, including one whose pointer is in the archive
   (`.cs/memory/reference_memory_archive.md`): its entry file is still in `.cs/memory/`, and the
-  dedup read in step 3 finds it.
+  dedup read in step 4 finds it.
 - A play-by-play of what you did ("we refactored X", "fixed the bug in Y") — the code and the commit already carry that. A constraint you *discovered* while doing it still qualifies; route it to `project_*.md`.
 - Anything inferring beyond what was literally said or clearly implied.

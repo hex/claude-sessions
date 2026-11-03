@@ -365,6 +365,28 @@ test_sweep_adds_check_tasks_and_keeps_the_entry() {
         "the sweep pass must add a task for the check and keep the memory entry, never replace it" || return 1
 }
 
+# The sweep opens with a retro: where the session struggled, each moment named,
+# routed to the fix that stops the repeat, and filed as a task the user picks,
+# never applied by the pass. An unanchored candidate is generic advice and is dropped.
+test_sweep_retro_proposes_anchored_fixes_as_tasks() {
+    assert_file_contains "$SWEEP_PASS" '^2\. \*\*Retro: where did this session struggle' \
+        "the retro is the sweep's second step, before the fact bars" || return 1
+    assert_file_contains "$SWEEP_PASS" 'Discard any candidate you cannot trace to one moment' \
+        "an unanchored candidate is dropped" || return 1
+    assert_file_contains "$SWEEP_PASS" 'A steering line that changed nothing | Delete it' \
+        "the routing table includes deleting a no-op steering line" || return 1
+    assert_file_contains "$SWEEP_PASS" 'A skill that would have helped and never fired | Tune that skill' \
+        "a skill that never fired gets its description tuned" || return 1
+    assert_file_contains "$SWEEP_PASS" 'never in one it only could have used' \
+        "a fix lands only where the session read or ran" || return 1
+    assert_file_contains "$SWEEP_PASS" 'never a second copy' \
+        "guidance already present is reworded or placed, not duplicated" || return 1
+    assert_file_contains "$SWEEP_PASS" 'Propose, never apply' \
+        "the retro files tasks and edits nothing" || return 1
+    assert_file_contains "$COMMANDS_DIR/wrap.md" '\*\*Retro:\*\*' \
+        "the wrap report carries a retro item" || return 1
+}
+
 # ============================================================================
 # lane 1b: store-secret guardrails, prose-hygiene scoring contract, release runbook
 # ============================================================================
@@ -478,7 +500,7 @@ test_release_verifies_ci_workflow() {
         "release.md must gate completion on the signature asset" || return 1
     assert_file_contains "$RELEASE_MD" 'ssh-keygen -Y sign' \
         "release.md must sign the manifest locally after CI succeeds" || return 1
-    assert_file_contains "$RELEASE_MD" 'git show "\$tag:lib/00-header.sh".*VERSION=' \
+    assert_file_contains "$RELEASE_MD" 'git show "\${tag}:lib/00-header.sh".*VERSION=' \
         "release.md must confirm the tag names the tagged commit's VERSION before signing" || return 1
     assert_file_contains "$RELEASE_MD" 'gh release upload.*SHA256SUMS.sig' \
         "release.md must upload the manifest signature" || return 1
@@ -565,6 +587,7 @@ run_test test_sweep_states_memory_pointer_format
 run_test test_sweep_demotes_pointers_to_the_archive_before_rewording
 run_test test_sweep_resolves_actor_before_narrative_append
 run_test test_sweep_adds_check_tasks_and_keeps_the_entry
+run_test test_sweep_retro_proposes_anchored_fixes_as_tasks
 run_test test_store_secret_opener_softened_and_stops_on_nothing
 run_test test_store_secret_guards_silent_overwrite
 run_test test_store_secret_non_session_warns_and_forbids_file
@@ -624,8 +647,8 @@ test_wrap_rotates_the_narrative_after_the_summary() {
         "wrap has a third pass" || return 1
     assert_file_contains "$COMMANDS_DIR/wrap.md" 'cs -narrative rotate' \
         "the pass runs the cs helper rather than describing file surgery" || return 1
-    assert_file_contains "$COMMANDS_DIR/wrap.md" '3\. \*\*Narrative:\*\*' \
-        "the report gains a third item" || return 1
+    assert_file_contains "$COMMANDS_DIR/wrap.md" '4\. \*\*Narrative:\*\*' \
+        "the report gains a fourth item" || return 1
 }
 
 # A wrap makes no commit (Alex, 2026-10-14: "No commits at all"): the memory
@@ -646,8 +669,9 @@ test_wrap_makes_no_commit() {
     assert_file_not_contains "$COMMANDS_DIR/wrap.md" "git add" "and stages nothing" || return 1
     assert_file_not_contains "$COMMANDS_DIR/wrap.md" "session: wrap" "and names no commit subject" || return 1
     assert_file_not_contains "$COMMANDS_DIR/wrap.md" '\*\*Commit:\*\*' "the report has no commit item" || return 1
-    assert_file_contains "$COMMANDS_DIR/wrap.md" 'the four labeled items below' "it has four items" || return 1
+    assert_file_contains "$COMMANDS_DIR/wrap.md" 'the five labeled items below' "it has five items" || return 1
 }
+
 
 # /wrap archives completed task rows the way /rotate does, from the one place
 # the procedure is written (the rotate skill's step 8), after the narrative
@@ -660,7 +684,7 @@ test_wrap_archives_completed_task_rows() {
     assert_file_contains "$COMMANDS_DIR/wrap.md" "^## Pass 5 — Mark the wrap finished" "marking the wrap stays last" || return 1
     assert_file_contains "$COMMANDS_DIR/wrap.md" '/\.claude/skills/rotate/SKILL\.md` step 8' \
         "the pass follows the rotate skill's step rather than restating it" || return 1
-    assert_file_contains "$COMMANDS_DIR/wrap.md" '4\. \*\*Tasks:\*\*' "the report gains a fourth item" || return 1
+    assert_file_contains "$COMMANDS_DIR/wrap.md" '5\. \*\*Tasks:\*\*' "the report gains a fifth item" || return 1
     assert_file_contains "$COMMANDS_DIR/wrap.md" 'ask as step 8 does for `forced: no`, whatever the plan'"'"'s `forced:` line says' \
         "a wrap is never a forced rotation, so it asks as a manual /rotate does" || return 1
     assert_file_not_contains "$COMMANDS_DIR/wrap.md" 'CS_ROTATE_FORCE_CTX' "the threshold setting decides nothing here" || return 1

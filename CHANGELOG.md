@@ -4,7 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## 2026.11.2
+## Unreleased
+
+### Changed
+- `/wrap`'s memory pass opens with a retro. Before weighing durable facts it lists where the session struggled, each moment named (a slow lookup, a mistake a tool could have caught, a review that missed a judgment call, a tool call that cost more than it returned, a steering line that changed nothing, a skill that never fired, a verification skipped), ranks them and routes each to the fix that stops the repeat: a navigation pointer, a check, a rule in the reviewing skill, a description tuned, a line deleted, access widened. A candidate with no moment behind it is dropped, a fix lands only in a file the session read or a skill it ran, and guidance already present is reworded or moved rather than copied. The pass files one task per fix and applies none; the wrap report carries them as its `Retro:` item.
+
 
 ### Changed
 - The `cs-filter-chat` mod titles its `/config` row `cs: Filter chat: your lines' colour`, as the cs, cs-update and cs-mermaid mods title theirs, so `/config` marks it as cs's; the `/cs` pane still shows the label without the mark under `Mods`.
