@@ -2710,6 +2710,9 @@ _install_tui_with_broken_verification() {  # tag
     [ -f "$sandbox/home/.claude/hooks/cs/.tui-origin" ] \
         || printf 'checkout /work/cs\n' > "$sandbox/home/.claude/hooks/cs/.tui-origin"
 
+    # The codeload URL falls through to the stub binary below, so the
+    # archive is a 200 that is not a gzip: tar fails and the install takes the
+    # one-file-at-a-time path, which is what these tests need.
     cat > "$bindir/curl" <<STUB
 #!/usr/bin/env bash
 out=""; url=""; prev=""
@@ -2941,6 +2944,9 @@ _seed_installed_cs() {  # home
 
 # A web install whose own download of cs drops halfway fails, and the cs
 # already installed is still whole: curl never writes onto ~/.local/bin/cs.
+# CS_TEST_BREAK also withholds the archive, so this and the next test run the
+# one-file-at-a-time path; the archive path's refusal is tested by
+# test_web_install_refuses_a_payload_file_that_does_not_match.
 test_web_install_keeps_the_installed_cs_when_its_download_breaks() {
     local home
     _seed_installed_cs "$TEST_TMPDIR/break-cs/home"
@@ -3062,7 +3068,7 @@ test_web_install_fetches_each_file_when_the_archive_fails() {
     home=$(CS_TEST_ARCHIVE=fail _web_install web-noarchive)
     assert_eq "0" "$(cat "$TEST_TMPDIR/web-noarchive/install.rc")" "install exit status" \
         || { cat "$TEST_TMPDIR/web-noarchive/install.out"; return 1; }
-    assert_eq "1" "$(grep -c 'Could not fetch the source archive; downloading the files one by one' "$TEST_TMPDIR/web-noarchive/install.out")" \
+    assert_eq "1" "$(grep -c 'Could not download the source archive; downloading the files one by one' "$TEST_TMPDIR/web-noarchive/install.out")" \
         "the fallback is reported once" || return 1
     assert_eq "1" "$(grep -c '^https://raw.githubusercontent.com/hex/claude-sessions/main/bin/cs$' "$TEST_TMPDIR/web-noarchive/urls")" \
         "bin/cs is fetched on its own" || return 1

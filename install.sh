@@ -1605,8 +1605,9 @@ fi
 STAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/cs-install.XXXXXX") || error "Could not create a temp dir to download into"
 trap 'rm -rf "$STAGE_DIR"' EXIT
 
-# Where the payload is read from: the checkout on a local install, the
-# downloads in STAGE_DIR on a web install.
+# Where the payload is read from: the checkout on a local install; on a web
+# install the unpacked archive under STAGE_DIR, or STAGE_DIR itself when the
+# files were downloaded one by one.
 if [ "$INSTALL_METHOD" = "local" ]; then
     PAYLOAD_DIR="$SCRIPT_DIR"
 else
@@ -1709,10 +1710,13 @@ _deploy() {  # repo-path, dest
         return 0
     fi
     # A deployed copy that already holds this content is left in place, its
-    # mode set again in case it drifted; the record line is still this
-    # install's, since the final record is written from CS_RECORD_LINES.
-    if [ -f "$2" ] && [ ! -L "$2" ] && [ "$(_cs_sha256_file "$2")" = "$digest" ]; then
-        chmod "$(_payload_mode "$1")" "$2" || error "Could not set the mode of $2"
+    # mode set again in case it drifted. A copy whose mode cannot be set (not
+    # this user's file) is replaced as before. The record gains its line now
+    # only when it lacks one, so a run that stops later still names the file.
+    if [ -f "$2" ] && [ ! -L "$2" ] && [ "$(_cs_sha256_file "$2")" = "$digest" ] \
+        && chmod "$(_payload_mode "$1")" "$2" 2>/dev/null; then
+        grep -qxF "$digest  ${2#"$HOME"/}" "$(_cs_install_record)" 2>/dev/null \
+            || _record_placed "$digest" "${2#"$HOME"/}"
         CS_RECORD_LINES+=("$digest  ${2#"$HOME"/}")
         return 0
     fi
@@ -1757,16 +1761,23 @@ _payload_matches() {  # repo-path
 # Downloads the ref's source archive once and unpacks it under STAGE_DIR, so
 # the payload arrives in one transfer instead of one per file. On success
 # PAYLOAD_DIR is the unpacked tree; nothing in it is trusted until
-# _payload_matches has checked it. Fails when there is no tar, when the
-# download fails, or when the archive does not unpack, and leaves PAYLOAD_DIR
-# as it was so the caller can fetch the files one by one.
+# _payload_matches has checked it. Fails, saying why, when there is no tar,
+# when the download fails, or when the archive does not unpack, and leaves
+# PAYLOAD_DIR as it was so the caller can fetch the files one by one.
 _fetch_payload_archive() {
     local tgz="$STAGE_DIR/payload.tar.gz" tree="$STAGE_DIR/tree"
-    command -v tar >/dev/null 2>&1 || return 1
-    _download "$ARCHIVE_URL" "$tgz" || return 1
-    mkdir -p "$tree" || return 1
+    if ! command -v tar >/dev/null 2>&1; then
+        warn "No tar found; downloading the files one by one"
+        return 1
+    fi
+    if ! _download "$ARCHIVE_URL" "$tgz"; then
+        warn "Could not download the source archive; downloading the files one by one"
+        return 1
+    fi
+    mkdir -p "$tree" || error "Could not create $tree"
     if ! tar -xzf "$tgz" -C "$tree" --strip-components=1 2>/dev/null; then
         rm -rf "$tree"
+        warn "The source archive did not unpack; downloading the files one by one"
         return 1
     fi
     PAYLOAD_DIR="$tree"
@@ -1789,13 +1800,14 @@ if [ "$INSTALL_METHOD" = "web" ]; then
                 || error "$_rel does not match the sha256 this installer carries for it; nothing was installed"
         done < <(_cs_payload_files)
         for _rel in "${CS_COMPLETION_FILES[@]}"; do
-            if ! _payload_matches "$_rel"; then
+            if [ ! -f "$PAYLOAD_DIR/$_rel" ]; then
+                warn "$_rel is not in the source archive; not installed"
+            elif ! _payload_matches "$_rel"; then
                 rm -f "$PAYLOAD_DIR/$_rel"
                 warn "$_rel does not match the sha256 this installer carries for it; not installed"
             fi
         done
     else
-        warn "Could not fetch the source archive; downloading the files one by one"
         while IFS= read -r _rel; do
             mkdir -p "$PAYLOAD_DIR/$(dirname "$_rel")"
             _download "$REPO_URL/$_rel" "$PAYLOAD_DIR/$_rel" || error "Failed to download $_rel"
