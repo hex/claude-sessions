@@ -619,7 +619,9 @@ state of the session's features,
 read from
 `cs <base> -features --porcelain` after each turn and at session start,
 without holding either up, and every 30 s while the band is idle once cs has
-been asked. Only the lead conversation asks cs, and a base asks only while
+been asked. cs gets 20 s to answer; a reading that runs past that stops the
+30 s clock, and the end of the next turn asks once more. Only the lead
+conversation asks cs, and a base asks only while
 the sessions root holds a `<base>@<task>` directory: a feature `/feature`
 makes shows when that turn ends. In a base, one feature ready reads
 `1 feature · fix-auth ready` (or `3 features · fix-auth ready`) and a press

@@ -4,7 +4,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.11.2
 
 ### Changed
 - The `cs-filter-chat` mod titles its `/config` row `cs: Filter chat: your lines' colour`, as the cs, cs-update and cs-mermaid mods title theirs, so `/config` marks it as cs's; the `/cs` pane still shows the label without the mark under `Mods`.
