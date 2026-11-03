@@ -217,7 +217,7 @@ _hidden_tracked_edits() {  # checkout_dir [prefix]
         path="${entry#*$'\t'}"
         if [ "$mode" = 160000 ]; then
             [ -e "$1/$path/.git" ] || continue
-            _hidden_tracked_edits "$1/$path" "${2:-}$(_printable_name "$path")/" || return 1
+            _hidden_tracked_edits "$1/$path" "${2:-}$(_printable_name "$path")/" || { rm -f "$flagged"; return 1; }
             continue
         fi
         case "$tag" in S|[[:lower:]]) ;; *) continue ;; esac
@@ -308,8 +308,8 @@ _submodule_others() {  # checkout_dir prefix
         sub="${entry#*$'\t'}"
         if [ ! -e "$1/$sub/.git" ]; then
             [ -d "$1/$sub" ] && [ ! -L "$1/$sub" ] || continue
-            at=$(printf '%s\0' "$sub" | _names_as_lines) || return 1
-            listing=$( (cd -- "$1/$sub" && find . ! -type d -print0) | _names_as_lines) || return 1
+            at=$(printf '%s\0' "$sub" | _names_as_lines) || { rm -f "$gitlinks"; return 1; }
+            listing=$( (cd -- "$1/$sub" && find . ! -type d -print0) | _names_as_lines) || { rm -f "$gitlinks"; return 1; }
             if [ -n "$listing" ]; then
                 while IFS= read -r line; do
                     printf '%s%s/%s\n' "$2" "$at" "${line#./}"
@@ -317,16 +317,16 @@ _submodule_others() {  # checkout_dir prefix
             fi
             continue
         fi
-        at=$(printf '%s\0' "$sub" | _names_as_lines) || return 1
+        at=$(printf '%s\0' "$sub" | _names_as_lines) || { rm -f "$gitlinks"; return 1; }
         listing=$({ git -C "$1/$sub" ls-files -z --others --exclude-standard \
                     && git -C "$1/$sub" ls-files -z --others --ignored --exclude-standard; } 2>/dev/null \
-                  | _names_as_lines) || return 1
+                  | _names_as_lines) || { rm -f "$gitlinks"; return 1; }
         if [ -n "$listing" ]; then
             while IFS= read -r line; do
                 printf '%s%s/%s\n' "$2" "$at" "$line"
             done <<< "$listing"
         fi
-        _submodule_others "$1/$sub" "$2$at/" || return 1
+        _submodule_others "$1/$sub" "$2$at/" || { rm -f "$gitlinks"; return 1; }
     done < "$gitlinks"
     rm -f "$gitlinks"
     return 0
