@@ -10,6 +10,9 @@ All notable changes to cs are documented here. Release notes are also available 
 - The `cs-filter-chat` mod titles its `/config` row `cs: Filter chat: your lines' colour`, as the cs, cs-update and cs-mermaid mods title theirs, so `/config` marks it as cs's; the `/cs` pane still shows the label without the mark under `Mods`.
 - The `/finish` skill calls a feature conversation that is still running live, the word every other cs surface uses for it.
 
+### Performance
+- `cs <base> -features` reads a large checkout in a fraction of the time: the readiness walk read every entry of each feature's index in bash, twice, to find the few it acts on (a skip-worktree or assume-unchanged flag, a submodule), and on a checkout of tens of thousands of files that read was most of its time. perl now hands bash only those entries. On a fixture base of 20,000 tracked files and three features the command takes 2.2 to 4.9 s where it took 7.8 to 15 s (three runs each, one machine, no cache warm-up). The `cs` band gives the command 20 s; a reading that still does not answer in that time stops the band's 30 s clock, so the band logs its `did not answer` line once, and the end of the next turn asks once more.
+
 ## 2026.11.1
 
 ### Features

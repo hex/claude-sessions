@@ -1153,6 +1153,11 @@ async function readFeatures($: EngineInterface): Promise<FeaturesWord | undefine
     }
   } catch (err) {
     complaint = LOGS.featuresNoAnswer(base, String(err instanceof Error ? err.message : err))
+    // A reading that did not answer in its budget would not answer in the
+    // next one either (a large checkout, a slow disk): the clock stops, and
+    // the next turn's end asks once more.
+    featuresClock?.cancel()
+    featuresClock = undefined
   }
   if (complaint !== undefined && complaint !== featuresComplaint) $.ui.log(complaint)
   featuresComplaint = complaint

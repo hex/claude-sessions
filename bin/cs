@@ -4807,9 +4807,19 @@ _printable_name() {  # name
 # Fails when git cannot list an index, never answering "none" on a listing it
 # did not get.
 _hidden_tracked_edits() {  # checkout_dir [prefix]
-    local entry tag mode oid path now target
-    git -C "$1" ls-files -v -s -z > /dev/null 2>&1 || return 1
-    # Each entry reads "<tag> <mode> <oid> <stage>\t<path>".
+    local entry tag mode oid path now target flagged
+    # Each entry reads "<tag> <mode> <oid> <stage>\t<path>". Only a flagged
+    # entry (tag S or lowercase) or a submodule (mode 160000) is read here:
+    # the index of a large checkout holds tens of thousands of entries, and a
+    # bash read of each is what makes `cs <base> -features` slow. perl keeps
+    # the NUL that ends each record. Fails without perl, as the session lock
+    # does; a listing that fails here is never read as "none".
+    flagged=$(mktemp "${TMPDIR:-/tmp}/cs-hidden.XXXXXX") || return 1
+    if ! git -C "$1" ls-files -v -s -z 2>/dev/null \
+            | perl -0 -ne 'BEGIN { binmode STDIN; binmode STDOUT } print if /^(?:S|[a-z]) |^. 160000 /' > "$flagged"; then
+        rm -f "$flagged"
+        return 1
+    fi
     while IFS= read -r -d '' entry; do
         tag="${entry%% *}"
         entry="${entry#* }"
@@ -4819,7 +4829,7 @@ _hidden_tracked_edits() {  # checkout_dir [prefix]
         path="${entry#*$'\t'}"
         if [ "$mode" = 160000 ]; then
             [ -e "$1/$path/.git" ] || continue
-            _hidden_tracked_edits "$1/$path" "${2:-}$(_printable_name "$path")/" || return 1
+            _hidden_tracked_edits "$1/$path" "${2:-}$(_printable_name "$path")/" || { rm -f "$flagged"; return 1; }
             continue
         fi
         case "$tag" in S|[[:lower:]]) ;; *) continue ;; esac
@@ -4840,7 +4850,8 @@ _hidden_tracked_edits() {  # checkout_dir [prefix]
             continue
         fi
         [ "$now" = "$oid" ] || printf '%s%s\n' "${2:-}" "$(_printable_name "$path")"
-    done < <(git -C "$1" ls-files -v -s -z 2>/dev/null)
+    done < "$flagged"
+    rm -f "$flagged"
     return 0
 }
 
@@ -4893,17 +4904,24 @@ _worktree_others() {  # wt_dir [--ignored]
 # directory to git, which lists nothing inside it either, so every file
 # there is listed. Fails when any listing fails.
 _submodule_others() {  # checkout_dir prefix
-    local entry sub at listing line
-    git -C "$1" ls-files -s -z > /dev/null 2>&1 || return 1
+    local entry sub at listing line gitlinks
     # A gitlink's index entry reads "160000 <oid> <stage>\t<path>"; one with a
-    # .git inside is initialised.
+    # .git inside is initialised. Only gitlinks are read here (perl keeps the
+    # NUL that ends each record): a bash read of every entry of a large index
+    # is what makes `cs <base> -features` slow. A listing that fails is never
+    # read as "none".
+    gitlinks=$(mktemp "${TMPDIR:-/tmp}/cs-gitlinks.XXXXXX") || return 1
+    if ! git -C "$1" ls-files -s -z 2>/dev/null \
+            | perl -0 -ne 'BEGIN { binmode STDIN; binmode STDOUT } print if /^160000 /' > "$gitlinks"; then
+        rm -f "$gitlinks"
+        return 1
+    fi
     while IFS= read -r -d '' entry; do
-        case "$entry" in 160000\ *) ;; *) continue ;; esac
         sub="${entry#*$'\t'}"
         if [ ! -e "$1/$sub/.git" ]; then
             [ -d "$1/$sub" ] && [ ! -L "$1/$sub" ] || continue
-            at=$(printf '%s\0' "$sub" | _names_as_lines) || return 1
-            listing=$( (cd -- "$1/$sub" && find . ! -type d -print0) | _names_as_lines) || return 1
+            at=$(printf '%s\0' "$sub" | _names_as_lines) || { rm -f "$gitlinks"; return 1; }
+            listing=$( (cd -- "$1/$sub" && find . ! -type d -print0) | _names_as_lines) || { rm -f "$gitlinks"; return 1; }
             if [ -n "$listing" ]; then
                 while IFS= read -r line; do
                     printf '%s%s/%s\n' "$2" "$at" "${line#./}"
@@ -4911,17 +4929,18 @@ _submodule_others() {  # checkout_dir prefix
             fi
             continue
         fi
-        at=$(printf '%s\0' "$sub" | _names_as_lines) || return 1
+        at=$(printf '%s\0' "$sub" | _names_as_lines) || { rm -f "$gitlinks"; return 1; }
         listing=$({ git -C "$1/$sub" ls-files -z --others --exclude-standard \
                     && git -C "$1/$sub" ls-files -z --others --ignored --exclude-standard; } 2>/dev/null \
-                  | _names_as_lines) || return 1
+                  | _names_as_lines) || { rm -f "$gitlinks"; return 1; }
         if [ -n "$listing" ]; then
             while IFS= read -r line; do
                 printf '%s%s/%s\n' "$2" "$at" "$line"
             done <<< "$listing"
         fi
-        _submodule_others "$1/$sub" "$2$at/" || return 1
-    done < <(git -C "$1" ls-files -s -z 2>/dev/null)
+        _submodule_others "$1/$sub" "$2$at/" || { rm -f "$gitlinks"; return 1; }
+    done < "$gitlinks"
+    rm -f "$gitlinks"
     return 0
 }
 
