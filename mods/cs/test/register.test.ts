@@ -2947,6 +2947,25 @@ test('an idle band asks cs again every 30 s, never while a turn runs, never twic
   expect(featureRuns().at(-1)?.init).toEqual({ timeoutMs: 20000 })
 })
 
+test('a reading that did not answer in its budget stops the 30 s clock; the next turn asks once more', async () => {
+  featureDir('fix-auth')
+  porcelain(feature('fix-auth', 3, 'ready'))
+  await featuresTurn()
+  const clocks = () => timers.filter(t => t.kind === 'every' && t.ms === 30000 && !t.cancelled)
+  expect(clocks()).toHaveLength(1)
+  runResult = new Error('cs: $.process.run(/opt/cs/bin/cs) aborted: still running after 20000ms')
+  await band()
+  await clocks()[0].fn()
+  expect(featureRuns()).toHaveLength(2)
+  expect(clocks()).toEqual([])
+  expect(logs).toEqual(['cs work -features did not answer: cs: $.process.run(/opt/cs/bin/cs) aborted: still running after 20000ms'])
+  porcelain(feature('fix-auth', 3, 'ready'))
+  await featuresTurn()
+  expect(featureRuns()).toHaveLength(3)
+  expect(clocks()).toHaveLength(1)
+  expect(logs).toHaveLength(1)
+})
+
 test('a survey owns the band: no features word under one', async () => {
   featureDir('fix-auth')
   porcelain(feature('fix-auth', 3, 'ready'))
