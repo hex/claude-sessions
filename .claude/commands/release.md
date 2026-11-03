@@ -399,9 +399,9 @@ stops before signing:
 ```bash
 set -euo pipefail
 tag=vX.Y.Z
-git fetch origin "refs/tags/$tag:refs/tags/$tag"
+git fetch origin "refs/tags/${tag}:refs/tags/${tag}"
 test "$(git rev-parse "$tag^{commit}")" = "$SHA"
-test "$(git show "$tag:lib/00-header.sh" | grep -m1 '^VERSION=' | cut -d'"' -f2)" = "${tag#v}"
+test "$(git show "${tag}:lib/00-header.sh" | grep -m1 '^VERSION=' | cut -d'"' -f2)" = "${tag#v}"
 release_dir=$(mktemp -d)
 gh release download "$tag" -p SHA256SUMS -p install.sh -p 'cs-tui-*' -D "$release_dir"
 (
@@ -412,13 +412,14 @@ gh release download "$tag" -p SHA256SUMS -p install.sh -p 'cs-tui-*' -D "$releas
     shasum -a 256 -c SHA256SUMS
   fi
 )
-git show "$tag:install.sh" > "$release_dir/committed-install.sh"
+git show "${tag}:install.sh" > "$release_dir/committed-install.sh"
 awk -v tag="$tag" '$0 == "CS_DEFAULT_REF=main" {$0="CS_DEFAULT_REF=" tag} {print}' \
   "$release_dir/committed-install.sh" > "$release_dir/expected-install.sh"
 diff -u "$release_dir/expected-install.sh" "$release_dir/install.sh"
 (
   cd "$release_dir"
-  ssh-keygen -Y sign -f "${RELEASE_SIGNING_KEY:-$HOME/.ssh/release-signing.pub}" -n "cs-release-$tag" SHA256SUMS
+  SSH_AUTH_SOCK="${RELEASE_SIGNING_AGENT:-$HOME/Library/Containers/com.bitwarden.desktop/Data/.bitwarden-ssh-agent.sock}" \
+    ssh-keygen -Y sign -f "${RELEASE_SIGNING_KEY:-$HOME/.ssh/release-signing.pub}" -n "cs-release-$tag" SHA256SUMS
 )
 gh release upload "$tag" "$release_dir/SHA256SUMS.sig"
 gh release view "$tag" --json assets --jq '.assets[].name' | grep -qxF SHA256SUMS.sig
@@ -440,6 +441,17 @@ file for installed copies that read those assets.
 Step 10 signs the manifest locally with the agent-held SSH key named by
 `~/.ssh/release-signing.pub`. Bitwarden's ssh-agent holds the private key.
 `RELEASE_SIGNING_KEY` overrides that path. CI holds no signing key.
+
+The private key is reachable only through Bitwarden's own agent socket,
+`~/Library/Containers/com.bitwarden.desktop/Data/.bitwarden-ssh-agent.sock`
+(`RELEASE_SIGNING_AGENT` overrides it). Every shell here, the Bash tool's
+and the user's, has `SSH_AUTH_SOCK` on the macOS launchd agent, which holds
+only the login keys, so a sign without that override fails with
+`No private key found for public key`. The socket exists only while
+Bitwarden desktop is open and unlocked with its SSH agent on; the sign
+runs from the Bash tool and needs no hand-off to the user. The step's
+tag expansions are braced (`${tag}:...`) because the Bash tool runs zsh,
+where `$tag:lib` reads `:l` as a modifier and corrupts the ref.
 
 `cs -update` and the installer's picker download require
 `ssh-keygen -Y verify` to authenticate `SHA256SUMS.sig` in the release's own
