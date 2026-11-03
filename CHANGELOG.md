@@ -6,6 +6,10 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Performance
+- `cs -update` and a `curl | bash` install fetch the release's source archive in one download instead of one download per payload file (62 of them), then check each file against the digests the verified installer carries, as before. When the archive cannot be had, the install says so once and fetches the files one by one. On one machine a web install of `main` into an empty home took 37.5 s before (one run, 66 downloads) and 9.3 to 9.8 s after (three runs, 5 downloads: the archive, then the picker binary and its manifest and signature); what remains is placing 61 files and fetching the picker.
+- An install leaves a deployed file whose content already matches the release in place, setting only its mode, instead of staging, copying and recording it again. A repeat `install.sh` over the same checkout took 6.8 to 7.7 s before and 2.9 to 3.9 s after (three runs each, back to back, one machine).
+
 ### Changed
 - `/wrap`'s memory pass opens with a retro. Before weighing durable facts it lists where the session struggled, each moment named (a slow lookup, a mistake a tool could have caught, a review that missed a judgment call, a tool call that cost more than it returned, a steering line that changed nothing, a skill that never fired, a verification skipped), ranks them and routes each to the fix that stops the repeat: a navigation pointer, a check, a rule in the reviewing skill, a description tuned, a line deleted, access widened. A candidate with no moment behind it is dropped, a fix lands only in a file the session read or a skill it ran, and guidance already present is reworded or moved rather than copied. The pass files one task per fix and applies none; the wrap report carries them as its `Retro:` item.
 

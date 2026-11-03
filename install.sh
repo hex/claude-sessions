@@ -91,6 +91,7 @@ SESSIONS_DIR="${HOME}/.claude-sessions"
 # fetches the files whose sha256s it carries (CS_PAYLOAD_SHA256 below).
 CS_DEFAULT_REF=main
 REPO_URL="https://raw.githubusercontent.com/hex/claude-sessions/${CS_INSTALL_REF:-$CS_DEFAULT_REF}"
+ARCHIVE_URL="https://codeload.github.com/hex/claude-sessions/tar.gz/${CS_INSTALL_REF:-$CS_DEFAULT_REF}"
 RELEASES_URL="https://github.com/hex/claude-sessions/releases/download"
 
 # ---- lib/01-manifests.sh (spliced by build.sh) ----
@@ -1449,7 +1450,7 @@ CS_PAYLOAD_SHA256=(
     "0202455687b8c8a584cfc1ecf0439de03e8f70fcb0062e479484fdfeb4b83147  hooks/prompt-rewriter.sh"
     "e6a9a79ff1b7342171f69c406d601d1bbd8dc631293e368ab8deaafef2d9d27a  hooks/prompt-rewriter-model.sh"
     "8be7cf198e9e950cb11eeb5d02231bb3e168aa078018495a1a8832186334bbc2  hooks/prompt-rewriter-vendor.sh"
-    "1fa475982564ec70f12bf5295b874989dd95f89224f27bb6be4854cc5b8674e3  hooks/wrap-sweep.md"
+    "5a3ca30bf9769a809964de8d3d24bb720d4ef0277e9511fcd43cf0cf49d6f534  hooks/wrap-sweep.md"
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
     "93ff2dee45bd443aabf3001f48942e5ac3718b7e08581f5c9808f6f9fb723657  hooks/session-start.sh"
     "e1d127ff4b828a434a3ddc4b57e3274f2d3ac94a7675680e44fda6eedf006553  hooks/autosave-commits.sh"
@@ -1461,7 +1462,7 @@ CS_PAYLOAD_SHA256=(
     "2736fd914673827102dd9e1ec60b1c385d8cfef56bac3b8579fde953d22fdbcb  hooks/session-auto-approve.sh"
     "68c76099cba2c4cff85321b35745bf148df18f6cc538743a31a424d250ef478d  hooks/scope-prompt.sh"
     "9e06eaa16960dff49881234c8a479c2f8d2dd8d672283056e1591c4528e755ab  commands/checkpoint.md"
-    "a0e341d4bdc60072b25354256e751b320733cdcc31b91ac3d4a4f661c73b611e  commands/wrap.md"
+    "3a692b0cff5bc84b87965bea0430c26c7438063c9846b20ce75f3eb16af4d63a  commands/wrap.md"
     "2520a6d54d75e3e9f1768160826a8b9f21e38e2234538cc62e3ec6337008fc28  skills/store-secret/SKILL.md"
     "eaf2ade4ce76f74b8d6ab979f536007606e77308a0c33dfedf28d31befd1eaec  skills/prose-hygiene/SKILL.md"
     "5e275bba3498c648c648132d31efb4481335a2ee5c3cdf38d0af40ada01d680f  skills/rotate/SKILL.md"
@@ -1707,6 +1708,14 @@ _deploy() {  # repo-path, dest
         CS_KEPT_PATHS+=("$2")
         return 0
     fi
+    # A deployed copy that already holds this content is left in place, its
+    # mode set again in case it drifted; the record line is still this
+    # install's, since the final record is written from CS_RECORD_LINES.
+    if [ -f "$2" ] && [ ! -L "$2" ] && [ "$(_cs_sha256_file "$2")" = "$digest" ]; then
+        chmod "$(_payload_mode "$1")" "$2" || error "Could not set the mode of $2"
+        CS_RECORD_LINES+=("$digest  ${2#"$HOME"/}")
+        return 0
+    fi
     _place "$1" "$2"
     _record_placed "$digest" "${2#"$HOME"/}"
     CS_RECORD_LINES+=("$digest  ${2#"$HOME"/}")
@@ -1730,12 +1739,12 @@ fi
 # Show banner
 show_banner
 
-# Whether downloaded file $STAGE_DIR/$1 has the sha256 CS_PAYLOAD_SHA256
-# carries for repo path $1. A path with no entry, or a digest that cannot be
-# computed, does not match.
+# Whether downloaded file $PAYLOAD_DIR/$1 has the sha256 CS_PAYLOAD_SHA256
+# carries for repo path $1. A path with no entry, a missing file, or a digest
+# that cannot be computed, does not match.
 _payload_matches() {  # repo-path
     local entry actual
-    actual=$(_cs_sha256_file "$STAGE_DIR/$1") || return 1
+    actual=$(_cs_sha256_file "$PAYLOAD_DIR/$1") || return 1
     for entry in "${CS_PAYLOAD_SHA256[@]}"; do
         if [ "${entry#*  }" = "$1" ]; then
             [ "${entry%%  *}" = "$actual" ]
@@ -1745,31 +1754,65 @@ _payload_matches() {  # repo-path
     return 1
 }
 
-# A web install downloads every payload file and checks it against the sha256
+# Downloads the ref's source archive once and unpacks it under STAGE_DIR, so
+# the payload arrives in one transfer instead of one per file. On success
+# PAYLOAD_DIR is the unpacked tree; nothing in it is trusted until
+# _payload_matches has checked it. Fails when there is no tar, when the
+# download fails, or when the archive does not unpack, and leaves PAYLOAD_DIR
+# as it was so the caller can fetch the files one by one.
+_fetch_payload_archive() {
+    local tgz="$STAGE_DIR/payload.tar.gz" tree="$STAGE_DIR/tree"
+    command -v tar >/dev/null 2>&1 || return 1
+    _download "$ARCHIVE_URL" "$tgz" || return 1
+    mkdir -p "$tree" || return 1
+    if ! tar -xzf "$tgz" -C "$tree" --strip-components=1 2>/dev/null; then
+        rm -rf "$tree"
+        return 1
+    fi
+    PAYLOAD_DIR="$tree"
+}
+
+# A web install fetches the payload and checks every file against the sha256
 # this installer carries before it puts any in place, so a transfer that fails
 # partway, or a file that is not the released one, leaves the installed files
-# as they were. A local install copies from its own checkout, which is what
-# it was built from, and checks nothing.
+# as they were. The ref's source archive is one download; when it cannot be
+# had, each file is downloaded on its own. A local install copies from its
+# own checkout, which is what it was built from, and checks nothing.
 if [ "$INSTALL_METHOD" = "web" ]; then
     if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
         error "Neither curl nor wget found. Please install one of them."
     fi
-    while IFS= read -r _rel; do
-        mkdir -p "$STAGE_DIR/$(dirname "$_rel")"
-        _download "$REPO_URL/$_rel" "$STAGE_DIR/$_rel" || error "Failed to download $_rel"
-        _payload_matches "$_rel" \
-            || error "$_rel does not match the sha256 this installer carries for it; nothing was installed"
-    done < <(_cs_payload_files)
-    for _rel in "${CS_COMPLETION_FILES[@]}"; do
-        mkdir -p "$STAGE_DIR/$(dirname "$_rel")"
-        if ! _download "$REPO_URL/$_rel" "$STAGE_DIR/$_rel"; then
-            rm -f "$STAGE_DIR/$_rel"
-            warn "Failed to download $_rel"
-        elif ! _payload_matches "$_rel"; then
-            rm -f "$STAGE_DIR/$_rel"
-            warn "$_rel does not match the sha256 this installer carries for it; not installed"
-        fi
-    done
+    if _fetch_payload_archive; then
+        while IFS= read -r _rel; do
+            [ -f "$PAYLOAD_DIR/$_rel" ] || error "$_rel is not in the source archive; nothing was installed"
+            _payload_matches "$_rel" \
+                || error "$_rel does not match the sha256 this installer carries for it; nothing was installed"
+        done < <(_cs_payload_files)
+        for _rel in "${CS_COMPLETION_FILES[@]}"; do
+            if ! _payload_matches "$_rel"; then
+                rm -f "$PAYLOAD_DIR/$_rel"
+                warn "$_rel does not match the sha256 this installer carries for it; not installed"
+            fi
+        done
+    else
+        warn "Could not fetch the source archive; downloading the files one by one"
+        while IFS= read -r _rel; do
+            mkdir -p "$PAYLOAD_DIR/$(dirname "$_rel")"
+            _download "$REPO_URL/$_rel" "$PAYLOAD_DIR/$_rel" || error "Failed to download $_rel"
+            _payload_matches "$_rel" \
+                || error "$_rel does not match the sha256 this installer carries for it; nothing was installed"
+        done < <(_cs_payload_files)
+        for _rel in "${CS_COMPLETION_FILES[@]}"; do
+            mkdir -p "$PAYLOAD_DIR/$(dirname "$_rel")"
+            if ! _download "$REPO_URL/$_rel" "$PAYLOAD_DIR/$_rel"; then
+                rm -f "$PAYLOAD_DIR/$_rel"
+                warn "Failed to download $_rel"
+            elif ! _payload_matches "$_rel"; then
+                rm -f "$PAYLOAD_DIR/$_rel"
+                warn "$_rel does not match the sha256 this installer carries for it; not installed"
+            fi
+        done
+    fi
 fi
 
 # Stop, before anything is placed, on a settings.json jq cannot parse or that
