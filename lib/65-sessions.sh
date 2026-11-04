@@ -580,9 +580,10 @@ Add --delete-files to remove $them with --force"
                 if [ -n "$force" ]; then
                     confirm="y"
                 else
-                    [ -z "$untracked" ] || printf '%bAlso deletes %s git does not track:\n%s%b\n' "$RED" \
-                        "${untracked_listing%%"$nl"*}" "${untracked_listing#*"$nl"}" "$NC" >&2
-                    read -r -p $'\033[0;31mRemove worktree session '"'$session_name'"$'? Uncommitted work in it is discarded. [y/N] \033[0m' confirm
+                    [ -z "$untracked" ] || printf '%bAlso deletes %s git does not track:%b\n%s\n' "$YELLOW" \
+                        "${untracked_listing%%"$nl"*}" "$NC" "${untracked_listing#*"$nl"}" >&2
+                    confirm=n
+                    ! cs_confirm "Remove worktree session '$session_name'? Uncommitted work in it is discarded." || confirm=y
                 fi
                 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
                     info "Cancelled"
@@ -595,7 +596,8 @@ Add --delete-files to remove $them with --force"
                     if [ -n "$force" ]; then
                         confirm="n"
                     else
-                        read -r -p "Delete branch $wt_branch too? [y/N] " confirm
+                        confirm=n
+                        ! cs_confirm "Delete branch $wt_branch too?" || confirm=y
                     fi
                     if [[ "$confirm" =~ ^[Yy]$ ]]; then
                         git -C "$wt_base_dir" branch -D "$wt_branch" 2>/dev/null || true
@@ -630,17 +632,19 @@ Add --delete-files to remove $them with --force"
     elif [ -L "$session_dir" ]; then
         local target
         target="$(_resolve_symlink_dir "$session_dir")"
-        read -r -p $'\033[0;31mRemove adopted session '"'$session_name'"$'? (removes symlink only, project at '"$target"$' is preserved) [y/N] \033[0m' confirm
+        confirm=n
+        ! cs_confirm "Remove adopted session '$session_name'? (removes symlink only, project at $target is preserved)" || confirm=y
     else
-        # read -p only shows its prompt on a terminal; the list must reach
-        # the user even when the answer is piped in.
+        # cs_confirm shows its question only on a terminal; the list must
+        # reach the user even when the answer is piped in.
         if [ -n "$foreign" ]; then
             local foreign_listing
             foreign_listing=$(_session_foreign_listing "$foreign") \
                 || error "cs could not list the files in $session_dir; refusing to remove what it cannot list"
-            printf '%bAlso deletes files cs did not create:\n%s%b\n' "$RED" "$foreign_listing" "$NC" >&2
+            printf '%bAlso deletes files cs did not create:%b\n%s\n' "$YELLOW" "$NC" "$foreign_listing" >&2
         fi
-        read -r -p $'\033[0;31mRemove session '"'$session_name'"$'? [y/N] \033[0m' confirm
+        confirm=n
+        ! cs_confirm "Remove session '$session_name'?" || confirm=y
     fi
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
         info "Cancelled"

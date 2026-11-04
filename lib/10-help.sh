@@ -164,3 +164,14 @@ cs_interactive() {
     [ -t 0 ] || [ "${CS_ASSUME_TTY:-}" = "1" ]
 }
 
+# Asks yes-or-no question $1 and reads one line of the answer. The question
+# prints in ink, its default dim and a gold caret after it, as the update
+# offer asks, and only when stdin is a terminal, as read -p shows a prompt;
+# the answer is read from stdin either way. True on y or Y.
+cs_confirm() {  # question
+    local answer=""
+    [ ! -t 0 ] || printf '%s %b[y/N]%b %b›%b ' "$1" "$DIM" "$NC" "$GOLD" "$NC" >&2
+    read -r answer || answer=""
+    [[ "$answer" =~ ^[Yy]$ ]]
+}
+
