@@ -10,7 +10,7 @@ The first two passes are owned by their own files, which cs installs beside its 
 
 ## Pass 1 — Memory distillation
 
-Read `~/.claude/hooks/cs/wrap-sweep.md` and execute it end to end: the retro that lists where the session struggled and files one task per fix, the strict bar with its bucket routing table, the dedup and `MEMORY.md` index rules, and the looser-bar narrative sweep. Skip its final report; the combined report below replaces it.
+Read `~/.claude/hooks/cs/wrap-sweep.md` and execute it end to end: the snags pass that lists where the session struggled and files one task per fix, the strict bar with its bucket routing table, the dedup and `MEMORY.md` index rules, and the looser-bar narrative sweep. Skip its final report; the combined report below replaces it.
 
 ## Pass 2 — Session summary
 
@@ -45,7 +45,7 @@ It names the conversation this wrap finished in (its own id, so a teammate's wra
 Output a brief report with the five labeled items below. No long prose; the summary IS the prose.
 
 1. **Memory:** list the file paths you wrote in Pass 1, one per line, each ending as the sweep's step 7 says: `supersedes: <file>`, `supersedes: none`, or `updated in place`. Or write `nothing to add` if the session didn't warrant memory entries.
-2. **Retro:** one line per task the sweep's retro filed, its fix and the moment behind it, or `nothing to fix` when the session listed no struggle.
+2. **Snags:** one line per task the sweep's snags pass filed, its fix and the moment behind it, or `nothing to fix` when the session listed no struggle.
 3. **Summary:** confirm `.cs/summary.md` was created.
 4. **Narrative:** the line `cs -narrative rotate` printed.
 5. **Tasks:** the line `cs -archive-tasks run` printed, or why the archive was skipped (the session answered no, nothing to archive, or the `Error:` line).

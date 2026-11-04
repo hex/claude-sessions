@@ -365,12 +365,12 @@ test_sweep_adds_check_tasks_and_keeps_the_entry() {
         "the sweep pass must add a task for the check and keep the memory entry, never replace it" || return 1
 }
 
-# The sweep opens with a retro: where the session struggled, each moment named,
+# The sweep opens with the snags pass: where the session struggled, each moment named,
 # routed to the fix that stops the repeat, and filed as a task the user picks,
 # never applied by the pass. An unanchored candidate is generic advice and is dropped.
-test_sweep_retro_proposes_anchored_fixes_as_tasks() {
-    assert_file_contains "$SWEEP_PASS" '^2\. \*\*Retro: where did this session struggle' \
-        "the retro is the sweep's second step, before the fact bars" || return 1
+test_sweep_snags_propose_anchored_fixes_as_tasks() {
+    assert_file_contains "$SWEEP_PASS" '^2\. \*\*Snags: where did this session struggle' \
+        "the snags pass is the sweep's second step, before the fact bars" || return 1
     assert_file_contains "$SWEEP_PASS" 'Discard any candidate you cannot trace to one moment' \
         "an unanchored candidate is dropped" || return 1
     assert_file_contains "$SWEEP_PASS" 'A steering line that changed nothing | Delete it' \
@@ -382,9 +382,9 @@ test_sweep_retro_proposes_anchored_fixes_as_tasks() {
     assert_file_contains "$SWEEP_PASS" 'never a second copy' \
         "guidance already present is reworded or placed, not duplicated" || return 1
     assert_file_contains "$SWEEP_PASS" 'Propose, never apply' \
-        "the retro files tasks and edits nothing" || return 1
-    assert_file_contains "$COMMANDS_DIR/wrap.md" '\*\*Retro:\*\*' \
-        "the wrap report carries a retro item" || return 1
+        "the snags pass files tasks and edits nothing" || return 1
+    assert_file_contains "$COMMANDS_DIR/wrap.md" '\*\*Snags:\*\*' \
+        "the wrap report carries a snags item" || return 1
 }
 
 # ============================================================================
@@ -587,7 +587,7 @@ run_test test_sweep_states_memory_pointer_format
 run_test test_sweep_demotes_pointers_to_the_archive_before_rewording
 run_test test_sweep_resolves_actor_before_narrative_append
 run_test test_sweep_adds_check_tasks_and_keeps_the_entry
-run_test test_sweep_retro_proposes_anchored_fixes_as_tasks
+run_test test_sweep_snags_propose_anchored_fixes_as_tasks
 run_test test_store_secret_opener_softened_and_stops_on_nothing
 run_test test_store_secret_guards_silent_overwrite
 run_test test_store_secret_non_session_warns_and_forbids_file

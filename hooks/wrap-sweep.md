@@ -22,7 +22,7 @@ bash ~/.claude/hooks/cs/memory-index-guard.sh snapshot
 
 1. **Review the conversation in your context.** Look at what the user has said and what was decided or learned across this whole session — not just the most recent turn.
 
-2. **Retro: where did this session struggle?** Before weighing facts, list the moments the work went
+2. **Snags: where did this session struggle?** Before weighing facts, list the moments the work went
    badly: a file or fact that took several tool calls to find, a mistake a tool could have caught
    before you did, a reviewer or gate that missed a judgment call, a tool call that cost far more than
    it returned, a steering line in `CLAUDE.md` or a skill that changed nothing, a step that stalled for
