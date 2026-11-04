@@ -67,6 +67,7 @@ warn_more() {
 _STEP_LIVE=""
 _STEP_LABEL=""
 _step() {  # label
+    _step_clear
     _STEP_LABEL="$1"
     if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
         _STEP_LIVE=1
@@ -1674,11 +1675,16 @@ _payload_mode() {  # repo-path
 # The rename replaces the link itself, never writing through it, so its
 # target is left as it was either way. A directory at $2 is kept and named
 # the same way: a rename onto it would drop the file inside it.
+# _PLACE_KEPT is set when the destination was kept instead of written, so a
+# caller can count or report only what landed.
+_PLACE_KEPT=""
 _place_file() {  # src, dest, mode
     local dest="$2" dir tmp digest link_target=""
+    _PLACE_KEPT=""
     if [ -d "$dest" ] && [ ! -L "$dest" ]; then
         warn "Kept $dest: a directory, so it was not replaced"
         CS_KEPT_PATHS+=("$dest")
+        _PLACE_KEPT=1
         return 0
     fi
     if [ -L "$dest" ]; then
@@ -1686,6 +1692,7 @@ _place_file() {  # src, dest, mode
         if ! _cs_owns_file "$dest" "$digest"; then
             warn "Kept $dest: a symlink to content cs did not write, so it was not replaced"
             CS_KEPT_PATHS+=("$dest")
+            _PLACE_KEPT=1
             return 0
         fi
         link_target=$(readlink "$dest") || error "Could not read the symlink $dest"
@@ -1759,9 +1766,9 @@ _deploy() {  # repo-path, dest
         return 0
     fi
     _place "$1" "$2"
+    [ -n "$_PLACE_KEPT" ] || CS_PLACED=$((CS_PLACED + 1))
     _record_placed "$digest" "${2#"$HOME"/}"
     CS_RECORD_LINES+=("$digest  ${2#"$HOME"/}")
-    CS_PLACED=$((CS_PLACED + 1))
 }
 
 # Check for Claude Code
@@ -1835,7 +1842,7 @@ if [ "$INSTALL_METHOD" = "web" ]; then
     _step "Downloading release"
     _dl_start=$SECONDS
     if _fetch_payload_archive; then
-        _dl_size=$(wc -c < "$STAGE_DIR/payload.tar.gz" | awk '{ printf "%.1f MB", $1 / 1048576 }')
+        _dl_size=$(wc -c < "$STAGE_DIR/payload.tar.gz" | LC_ALL=C awk '{ printf "%.1f MB", $1 / 1048576 }')
         _done "Downloaded release" "$_dl_size · $((SECONDS - _dl_start)) s"
         _step "Verifying files"
         _verified=0
@@ -1912,19 +1919,13 @@ fi
 echo ""
 
 _step "Placing files"
-# Install cs script
-_place bin/cs "$INSTALL_DIR/cs"
-
-# Install cs-secrets utility
-_place bin/cs-secrets "$INSTALL_DIR/cs-secrets"
-
-# Install cs-statusline (Claude Code status line)
-_place bin/cs-statusline "$INSTALL_DIR/cs-statusline"
-
-# Install cs-subagent-statusline (Claude Code agent-panel rows). It sources
-# cs-statusline for the shared palette, so the two must land in the same dir.
-_place bin/cs-subagent-statusline "$INSTALL_DIR/cs-subagent-statusline"
-CS_PLACED=$((CS_PLACED + 4))
+# Install cs, cs-secrets, cs-statusline and cs-subagent-statusline. The last
+# sources cs-statusline for the shared palette, so the two must land in the
+# same dir.
+for _bin in cs cs-secrets cs-statusline cs-subagent-statusline; do
+    _place "bin/$_bin" "$INSTALL_DIR/$_bin"
+    [ -n "$_PLACE_KEPT" ] || CS_PLACED=$((CS_PLACED + 1))
+done
 
 # Records where the cs-tui just put in $INSTALL_DIR came from, in
 # HOOKS_DIR/.tui-origin beside the .version stamp: "checkout <path>" for a
@@ -1960,7 +1961,7 @@ CS_PICKER=""
 if [ "$INSTALL_METHOD" = "local" ] && [ -f "$_cs_tui_src" ]; then
     _place_file "$_cs_tui_src" "$INSTALL_DIR/cs-tui" 755
     _record_tui_origin "checkout $SCRIPT_DIR"
-    CS_PICKER="from this checkout"
+    [ -n "$_PLACE_KEPT" ] || CS_PICKER="from this checkout"
 elif [ "$INSTALL_METHOD" = "web" ]; then
     # The release this install downloaded, read from its verified bin/cs:
     # $INSTALL_DIR/cs may be a link _place_file kept, which is not this
@@ -1990,8 +1991,8 @@ elif [ "$INSTALL_METHOD" = "web" ]; then
         fi
         if [ -f "$_tui_dst" ]; then
             _place_file "$_tui_dst" "$INSTALL_DIR/cs-tui" 755
+            [ -n "$_PLACE_KEPT" ] || CS_PICKER="${_os}-${_arch}, signed release"
             _record_tui_origin release
-            CS_PICKER="${_os}-${_arch}, signed release"
         fi
     else
         info "cs-tui not available for ${_os}-${_arch} — run 'cs' for help, or build from source: cd tui && cargo build --release"

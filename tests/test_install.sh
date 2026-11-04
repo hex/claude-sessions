@@ -3109,6 +3109,36 @@ test_reinstall_leaves_an_unchanged_file_in_place() {
         || { echo "  FAIL: the install record lacks the unchanged hook"; return 1; }
 }
 
+# The report says what this run did: a first install closes with "installed"
+# and the usage examples; a second run over the same version closes with
+# "installed again" and no examples; a run over an older version opens with
+# "old → new" and closes with "updated to". A kept destination is not counted
+# among the files placed.
+test_install_report_names_first_repeat_and_update_runs() {
+    local fake_home="$TEST_TMPDIR/report" out version
+    version=$(grep -m1 '^VERSION=' "$SCRIPT_DIR/../bin/cs" | cut -d'"' -f2)
+    mkdir -p "$fake_home"
+    out=$(HOME="$fake_home" bash "$INSTALL_SH" 2>&1 < /dev/null) || { echo "$out"; return 1; }
+    assert_output_contains "$out" "^   cs $(_bre_literal "$version")$" "a first install opens with the version alone" || return 1
+    assert_output_contains "$out" "✓ Placed 60 files *~/.local/bin, ~/.claude$" "a first install places every file" || return 1
+    assert_output_contains "$out" "✓ cs $(_bre_literal "$version") installed$" "a first install closes with installed" || return 1
+    assert_output_contains "$out" "Getting started:" "a first install shows the usage examples" || return 1
+    out=$(HOME="$fake_home" bash "$INSTALL_SH" 2>&1 < /dev/null) || { echo "$out"; return 1; }
+    assert_output_contains "$out" "^   cs $(_bre_literal "$version") again$" "a repeat opens with again" || return 1
+    assert_output_contains "$out" "✓ Placed 4 files *56 unchanged" "a repeat places the binaries and leaves the rest" || return 1
+    assert_output_contains "$out" "✓ cs $(_bre_literal "$version") installed again$" "a repeat closes with installed again" || return 1
+    assert_output_not_contains "$out" "Getting started:" "a repeat shows no usage examples" || return 1
+    printf '2000.1.1\n' > "$fake_home/.claude/hooks/cs/.version"
+    out=$(HOME="$fake_home" bash "$INSTALL_SH" 2>&1 < /dev/null) || { echo "$out"; return 1; }
+    assert_output_contains "$out" "^   cs 2000.1.1 → $(_bre_literal "$version")$" "an update opens with old → new" || return 1
+    assert_output_contains "$out" "✓ cs updated to $(_bre_literal "$version")$" "an update closes with updated to" || return 1
+    assert_output_not_contains "$out" "Getting started:" "an update shows no usage examples" || return 1
+    rm -f "$fake_home/.local/bin/cs" && ln -s /bin/true "$fake_home/.local/bin/cs"
+    out=$(HOME="$fake_home" bash "$INSTALL_SH" 2>&1 < /dev/null) || { echo "$out"; return 1; }
+    assert_output_contains "$out" "Kept $(_bre_literal "$fake_home")/.local/bin/cs: a symlink" "the foreign link is kept" || return 1
+    assert_output_contains "$out" "✓ Placed 3 files" "a kept destination is not counted as placed" || return 1
+}
+
 # The unchanged-file path reads the install record to see whether it already
 # names the file. A record that is a FIFO with no writer would hold that read
 # forever; the install must finish, and leave a regular record behind.
@@ -3847,6 +3877,7 @@ run_test test_web_install_fetches_each_file_when_the_archive_fails
 run_test test_web_install_refuses_an_archive_missing_a_payload_file
 run_test test_reinstall_leaves_an_unchanged_file_in_place
 run_test test_reinstall_finishes_when_the_record_is_a_fifo
+run_test test_install_report_names_first_repeat_and_update_runs
 run_test test_build_embeds_the_sha256_of_every_payload_file
 run_test test_release_workflow_pins_the_installers_default_ref
 run_test test_install_keeps_user_files_that_share_a_cs_name
