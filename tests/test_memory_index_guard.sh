@@ -102,7 +102,7 @@ test_check_counts_the_line_breaks_claude_code_counts() {
         "U+2029 counts as a line break" || return 1
 }
 
-# step 5 runs check once per sweep even when nothing was written; with no
+# step 6 runs check once per sweep even when nothing was written; with no
 # snapshot there is nothing to compare, and that must never read as a pass.
 test_check_without_a_snapshot_is_an_error() {
     _guard_session
@@ -124,7 +124,7 @@ test_check_without_the_index_is_an_error() {
         "the error must name the missing index" || return 1
 }
 
-# Rewriting a pointer shorter and adding a new one is what step 5 asks for.
+# Rewriting a pointer shorter and adding a new one is what step 6 asks for.
 test_check_passes_a_rewrite_that_keeps_every_link_at_the_budget() {
     _guard_session
     _guard snapshot > /dev/null || return 1

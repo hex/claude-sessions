@@ -51,11 +51,15 @@ warn() {
 
 # A follow-on line of the note or warning above it, aligned with its text.
 info_more() {
+    _step_clear
     echo -e "     ${GREEN}$1${NC}"
+    _step_redraw
 }
 
 warn_more() {
+    _step_clear
     echo -e "     ${YELLOW}$1${NC}"
+    _step_redraw
 }
 
 # A phase of the install is one line: while it runs, a gold asterisk and its
@@ -342,20 +346,19 @@ _record_placed() {  # sha256, path-under-home
 # again at the end. A file is cs's as _cs_owns_file decides; a symlink that
 # points nowhere holds nothing cs wrote, so it is kept too.
 _deploy() {  # repo-path, dest
-    local digest record
+    local digest record existing=""
     digest=$(_cs_sha256_file "$PAYLOAD_DIR/$1") || error "Could not compute the sha256 of $1 (needs sha256sum or shasum)"
-    if { [ -e "$2" ] || [ -L "$2" ]; } && ! _cs_owns_file "$2" "$digest"; then
-        warn "Kept $2: cs did not write it, so it was not replaced"
-        CS_KEPT_PATHS+=("$2")
-        return 0
+    # A regular file already there is hashed once, for both checks below.
+    if [ -f "$2" ] && [ ! -L "$2" ]; then
+        existing=$(_cs_sha256_file "$2") || existing=""
     fi
-    # A deployed copy that already holds this content is left in place, its
-    # mode set again in case it drifted. A copy whose mode cannot be set (not
-    # this user's file) is replaced as before. The record gains its line now
-    # only when it lacks one, so a run that stops later still names the file;
-    # a record that is not a regular file (a FIFO would hold grep forever) is
-    # rewritten the way _record_placed rewrites it.
-    if [ -f "$2" ] && [ ! -L "$2" ] && [ "$(_cs_sha256_file "$2")" = "$digest" ] \
+    # A deployed copy that already holds this content is cs's and is left in
+    # place, its mode set again in case it drifted. A copy whose mode cannot
+    # be set (not this user's file) goes through the replacement below. The
+    # record gains its line now only when it lacks one, so a run that stops
+    # later still names the file; a record that is not a regular file (a FIFO
+    # would hold grep forever) is rewritten the way _record_placed rewrites it.
+    if [ -n "$existing" ] && [ "$existing" = "$digest" ] \
         && chmod "$(_payload_mode "$1")" "$2" 2>/dev/null; then
         record=$(_cs_install_record)
         if ! { [ -f "$record" ] && grep -qxF "$digest  ${2#"$HOME"/}" "$record" 2>/dev/null; }; then
@@ -363,6 +366,11 @@ _deploy() {  # repo-path, dest
         fi
         CS_RECORD_LINES+=("$digest  ${2#"$HOME"/}")
         CS_UNCHANGED=$((CS_UNCHANGED + 1))
+        return 0
+    fi
+    if { [ -e "$2" ] || [ -L "$2" ]; } && ! _cs_owns_file "$2" "$digest"; then
+        warn "Kept $2: cs did not write it, so it was not replaced"
+        CS_KEPT_PATHS+=("$2")
         return 0
     fi
     _place "$1" "$2"
@@ -560,8 +568,8 @@ fi
 CS_PICKER=""
 if [ "$INSTALL_METHOD" = "local" ] && [ -f "$_cs_tui_src" ]; then
     _place_file "$_cs_tui_src" "$INSTALL_DIR/cs-tui" 755
-    _record_tui_origin "checkout $SCRIPT_DIR"
     [ -n "$_PLACE_KEPT" ] || CS_PICKER="from this checkout"
+    _record_tui_origin "checkout $SCRIPT_DIR"
 elif [ "$INSTALL_METHOD" = "web" ]; then
     # The release this install downloaded, read from its verified bin/cs:
     # $INSTALL_DIR/cs may be a link _place_file kept, which is not this

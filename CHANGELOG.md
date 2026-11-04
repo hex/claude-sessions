@@ -4,7 +4,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.11.3
 
 ### Performance
 - `cs -update` and a `curl | bash` install fetch the release's source archive in one download instead of one download per payload file (62 of them), then check each file against the digests the verified installer carries, as before. When the archive cannot be had, the install says so once and fetches the files one by one. On one machine a web install of `main` into an empty home took 37.5 s before (one run, 66 downloads) and 9.3 to 9.8 s after (three runs, 5 downloads: the archive, then the picker binary and its manifest and signature); what remains is placing 61 files and fetching the picker.
@@ -14,7 +14,17 @@ All notable changes to cs are documented here. Release notes are also available 
 - The installer reports in phases. On a terminal each phase shows as a gold `✳` with its label while it runs and settles to a green `✓` line with what it did: `Downloaded release  3.9 MB · 1 s`, `Verified 62 files`, `Placed 14 files  47 unchanged · ~/.local/bin, ~/.claude`, `Picker cs-tui`, `Completions  bash, zsh`, `Registered hooks`. Off a terminal only the settled lines print. The report opens with the version it installs, as `cs 2026.11.2 → 2026.11.3` on an update, and closes with `✓ cs updated to 2026.11.3`, `✓ cs 2026.11.3 installed` or `installed again`. Warnings (a `PATH` without `~/.local/bin`, completion setup, files left in place) come before that closing line, and the usage examples print only on a first install. The ten `Installed <name> → <full path>` lines are gone.
 - `cs -rm` asks in cs's own prompt style: the question in ink, `[y/N]` dim and a gold `›` after it, as the update offer asks, and the list of files cs did not create above it in amber with the names in plain ink, where everything was red. The worktree and adopted-session confirms and the branch question ask the same way, through one `cs_confirm` helper.
 - `/wrap`'s memory pass opens by listing the session's snags. Before weighing durable facts it lists where the session struggled, each moment named (a slow lookup, a mistake a tool could have caught, a review that missed a judgment call, a tool call that cost more than it returned, a steering line that changed nothing, a skill that never fired, a verification skipped), ranks them and routes each to the fix that stops the repeat: a navigation pointer, a check, a rule in the reviewing skill, a description tuned, a line deleted, access widened. A candidate with no moment behind it is dropped, a fix lands only in a file the session read or a skill it ran, and guidance already present is reworded or moved rather than copied. The pass files one task per fix and applies none; the wrap report carries them as its `Snags:` item.
+- The release process signs the manifest through Bitwarden's own agent socket instead of handing the sign to the user, whose shell holds the same macOS agent and fails the same way.
 
+### Fixes
+- A deployed copy with matching content whose mode cannot be set (not this user's file) is replaced as before instead of aborting the install; a file skipped as unchanged gets its record line at once when the record lacks one, so a run that stops later still names it; a record that is not a regular file is rewritten rather than read, so a FIFO at `.installed` no longer holds the install.
+- A kept directory or foreign link at a binary, hook or picker path is neither counted among the files placed nor reported as the picker installed; the archive size prints under `LC_ALL=C`, so a `de_DE` locale cannot write `3,9 MB`.
+- An unchanged file is hashed once, not twice, on the skip path; a follow-on note or warning line raised while a phase is live takes the line as a note does; `cs -adopt`'s re-adopt question asks through `cs_confirm` like the others.
+
+### Docs
+- The README names the archive download and the snags step; the release-verification notes say that only `cs -update` verifies the installer it runs, and that a completion missing from the archive is skipped with a warning rather than stopping the install. A spinner tip points at `/wrap`'s snags.
+
+## 2026.11.2
 
 ### Changed
 - The `cs-filter-chat` mod titles its `/config` row `cs: Filter chat: your lines' colour`, as the cs, cs-update and cs-mermaid mods title theirs, so `/config` marks it as cs's; the `/cs` pane still shows the label without the mark under `Mods`.

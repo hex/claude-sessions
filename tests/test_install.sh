@@ -3115,17 +3115,21 @@ test_reinstall_leaves_an_unchanged_file_in_place() {
 # "old → new" and closes with "updated to". A kept destination is not counted
 # among the files placed.
 test_install_report_names_first_repeat_and_update_runs() {
-    local fake_home="$TEST_TMPDIR/report" out version
+    local fake_home="$TEST_TMPDIR/report" out version total deployed
     version=$(grep -m1 '^VERSION=' "$SCRIPT_DIR/../bin/cs" | cut -d'"' -f2)
+    # The payload the manifest lists, less the completions, which are not
+    # counted among the files placed; the four binaries are written each run.
+    total=$(( $(extract_array "$INSTALL_SH" CS_PAYLOAD_SHA256 | wc -l) - $(extract_array "$INSTALL_SH" CS_COMPLETION_FILES | wc -l) ))
+    deployed=$((total - 4))
     mkdir -p "$fake_home"
     out=$(HOME="$fake_home" bash "$INSTALL_SH" 2>&1 < /dev/null) || { echo "$out"; return 1; }
     assert_output_contains "$out" "^   cs $(_bre_literal "$version")$" "a first install opens with the version alone" || return 1
-    assert_output_contains "$out" "✓ Placed 60 files *~/.local/bin, ~/.claude$" "a first install places every file" || return 1
+    assert_output_contains "$out" "✓ Placed $total files *~/.local/bin, ~/.claude$" "a first install places every file" || return 1
     assert_output_contains "$out" "✓ cs $(_bre_literal "$version") installed$" "a first install closes with installed" || return 1
     assert_output_contains "$out" "Getting started:" "a first install shows the usage examples" || return 1
     out=$(HOME="$fake_home" bash "$INSTALL_SH" 2>&1 < /dev/null) || { echo "$out"; return 1; }
     assert_output_contains "$out" "^   cs $(_bre_literal "$version") again$" "a repeat opens with again" || return 1
-    assert_output_contains "$out" "✓ Placed 4 files *56 unchanged" "a repeat places the binaries and leaves the rest" || return 1
+    assert_output_contains "$out" "✓ Placed 4 files *$deployed unchanged" "a repeat places the binaries and leaves the rest" || return 1
     assert_output_contains "$out" "✓ cs $(_bre_literal "$version") installed again$" "a repeat closes with installed again" || return 1
     assert_output_not_contains "$out" "Getting started:" "a repeat shows no usage examples" || return 1
     printf '2000.1.1\n' > "$fake_home/.claude/hooks/cs/.version"

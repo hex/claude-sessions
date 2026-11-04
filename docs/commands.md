@@ -215,7 +215,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 - See [handoff records](session-layout.md#shared-files) for lineage, encrypted storage, and pruning after 30 days while retaining the newest ten. The [SessionStart hook](hooks.md#session-startsh-sessionstart) documents clean/tracked pruning safeguards and marker survival across compaction or a context-limit fork.
 - Handoffs redact credentials, identifying data, and sensitive personal detail. They put blockers first, reference committed work by path, and keep the user's words while condensing agent reasoning.
 - `cs -conversations` folds starts with resume counts and marks the current conversation. [Rotation events](session-layout.md#shared-files) name old/new identifiers and a reason, `handoff`, `declined-resume`, `resume-failed`, or `rebind`.
-- `/wrap` saves durable memory, sweeps findings into the narrative, writes the summary, rotates the narrative, and archives completed tasks with consent. It commits nothing.
+- `/wrap` lists where the session struggled and files one task per fix without applying any, saves durable memory, sweeps findings into the narrative, writes the summary, rotates the narrative, and archives completed tasks with consent. It commits nothing.
 - The wrap pass moves pointers for finished subjects or enforced rules to the memory archive before rewording. It keeps entries while adding tasks for checks that could enforce them.
 - `/checkpoint <label>` saves a snapshot mid-session.
 - See [memory checks](hooks.md#memory-index-guardsh-not-a-hook--run-by-wraps-memory-pass), [summary and task archives](session-layout.md#shared-files), and [narrative budgets](configuration.md).

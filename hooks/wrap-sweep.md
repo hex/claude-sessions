@@ -52,7 +52,7 @@ bash ~/.claude/hooks/cs/memory-index-guard.sh snapshot
 
    **Propose, never apply.** This pass edits nothing outside `.cs/memory/`: add one task per surviving
    candidate, named for its fix and carrying its moment, the way step 4 adds a task for a check.
-   The user picks what to build. A candidate that is also a durable fact still goes through step 4's
+   The user picks what to build. A candidate that is also a durable fact still goes through step 3's
    bars; the task does not replace the entry, and the entry does not replace the task.
 
 3. **For each of the four memory categories** (`user`, `feedback`, `project`, `reference`), ask: is there a durable fact in this conversation that meets ALL three bars?

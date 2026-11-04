@@ -22,7 +22,7 @@ cd claude-sessions
 ./install.sh
 ```
 
-Review [install.sh](install.sh) before running it. The piped command always installs the release, even inside a checkout.
+Review [install.sh](install.sh) before running it. The piped command always installs the release, even inside a checkout. It and `cs -update` fetch the release's source archive in one download and check every file against the digests the installer carries; with no `tar`, or when the archive cannot be downloaded or unpacked, they fetch the files one by one ([release verification](docs/configuration.md#release-verification-and-notes)).
 The installer puts the commands in `~/.local/bin/`, registers hooks, and installs skills, mods, and Bash and Zsh completions.
 When `~/.claude/settings.json` names no spinner tips file, the installer names cs's there as `spinnerTipsOverride.tipsFile` ([spinner tip](docs/configuration.md#spinner-tip)).
 Updates and prebuilt picker downloads require `ssh-keygen` with `-Y verify` support to check the [signed release manifest](docs/configuration.md#release-verification-and-notes).
@@ -68,7 +68,7 @@ The [statusline guide](docs/statusline.md) covers the quiet default layout, the 
 | Prompt grounding | Adds matching files, recent commits, changes, and clarification guidance to code-work prompts. | [Scope hook](docs/hooks.md#scope-promptsh-userpromptsubmit) |
 | Prompt rewriting | Ctrl+G rewrites a draft in the composer for you to review before sending. | [Prompt rewriter](docs/hooks.md#prompt-rewritersh-not-a-hook--an-editor-shim) |
 | Writing skills | Judges prose or drafts from a writing profile. | [Skills](docs/hooks.md#skills) |
-| Session wrap | `/wrap` saves memory, summarizes the narrative, and archives completed tasks without committing. Its memory pass also finds references to paths, `cs` verbs and identifiers that no longer exist, and updates them or marks them gone. | [Memory checks](docs/hooks.md#memory-index-guardsh-not-a-hook--run-by-wraps-memory-pass) |
+| Session wrap | `/wrap` saves memory, summarizes the narrative, and archives completed tasks without committing. Its memory pass first lists where the session struggled and files one task per fix, applying none. It also finds references to paths, `cs` verbs and identifiers that no longer exist, and updates them or marks them gone. | [Memory checks](docs/hooks.md#memory-index-guardsh-not-a-hook--run-by-wraps-memory-pass) |
 | Inline Mermaid | Draws supported flowcharts in replies, and a `show-me` skill answers "show me" with one. | [Mermaid mod](docs/hooks.md#cs-mermaid-not-a-hook-script--a-claude-code-mod)<br><img src="https://raw.githubusercontent.com/hex/claude-sessions/main/assets/mermaid.svg" width="260" alt="Reply prose, then the same prose with a drawn Mermaid chart"> |
 | Filter chat | While on, the chat shows what you type and what Claude answers, and nothing of the work between them. Off by default; `/filter-chat` or the band's key switches it for that session. | [Filter chat mod](docs/hooks.md#cs-filter-chat-not-a-hook-script--a-claude-code-mod) |
 | Release notes | A launch from your terminal offers a pending release once. In the session, `/cs-update` shows its release notes. | [Update mod](docs/hooks.md#cs-update-not-a-hook-script--a-claude-code-mod) |

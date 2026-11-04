@@ -299,9 +299,7 @@ adopt_session() {  # name, [--yes|-y], in any order
         if [ "$assume_yes" = true ]; then
             :
         elif cs_interactive; then
-            local confirm
-            read -r -p "Found existing session records (.cs/) with no session link. Re-adopt as '$session_name', preserving them? [y/N] " confirm
-            if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+            if ! cs_confirm "Found existing session records (.cs/) with no session link. Re-adopt as '$session_name', preserving them?"; then
                 info "Cancelled"
                 return 0
             fi

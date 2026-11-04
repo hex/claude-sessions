@@ -15,6 +15,10 @@
     {
       "id": "cs.filter-chat",
       "text": "to see only your prompts and Claude's answers in this session, run /filter-chat; run it again to show the work between them"
+    },
+    {
+      "id": "cs.wrap-snags",
+      "text": "run /wrap when a session winds down: before it saves memory and the summary, it lists where the session struggled and files one task per fix for you to pick from, applying none"
     }
   ]
 }

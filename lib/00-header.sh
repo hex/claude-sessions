@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.11.2"
+VERSION="2026.11.3"
 # A relative CS_SESSIONS_ROOT names a directory under the one cs started in.
 # cs moves into a session before it launches claude, and claude's hooks, the
 # status line and cs-secrets read the variable from wherever they run, so it is

@@ -52,11 +52,15 @@ warn() {
 
 # A follow-on line of the note or warning above it, aligned with its text.
 info_more() {
+    _step_clear
     echo -e "     ${GREEN}$1${NC}"
+    _step_redraw
 }
 
 warn_more() {
+    _step_clear
     echo -e "     ${YELLOW}$1${NC}"
+    _step_redraw
 }
 
 # A phase of the install is one line: while it runs, a gold asterisk and its
@@ -629,6 +633,7 @@ CS_KNOWN_SHA256=(
     0321362c2f76929b668bb632546f2a2b9e1cb36b8f120dee5ed03ef891fc5114
     0428a8eeb58089c168c6328dcc436de9cbb39257c6d67fcdfc8a8adfcd6269a2
     0482cb10fb7f9b2b7414be54b7cc06be725c213e641baa506ce6e7edc5055bd1
+    054454213cef99daeec0a56bc2b39496b7044e46795b0fca29be59101941e18a
     05687630e164cf75b205a5a2db9def56e2342aed97f50f6171684138fabef2ef
     056886a6278fe7f88bb706abab1132f87055f8fab2591cd8ee40875c6f54539a
     06030c70725f932051685ea087391c9aecd958d512190c366b34c82f224686b9
@@ -759,6 +764,7 @@ CS_KNOWN_SHA256=(
     286f75d0b3aa3871751db2d3b6d5590b8e1c28bac58ea993f99d06e0238539cf
     287bc6c368e8b625db8ea12e78c6f4ee7268aefa9cec4d3fce563ef56d20ca11
     2914a0ed30fbf76b9e362151ac3abf7137b10e52ed81257839683f995f33f0d7
+    293b6da5250820f2247d1ba122cf4c732f0e987bc80cb8e7fe3500917d4f373f
     296ecfe833395f88e4a5eff36f0ce39267f51bd33abc1329295bc9b5871e9b42
     29ac06fdebc523b5c2a4de15dcf47e47a486f4c043f22615172318ba80714b51
     29b05b58ef8049d9a36a75af3d747c15fa7bcd5b9fed9e65558e78d78441e2f1
@@ -1190,6 +1196,7 @@ CS_KNOWN_SHA256=(
     a51b158574547d0560e254653d04d0ec069c1b911152f8da0c4615fd59c452c4
     a5540d6098772508987b5f8919ad00662706d352e6f324593ddcb0fbbe028e33
     a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8
+    a56e579e12839d35e969e7f44f99f6938a898abe05504f37f54e01975b8f80a1
     a57e3bdb4fd68482578c1b1d1f07090072284bd2b7a05a5720f02782f00eb43d
     a5d9864215c3f7b99a49bd59524b72bbc2a75d8df15c97caa23c1aba31ddb428
     a633bd92c5dda03d164420ee7950640eaab25fa0b854cedf743c156b17184f26
@@ -1328,6 +1335,7 @@ CS_KNOWN_SHA256=(
     d1b0051b093a3c62b75d76a1d81bbedc5ae6ddcb3e24e01968383ef8e91d9788
     d1b17b6d68e55ed2a88c5127abebf18e38b1e718a3c9976f22668882f0ff6447
     d1ba620fde301d5b7d11de96a79303eb392626f3e33a067fc6eaa05d9e37aed2
+    d2211a0814db82373d621155a753a21be1beff486d78b79700fc6d0e83e27c1a
     d22ebd5a106135b9e5d2d5c5be232951ddc8a91c491c28efda4c27e87b45b022
     d267e7420ba1863aad905f864e5e7f202e9cc075c5bd6907c16c4164e9ec21ef
     d26c9590295085bb809bc90202c55e7d3a41e83415d191016cba9baa3211c751
@@ -1469,7 +1477,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "6e105772a15db6d1ec32b73e33a9235107c00e4c80e7f7ab2e2735fd86640521  bin/cs"
+    "7d9c258fa75d90f710e64fc8664dedeb671721669f3ab40ab51f37721bd48bd7  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "ba8fff7f5576e3cc24276fb470b9518a64e7af96b050a31cb40506778e0f80c3  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
@@ -1481,7 +1489,7 @@ CS_PAYLOAD_SHA256=(
     "0202455687b8c8a584cfc1ecf0439de03e8f70fcb0062e479484fdfeb4b83147  hooks/prompt-rewriter.sh"
     "e6a9a79ff1b7342171f69c406d601d1bbd8dc631293e368ab8deaafef2d9d27a  hooks/prompt-rewriter-model.sh"
     "8be7cf198e9e950cb11eeb5d02231bb3e168aa078018495a1a8832186334bbc2  hooks/prompt-rewriter-vendor.sh"
-    "d2211a0814db82373d621155a753a21be1beff486d78b79700fc6d0e83e27c1a  hooks/wrap-sweep.md"
+    "293b6da5250820f2247d1ba122cf4c732f0e987bc80cb8e7fe3500917d4f373f  hooks/wrap-sweep.md"
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
     "93ff2dee45bd443aabf3001f48942e5ac3718b7e08581f5c9808f6f9fb723657  hooks/session-start.sh"
     "e1d127ff4b828a434a3ddc4b57e3274f2d3ac94a7675680e44fda6eedf006553  hooks/autosave-commits.sh"
@@ -1505,7 +1513,7 @@ CS_PAYLOAD_SHA256=(
     "a4a0978846dd5f6cca361977b6c8b4b951d475734af234cbe78aae1f3bf8148a  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
     "caa1d32940b2a16921f89aadcb2c6d097d47734a8f5b182018ef023fa4328b5d  mods/cs/hooks/register.tsx"
-    "31a4e95f517c28fa17d68f731d8adaefc5825872c654ab63f0d04d2f963e109c  mods/cs/tips.json"
+    "a56e579e12839d35e969e7f44f99f6938a898abe05504f37f54e01975b8f80a1  mods/cs/tips.json"
     "2f8d4b45beddd0b27b050f1c2eb08ebb25552b4dea5f33b9398318a2ef636985  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
     "24a173a7705879c5f7835e7154a6b694a6ba23320e19ffd8fbfa7e15506d2a39  mods/cs-update/hooks/register.tsx"
@@ -1742,20 +1750,19 @@ _record_placed() {  # sha256, path-under-home
 # again at the end. A file is cs's as _cs_owns_file decides; a symlink that
 # points nowhere holds nothing cs wrote, so it is kept too.
 _deploy() {  # repo-path, dest
-    local digest record
+    local digest record existing=""
     digest=$(_cs_sha256_file "$PAYLOAD_DIR/$1") || error "Could not compute the sha256 of $1 (needs sha256sum or shasum)"
-    if { [ -e "$2" ] || [ -L "$2" ]; } && ! _cs_owns_file "$2" "$digest"; then
-        warn "Kept $2: cs did not write it, so it was not replaced"
-        CS_KEPT_PATHS+=("$2")
-        return 0
+    # A regular file already there is hashed once, for both checks below.
+    if [ -f "$2" ] && [ ! -L "$2" ]; then
+        existing=$(_cs_sha256_file "$2") || existing=""
     fi
-    # A deployed copy that already holds this content is left in place, its
-    # mode set again in case it drifted. A copy whose mode cannot be set (not
-    # this user's file) is replaced as before. The record gains its line now
-    # only when it lacks one, so a run that stops later still names the file;
-    # a record that is not a regular file (a FIFO would hold grep forever) is
-    # rewritten the way _record_placed rewrites it.
-    if [ -f "$2" ] && [ ! -L "$2" ] && [ "$(_cs_sha256_file "$2")" = "$digest" ] \
+    # A deployed copy that already holds this content is cs's and is left in
+    # place, its mode set again in case it drifted. A copy whose mode cannot
+    # be set (not this user's file) goes through the replacement below. The
+    # record gains its line now only when it lacks one, so a run that stops
+    # later still names the file; a record that is not a regular file (a FIFO
+    # would hold grep forever) is rewritten the way _record_placed rewrites it.
+    if [ -n "$existing" ] && [ "$existing" = "$digest" ] \
         && chmod "$(_payload_mode "$1")" "$2" 2>/dev/null; then
         record=$(_cs_install_record)
         if ! { [ -f "$record" ] && grep -qxF "$digest  ${2#"$HOME"/}" "$record" 2>/dev/null; }; then
@@ -1763,6 +1770,11 @@ _deploy() {  # repo-path, dest
         fi
         CS_RECORD_LINES+=("$digest  ${2#"$HOME"/}")
         CS_UNCHANGED=$((CS_UNCHANGED + 1))
+        return 0
+    fi
+    if { [ -e "$2" ] || [ -L "$2" ]; } && ! _cs_owns_file "$2" "$digest"; then
+        warn "Kept $2: cs did not write it, so it was not replaced"
+        CS_KEPT_PATHS+=("$2")
         return 0
     fi
     _place "$1" "$2"
@@ -1960,8 +1972,8 @@ fi
 CS_PICKER=""
 if [ "$INSTALL_METHOD" = "local" ] && [ -f "$_cs_tui_src" ]; then
     _place_file "$_cs_tui_src" "$INSTALL_DIR/cs-tui" 755
-    _record_tui_origin "checkout $SCRIPT_DIR"
     [ -n "$_PLACE_KEPT" ] || CS_PICKER="from this checkout"
+    _record_tui_origin "checkout $SCRIPT_DIR"
 elif [ "$INSTALL_METHOD" = "web" ]; then
     # The release this install downloaded, read from its verified bin/cs:
     # $INSTALL_DIR/cs may be a link _place_file kept, which is not this
