@@ -1549,8 +1549,8 @@ test_install_keeps_a_symlinked_skill_directory_and_writes_nothing_through_it() {
         [ -L "$home/.claude/skills/$l" ] || { echo "  FAIL: the link at skills/$l was not kept"; return 1; }
         assert_eq "1" "$(printf '%s\n' "$out" | grep -c "Kept $(_bre_literal "$home/.claude/skills/$l"): a symlink, so cs wrote nothing through it and the skill files under it were not deployed$")" \
             "one warning names the link at skills/$l" || return 1
-        printf '%s\n' "$out" | sed -n '/Installation complete/,$p' | grep -q "^ *$(_bre_literal "$home/.claude/skills/$l")$" \
-            || { echo "  FAIL: skills/$l is not listed after the completion line"; return 1; }
+        printf '%s\n' "$out" | sed -n '/Left in place/,$p' | grep -q "^ *$(_bre_literal "$home/.claude/skills/$l")$" \
+            || { echo "  FAIL: skills/$l is not listed under the kept paths"; return 1; }
     done
     assert_eq "$(_cs_shipped_content)" "$(cat "$ext/rotate/SKILL.md")" "the rotate link's target is untouched" || return 1
     assert_eq "my finish skill" "$(cat "$ext/finish/SKILL.md")" "the finish link's SKILL.md is untouched" || return 1
@@ -3208,10 +3208,10 @@ test_install_keeps_user_files_that_share_a_cs_name() {
     # Everything that is not in the way is still installed.
     cmp -s "$SCRIPT_DIR/../commands/wrap.md" "$home/.claude/commands/wrap.md" || { echo "  FAIL: wrap.md not installed"; return 1; }
     cmp -s "$SCRIPT_DIR/../hooks/session-start.sh" "$home/.claude/hooks/cs/session-start.sh" || { echo "  FAIL: hook not installed"; return 1; }
-    # The skipped paths are reported again after the completion line.
-    assert_output_contains "$out" "Installation complete" "the install finished" || return 1
-    printf '%s\n' "$out" | sed -n '/Installation complete/,$p' | grep -q "$home/.claude/commands/checkpoint.md" \
-        || { echo "  FAIL: the skipped command is not listed after the completion line"; return 1; }
+    # The skipped paths are reported again, together, before the closing line.
+    assert_output_contains "$out" "✓ cs [0-9.]* installed" "the install finished" || return 1
+    printf '%s\n' "$out" | sed -n '/Left in place/,$p' | grep -q "$home/.claude/commands/checkpoint.md" \
+        || { echo "  FAIL: the skipped command is not listed under the kept paths"; return 1; }
 }
 
 # A symlink where cs deploys a file is the user's unless what it points at is
@@ -3595,8 +3595,8 @@ test_install_reads_its_version_from_the_payload_not_a_kept_link() {
         || { echo "  FAIL: the link and the fifo are not left as they were"; return 1; }
     assert_output_contains "$out" "Kept $(_bre_literal "$home/.local/bin/cs"): a symlink to content cs did not write, so it was not replaced" \
         "the kept link is named" || return 1
-    assert_output_contains "$out" "Installation complete ($(_bre_literal "$version"))$" \
-        "the completion line names the version installed" || return 1
+    assert_output_contains "$out" "✓ cs $(_bre_literal "$version") installed$" \
+        "the closing line names the version installed" || return 1
     assert_eq "$version" "$(cat "$home/.claude/hooks/cs/.version")" "the hooks are stamped with the version installed" || return 1
 }
 
@@ -3638,8 +3638,8 @@ test_install_writes_the_version_stamp_without_opening_what_is_there() {
     assert_eq "" "$(ls -A "$stamp")" "nothing is put inside the directory" || return 1
     assert_output_contains "$out" "Kept $(_bre_literal "$stamp"): a directory, so it was not replaced" \
         "the kept directory is named" || return 1
-    printf '%s\n' "$out" | sed -n '/Installation complete/,$p' | grep -q "^ *$(_bre_literal "$stamp")$" \
-        || { echo "  FAIL: the kept directory is not listed at the end"; return 1; }
+    printf '%s\n' "$out" | sed -n '/Left in place/,$p' | grep -q "^ *$(_bre_literal "$stamp")$" \
+        || { echo "  FAIL: the kept directory is not listed under the kept paths"; return 1; }
 }
 
 test_uninstall_removes_leftover_cs_tui_exe() {
