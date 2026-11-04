@@ -1702,7 +1702,7 @@ _record_placed() {  # sha256, path-under-home
 # again at the end. A file is cs's as _cs_owns_file decides; a symlink that
 # points nowhere holds nothing cs wrote, so it is kept too.
 _deploy() {  # repo-path, dest
-    local digest
+    local digest record
     digest=$(_cs_sha256_file "$PAYLOAD_DIR/$1") || error "Could not compute the sha256 of $1 (needs sha256sum or shasum)"
     if { [ -e "$2" ] || [ -L "$2" ]; } && ! _cs_owns_file "$2" "$digest"; then
         warn "Kept $2: cs did not write it, so it was not replaced"
@@ -1712,11 +1712,15 @@ _deploy() {  # repo-path, dest
     # A deployed copy that already holds this content is left in place, its
     # mode set again in case it drifted. A copy whose mode cannot be set (not
     # this user's file) is replaced as before. The record gains its line now
-    # only when it lacks one, so a run that stops later still names the file.
+    # only when it lacks one, so a run that stops later still names the file;
+    # a record that is not a regular file (a FIFO would hold grep forever) is
+    # rewritten the way _record_placed rewrites it.
     if [ -f "$2" ] && [ ! -L "$2" ] && [ "$(_cs_sha256_file "$2")" = "$digest" ] \
         && chmod "$(_payload_mode "$1")" "$2" 2>/dev/null; then
-        grep -qxF "$digest  ${2#"$HOME"/}" "$(_cs_install_record)" 2>/dev/null \
-            || _record_placed "$digest" "${2#"$HOME"/}"
+        record=$(_cs_install_record)
+        if ! { [ -f "$record" ] && grep -qxF "$digest  ${2#"$HOME"/}" "$record" 2>/dev/null; }; then
+            _record_placed "$digest" "${2#"$HOME"/}"
+        fi
         CS_RECORD_LINES+=("$digest  ${2#"$HOME"/}")
         return 0
     fi

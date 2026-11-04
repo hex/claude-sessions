@@ -63,7 +63,7 @@ Preserved files have these rules:
 - Updates authenticate `SHA256SUMS` with `SHA256SUMS.sig` using `ssh-keygen -Y verify`, then check the installer's SHA-256 digest.
 - Web installs apply the same check to the picker binary. Missing verification tools, assets, or manifest entries and failed checks refuse the download.
 - A web install fetches the release's source archive in one download, and falls back to one download per file when the archive cannot be had. Either way every payload file is checked against the SHA-256 digest the verified installer carries before anything is put in place; a file that is missing from the archive or does not match stops the install.
-- An install leaves a deployed file that already holds the release's content in place and only sets its mode again, so a repeat install over the same release writes nothing but the record.
+- An install leaves a hook, command, skill or mod file under `~/.claude` that already holds the release's content in place and only sets its mode again; the binaries under `~/.local/bin`, the completions and the version and install records are written on every install.
 - The verifier requires SSH signature support, the `release` identity, and the release's own `cs-release-vX.Y.Z` namespace, so a signature made for one tag never verifies another. `cs -update` refuses a release older than the installed cs. Embedded allowed signers and revoked public keys define which keys it trusts.
 - An update refuses an installer that drops any revoked key from the installed list. Minisign is not used.
 - `cs -update --check` prints the full pending release notes.

@@ -3109,6 +3109,22 @@ test_reinstall_leaves_an_unchanged_file_in_place() {
         || { echo "  FAIL: the install record lacks the unchanged hook"; return 1; }
 }
 
+# The unchanged-file path reads the install record to see whether it already
+# names the file. A record that is a FIFO with no writer would hold that read
+# forever; the install must finish, and leave a regular record behind.
+test_reinstall_finishes_when_the_record_is_a_fifo() {
+    local fake_home="$TEST_TMPDIR/reinstall-fifo" record rc=0
+    mkdir -p "$fake_home"
+    HOME="$fake_home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || { echo "  FAIL: first install failed"; return 1; }
+    record="$fake_home/.claude/hooks/cs/.installed"
+    rm -f "$record" && mkfifo "$record"
+    _run_bounded 60 env HOME="$fake_home" bash "$INSTALL_SH" < /dev/null > "$TEST_TMPDIR/reinstall-fifo.out" 2>&1 || rc=$?
+    assert_eq "0" "$rc" "the second install finishes" || { tail -5 "$TEST_TMPDIR/reinstall-fifo.out"; return 1; }
+    [ -f "$record" ] || { echo "  FAIL: the record is not a regular file afterwards"; return 1; }
+    grep -qF "  .claude/hooks/cs/session-start.sh" "$record" \
+        || { echo "  FAIL: the record lacks the unchanged hook"; return 1; }
+}
+
 # The built install.sh carries, for every file a web install downloads, the
 # sha256 of that file in the checkout it was built from, as
 # "<sha256>  <repo path>" entries of CS_PAYLOAD_SHA256.
@@ -3830,6 +3846,7 @@ run_test test_web_install_fetches_the_payload_as_one_archive
 run_test test_web_install_fetches_each_file_when_the_archive_fails
 run_test test_web_install_refuses_an_archive_missing_a_payload_file
 run_test test_reinstall_leaves_an_unchanged_file_in_place
+run_test test_reinstall_finishes_when_the_record_is_a_fifo
 run_test test_build_embeds_the_sha256_of_every_payload_file
 run_test test_release_workflow_pins_the_installers_default_ref
 run_test test_install_keeps_user_files_that_share_a_cs_name
