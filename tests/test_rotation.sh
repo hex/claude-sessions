@@ -588,11 +588,11 @@ run_test test_rotate_skill_reads_parent_from_state_not_the_launch_env
 # Cycle 3: three-way launch prompt
 # ============================================================================
 
-_seed_handoff() {  # session_dir, basename, status
+_seed_handoff() {  # session_dir, basename, status, [parent, default $UUID_A]
     mkdir -p "$1/.cs/handoffs"
     cat > "$1/.cs/handoffs/$2" << EOF
 ---
-parent: $UUID_A
+parent: ${4:-$UUID_A}
 created: 2026-07-16T10:00:00Z
 purpose: test rotation
 status: $3
@@ -877,19 +877,20 @@ test_crit_context_follows_the_status_line_knob() {
     assert_eq "1" "$(grep -cxF 'Continue previous conversation? [y/N] ' <<< "$output")" "a word falls back to the default 60" || return 1
 }
 
-# With a handoff pending at crit the fresh conversation the default starts is
-# the one that picks up the handoff: the line above the menu says so, and the
-# default moves from the resume row to the r row. Enter, like a key the menu
-# does not offer, takes the r arm: it arms the marker with that handoff and
-# starts fresh. n still starts fresh with the handoff waiting for later.
-test_handoff_menu_at_crit_context_defaults_to_the_handoff() {
+# With a handoff pending at crit, the fresh conversation the default starts is
+# the one that picks up the handoff when the bound conversation wrote it, its
+# parent: the line above the menu says so, and the default moves from the
+# resume row to the r row. Enter, like a key the menu does not offer, takes
+# the r arm: it arms the marker with that handoff and starts fresh. n still
+# starts fresh with the handoff waiting for later.
+test_handoff_menu_at_crit_context_defaults_to_the_bound_conversations_handoff() {
     _rot_session "rot-crit-menu"
     local dir="$CS_SESSIONS_ROOT/rot-crit-menu" output rows warn_at menu_at answer old new
-    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
     for answer in "" x; do
         _stamp_context rot-crit-menu 70
         rm -f "$dir/.cs/local/pending-handoff"
         old=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+        _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed" "$old"
         output=$(_launch_at_default_thresholds rot-crit-menu "$answer") || true
         assert_eq "$(_crit_warning 70 'a fresh conversation from the handoff')" "$(grep -F 'last context reading' <<< "$output")" \
             "the menu carries the warning (answer '$answer')" || return 1
@@ -914,6 +915,7 @@ test_handoff_menu_at_crit_context_defaults_to_the_handoff() {
     done
     _stamp_context rot-crit-menu 70
     rm -f "$dir/.cs/local/pending-handoff"
+    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed" "$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")"
     output=$(_launch_at_default_thresholds rot-crit-menu n) || true
     new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
     assert_output_contains "$output" "--session-id $new" "n at 70% starts a fresh conversation" || return 1
@@ -921,6 +923,60 @@ test_handoff_menu_at_crit_context_defaults_to_the_handoff() {
         "n at 70% declines the resume rather than rotating from the handoff" || return 1
     assert_not_exists "$dir/.cs/local/pending-handoff" "n at 70% arms no marker" || return 1
     assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "^status: unconsumed$" "n at 70% leaves the handoff pending" || return 1
+}
+
+# A handoff whose parent is not the bound conversation waits at crit: one
+# from another checkout, or an older one an earlier conversation here wrote.
+# Enter, or any key the menu does not offer, starts fresh and leaves it
+# pending, since SessionStart marks an armed handoff consumed and a stray key
+# must not take one the user never chose. The line above the menu gives the
+# plain default and the default mark sits on the n row. A typed r still takes
+# the handoff.
+test_handoff_menu_at_crit_context_leaves_another_conversations_handoff_waiting() {
+    _rot_session "rot-crit-other"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-other" output rows origin answer answers old new
+    for origin in foreign local; do
+        if [ "$origin" = local ]; then
+            # An earlier conversation in this checkout wrote it: its start is
+            # in session.log, but the session has moved on to another one.
+            printf '2026-07-16 10:00:00 - Session started (source: startup, ID: %s)\n' "$UUID_A" >> "$dir/.cs/local/session.log"
+        fi
+        for answer in "" x " " q 1; do
+            _stamp_context rot-crit-other 70
+            rm -f "$dir/.cs/local/pending-handoff"
+            _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+            old=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+            output=$(_launch_at_default_thresholds rot-crit-other "$answer") || true
+            if [ "$origin" = foreign ]; then
+                assert_output_contains "$output" "(from another checkout)" "the $origin handoff is labelled (answer '$answer')" || return 1
+            else
+                assert_output_not_contains "$output" "(from another checkout)" "the $origin handoff carries no label (answer '$answer')" || return 1
+            fi
+            assert_eq "$(_crit_warning 70)" "$(grep -F 'last context reading' <<< "$output")" \
+                "the $origin handoff leaves the plain default (answer '$answer')" || return 1
+            rows=$(printf '%s\n' "$output" | grep -E '^    [yrnd]  ')
+            assert_eq "    y  resume          continue the previous conversation
+    r  from handoff    fresh conversation that picks up the handoff
+    n  fresh           fresh conversation; the handoff waits for later · default
+    d  discard         retire the handoff, then resume" "$rows" "the default sits on the n row ($origin, answer '$answer')" || return 1
+            assert_not_exists "$dir/.cs/local/pending-handoff" "answer '$answer' arms no marker for the $origin handoff" || return 1
+            assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "^status: unconsumed$" \
+                "answer '$answer' leaves the $origin handoff pending" || return 1
+            assert_eq "declined-resume" "$(jq -r 'select(.event == "rotated") | .reason' "$dir/.cs/timeline.jsonl" | tail -1)" \
+                "answer '$answer' declines the resume rather than rotating from the $origin handoff" || return 1
+            new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+            [ "$new" != "$old" ] || { echo "  FAIL: answer '$answer' at 70% must rebind to a fresh conversation ($origin)"; return 1; }
+            assert_output_contains "$output" "--session-id $new" "answer '$answer' at 70% starts a fresh conversation ($origin)" || return 1
+            assert_output_not_contains "$output" "--resume" "answer '$answer' at 70% must not resume ($origin)" || return 1
+        done
+    done
+    _stamp_context rot-crit-other 70
+    output=$(_launch_at_default_thresholds rot-crit-other r) || true
+    assert_eq "2026-07-16-test.md" "$(tr -d '[:space:]' < "$dir/.cs/local/pending-handoff" 2>/dev/null)" \
+        "a typed r arms the handoff another conversation wrote" || return 1
+    assert_eq "handoff 2026-07-16-test.md" \
+        "$(jq -r 'select(.event == "rotated") | "\(.reason) \(.handoff)"' "$dir/.cs/timeline.jsonl" | tail -1)" \
+        "a typed r rotates from it" || return 1
 }
 
 # A spawned launch is unattended and resumes at any reading: the fresh default
@@ -1476,7 +1532,8 @@ run_test test_y_at_crit_context_resumes
 run_test test_enter_at_crit_context_disarms_an_orphaned_marker
 run_test test_crit_context_starts_at_the_status_lines_default_threshold
 run_test test_crit_context_follows_the_status_line_knob
-run_test test_handoff_menu_at_crit_context_defaults_to_the_handoff
+run_test test_handoff_menu_at_crit_context_defaults_to_the_bound_conversations_handoff
+run_test test_handoff_menu_at_crit_context_leaves_another_conversations_handoff_waiting
 run_test test_spawned_launch_at_crit_context_still_resumes
 run_test test_reading_is_not_shown_for_a_conversation_without_a_transcript
 # r is only offered alongside a pending handoff. Pressed without one it falls

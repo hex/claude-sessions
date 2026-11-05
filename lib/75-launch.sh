@@ -16,6 +16,20 @@ _handoff_is_unconsumed() {  # handoff_file
     ' "$1" 2>/dev/null
 }
 
+# The parent: UUID in a handoff's YAML frontmatter, the conversation that wrote
+# it. Prints nothing when the frontmatter names none.
+_handoff_parent() {  # handoff_file
+    awk '
+        NR==1 { if ($0 != "---") exit; next }
+        $0 == "---" { exit }
+        /^parent:[[:space:]]*/ {
+            sub(/^parent:[[:space:]]*/, "")
+            gsub(/[[:space:]\r]+$/, "")
+            print; exit
+        }
+    ' "$1" 2>/dev/null
+}
+
 # True when the handoff's parent: UUID appears in this checkout's session log,
 # meaning this machine ran the conversation that wrote it. The log is
 # machine-local by design, so a co-worker's handoff — and this user's own from a
@@ -26,15 +40,7 @@ _handoff_is_local() {  # handoff_file, session_dir
     local log parent
     log="$(cs_private_dir "$2/.cs")/session.log" || return 1
     [ -f "$log" ] || return 1
-    parent=$(awk '
-        NR==1 { if ($0 != "---") exit; next }
-        $0 == "---" { exit }
-        /^parent:[[:space:]]*/ {
-            sub(/^parent:[[:space:]]*/, "")
-            gsub(/[[:space:]\r]+$/, "")
-            print; exit
-        }
-    ' "$1" 2>/dev/null)
+    parent=$(_handoff_parent "$1")
     [ -n "$parent" ] || return 1
     # Anchored to the line session-start.sh writes, not a bare substring: this
     # file can hold the `BASH:` command lines the retired bash-logger hook
@@ -974,19 +980,26 @@ EOF
         else
             # From the status line's crit threshold the ask defaults to a
             # fresh conversation: one line above it says so, and the default
-            # mark moves off resume. With a handoff pending that conversation
-            # is the one that picks it up, r; without one it is n. The status
-            # line stamps the figure per session, not per conversation, so the
-            # line calls it the last reading in this session and claims no more.
-            local _resume_default=' · default' _handoff_default='' _ask_keys='[Y/n]'
+            # mark moves off resume. That conversation picks up a pending
+            # handoff, r, only when the bound conversation wrote it, its
+            # parent: otherwise it is n and the handoff waits. One from another
+            # checkout, or an older one an earlier conversation here wrote, is
+            # the user's to choose: armed by a key they did not mean for it,
+            # SessionStart would mark it consumed. The status line stamps the
+            # figure per session, not per conversation, so the line calls it
+            # the last reading in this session and claims no more.
+            local _resume_default=' · default' _handoff_default='' _fresh_default='' _ask_keys='[Y/n]'
             local _crit_default=n _crit_start='a fresh conversation'
             if [ "$ctx_heat" = crit ]; then
                 _resume_default=''
                 _ask_keys="[y/${BOLD}N${NC}]"
-                if [ -n "$pending_handoff" ]; then
+                if [ -n "$pending_handoff" ] \
+                    && [ "$(_handoff_parent "$pending_handoff")" = "$claude_session_id" ]; then
                     _crit_default=r
                     _crit_start='a fresh conversation from the handoff'
                     _handoff_default=' · default'
+                else
+                    _fresh_default=' · default'
                 fi
                 printf "${BOLD}${CRIT}%s${NC}\n" "${ICON_CTX} The last context reading in this session was ${ctx_pct}%, so ${_crit_start} is the default. Press y to resume."
             fi
@@ -1007,7 +1020,7 @@ EOF
                 if [ -n "$claude_session_id" ]; then
                     _resume_menu_row y "$GREEN" 'resume' "continue the previous conversation$_resume_default"
                     _resume_menu_row r "$GOLD" 'from handoff' "fresh conversation that picks up the handoff$_handoff_default"
-                    _resume_menu_row n "$COMMENT" 'fresh' 'fresh conversation; the handoff waits for later'
+                    _resume_menu_row n "$COMMENT" 'fresh' "fresh conversation; the handoff waits for later$_fresh_default"
                     _resume_menu_row d "$ORANGE" 'discard' 'retire the handoff, then resume'
                 else
                     _resume_menu_row r "$GOLD" 'from handoff' 'fresh conversation that picks up the handoff'
@@ -1022,8 +1035,8 @@ EOF
             # Single keypress, no Enter needed (mirrors the collision menu).
             # ESC or EOF (piped close) cancels the launch; Enter takes the
             # default: resume via the case's *) arm below, or at crit a fresh
-            # conversation, via the r arm with a handoff pending and the n arm
-            # without one.
+            # conversation, via the r arm for a handoff the bound conversation
+            # wrote and the n arm otherwise.
             IFS= read -rsn1 response || { echo; exit 130; }
             echo
             case "$response" in $'\e') exit 130 ;; esac
