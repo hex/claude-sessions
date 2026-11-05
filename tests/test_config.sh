@@ -828,6 +828,26 @@ test_build_splices_the_fragment_into_the_status_line() {
         "hooks/cs-shared.sh carries both shared fragments" || return 1
 }
 
+# The status line, its subagent rows and the Stop hook decide the context
+# thresholds on paths that run every repaint or every turn, so each keeps its
+# default as a literal where cs -config, the panel and the launch's resume
+# prompt read the record. A literal that drifts from the record applies one
+# default while the panel names another.
+test_render_path_context_defaults_are_the_records() {
+    local porcelain spec key file literal want
+    porcelain=$("$CS_BIN" -config list --porcelain) || { echo "  FAIL: cs -config list --porcelain failed"; return 1; }
+    for spec in "CS_STATUSLINE_CTX_WARN bin/cs-statusline" "CS_STATUSLINE_CTX_CRIT bin/cs-statusline" \
+        "CS_STATUSLINE_CTX_WARN bin/cs-subagent-statusline" "CS_STATUSLINE_CTX_CRIT bin/cs-subagent-statusline" \
+        "CS_ROTATE_NUDGE_CTX hooks/stop-notices.sh" "CS_CTX_WARN_CTX hooks/stop-notices.sh"; do
+        key=${spec%% *}
+        file=${spec#* }
+        literal=$(sed -n "s/.*_num_or \"\\\${$key:-}\" \\([0-9][0-9]*\\).*/\\1/p" "$REPO/$file")
+        want=$(awk -F'\t' -v k="$key" '$1 == k { print $6 }' <<< "$porcelain")
+        [ -n "$want" ] || { echo "  FAIL: the record names no default for $key"; return 1; }
+        assert_eq "$want" "$literal" "$file reads $key with the record's default" || return 1
+    done
+}
+
 echo ""
 echo "cs -config tests"
 echo "================"
@@ -864,5 +884,6 @@ run_test test_every_reader_loads_the_settings_before_its_first_read
 run_test test_doctor_names_skipped_lines_and_hidden_values
 run_test test_uninstall_keeps_the_settings_file
 run_test test_build_splices_the_fragment_into_the_status_line
+run_test test_render_path_context_defaults_are_the_records
 
 report_results

@@ -112,10 +112,15 @@ _resume_context_pct() {  # session_dir
 # Where a context reading sits against the status line's own thresholds,
 # CS_STATUSLINE_CTX_WARN and CS_STATUSLINE_CTX_CRIT: crit, warn, or none, and
 # none for no reading. Each knob parses as the bar's _num_or does, one to three
-# digits or else the default, so a crit of 101 never fires here either. KEEP
-# IN SYNC with the defaults in _seg_ctx (bin/cs-statusline).
+# digits or else the default, so a crit of 101 never fires here either. The
+# defaults are the config record's; test_config.sh holds the bar's own
+# literals to the same record.
 _resume_context_heat() {  # pct
-    local warn=40 crit=60
+    local warn crit
+    _config_fields CS_STATUSLINE_CTX_WARN
+    warn=$_CF_DEFAULT
+    _config_fields CS_STATUSLINE_CTX_CRIT
+    crit=$_CF_DEFAULT
     case "${CS_STATUSLINE_CTX_WARN:-}" in ''|*[!0-9]*|????*) ;; *) warn="$CS_STATUSLINE_CTX_WARN" ;; esac
     case "${CS_STATUSLINE_CTX_CRIT:-}" in ''|*[!0-9]*|????*) ;; *) crit="$CS_STATUSLINE_CTX_CRIT" ;; esac
     if [ -z "$1" ]; then
