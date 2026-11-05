@@ -96,6 +96,27 @@ test('a fence in a list item is indented from the item, not the margin', () => {
   expect(fencesOf('> ```mermaid\n> graph TD\n> A --> B\n> ```')).toEqual([])
 })
 
+// Claude Code reads a reply with marked, which keeps a line left of a list item's content
+// column inside the item (a lazy line) unless it starts a block of its own, a blank line came
+// before it inside the item, or the line before it was a fence mark, heading, thematic break or
+// indented code. A lazy line in an open fence is part of its body.
+test('a lazy line left of a list item keeps the item and the fence open in it', () => {
+  expect(fencesOf('1. Flow:\n   ```mermaid\n   graph TD\nA --> B\n   ```\n\n2. Next:\n\n```mermaid\ngraph LR\nC --> D\n```')).toEqual(['graph TD\nA --> B', 'graph LR\nC --> D'])
+  expect(fencesOf('- a\nprose\n    ```mermaid\n    graph TD\n    A --> B\n    ```')).toEqual(['graph TD\n    A --> B'])
+})
+
+// CommonMark 4.5: a fence still open when its list item ends is a code block up to there. The
+// line that ends the item is read afresh outside it; a bare ``` there opens a block of its own.
+test('a fence open in a list item ends with the item, and the line that ends it is read outside', () => {
+  const text = '- a\n  ```mermaid\n  graph TD\n  A --> B\n```\n\nlater:\n\n```mermaid\ngraph LR\nC --> D\n```'
+  expect(fencesOf(text)).toEqual(['graph TD\n  A --> B'])
+  expect(splitReply(text)).toEqual([
+    { kind: 'text', body: '- a' },
+    { kind: 'mermaid', body: 'graph TD\n  A --> B' },
+    { kind: 'text', body: '\n```\n\nlater:\n\n```mermaid\ngraph LR\nC --> D\n```' },
+  ])
+})
+
 test('a reply whose only fence is indented four spaces is left to the engine', async ($, on) => {
   on('config.list', () => ({ value: [] }))
   mock.env(on, {})
