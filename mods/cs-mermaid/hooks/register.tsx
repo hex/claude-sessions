@@ -14,17 +14,28 @@ export const OPTION = 'drawDiagrams'
 // A mermaid fence opens and closes on its own line with exactly three backticks. A line of four
 // or more backticks, or of three tildes, opens an outer block that quotes what it holds, closed by
 // a line of the same mark at least as long; a fence inside one is quoted source, not a chart.
-// Any of these marks may be indented up to three columns (CommonMark); at four, or after a tab,
-// which reaches the next multiple of four, the line is an indented code block, not a fence.
+// Any of these marks may be indented up to three columns past the margin, or inside a list item
+// past the item's content column (CommonMark); at four, a tab reaching the next multiple of four,
+// the line is an indented code block, not a fence. A line left of an open item's content column
+// closes the item, and with it a fence or block open inside it.
 type Fence = { start: number; end: number; body: string }
 export function scanFences(text: string): Fence[] {
   const fences: Fence[] = []
-  let outer: { mark: string; length: number } | undefined
-  let open: { start: number; bodyStart: number } | undefined
+  // The content column of each open list item, outermost first; `depth` is how many were open.
+  const items: number[] = []
+  let outer: { mark: string; length: number; depth: number } | undefined
+  let open: { start: number; bodyStart: number; depth: number } | undefined
   let at = 0
   for (const line of text.split('\n')) {
     const next = at + line.length + 1
-    const trimmed = fenceLine(line)
+    const { column, rest } = indentation(line, 0)
+    if (rest !== '') {
+      while (items.length > 0 && column < items[items.length - 1]!) items.pop()
+      if (open && open.depth > items.length) open = undefined
+      if (outer && outer.depth > items.length) outer = undefined
+    }
+    const margin = items.length > 0 ? items[items.length - 1]! : 0
+    const trimmed = column - margin < 4 ? rest : undefined
     const run = trimmed === undefined ? null : /^(`{3,}|~{3,})/.exec(trimmed)
     if (run) {
       const mark = run[1]!
@@ -37,27 +48,42 @@ export function scanFences(text: string): Fence[] {
         }
       } else if (mark === '```' && trimmed.slice(3).trim() === 'mermaid') {
         // The newline before the fence belongs to it, not to the prose above.
-        open = { start: Math.max(0, at - 1), bodyStart: next }
+        open = { start: Math.max(0, at - 1), bodyStart: next, depth: items.length }
       } else if (mark.length > 3 || mark[0] === '~') {
-        outer = { mark: mark[0]!, length: mark.length }
+        outer = { mark: mark[0]!, length: mark.length, depth: items.length }
       }
+    } else if (trimmed !== undefined && !open && !outer) {
+      const content = itemContent(trimmed, column)
+      if (content !== undefined) items.push(content)
     }
     at = next
   }
   return fences
 }
 
-// The line without its indentation and trailing blanks, or nothing when the indentation reaches
-// four columns.
-function fenceLine(line: string): string | undefined {
-  let columns = 0
+// The column a line's text starts at, counting on from `column` (a tab reaches the next multiple
+// of four), and that text without its trailing blanks.
+function indentation(line: string, column: number): { column: number; rest: string } {
   let i = 0
-  for (; i < line.length && columns < 4; i++) {
-    if (line[i] === ' ') columns += 1
-    else if (line[i] === '\t') columns += 4 - (columns % 4)
+  for (; i < line.length; i++) {
+    if (line[i] === ' ') column += 1
+    else if (line[i] === '\t') column += 4 - (column % 4)
     else break
   }
-  return columns >= 4 ? undefined : line.slice(i).trimEnd()
+  return { column, rest: line.slice(i).trimEnd() }
+}
+
+// The content column of a list item that opens with `rest` at `column`: a bullet (`-`, `+`, `*`)
+// or 1-9 digits and `.` or `)`, then blanks. The content starts past one to four columns of
+// blanks, or one column past the marker when more or nothing follow it (CommonMark). Three or
+// more `*`, `-` or `_` alone on the line are a thematic break, not a bullet.
+function itemContent(rest: string, column: number): number | undefined {
+  if (/^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/.test(rest)) return undefined
+  const marker = /^(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$)/.exec(rest)
+  if (!marker) return undefined
+  const after = column + marker[0].length
+  const content = indentation(rest.slice(marker[0].length), after)
+  return content.rest === '' || content.column - after > 4 ? after + 1 : content.column
 }
 
 export function fencesOf(text: string): string[] {

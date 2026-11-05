@@ -49,6 +49,9 @@ test('a fence in a list item is indented from the item, not the margin', () => {
   // prose at the margin has closed the list.
   expect(fencesOf(chart('    '))).toEqual([])
   expect(fencesOf(`- a\n\nprose\n${chart('    ')}`)).toEqual([])
+  // `* * *` and `- - -` are thematic breaks, not bullets.
+  expect(fencesOf(`* * *\n${chart('    ')}`)).toEqual([])
+  expect(fencesOf(`- - -\n${chart('    ')}`)).toEqual([])
   // A body line back at the margin closes the item and the fence open in it: no chart.
   expect(fencesOf('1. flow:\n   ```mermaid\ngraph TD\nA --> B\n   ```')).toEqual([])
   // A blockquote's `>` is not read: a quoted fence stays source.
