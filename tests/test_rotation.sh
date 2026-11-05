@@ -935,7 +935,7 @@ test_handoff_menu_at_crit_context_defaults_to_the_bound_conversations_handoff() 
 # the handoff.
 test_handoff_menu_at_crit_context_leaves_another_conversations_handoff_waiting() {
     _rot_session "rot-crit-other"
-    local dir="$CS_SESSIONS_ROOT/rot-crit-other" output rows origin answer answers old new
+    local dir="$CS_SESSIONS_ROOT/rot-crit-other" output rows origin answer old new
     for origin in foreign local; do
         if [ "$origin" = local ]; then
             # An earlier conversation in this checkout wrote it: its start is

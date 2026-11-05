@@ -660,7 +660,7 @@ test_usage_reads_the_users_claude_config_dir_but_not_an_inherited_sessions() {
     _seed_usage_transcript "$HOME/.claude/projects/$enc" cccc1111-2222-4333-8444-555566667777
     output=$( (unset CS_TRANSCRIPTS_DIR CLAUDE_SECURESTORAGE_CONFIG_DIR; CLAUDE_CONFIG_DIR="$user_cfg" "$CS_BIN" -usage cfg_sess) 2>&1) || true
     assert_output_contains "$output" "aaaa1111" "the user's CLAUDE_CONFIG_DIR is read" || return 1
-    assert_output_not_contains "$output" "cccc1111" "~/.claude is not, beside a user's CLAUDE_CONFIG_DIR" || return 1
+    assert_output_not_contains "$output" "cccc1111" "the default config dir is not, beside a user's CLAUDE_CONFIG_DIR" || return 1
     output=$( (unset CS_TRANSCRIPTS_DIR; CLAUDE_CONFIG_DIR="$inherited" CLAUDE_SECURESTORAGE_CONFIG_DIR="$user_cfg" "$CS_BIN" -usage cfg_sess) 2>&1) || true
     assert_output_contains "$output" "aaaa1111" "under an inherited session config the shell's own config dir is read" || return 1
     assert_output_not_contains "$output" "bbbb1111" "the other session's config dir is not" || return 1
