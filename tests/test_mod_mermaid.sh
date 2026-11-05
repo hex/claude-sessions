@@ -91,6 +91,7 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     fi
     assert_output_contains "$out" 'hooks: ui.render{component=AssistantMessage}' "the mod only draws replies" || return 1
     assert_output_contains "$out" 'calls: $.config.list, $.env.get, $.ui.resolve' "the mod reads the theme row and the terminal cs measured, and draws; no files, writes, processes or network" || return 1
+    assert_eq "env reads: CS_TERM_BG_RGB, CS_TERM_THEME" "$(sed -n 's/^.* env reads: /env reads: /p' <<< "$out")" "the mod reads cs's two terminal variables and no other" || return 1
 }
 
 run_test test_mod_manifest_names_the_plugin_its_module_and_the_config_field
