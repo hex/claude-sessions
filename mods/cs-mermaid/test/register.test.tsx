@@ -241,6 +241,40 @@ test('a reply under the auto theme on a dark terminal draws the dark palette', a
   await reply.unmount()
 })
 
+// WCAG 2 relative luminance and contrast ratio, from the formula in the spec.
+function luminance(hex: string): number {
+  const channel = (at: number) => {
+    const c = parseInt(hex.slice(at, at + 2), 16) / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
+}
+function contrast(ink: string, background: string): number {
+  const [lighter, darker] = [luminance(ink), luminance(background)].sort((p, q) => q - p) as [number, number]
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+// Lines and edge labels are drawn on the terminal's own background; a node's label on its fill.
+// Every such pair meets WCAG AA for text (4.5:1) on the backgrounds a terminal has: white and
+// a cream (252;247;229) under the light palette, black and two dark greys under the dark one.
+test('every ink in each palette reads at 4.5:1 on what it is drawn over', () => {
+  expect(contrast('#FFFFFF', '#000000')).toBe(21)
+  const terminals = { light: ['#FFFFFF', '#FCF7E5'], dark: ['#000000', '#1C1C1E', '#282C34'] }
+  const failing: string[] = []
+  for (const [name, backgrounds] of Object.entries(terminals)) {
+    const palette = paletteFor(name)
+    for (const background of backgrounds) for (const ink of ['line', 'good', 'bad'] as const) {
+      const ratio = contrast(palette[ink], background)
+      if (ratio < 4.5) failing.push(`${name} ${ink} ${palette[ink]} on ${background}: ${ratio.toFixed(2)}`)
+    }
+    for (const fill of ['fill', 'decision', 'start', 'end'] as const) {
+      const ratio = contrast(palette.text, palette[fill])
+      if (ratio < 4.5) failing.push(`${name} text ${palette.text} on ${fill} ${palette[fill]}: ${ratio.toFixed(2)}`)
+    }
+  }
+  expect(failing).toEqual([])
+})
+
 test('blockRows pads full-width rows with the label centred, measured in cells', () => {
   expect(blockRows('ab', 8, 3)).toEqual(['        ', '   ab   ', '        '])
   expect(blockRows('abc', 8, 3)).toEqual(['        ', '  abc   ', '        '])
