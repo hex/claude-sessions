@@ -28,6 +28,7 @@ test('an emoji a terminal draws two cells wide measures two', () => {
 
 test('CJK stays two cells, a combining mark none, plain text one each', () => {
   expect(cellWidth('中')).toBe(2)
+  expect(cellWidth('中\uFE0E')).toBe(2)
   expect(cellWidth('界界')).toBe(4)
   expect(cellWidth('é')).toBe(1)
   expect(cellWidth('́')).toBe(0)

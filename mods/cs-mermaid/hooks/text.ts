@@ -11,8 +11,14 @@ export function graphemes(text: string): string[] {
   return Array.from(new Segmenter('en', { granularity: 'grapheme' }).segment(text), piece => piece.segment)
 }
 
+// Emoji a terminal draws two cells wide: one presented as emoji by default, an emoji base
+// that U+FE0F asks to present as emoji (❤️, ©️, a keycap), or a regional-indicator pair
+// (a flag). U+FE0E asks an emoji for text presentation: one cell.
+const EMOJI_WIDE = /^(?:\p{Emoji_Presentation}|\p{Emoji}️|\p{Regional_Indicator}\p{Regional_Indicator})/u
+
 function cellsOf(grapheme: string): number {
   if (ZERO.test(grapheme)) return 0
+  if (EMOJI_WIDE.test(grapheme)) return grapheme.includes('︎') ? 1 : 2
   const base = grapheme.replace(/[\p{M}​-‏️]/gu, '')
   return WIDE.test(base) ? 2 : 1
 }
