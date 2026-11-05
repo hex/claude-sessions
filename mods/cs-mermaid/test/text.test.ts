@@ -54,6 +54,21 @@ test('CJK and the other East Asian wide scripts are two cells, a combining mark 
   expect(cellWidth('ok ✅')).toBe(5)
 })
 
+// Rules the census also holds to Bun, pinned here for a run where the census skips (it needs the
+// bun that claude embeds).
+test('a shown format character, a bare ZWJ and a regional indicator with a selector measure as the engine does', () => {
+  // Most format characters take no cell; these few the engine draws one cell wide.
+  expect(cellWidth('\u{890}')).toBe(1) // ARABIC POUND MARK ABOVE
+  expect(cellWidth('\u{FFF9}')).toBe(1) // INTERLINEAR ANNOTATION ANCHOR
+  expect(cellWidth('\u{600}')).toBe(0) // ARABIC NUMBER SIGN
+  // After © a bare ZWJ joins nothing; after a pictograph it makes an emoji sequence.
+  expect(cellWidth('©\u{200D}')).toBe(1)
+  expect(cellWidth('❤\u{200D}')).toBe(2)
+  // A regional indicator is Emoji_Presentation but not wide: two cells with either selector.
+  expect(cellWidth('\u{1F1EF}\u{FE0E}')).toBe(2)
+  expect(cellWidth('\u{1F1EF}\u{FE0F}')).toBe(2)
+})
+
 // Bun's measure gives no cell to most vowel signs of the Indic scripts, spacing marks (Mc) drawn
 // beside the consonant they follow, so a Hindi or Bengali label is narrower than its code points.
 test('an Indic word measures the cells the engine measures it in', () => {

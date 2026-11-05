@@ -97,6 +97,27 @@ test('a fence in a list item is indented from the item, not the margin', () => {
   expect(fencesOf('> ```mermaid\n> graph TD\n> A --> B\n> ```')).toEqual([])
 })
 
+// The rest of the list item rules the scanner keeps, each beside its counterpart.
+test('a list item takes its content column from its marker and the blanks after it', () => {
+  const chart = (indent: string) => ['```mermaid', 'graph TD', 'A --> B', '```'].map(line => indent + line).join('\n')
+  // Five blanks after the marker make the text indented code, its content column one past the
+  // marker; with four, the content starts at the text.
+  expect(fencesOf('-     code\n      ```mermaid\n      graph TD\n      A --> B\n      ```')).toEqual([])
+  expect(fencesOf(`-    code\n${chart('     ')}`)).toEqual(['graph TD\n     A --> B'])
+  // A marker with nothing after it puts the content one column past the marker.
+  expect(fencesOf('-\n     ```mermaid\n     graph TD\n     A --> B\n     ```')).toEqual(['graph TD\n     A --> B'])
+  // `)` ends an ordered marker as `.` does.
+  expect(fencesOf(`1) flow:\n${chart('    ')}`)).toEqual(['graph TD\n    A --> B'])
+  // A blank line inside an item does not end it.
+  expect(fencesOf('1. one\n\n    ```mermaid\n    graph TD\n    A --> B\n    ```')).toEqual(['graph TD\n    A --> B'])
+  // A marker in indented code starts no item; three columns in, it does.
+  expect(fencesOf('    1. a\n       ```mermaid\n       graph TD\n       A --> B\n       ```')).toEqual([])
+  expect(fencesOf(`   1. a\n${chart('      ')}`)).toEqual(['graph TD\n      A --> B'])
+  // An ordered marker has at most nine digits.
+  expect(fencesOf(`123456789. flow:\n${chart(' '.repeat(11))}`)).toEqual(['graph TD\n           A --> B'])
+  expect(fencesOf(`1234567890. flow:\n${chart(' '.repeat(12))}`)).toEqual([])
+})
+
 // Claude Code reads a reply with marked, which keeps a line left of a list item's content
 // column inside the item (a lazy line) unless it starts a block of its own, a blank line came
 // before it inside the item, or the line before it was a fence mark, heading, thematic break or
