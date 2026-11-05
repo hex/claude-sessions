@@ -21,6 +21,19 @@ test('fencesOf finds mermaid fences and ignores other fences', () => {
   expect(fencesOf('````\nquoted\n````\n```mermaid\ngraph TD\nA --> B\n```')).toEqual(['graph TD\nA --> B'])
 })
 
+// Any other three-backtick opener, with a language or none, quotes everything up to a bare
+// line of at least its backticks: a mermaid fence inside it is its text, not a chart.
+test('a mermaid fence quoted in a three-backtick block stays source; one after a closed block draws', () => {
+  expect(fencesOf('Write it like this:\n```markdown\n```mermaid\ngraph TD\nA --> B\n```\n```')).toEqual([])
+  expect(fencesOf('```\n```mermaid\ngraph TD\nA --> B\n```\n```')).toEqual([])
+  // A closer takes no language: `ts` inside a ts block is its text.
+  expect(fencesOf('```ts\nconst a = 1\n```ts\n```\n```mermaid\ngraph TD\nA --> B\n```')).toEqual(['graph TD\nA --> B'])
+  expect(fencesOf('```bash\nls\n```\n```mermaid\ngraph TD\nA --> B\n```')).toEqual(['graph TD\nA --> B'])
+  expect(fencesOf('```mermaid\ngraph TD\nA --> B\n```\n```mermaid\ngraph LR\nC --> D\n```')).toEqual(['graph TD\nA --> B', 'graph LR\nC --> D'])
+  // Backticks after the opening run make inline code, not a block.
+  expect(fencesOf('```npm test``` runs it\n```mermaid\ngraph TD\nA --> B\n```')).toEqual(['graph TD\nA --> B'])
+})
+
 // CommonMark: a fence may be indented up to three spaces; four, or a tab (which reaches the
 // next multiple of four), makes an indented code block, so the fence stays source.
 test('a fence indented four spaces or a tab is an indented code block, not a chart', () => {
