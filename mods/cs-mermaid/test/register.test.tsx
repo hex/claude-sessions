@@ -445,6 +445,52 @@ test('splitReply keeps prose and fences in order', () => {
   ])
 })
 
+test('splitReply keeps list continuation prose and sibling markers readable', () => {
+  const text = '10. Outer\n    - Flow\n      ```mermaid\n      graph TD\n      A --> B\n      ```\n      Explanation\n    - Sibling\n11. Done'
+  const parts = splitReply(text)
+  expect(parts).toEqual([
+    { kind: 'text', body: '10. Outer\n    - Flow' },
+    { kind: 'mermaid', body: 'graph TD\n      A --> B' },
+    { kind: 'text', body: '\nExplanation\n' },
+    { kind: 'text', body: '- Sibling\n' },
+    { kind: 'text', body: '11. Done' },
+  ])
+  const [before, , continuation, sibling, done] = parts
+  expect(before?.body + '\n      ```mermaid\n      graph TD\n      A --> B\n      ```' + '\n      ' + continuation?.body.slice(1) + '    ' + sibling?.body + done?.body).toEqual(text)
+})
+
+test('splitReply preserves code indentation when a tab crosses a list margin', () => {
+  const text = '- a\n  ```mermaid\n  graph TD\n  A --> B\n  ```\n\n\t  code'
+  const parts = splitReply(text)
+  expect(parts).toEqual([
+    { kind: 'text', body: '- a' },
+    { kind: 'mermaid', body: 'graph TD\n  A --> B' },
+    { kind: 'text', body: '\n\n    code' },
+  ])
+  expect(parts[0]?.body + '\n  ```mermaid\n  graph TD\n  A --> B\n  ```' + parts[2]?.body.replace('    code', '\t  code')).toEqual(text)
+  const spaced = '- a\n  ```mermaid\n  graph TD\n  A --> B\n  ```\n\n \t code'
+  const spacedParts = splitReply(spaced)
+  expect(spacedParts[2]?.body).toEqual('\n\n    code')
+  expect(spacedParts[0]?.body + '\n  ```mermaid\n  graph TD\n  A --> B\n  ```' + spacedParts[2]?.body.replace('    code', ' \t code')).toEqual(spaced)
+})
+
+test('splitReply preserves tabs within an item continuation as marked reads them', () => {
+  const text = '- a\n  ```mermaid\n  graph TD\n  A --> B\n  ```\n\n\t\tcode\tend'
+  const parts = splitReply(text)
+  expect(parts[2]?.body).toEqual('\n\n      code    end')
+  expect(parts[0]?.body + '\n  ```mermaid\n  graph TD\n  A --> B\n  ```' + parts[2]?.body.replace('      code    end', '\t\tcode\tend')).toEqual(text)
+})
+
+test('splitReply keeps an indented code block after an enclosing list ends', () => {
+  const text = '1. a\n     ```mermaid\n     graph TD\n     A --> B\n     ```\n\n     - d\nlazy\n\n     - code'
+  expect(splitReply(text)).toEqual([
+    { kind: 'text', body: '1. a' },
+    { kind: 'mermaid', body: 'graph TD\n     A --> B' },
+    { kind: 'text', body: '\n\n  - d\n' },
+    { kind: 'text', body: 'lazy\n\n     - code' },
+  ])
+})
+
 
 // A design tool outside cs draws a fence by calling Drawing or drawFence itself. A Pane
 // the test draws from those exports must match the reply the mod draws, but

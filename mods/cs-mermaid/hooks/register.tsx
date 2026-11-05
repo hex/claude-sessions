@@ -21,17 +21,17 @@ export const OPTION = 'drawDiagrams'
 // indented code block, not a fence.
 // List items end where marked, which Claude Code reads a reply with, ends them; a block still open
 // in an item ends with it (CommonMark 4.5), and a mermaid fence ended so is a chart up to there.
-type Fence = { start: number; end: number; body: string }
+type Fence = { start: number; end: number; body: string; items: Item[] }
 // A list item open around the line being read: the column its content starts at, and whether a
 // blank line has come inside it (a marker with nothing after it counts as one, as marked reads it).
-type Item = { content: number; blank: boolean }
+type Item = { content: number; blank: boolean; end: number }
 export function scanFences(text: string): Fence[] {
   const fences: Fence[] = []
   // The open list items, outermost first. A fenced block keeps how many were open when it opened
   // (`depth`), and ends with the item it opened in.
   const items: Item[] = []
   // The fenced block open on the line being read: a mermaid fence keeps where it and its body start.
-  let block: { mark: string; length: number; depth: number; mermaid?: { start: number; bodyStart: number } } | undefined
+  let block: { mark: string; length: number; depth: number; mermaid?: { start: number; bodyStart: number; items: Item[] } } | undefined
   // Whether the line before was a fence mark, heading, thematic break or indented code, after which
   // a line left of an item's content column ends the item rather than continuing it.
   let settled = false
@@ -45,11 +45,12 @@ export function scanFences(text: string): Fence[] {
   let bare = false
   let at = 0
   const closeItems = (depth: number) => {
+    for (const item of items.slice(depth)) item.end = at
     items.length = depth
     paragraph = false
     if (!block || block.depth <= depth) return
     const { mermaid } = block
-    if (mermaid) fences.push({ start: mermaid.start, end: at - 1, body: text.slice(mermaid.bodyStart, Math.max(mermaid.bodyStart, at - 1)) })
+    if (mermaid) fences.push({ start: mermaid.start, end: at - 1, body: text.slice(mermaid.bodyStart, Math.max(mermaid.bodyStart, at - 1)), items: mermaid.items })
     block = undefined
   }
   for (const line of text.split('\n')) {
@@ -83,14 +84,14 @@ export function scanFences(text: string): Fence[] {
       mark = indented || lazy ? undefined : fenceMark(rest)
       if (mark && mark[0] === block.mark && mark.length >= block.length && rest === mark) {
         const { mermaid } = block
-        if (mermaid) fences.push({ start: mermaid.start, end: at + line.length, body: text.slice(mermaid.bodyStart, Math.max(mermaid.bodyStart, at - 1)) })
+        if (mermaid) fences.push({ start: mermaid.start, end: at + line.length, body: text.slice(mermaid.bodyStart, Math.max(mermaid.bodyStart, at - 1)), items: mermaid.items })
         block = undefined
       }
     } else if (!indented && !lazy) {
       const item = listItem(rest, column)
       if (paragraph && /^(?:-+|=+)$/.test(rest)) underline = true
       else if (item && (items.length > 0 || !paragraph || (item.text !== '' && /^(?:[-+*]|1[.)])$/.test(item.marker)))) {
-        items.push({ content: item.content, blank: item.text === '' })
+        items.push({ content: item.content, blank: item.text === '', end: text.length })
         read = { indented: item.textColumn - item.content >= 4, text: item.text, start: read.start + item.textOffset }
         pushed = true
       }
@@ -99,7 +100,7 @@ export function scanFences(text: string): Fence[] {
         // The newline before a fence on its own line belongs to it, not to the prose above; a fence on
         // a marker's line starts at its mark, and the marker stays prose.
         const start = pushed ? read.start : Math.max(0, at - 1)
-        const mermaid = mark === '```' && read.text.slice(3).trim() === 'mermaid' ? { start, bodyStart: next } : undefined
+        const mermaid = mark === '```' && read.text.slice(3).trim() === 'mermaid' ? { start, bodyStart: next, items: items.slice() } : undefined
         block = { mark: mark[0]!, length: mark.length, depth: items.length, mermaid }
       }
     }
@@ -283,14 +284,40 @@ export function drawFence(source: string, error: string, elements: Elements) {
 export function splitReply(text: string): { kind: 'text' | 'mermaid'; body: string }[] {
   const parts: { kind: 'text' | 'mermaid'; body: string }[] = []
   let last = 0
+  let items: Item[] = []
+  const addText = (end: number) => {
+    let body = ''
+    let at = last
+    while (at < end) {
+      const newline = text.indexOf('\n', at)
+      const lineEnd = newline < 0 || newline >= end ? end : newline + 1
+      const line = text.slice(at, lineEnd)
+      const ended = items.some(item => item.end === at)
+      if (ended && body.trim()) {
+        parts.push({ kind: 'text', body })
+        body = ''
+      }
+      const margin = items.filter(item => at < item.end).at(-1)?.content ?? 0
+      let column = 0
+      let offset = 0
+      while (offset < line.length && column < margin) {
+        if (line[offset] === ' ') column++
+        else if (line[offset] === '\t') column += 4
+        else break
+        offset++
+      }
+      body += column < margin ? line : ' '.repeat(column - margin) + (margin ? line.slice(offset).replace(/\t/g, '    ') : line.slice(offset))
+      at = lineEnd
+    }
+    if (body.trim()) parts.push({ kind: 'text', body })
+  }
   for (const fence of scanFences(text)) {
-    const before = text.slice(last, fence.start)
-    if (before.trim()) parts.push({ kind: 'text', body: before })
+    addText(fence.start)
     parts.push({ kind: 'mermaid', body: fence.body.trim() })
     last = fence.end
+    items = fence.items
   }
-  const after = text.slice(last)
-  if (after.trim()) parts.push({ kind: 'text', body: after })
+  addText(text.length)
   return parts
 }
 
