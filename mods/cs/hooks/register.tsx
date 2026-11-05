@@ -1458,15 +1458,23 @@ async function refreshRail($: EngineInterface) {
 }
 
 // Where Claude Code writes this conversation's transcript, the way cs's own
-// _claude_project_dir finds it (lib/40-state.sh): CS_TRANSCRIPTS_DIR, else
-// ~/.claude/projects, or the session's own config dir's projects/ when it
-// has one (.cs/claude-config, an encrypted session); under that, the cwd as
-// resolved with every character outside [A-Za-z0-9] made `-`, then
-// <session id>.jsonl.
+// _claude_project_dir finds it (lib/40-state.sh): the session's own config
+// dir's projects/ when it has one (.cs/claude-config, an encrypted session;
+// a link a locked vault left dangling still names it, so $.fs.stat, which
+// answers such a link, asks rather than $.fs.exists, which follows it), else
+// CS_TRANSCRIPTS_DIR, else CLAUDE_CONFIG_DIR's projects/, else
+// ~/.claude/projects. A CLAUDE_CONFIG_DIR naming some session's
+// .cs/claude-config was inherited from a claude running there, so the shell's
+// own config dir, which the launch keeps in CLAUDE_SECURESTORAGE_CONFIG_DIR
+// (empty for ~/.claude), stands in. Under that, the cwd as resolved with
+// every character outside [A-Za-z0-9] made `-`, then <session id>.jsonl.
 async function transcriptPath($: EngineInterface): Promise<string> {
   const cwd = await $.session.cwd()
-  let base = (await $.env.get("CS_TRANSCRIPTS_DIR")) || `${await $.env.get("HOME")}/.claude/projects`
-  if (await $.fs.exists(`${cwd}/.cs/claude-config`)) base = `${cwd}/.cs/claude-config/projects`
+  let config = await $.env.get("CLAUDE_CONFIG_DIR")
+  if (config?.endsWith('/.cs/claude-config')) config = await $.env.get("CLAUDE_SECURESTORAGE_CONFIG_DIR")
+  let base = (await $.env.get("CS_TRANSCRIPTS_DIR")) || `${config || `${await $.env.get("HOME")}/.claude`}/projects`
+  const own = `${cwd}/.cs/claude-config`
+  if (await $.fs.stat(own).then(() => true, () => false)) base = `${own}/projects`
   const resolved = (await resolvedPath($, cwd)) ?? cwd
   return `${base}/${resolved.replace(/[^A-Za-z0-9]/g, '-')}/${await $.session.id()}.jsonl`
 }

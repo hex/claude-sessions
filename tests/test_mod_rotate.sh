@@ -119,20 +119,21 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     assert_output_contains "$out" "hooks: session.start, command.run{command=queue}, command.run{command=cs}, config.set, turn.complete, skill.prompt{skill=finish}, prompt.submit, command.run{command=clear}, turn.start, ui.render{component=UserMessage}, ui.render{component=AbovePrompt}, ui.focus{component=AbovePrompt, plugin=cs}" "all twelve hooks inventoried, config.set refusing a band value the band cannot draw" || return 1
     assert_output_contains "$out" "gating hook without .catch: command.run{command=cs}" "/cs is a gate: it answers an argument itself and hands bare /cs to the cs panel's hook" || return 1
     assert_output_not_contains "$out" '$.prompt.fill' "nothing fills the composer any more" || return 1
-    assert_output_contains "$out" 'env reads: CLAUDE_CONFIG_DIR, CS_BIN, CS_FILTER_CHAT, CS_ROTATE_BUTTON_CTX, CS_ROTATE_FORCE_CTX, CS_SESSIONS_ROOT, CS_STATUSLINE_CTX_WARN, CS_TERM_BG_RGB, CS_TERM_THEME, CS_TRANSCRIPTS_DIR, HOME, XDG_CONFIG_HOME' "the cs path, the two thresholds, the bar's warn band, the measured background and the theme (the count's amber pivot), where keybindings.json lives, the sessions root and where transcripts live are read from the environment; the caps consent is not" || return 1
+    assert_output_contains "$out" 'env reads: CLAUDE_CONFIG_DIR, CLAUDE_SECURESTORAGE_CONFIG_DIR, CS_BIN, CS_FILTER_CHAT, CS_ROTATE_BUTTON_CTX, CS_ROTATE_FORCE_CTX, CS_SESSIONS_ROOT, CS_STATUSLINE_CTX_WARN, CS_TERM_BG_RGB, CS_TERM_THEME, CS_TRANSCRIPTS_DIR, HOME, XDG_CONFIG_HOME' "the cs path, the two thresholds, the bar's warn band, the measured background and the theme (the count's amber pivot), where keybindings.json lives, the sessions root and where transcripts live (the shell's config dir standing in for a session's inherited one) are read from the environment; the caps consent is not" || return 1
     assert_output_contains "$out" '$.process.run, $.prompt.submit (via offerToStart), $.session.compact (via offerToStart), $.session.cwd' "/queue runs cs from its own hook and its start offer, which alone submits a prompt and compacts; the rotation asks cs -vet-session before it arms; the /finish watch runs kill -0 to ask after cs's pid" || return 1
     assert_output_contains "$out" '$.command.list, $.command.register, $.command.run (via askToWrap, clearAndContinue, noteConversation, pressFinish, rotate)' "the band discovers commands; the wrap, clear, finish and rotate keys and conversation colour keep their command routes" || return 1
     assert_output_contains "$out" '$.clock.after, $.clock.every (via readFeatures, startCountdown, watchFinish), $.clock.now (via gateWord)' "the forced /rotate, the next-step toast and the rail's redraw are one-shot timers, the grace, the /finish watch and the idle features read tickers, and the gate word alone reads the time" || return 1
     local src="$MOD/hooks/register.tsx" scroll_lines jump_range filter_chat_range
     # The validator cuts its calls line at a fixed length (`… [+N chars]`);
-    # every assert on it must name something before the cut. $.ui.log and
-    # selected later calls are checked on the source instead.
+    # every assert on it must name something before the cut. $.ui.log,
+    # $.ui.ask's callers and selected later calls are checked on the source
+    # instead.
     assert_eq "6" "$(grep -c '\$\.ui\.log' "$src")" "six calls log a features word read failure, a features complaint, a transcript read failure, a /color that did not run, a filter chat read failure and a settings read complaint" || return 1
     filter_chat_range=$(awk '/^async function pressFilterChat\(/ { start = NR } start && !end && /^}/ { end = NR } END { print start, end }' "$src")
     set -- $filter_chat_range
     assert_eq "0" "$(awk -v start="$1" -v end="$2" 'NR > start && NR < end && /\$\.fs\.write/ { count++ } END { print count + 0 }' "$src")" "pressFilterChat writes no file itself" || return 1
     assert_eq "1" "$(awk -v start="$1" -v end="$2" 'NR > start && NR < end && /-config.*CS_FILTER_CHAT/ { count++ } END { print count + 0 }' "$src")" "one call inside pressFilterChat runs cs -config set" || return 1
-    assert_output_contains "$out" '$.session.id, $.session.usage, $.ui.ask (via askToWrap, offerToStart)' "the visible inventory includes the session and dialog calls" || return 1
+    assert_output_contains "$out" '$.session.id, $.session.usage, $.ui.ask' "the visible inventory includes the session and dialog calls" || return 1
     assert_file_contains "$src" '\$\.ui\.invalidate(.ui\.render.)' "the band redraws itself through \$.ui.invalidate" || return 1
     scroll_lines=$(grep -n '\$\.ui\.scroll' "$src" | cut -d: -f1 | tr '\n' ' ')
     jump_range=$(awk '/^async function jumpTo\(/ { start = NR } start && !end && /^}/ { end = NR } END { print start, end }' "$src")
@@ -140,13 +141,31 @@ test_mod_validate_inventories_the_hooks_and_calls() {
     set -- $jump_range
     [ "${scroll_lines% }" -gt "$1" ] && [ "${scroll_lines% }" -lt "$2" ] \
         || { echo "  FAIL: \$.ui.scroll at line ${scroll_lines% } is outside jumpTo (lines $1-$2)"; return 1; }
-    assert_output_contains "$out" '$.ui.ask (via askToWrap, offerToStart)' "the wrap key and the /queue start offer ask through the engine's own dialog" || return 1
+    # The wrap key and the /queue start offer ask through the engine's own
+    # dialog: every $.ui.ask sits in askToWrap or offerToStart, and each of
+    # them makes one.
+    local ask_line wrap_start wrap_end offer_start offer_end in_wrap=0 in_offer=0
+    read -r wrap_start wrap_end <<< "$(awk '/^async function askToWrap\(/ { start = NR } start && !end && /^}/ { end = NR } END { print start, end }' "$src")"
+    read -r offer_start offer_end <<< "$(awk '/^async function offerToStart\(/ { start = NR } start && !end && /^}/ { end = NR } END { print start, end }' "$src")"
+    [ -n "$wrap_end" ] && [ -n "$offer_end" ] \
+        || { echo "  FAIL: could not locate askToWrap and offerToStart in $src"; return 1; }
+    while IFS= read -r ask_line; do
+        if [ "$ask_line" -gt "$wrap_start" ] && [ "$ask_line" -lt "$wrap_end" ]; then
+            in_wrap=$((in_wrap + 1))
+        elif [ "$ask_line" -gt "$offer_start" ] && [ "$ask_line" -lt "$offer_end" ]; then
+            in_offer=$((in_offer + 1))
+        else
+            echo "  FAIL: \$.ui.ask at line $ask_line is outside askToWrap and offerToStart"; return 1
+        fi
+    done < <(grep -n '\$\.ui\.ask(' "$src" | cut -d: -f1)
+    [ "$in_wrap" -gt 0 ] && [ "$in_offer" -gt 0 ] \
+        || { echo "  FAIL: askToWrap ($in_wrap) and offerToStart ($in_offer) must each call \$.ui.ask"; return 1; }
     assert_eq "0" "$(grep -c '\$\.ui\.open' "$src")" "the mod opens no pane" || return 1
     assert_eq "0" "$(grep -c '\$\.ui\.close' "$src")" "and closes none" || return 1
     assert_eq "0" "$(grep -c '\$\.ui\.panes' "$src")" "and lists none" || return 1
     assert_output_contains "$out" '$.fs.list (via hasFeatureDirs, queueLength, unreadMail)' "the band counts the queue's tasks and the mailbox's unread mail by listing their directories, and looks for a base's feature directories at the sessions root before asking cs; nothing else lists one" || return 1
     assert_output_contains "$out" '$.fs.read (via armedHandoff, boundChords, clearPressed, csSessionName, forceRotation, queueRunning, readFilterChat, readFinish, readState, readWrapped, refreshRail)' "the wrap marker, the press marker, the state (for the session's recorded name too), the queue's state, the filter chat file, the /finish record, keybindings.json and the transcript are read" || return 1
-    assert_output_contains "$out" '$.fs.stat (via refreshRail, resolvedPath)' "stat resolves where a path lands, to prove the cwd is the sessions root's entry, and gates the transcript's re-read on its size and mtime; no other rule hangs on a modification time" || return 1
+    assert_output_contains "$out" '$.fs.stat (via refreshRail, resolvedPath, transcriptPath)' "stat resolves where a path lands, to prove the cwd is the sessions root's entry, gates the transcript's re-read on its size and mtime, and finds a session's own claude-config even when a locked vault leaves its link dangling; no other rule hangs on a modification time" || return 1
 }
 
 run_test test_mod_manifest_names_the_plugin_and_its_module
