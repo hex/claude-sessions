@@ -37,10 +37,10 @@ export function scanFences(text: string): Fence[] {
       if (outer && outer.depth > items.length) outer = undefined
     }
     const margin = items.length > 0 ? items[items.length - 1]! : 0
-    // Undefined four columns past the margin, an indented code line that opens nothing.
-    const run = column - margin < 4 ? /^(`{3,}(?!.*`)|~{3,})/.exec(rest) : undefined
-    if (run) {
-      const mark = run[1]!
+    // Four columns past the margin a line is indented code, which opens nothing.
+    const indented = column - margin >= 4
+    const mark = indented ? undefined : fenceMark(rest)
+    if (mark) {
       if (outer) {
         if (mark[0] === outer.mark && mark.length >= outer.length && rest === mark) outer = undefined
       } else if (open) {
@@ -54,13 +54,20 @@ export function scanFences(text: string): Fence[] {
       } else {
         outer = { mark: mark[0]!, length: mark.length, depth: items.length }
       }
-    } else if (run === null && !open && !outer) {
+    } else if (!indented && !open && !outer) {
       const content = itemContent(rest, column)
       if (content !== undefined) items.push(content)
     }
     at = next
   }
   return fences
+}
+
+// The fence mark a line opens with: three or more backticks with no backtick after them (one
+// makes the line inline code), or three or more tildes. One pass over the line, however long.
+function fenceMark(rest: string): string | undefined {
+  const mark = /^(?:`{3,}|~{3,})/.exec(rest)?.[0]
+  return mark?.[0] === '`' && rest.includes('`', mark.length) ? undefined : mark
 }
 
 // The column a line's text starts at, counting on from `column` (a tab reaches the next multiple
