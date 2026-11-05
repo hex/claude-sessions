@@ -11,6 +11,10 @@ from a distilled profile document, never from improvisation.
 - Profile: `${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}/.voice/profile.md`
 - Corpus: `${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}/.voice/corpus.md`
 - Builder: `~/.claude/skills/write-as-me/scripts/build-corpus.sh`
+- Check: `~/.claude/skills/write-as-me/scripts/corpus-check.sh [corpus]`
+  counts the entries a built corpus holds that are not the user's typing
+  (side-agent notes, side checks, tagged pastes, test-session projects) and
+  exits 1 when it finds any.
 - Supplementary sources: `${CS_SESSIONS_ROOT:-$HOME/.claude-sessions}/.voice/sources/*.md`
   — writing no transcript holds (an exported chat, sent mail), kept by hand.
   Entries mirror the corpus: `[tag, YYYY-MM-DD]`, the text, then `---`. The

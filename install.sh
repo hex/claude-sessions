@@ -265,6 +265,7 @@ _check_retired_entries() {  # list name, kind (file or directory), entries...
 # Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
 CS_SKILL_FILES=(
     write-as-me/scripts/build-corpus.sh
+    write-as-me/scripts/corpus-check.sh
     finish/scripts/finish.sh
 )
 
@@ -1477,7 +1478,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "7d9c258fa75d90f710e64fc8664dedeb671721669f3ab40ab51f37721bd48bd7  bin/cs"
+    "2e426c6383a6d19e5367e7885cee37273e4393a6e43a1059b309461fa9dd86cb  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "ba8fff7f5576e3cc24276fb470b9518a64e7af96b050a31cb40506778e0f80c3  bin/cs-statusline"
     "aa370b9561539ddacd7dc6cf3dbd45f1bbdc9f7f21f0e97d211807fcbe17c4ab  bin/cs-subagent-statusline"
@@ -1507,8 +1508,9 @@ CS_PAYLOAD_SHA256=(
     "5e275bba3498c648c648132d31efb4481335a2ee5c3cdf38d0af40ada01d680f  skills/rotate/SKILL.md"
     "0d88656291eb6078b08187204807c72bd926b93c360041767cdbc26e64567353  skills/finish/SKILL.md"
     "938985c6dbc9166170d1e0d7e632cd3c4a4089d5cdd5b2cf5f0702600f29110f  skills/feature/SKILL.md"
-    "343016f4d62029a85cfae3c0911b8a7a2bff99a31bd868e04ca83ec4002d6f48  skills/write-as-me/SKILL.md"
-    "9d42a50e396f05c53d62f13f4a6e21ba20ee04abf7b532023e0d8e5be988e2d3  skills/write-as-me/scripts/build-corpus.sh"
+    "96cc4d5a8511904fe972fb1b47c35c970d6367485828c6cad0b89926528d7917  skills/write-as-me/SKILL.md"
+    "a8abe8e196ab085c28a30db08b3a52781d14c14ed1134cea5464a75ef03486b6  skills/write-as-me/scripts/build-corpus.sh"
+    "a8a14c22510b49f89557b401730875996064682af719a85322215b61d046b054  skills/write-as-me/scripts/corpus-check.sh"
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
     "a4a0978846dd5f6cca361977b6c8b4b951d475734af234cbe78aae1f3bf8148a  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"

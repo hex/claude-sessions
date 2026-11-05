@@ -9,6 +9,17 @@ MAX_MESSAGES=4000
 SHORT_CHARS=20
 PASTE_CHARS=2000
 
+# Claude Code names a project directory after the directory claude launched in,
+# with every character that is not a letter or digit turned into "-". A project
+# matching one of these jq regexes is a test session: a harness or a probe
+# script wrote its prompts, so none of them is the user's typing.
+TEST_SESSION_PROJECTS=(
+    '^-private-tmp-'          # /tmp on macOS: agent scratchpads and E2E harness checkouts
+    '^-tmp-'                  # /tmp as Linux spells it
+    '^-private-var-folders-'  # $TMPDIR on macOS, where mktemp -d puts a suite's throwaway project
+    '--cs-local-'             # a session's .cs/local/, cs's machine-local state, where live probes launch claude
+)
+
 command -v jq >/dev/null 2>&1 || {
     echo "write-as-me: jq is required (brew install jq / apt-get install jq)" >&2
     exit 1
@@ -76,6 +87,7 @@ trap 'rm -rf "$workdir"' EXIT
 # their "user" messages are dispatch prompts, not the user's typing; the
 # depth bound excludes them, the name filter is belt and braces.
 find "$TRANSCRIPTS_ROOT" -mindepth 2 -maxdepth 2 -name '*.jsonl' ! -name 'agent-*.jsonl' > "$workdir/files"
+test_projects="$(printf '%s\n' "${TEST_SESSION_PROJECTS[@]}" | jq -R . | jq -cs .)"
 
 files_scanned=0
 files_failed=0
@@ -88,8 +100,10 @@ while IFS= read -r f; do
     # jq 1.7.1's -R splits a multibyte character 4095 bytes into a line and
     # puts a replacement character in its place, and a transcript line runs
     # that long whenever a message carries tool output or an image.
-    if ! jq -cn --rawfile t "$f" --arg proj "$proj" --argjson paste "$PASTE_CHARS" "$LOOKS_SECRET_DEF"'
-        $t | split("\n")[]
+    if ! jq -cn --rawfile t "$f" --arg proj "$proj" --argjson paste "$PASTE_CHARS" \
+            --argjson test_projects "$test_projects" "$LOOKS_SECRET_DEF"'
+        ($test_projects | any(. as $re | $proj | test($re))) as $test_session
+        | $t | split("\n")[]
         | fromjson? | select(type == "object")
         | select(.type == "user")
         | select((.isMeta // false) | not)
@@ -100,6 +114,11 @@ while IFS= read -r f; do
            then ($c | map(select(type == "object" and .type == "text") | .text) | join(" "))
            else "" end) as $raw
         | ($raw | gsub("^[[:space:]]+|[[:space:]]+$"; "")) as $t
+        # Claude Code records a paste between <pasted_content id="X"> and
+        # </pasted_content id="X">. The block is text the user pasted, so it
+        # goes, and what they typed around it stays.
+        | ($t | gsub("<pasted_content id=\"(?<id>[^\"]*)\">[\\s\\S]*?</pasted_content id=\"\\k<id>\">"; "")
+              | gsub("^[[:space:]]+|[[:space:]]+$"; "")) as $typed
         # Claude Code stamps who originated the turn. Only some values mean a
         # human typed it; sdk and system turns are machine-authored and would
         # otherwise be distilled as the user'"'"'s writing voice. An absent field
@@ -119,11 +138,20 @@ while IFS= read -r f; do
            elif ($t | startswith("Caveat:")) then "sentinel"
            elif ($t | startswith("This session is being continued")) then "sentinel"
            elif ($t | test("<command-name>|<local-command-stdout>|<system-reminder>|Stop hook feedback:|\\[Request interrupted|TASKMASTER|<task-notification>|<teammate-message|<bash-input>|<bash-stdout>|<bash-stderr>")) then "sentinel"
-           elif ($t | length) > $paste then "paste"
+           elif $test_session then "test-session"
+           # A side agent relays its note through a draft the user sends
+           # unedited, which Claude Code stamps typed: its own side-agent
+           # wrapper, and the claude-council heads-up mod Tell Claude draft
+           # ("A side check by codex (not you) flagged this:", also seen as
+           # "raised this:").
+           elif ($t | startswith("Here is a note offered by a side agent:")) then "side-note"
+           elif ($t | startswith("A side check by ")) then "side-check"
+           elif ($typed | length) == 0 then "tagged-paste"
+           elif ($typed | length) > $paste then "paste"
            else null end) as $drop
-        | {ts: (.timestamp // ""), proj: $proj, drop: $drop,
+        | {ts: (.timestamp // ""), proj: $proj, drop: $drop, cut: ($typed != $t),
            text: (if $drop != null then ""
-                  else ($t | split("\n")
+                  else ($typed | split("\n")
                         | map(if looks_secret then "[redacted line]" else . end)
                         | join("\n"))
                   end)}
@@ -155,6 +183,11 @@ jq -r -s \
     | (map(select(.drop == "paste")) | length) as $n_paste
     | (map(select(.drop == "not-typed")) | length) as $n_nottyped
     | (map(select(.drop == "machine")) | length) as $n_machine
+    | (map(select(.drop == "test-session")) | length) as $n_test
+    | (map(select(.drop == "side-note")) | length) as $n_side_note
+    | (map(select(.drop == "side-check")) | length) as $n_side_check
+    | (map(select(.drop == "tagged-paste")) | length) as $n_tagged
+    | ($typed | map(select(.cut)) | length) as $n_cut
     | ($typed | map(select((.text | length) < $short and (.text != "[redacted line]")))) as $acks
     | ($typed | map(select((.text | length) >= $short))) as $long
     | ($long | group_by(.text) | map(max_by(.ts)) | sort_by(.ts) | reverse) as $uniq
@@ -170,7 +203,10 @@ jq -r -s \
          + "\(($long | length) - ($uniq | length)) duplicates collapsed)"
          + (if ($uniq | length) > $max then ", capped at \($max)" else "" end)),
         "Short acks in appendix: \($acks | length) occurrences, \($appendix | length) distinct",
-        "Dropped: \($n_sentinel) harness-injected, \($n_paste) pastes over 2000 chars, \($n_nottyped) non-typed, \($n_machine) machine-authored"
+        ("Dropped: \($n_sentinel) harness-injected, \($n_paste) pastes over 2000 chars, \($n_nottyped) non-typed, "
+         + "\($n_machine) machine-authored, \($n_test) from test sessions, \($n_side_note) side-agent notes, "
+         + "\($n_side_check) side checks, \($n_tagged) tagged pastes with no typed text"),
+        "Tagged pastes cut from typed messages: \($n_cut)"
       ]
       + (if $sources > 0
          then ["Supplementary sources: \($sources) file\(if $sources == 1 then "" else "s" end)"]

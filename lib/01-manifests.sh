@@ -137,6 +137,7 @@ _check_retired_entries() {  # list name, kind (file or directory), entries...
 # Support files skills ship beyond SKILL.md, as skills/<skill>/<path> entries.
 CS_SKILL_FILES=(
     write-as-me/scripts/build-corpus.sh
+    write-as-me/scripts/corpus-check.sh
     finish/scripts/finish.sh
 )
 
