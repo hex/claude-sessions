@@ -175,7 +175,8 @@ test('a fence opened on a list marker\'s own line is a fence in the item', () =>
   // Right after the opener a line back at the margin ends the item and its empty fence; the bare
   // ``` under it then opens a block of its own, quoting the chart after it.
   expect(fencesOf('- ```mermaid\ngraph TD\n  ```\n```mermaid\ngraph LR\nC --> D\n```')).toEqual([])
-  // The marker goes to the engine with the prose, so the list keeps its bullet.
+  // Marked reads the isolated "- " as a paragraph. It looks like the original marker because
+  // Claude Code uses "-" for the bullet.
   expect(splitReply('- ```mermaid\n  graph TD\n  A --> B\n  ```\n- next')).toEqual([
     { kind: 'text', body: '- ' },
     { kind: 'mermaid', body: 'graph TD\n  A --> B' },

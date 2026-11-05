@@ -17,10 +17,10 @@ export const OPTION = 'drawDiagrams'
 // closes on a bare line of its mark at least as long as its opener. A backtick after the opening
 // run makes the line inline code, not an opener. Any of these marks may be indented up to three
 // columns past the margin, or inside a list item past the item's content column, the marker's own
-// line included (CommonMark); at four, a tab reaching the next multiple of four, the line is an
-// indented code block, not a fence.
-// List items end where marked, which Claude Code reads a reply with, ends them; a block still open
-// in an item ends with it (CommonMark 4.5), and a mermaid fence ended so is a chart up to there.
+// line included (CommonMark); at four, the line is an indented code block, not a fence. Outside
+// lists a tab reaches the next multiple of four; list continuations count each tab as four spaces.
+// A block still open in an item ends with it (CommonMark 4.5), and a mermaid fence ended so is a
+// chart up to there. Each item's continuation rules are measured at its own content column.
 type Fence = { start: number; end: number; body: string; items: Item[] }
 // A list item open around the line being read: its content column and end, whether a blank line
 // has come inside it (a marker with nothing after it counts as one, as marked reads it), and whether

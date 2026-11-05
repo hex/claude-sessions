@@ -1076,10 +1076,14 @@ It hooks one event:
   column, past its `-`, `+`, `*`, `1.` or `1)` marker and the blanks after it,
   and a fence may open on the marker's own line: a fence under `1. flow:` at
   four columns draws, and one four columns past the item's content stays
-  source. Items end where marked, which Claude Code reads replies with, ends
-  them: a line left of the content column stays in the item unless it starts
-  a block of its own or follows a blank line in the item, a fence mark, a
-  heading, a thematic break or an indented code line. A mermaid fence still
+  source. The scanner checks list continuation from the outermost item inward.
+  A line left of an item's content column ends that item if it starts a block
+  within three columns of its parent's content column, follows a blank line in
+  that item, or follows a fence mark, heading, thematic break or indented code
+  at that level. The previous-line checks
+  use each item's content column: four spaces make indented code; a fence,
+  heading or thematic break counts only within `min(3, item indent - 1)` spaces.
+  A mermaid fence still
   open when its item ends draws up to there. A mermaid fence closes on a bare
   line of three or more backticks. A mermaid fence inside another code block (a
   ` ```markdown ` or bare ` ``` ` one, four backticks or tildes) is that
@@ -1118,6 +1122,24 @@ It hooks one event:
   diagram types, more than 200 nodes, 400 edges or 60-cell
   labels) or one still too wide stays a code block with `mermaid: <reason>`
   under it.
+
+After a chart in a list, `splitReply` removes the indentation of the enclosing
+items still open on each prose line. It starts a separate prose part when one
+of those items ends, so a numbered sibling can start a list. It removes the
+item's final line break; only the last item in a list loses the remaining
+trailing whitespace, as marked does. It keeps the list
+markers and the indentation of items opened after the chart. On a continuation
+that reaches an enclosing item's margin, it expands each tab to four spaces
+before removing indentation, as marked does. Lazy lines keep their literal text.
+
+Known differences from marked remain. The scanner does not track HTML blocks
+such as `<details>` or blockquotes inside list items. A tab immediately after a
+list marker, a lone CR line break, or a lazy nested line under a wide numbered
+marker can give different fence boundaries. Openers ` ````mermaid ` and
+`~~~mermaid` stay source by design, as do replies whose
+only Mermaid fences are empty. Because the engine reads prose parts separately,
+an ordered list with nonconsecutive source numbers can restart at a source
+number where marked would continue counting from the earlier part.
 
 cs adds a `cs:mermaid-diagrams` section headed `Diagrams` to `CLAUDE.local.md`
 when it creates a session, or on migration when the sentinel is absent. The
