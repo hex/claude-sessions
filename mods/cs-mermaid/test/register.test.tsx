@@ -87,7 +87,8 @@ test('a fence in a list item is indented from the item, not the margin', () => {
   // `* * *` and `- - -` are thematic breaks, not bullets.
   expect(fencesOf(`* * *\n${chart('    ')}`)).toEqual([])
   expect(fencesOf(`- - -\n${chart('    ')}`)).toEqual([])
-  // A body line back at the margin closes the item and the fence open in it: no chart.
+  // Right after the opener a body line back at the margin ends the item and the fence open in
+  // it, with nothing in it: no chart.
   expect(fencesOf('1. flow:\n   ```mermaid\ngraph TD\nA --> B\n   ```')).toEqual([])
   // A fence on the marker's own line is not read, so its closer opens an outer block; that block
   // closes with the item, and a chart after the list still draws.
