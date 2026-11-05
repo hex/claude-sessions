@@ -67,6 +67,9 @@ test('a fence in a list item is indented from the item, not the margin', () => {
   expect(fencesOf(`- - -\n${chart('    ')}`)).toEqual([])
   // A body line back at the margin closes the item and the fence open in it: no chart.
   expect(fencesOf('1. flow:\n   ```mermaid\ngraph TD\nA --> B\n   ```')).toEqual([])
+  // A fence on the marker's own line is not read, so its closer opens an outer block; that block
+  // closes with the item, and a chart after the list still draws.
+  expect(fencesOf('- ```mermaid\n  graph TD\n  A --> B\n  ```\n\nlater:\n```mermaid\ngraph TD\nC --> D\n```')).toEqual(['graph TD\nC --> D'])
   // A blockquote's `>` is not read: a quoted fence stays source.
   expect(fencesOf('> ```mermaid\n> graph TD\n> A --> B\n> ```')).toEqual([])
 })
