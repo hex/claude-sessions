@@ -11,10 +11,11 @@ import { cellWidth, padToWidth, truncateToWidth } from './text'
 // The /config row (`cs-mermaid.drawDiagrams`): off, fences stay source.
 export const OPTION = 'drawDiagrams'
 
-// A mermaid fence opens and closes on its own line with exactly three backticks. A line of four
-// or more backticks, or of three tildes, opens an outer block that quotes what it holds, closed by
-// a line of the same mark at least as long; a fence inside one is quoted source, not a chart.
-// Any of these marks may be indented up to three columns past the margin, or inside a list item
+// A mermaid fence opens and closes on its own line with exactly three backticks. Any other opener
+// (three backticks with another language or none, four or more, or three tildes) opens an outer
+// block that quotes what it holds, closed by a bare line of the same mark at least as long; a
+// fence inside one is quoted source, not a chart. A backtick after the opening run makes the line
+// inline code, not an opener. Any of these marks may be indented up to three columns past the margin, or inside a list item
 // past the item's content column (CommonMark); at four, a tab reaching the next multiple of four,
 // the line is an indented code block, not a fence. A line left of an open item's content column
 // closes the item, and with it a fence or block open inside it.
@@ -36,7 +37,7 @@ export function scanFences(text: string): Fence[] {
     }
     const margin = items.length > 0 ? items[items.length - 1]! : 0
     const trimmed = column - margin < 4 ? rest : undefined
-    const run = trimmed === undefined ? null : /^(`{3,}|~{3,})/.exec(trimmed)
+    const run = trimmed === undefined ? null : /^(`{3,}(?!.*`)|~{3,})/.exec(trimmed)
     if (run) {
       const mark = run[1]!
       if (outer) {
@@ -49,7 +50,7 @@ export function scanFences(text: string): Fence[] {
       } else if (mark === '```' && trimmed.slice(3).trim() === 'mermaid') {
         // The newline before the fence belongs to it, not to the prose above.
         open = { start: Math.max(0, at - 1), bodyStart: next, depth: items.length }
-      } else if (mark.length > 3 || mark[0] === '~') {
+      } else {
         outer = { mark: mark[0]!, length: mark.length, depth: items.length }
       }
     } else if (trimmed !== undefined && !open && !outer) {
