@@ -36,25 +36,25 @@ export function scanFences(text: string): Fence[] {
       if (outer && outer.depth > items.length) outer = undefined
     }
     const margin = items.length > 0 ? items[items.length - 1]! : 0
-    const trimmed = column - margin < 4 ? rest : undefined
-    const run = trimmed === undefined ? null : /^(`{3,}(?!.*`)|~{3,})/.exec(trimmed)
+    // Undefined four columns past the margin, an indented code line that opens nothing.
+    const run = column - margin < 4 ? /^(`{3,}(?!.*`)|~{3,})/.exec(rest) : undefined
     if (run) {
       const mark = run[1]!
       if (outer) {
-        if (mark[0] === outer.mark && mark.length >= outer.length && trimmed === mark) outer = undefined
+        if (mark[0] === outer.mark && mark.length >= outer.length && rest === mark) outer = undefined
       } else if (open) {
-        if (trimmed === '```') {
+        if (rest === '```') {
           fences.push({ start: open.start, end: at + line.length, body: text.slice(open.bodyStart, Math.max(open.bodyStart, at - 1)) })
           open = undefined
         }
-      } else if (mark === '```' && trimmed.slice(3).trim() === 'mermaid') {
+      } else if (mark === '```' && rest.slice(3).trim() === 'mermaid') {
         // The newline before the fence belongs to it, not to the prose above.
         open = { start: Math.max(0, at - 1), bodyStart: next, depth: items.length }
       } else {
         outer = { mark: mark[0]!, length: mark.length, depth: items.length }
       }
-    } else if (trimmed !== undefined && !open && !outer) {
-      const content = itemContent(trimmed, column)
+    } else if (run === null && !open && !outer) {
+      const content = itemContent(rest, column)
       if (content !== undefined) items.push(content)
     }
     at = next
