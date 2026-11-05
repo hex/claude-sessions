@@ -288,21 +288,24 @@ function contrast(ink: string, background: string): number {
 }
 
 // Lines and edge labels are drawn on the terminal's own background; a node's label on its fill.
-// Every such pair meets WCAG AA for text (4.5:1) on the backgrounds a terminal has: white and
-// a cream (252;247;229) under the light palette, black and two dark greys under the dark one.
-test('every ink in each palette reads at 4.5:1 on what it is drawn over', () => {
+// Every such pair meets WCAG AA for text (4.5:1) with 0.1 to spare, on the backgrounds a terminal
+// has: white, a cream (252;247;229), Solarized Light (253;246;227) and the light background of
+// cs's own status-line art (251;246;233) under the light palette, black and two dark greys under
+// the dark one.
+test('every ink in each palette reads at 4.5:1, with 0.1 to spare, on what it is drawn over', () => {
   expect(contrast('#FFFFFF', '#000000')).toBe(21)
-  const terminals = { light: ['#FFFFFF', '#FCF7E5'], dark: ['#000000', '#1C1C1E', '#282C34'] }
+  const least = 4.5 + 0.1
+  const terminals = { light: ['#FFFFFF', '#FCF7E5', '#FDF6E3', '#FBF6E9'], dark: ['#000000', '#1C1C1E', '#282C34'] }
   const failing: string[] = []
   for (const [name, backgrounds] of Object.entries(terminals)) {
     const palette = paletteFor(name)
     for (const background of backgrounds) for (const ink of ['line', 'good', 'bad'] as const) {
       const ratio = contrast(palette[ink], background)
-      if (ratio < 4.5) failing.push(`${name} ${ink} ${palette[ink]} on ${background}: ${ratio.toFixed(2)}`)
+      if (ratio < least) failing.push(`${name} ${ink} ${palette[ink]} on ${background}: ${ratio.toFixed(2)}`)
     }
     for (const fill of ['fill', 'decision', 'start', 'end'] as const) {
       const ratio = contrast(palette.text, palette[fill])
-      if (ratio < 4.5) failing.push(`${name} text ${palette.text} on ${fill} ${palette[fill]}: ${ratio.toFixed(2)}`)
+      if (ratio < least) failing.push(`${name} text ${palette.text} on ${fill} ${palette[fill]}: ${ratio.toFixed(2)}`)
     }
   }
   expect(failing).toEqual([])
