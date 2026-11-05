@@ -15,14 +15,15 @@ export const OPTION = 'drawDiagrams'
 // (three backticks with another language or none, four or more, or three tildes) opens an outer
 // block that quotes what it holds, closed by a bare line of the same mark at least as long; a
 // fence inside one is quoted source, not a chart. A backtick after the opening run makes the line
-// inline code, not an opener. Any of these marks may be indented up to three columns past the margin, or inside a list item
-// past the item's content column (CommonMark); at four, a tab reaching the next multiple of four,
-// the line is an indented code block, not a fence. A line left of an open item's content column
-// closes the item, and with it a fence or block open inside it.
+// inline code, not an opener. Any of these marks may be indented up to three columns past the
+// margin, or inside a list item past the item's content column (CommonMark); at four, a tab
+// reaching the next multiple of four, the line is an indented code block, not a fence. A line
+// left of an open item's content column closes the item, and with it a fence or block open inside.
 type Fence = { start: number; end: number; body: string }
 export function scanFences(text: string): Fence[] {
   const fences: Fence[] = []
-  // The content column of each open list item, outermost first; `depth` is how many were open.
+  // The content column of each open list item, outermost first. A fence or outer block keeps how
+  // many were open when it opened (`depth`), and closes with the item it opened in.
   const items: number[] = []
   let outer: { mark: string; length: number; depth: number } | undefined
   let open: { start: number; bodyStart: number; depth: number } | undefined
