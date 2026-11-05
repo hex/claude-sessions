@@ -11,50 +11,45 @@ import { cellWidth, padToWidth, truncateToWidth } from './text'
 // The /config row (`cs-mermaid.drawDiagrams`): off, fences stay source.
 export const OPTION = 'drawDiagrams'
 
-// A mermaid fence opens and closes on its own line with exactly three backticks. Any other opener
-// (three backticks with another language or none, four or more, or three tildes) opens an outer
-// block that quotes what it holds, closed by a bare line of the same mark at least as long; a
-// fence inside one is quoted source, not a chart. A backtick after the opening run makes the line
-// inline code, not an opener. Any of these marks may be indented up to three columns past the
-// margin, or inside a list item past the item's content column (CommonMark); at four, a tab
-// reaching the next multiple of four, the line is an indented code block, not a fence. A line
-// left of an open item's content column closes the item, and with it a fence or block open inside.
+// A mermaid fence opens on its own line with exactly three backticks and `mermaid`. Any other
+// opener (three backticks with another language or none, four or more, or three tildes) opens an
+// outer block that quotes what it holds; a fence inside one is quoted source, not a chart. Either
+// closes on a bare line of its mark at least as long as its opener. A backtick after the opening
+// run makes the line inline code, not an opener. Any of these marks may be indented up to three
+// columns past the margin, or inside a list item past the item's content column (CommonMark); at
+// four, a tab reaching the next multiple of four, the line is an indented code block, not a fence.
+// A line left of an open item's content column closes the item, and with it a block open inside.
 type Fence = { start: number; end: number; body: string }
 export function scanFences(text: string): Fence[] {
   const fences: Fence[] = []
-  // The content column of each open list item, outermost first. A fence or outer block keeps how
-  // many were open when it opened (`depth`), and closes with the item it opened in.
+  // The content column of each open list item, outermost first. A fenced block keeps how many were
+  // open when it opened (`depth`), and closes with the item it opened in.
   const items: number[] = []
-  let outer: { mark: string; length: number; depth: number } | undefined
-  let open: { start: number; bodyStart: number; depth: number } | undefined
+  // The fenced block open on the line being read: a mermaid fence keeps where it and its body start.
+  let block: { mark: string; length: number; depth: number; mermaid?: { start: number; bodyStart: number } } | undefined
   let at = 0
   for (const line of text.split('\n')) {
     const next = at + line.length + 1
     const { column, rest } = indentation(line, 0)
     if (rest !== '') {
       while (items.length > 0 && column < items[items.length - 1]!) items.pop()
-      if (open && open.depth > items.length) open = undefined
-      if (outer && outer.depth > items.length) outer = undefined
+      if (block && block.depth > items.length) block = undefined
     }
     const margin = items.length > 0 ? items[items.length - 1]! : 0
     // Four columns past the margin a line is indented code, which opens nothing.
     const indented = column - margin >= 4
     const mark = indented ? undefined : fenceMark(rest)
-    if (mark) {
-      if (outer) {
-        if (mark[0] === outer.mark && mark.length >= outer.length && rest === mark) outer = undefined
-      } else if (open) {
-        if (rest === '```') {
-          fences.push({ start: open.start, end: at + line.length, body: text.slice(open.bodyStart, Math.max(open.bodyStart, at - 1)) })
-          open = undefined
-        }
-      } else if (mark === '```' && rest.slice(3).trim() === 'mermaid') {
-        // The newline before the fence belongs to it, not to the prose above.
-        open = { start: Math.max(0, at - 1), bodyStart: next, depth: items.length }
-      } else {
-        outer = { mark: mark[0]!, length: mark.length, depth: items.length }
+    if (mark && block) {
+      if (mark[0] === block.mark && mark.length >= block.length && rest === mark) {
+        const { mermaid } = block
+        if (mermaid) fences.push({ start: mermaid.start, end: at + line.length, body: text.slice(mermaid.bodyStart, Math.max(mermaid.bodyStart, at - 1)) })
+        block = undefined
       }
-    } else if (!indented && !open && !outer) {
+    } else if (mark) {
+      // The newline before a mermaid fence belongs to it, not to the prose above.
+      const mermaid = mark === '```' && rest.slice(3).trim() === 'mermaid' ? { start: Math.max(0, at - 1), bodyStart: next } : undefined
+      block = { mark: mark[0]!, length: mark.length, depth: items.length, mermaid }
+    } else if (!indented && !block) {
       const content = itemContent(rest, column)
       if (content !== undefined) items.push(content)
     }
