@@ -21,6 +21,34 @@ test('fencesOf finds mermaid fences and ignores other fences', () => {
   expect(fencesOf('````\nquoted\n````\n```mermaid\ngraph TD\nA --> B\n```')).toEqual(['graph TD\nA --> B'])
 })
 
+// CommonMark: a fence may be indented up to three spaces; four, or a tab (which reaches the
+// next multiple of four), makes an indented code block, so the fence stays source.
+test('a fence indented four spaces or a tab is an indented code block, not a chart', () => {
+  expect(fencesOf('   ```mermaid\ngraph TD\nA --> B\n   ```')).toEqual(['graph TD\nA --> B'])
+  expect(fencesOf('    ```mermaid\ngraph TD\nA --> B\n    ```')).toEqual([])
+  expect(fencesOf('\t```mermaid\ngraph TD\nA --> B\n\t```')).toEqual([])
+  expect(fencesOf(' \t```mermaid\ngraph TD\nA --> B\n ```')).toEqual([])
+  // Under a bullet the fence sits two columns in and still draws; under `1. ` it sits four
+  // in, which CommonMark reads relative to the item but this scanner does not: it stays source.
+  expect(fencesOf('- flow:\n  ```mermaid\n  graph TD\n  A --> B\n  ```')).toEqual(['graph TD\n  A --> B'])
+  expect(fencesOf('1. flow:\n    ```mermaid\n    graph TD\n    A --> B\n    ```')).toEqual([])
+  // A line of three backticks indented four inside a fence is its content, not its closer.
+  expect(fencesOf('```mermaid\ngraph TD\n    ```\nA --> B\n```')).toEqual(['graph TD\n    ```\nA --> B'])
+  // An outer block's marks follow the same rule.
+  expect(fencesOf('    ````\n```mermaid\ngraph TD\nA --> B\n```\n    ````')).toEqual(['graph TD\nA --> B'])
+})
+
+test('a reply whose only fence is indented four spaces is left to the engine', async ($, on) => {
+  on('config.list', () => ({ value: [] }))
+  mock.env(on, {})
+  const seen: { text: string; isFirstOfReply: boolean }[] = []
+  engine(on, seen)
+  const text = 'Code:\n\n    ```mermaid\n    graph TD\n    A --> B\n    ```'
+  const reply = await $.ui.mount({ plugin: 'cs-mermaid', surface: 'terminal', component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
+  expect(seen).toEqual([{ text, isFirstOfReply: true }])
+  await reply.unmount()
+})
+
 test('a reply without mermaid is left to the engine', async ($, on) => {
   on('ui.render', { component: 'AssistantMessage' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
