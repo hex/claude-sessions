@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ABOUTME: Checks that shell tests are registered before their suite reports results.
-# ABOUTME: Names each offending file and function in a failed check.
+# ABOUTME: Checks release tags against changelog headings and names each violation.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
@@ -54,6 +54,54 @@ test_every_test_function_is_registered_before_results() {
     _check_suite_registrations "$REPO"/tests/test_*.sh
 }
 
+_check_release_headings() {  # repo changelog
+    local repo="$1" changelog="$2" tags="$TEST_TMPDIR/release-tags"
+    if ! git -C "$repo" tag -l 'v*' > "$tags"; then
+        echo "  FAIL: $repo: could not read release tags"
+        return 1
+    fi
+    if [[ ! -s "$tags" ]]; then
+        SKIP_REASON="checkout has no release tags (shallow checkout or tags not fetched)"
+        echo "    SKIP: $SKIP_REASON"
+        return 77
+    fi
+
+    # Releases write the topmost heading before creating its tag. Only that
+    # heading may lack a tag; every tagged release still needs its heading.
+    awk '
+        FILENAME == ARGV[1] {
+            version = substr($0, 2)
+            tagged[version] = 1
+            tag_order[++tag_count] = version
+            next
+        }
+        /^## [0-9][^[:space:]]*[[:space:]]*$/ {
+            version = $2
+            headings[version] = 1
+            heading_count++
+            if (!(version in tagged) && heading_count > 1) {
+                printf "  FAIL: %s:%d: heading ## %s has no release tag v%s\n", FILENAME, FNR, version, version
+                failed = 1
+            }
+        }
+        END {
+            for (i = 1; i <= tag_count; i++) {
+                version = tag_order[i]
+                if (!(version in headings)) {
+                    printf "  FAIL: %s: release tag v%s has no heading ## %s\n", ARGV[2], version, version
+                    failed = 1
+                }
+            }
+            exit failed
+        }
+    ' "$tags" "$changelog"
+}
+
+test_release_tags_match_changelog_headings() {
+    _check_release_headings "$REPO" "$REPO/CHANGELOG.md"
+}
+
 run_test test_every_test_function_is_registered_before_results
+run_test test_release_tags_match_changelog_headings
 
 report_results
