@@ -106,6 +106,23 @@ test('a lazy line left of a list item keeps the item and the fence open in it', 
   expect(fencesOf('- a\nprose\n    ```mermaid\n    graph TD\n    A --> B\n    ```')).toEqual(['graph TD\n    A --> B'])
 })
 
+// A paragraph at a reply's top level runs on through a list marker unless it is a bullet or `1.`
+// or `1)` with text after it; inside a list item any marker starts an item (marked reads an item's
+// text a line at a time). A line of only `-` or `=` under a text line underlines it as a heading,
+// and an item begins with at most one blank line. A fence after a marker that starts no item is
+// indented code.
+test('a list marker that cannot start an item leaves the fence under it indented code', () => {
+  const chart = (indent: string) => ['```mermaid', 'graph TD', 'A --> B', '```'].map(line => indent + line).join('\n')
+  expect(fencesOf('Steps:\n2. flow:\n    ```mermaid\n    graph TD\n    A --> B\n    ```')).toEqual([])
+  expect(fencesOf(`Steps:\n1. flow:\n${chart('    ')}`)).toEqual(['graph TD\n    A --> B'])
+  expect(fencesOf(`Steps:\n\n2. flow:\n${chart('    ')}`)).toEqual(['graph TD\n    A --> B'])
+  expect(fencesOf(`- Steps:\n  2. flow:\n${chart('      ')}`)).toEqual(['graph TD\n      A --> B'])
+  expect(fencesOf('-\n\n    ```mermaid\n    graph TD\n    A --> B\n    ```')).toEqual([])
+  expect(fencesOf(`-\n${chart('    ')}`)).toEqual(['graph TD\n    A --> B'])
+  expect(fencesOf('Title\n-\n    ```mermaid\n    graph TD\n    A --> B\n    ```')).toEqual([])
+  expect(fencesOf(`Title\n-\n2. x\n${chart('    ')}`)).toEqual(['graph TD\n    A --> B'])
+})
+
 // CommonMark 4.5: a fence still open when its list item ends is a code block up to there. The
 // line that ends the item is read afresh outside it; a bare ``` there opens a block of its own.
 test('a fence open in a list item ends with the item, and the line that ends it is read outside', () => {
