@@ -1073,10 +1073,15 @@ It hooks one event:
   more columns (a tab counts to the next multiple of four) is an indented code
   block, as CommonMark reads it, and stays with the engine; one indented up to
   three draws. Inside a list item the columns count from the item's content
-  column, past its `-`, `+`, `*`, `1.` or `1)` marker and the blanks after it:
-  a fence under `1. flow:` at four columns draws, and one four columns past the
-  item's content stays source. A line left of that column ends the item and
-  any fence open in it. A mermaid fence inside another code block (a
+  column, past its `-`, `+`, `*`, `1.` or `1)` marker and the blanks after it,
+  and a fence may open on the marker's own line: a fence under `1. flow:` at
+  four columns draws, and one four columns past the item's content stays
+  source. Items end where marked, which Claude Code reads replies with, ends
+  them: a line left of the content column stays in the item unless it starts
+  a block of its own or follows a blank line in the item, a fence mark, a
+  heading, a thematic break or an indented code line. A mermaid fence still
+  open when its item ends draws up to there. A mermaid fence closes on a bare
+  line of three or more backticks. A mermaid fence inside another code block (a
   ` ```markdown ` or bare ` ``` ` one, four backticks or tildes) is that
   block's text and stays source. A reply with a fence is split
   into prose, which goes back to the engine (so the reply keeps its opening
