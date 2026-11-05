@@ -1188,6 +1188,8 @@ the hook inventory check skips when validation cannot list function hooks.
 The shell suite always checks the manifest, its `/config` field and that the
 installer names the mod. `tests/test_mermaid_section.sh` checks the session
 instruction and tombstone, and `tests/test_migrate_claude_md.sh` covers migration.
+After changing `mods/cs-mermaid/hooks/`, run `./build.sh` to refresh the payload
+hashes in `install.sh`.
 
 ## cs-panel (not a hook script — a Claude Code mod)
 
