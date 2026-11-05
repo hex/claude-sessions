@@ -31,7 +31,7 @@ _CS_CONFIG_SPEC=(
     'CS_NARRATIVE_PROMPT_DISABLE|Prompts|Narrative line|flagoff|flag|-|off|now|applies at your next prompt|Asks Claude, on each prompt, to note a finding in its narrative before it answers.'
     'CS_CTX_WARN_CTX|Rotation|Context warning %|text|num|-|40|now|applies when the next turn ends|Context use at which Claude tells you, once, that the conversation is filling up.'
     'CS_ROTATE_BUTTON_CTX|Rotation|Rotate button from %|text|num|-|the warn %|now|applies by your next prompt|Context use from which the band above the prompt shows the rotate key, Ctrl+X 1.'
-    'CS_ROTATE_NUDGE_CTX|Rotation|Rotation nudge %|text|num|-|65|now|applies when the next turn ends|Context use at which Claude suggests, once, writing a handoff and going on after /clear.'
+    'CS_ROTATE_NUDGE_CTX|Rotation|Rotation nudge %|text|num|-|60|now|applies when the next turn ends|Context use at which Claude suggests, once, writing a handoff and going on after /clear.'
     'CS_ROTATE_FORCE_CTX|Rotation|Rotate on its own past %|text|force|-|80|now|applies by your next prompt|Context use past which cs rotates by itself after a 20 second countdown you can stop.'
     'CS_NO_ROTATION_WAKE|Rotation|Wake after /clear|flagoff|flag|-|off|/clear|applies at the next /clear or launch|After /clear on a handoff, the fresh conversation starts its next step without you typing.'
     'CS_ROTATION_KICK_DELAY|Rotation|Wake delay (s)|text|secs|-|2|now|applies at the next rotation|Seconds between tries to wake the fresh conversation after /clear; 0 tries once.'

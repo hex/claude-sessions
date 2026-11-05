@@ -17,7 +17,7 @@ CS_CLARIFY_DISABLE	Prompts	Clarifying questions	flagoff	-	off	now	applies at you
 CS_NARRATIVE_PROMPT_DISABLE	Prompts	Narrative line	flagoff	-	off	now	applies at your next prompt	-	default	-	Asks Claude, on each prompt, to note a finding in its narrative before it answers.
 CS_CTX_WARN_CTX	Rotation	Context warning %	text	-	40	now	applies when the next turn ends	-	default	-	Context use at which Claude tells you, once, that the conversation is filling up.
 CS_ROTATE_BUTTON_CTX	Rotation	Rotate button from %	text	-	the warn %	now	applies by your next prompt	-	default	-	Context use from which the band above the prompt shows the rotate key, Ctrl+X 1.
-CS_ROTATE_NUDGE_CTX	Rotation	Rotation nudge %	text	-	65	now	applies when the next turn ends	-	default	-	Context use at which Claude suggests, once, writing a handoff and going on after /clear.
+CS_ROTATE_NUDGE_CTX	Rotation	Rotation nudge %	text	-	60	now	applies when the next turn ends	-	default	-	Context use at which Claude suggests, once, writing a handoff and going on after /clear.
 CS_ROTATE_FORCE_CTX	Rotation	Rotate on its own past %	text	-	80	now	applies by your next prompt	-	default	session line 4: CS_ROTATE_FORCE_CTX=101: not off, 0 or a percentage from 1 to 100	Context use past which cs rotates by itself after a 20 second countdown you can stop.
 CS_NO_ROTATION_WAKE	Rotation	Wake after /clear	flagoff	-	off	/clear	applies at the next /clear or launch	-	default	-	After /clear on a handoff, the fresh conversation starts its next step without you typing.
 CS_ROTATION_KICK_DELAY	Rotation	Wake delay (s)	text	-	2	now	applies at the next rotation	-	default	-	Seconds between tries to wake the fresh conversation after /clear; 0 tries once.

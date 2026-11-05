@@ -267,9 +267,9 @@ test_ctx_escalates_to_amber_then_red() {
     assert_output_contains "$c" "38;2;215;0;21" "85% context renders red" || return 1
 }
 
-# The row's crit default is the bar's. Only readings either side of the cut
-# point tell 60 apart from 59 or 61, and only an exact multiple of the window
-# keeps jq's floor out of it.
+# The row's crit default is the bar's, so red starts where the rotation nudge
+# does. Only readings either side of the cut point tell 60 apart from 59 or 61,
+# and only an exact multiple of the window keeps jq's floor out of it.
 test_ctx_crit_edge_matches_the_bar() {
     export COLORTERM=truecolor CS_TERM_THEME=light
     local fx out c

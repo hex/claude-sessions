@@ -263,7 +263,7 @@ export CS_SUBAGENT_STATUSLINE_DISABLE="1"
 
 # Context tiers in the Stop hook: one-time warning band start, rotation nudge
 export CS_CTX_WARN_CTX="40"
-export CS_ROTATE_NUDGE_CTX="65"
+export CS_ROTATE_NUDGE_CTX="60"
 
 # Seconds, counted from its start, that the async Stop hook (stop-notices.sh)
 # waits for the other Stop hook's verdict once that verdict reads pending; a
@@ -490,7 +490,7 @@ stays with its session.
 | `CS_CLARIFY_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
 | `CS_NARRATIVE_PROMPT_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
 | `CS_CTX_WARN_CTX` | a whole number of 1 to 3 digits | 40 | when the next turn ends |
-| `CS_ROTATE_NUDGE_CTX` | a whole number of 1 to 3 digits | 65 | when the next turn ends |
+| `CS_ROTATE_NUDGE_CTX` | a whole number of 1 to 3 digits | 60 | when the next turn ends |
 | `CS_QUEUE_MAX_FAILURES` | a whole number of 1 to 3 digits | 5 | when the next turn ends |
 | `CS_QUEUE_MAX_CTX` | a whole number of 1 to 3 digits | 85 | when the next turn ends |
 | `CS_QUEUE_MAX_5H` | a whole number of 1 to 3 digits | 85 | when the next turn ends |

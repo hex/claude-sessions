@@ -352,7 +352,7 @@ const GOLDEN_AT_58 = [
   group('Rotation'),
   at58('Context warning %', '40%'),
   at58('Rotate button from %', 'the warn %'),
-  at58('Rotation nudge %', '65%'),
+  at58('Rotation nudge %', '60%'),
   at58('Rotate on its own past %', '80%'),
   at58('Wake after /clear', '● on'),
   at58('Wake delay (s)', '2'),

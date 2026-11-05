@@ -2133,8 +2133,8 @@ _warning_text() {  # reading, nudge threshold
 test_nudge_fires_once_at_threshold() {
     _rot_hook_session "rot-nudge"
     local out
-    out=$(_stop_with_ctx 65 "$UUID_A") || return 1
-    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" \
+    out=$(_stop_with_ctx 60 "$UUID_A") || return 1
+    assert_eq "$(_nudge_text 60)" "$(stop_notice_text "$out")" \
         "the nudge names the reading and the rotate skill, as additionalContext" || return 1
     assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" | tr -d '[:space:]')" \
         "cursor records the nudged conversation" || return 1
@@ -2153,8 +2153,8 @@ test_nudge_rearms_for_new_conversation() {
 test_nudge_silent_below_threshold_and_without_signal() {
     _rot_hook_session "rot-nudge-quiet"
     local out
-    out=$(_stop_with_ctx 64 "$UUID_A") || return 1
-    assert_eq "$(_warning_text 64 65)" "$(stop_notice_text "$out")" "64 warns and does not nudge at the default threshold" || return 1
+    out=$(_stop_with_ctx 59 "$UUID_A") || return 1
+    assert_eq "$(_warning_text 59 60)" "$(stop_notice_text "$out")" "59 warns and does not nudge at the default threshold" || return 1
     out=$(_stop_with_ctx "" "$UUID_A") || return 1
     assert_eq "" "$out" "missing context-pct must never nudge" || return 1
     out=$(_stop_with_ctx "hot" "$UUID_A") || return 1
@@ -2178,22 +2178,22 @@ test_nudge_threshold_override() {
     # below 80, including the 80 this branch replaced.
     _rot_hook_session "rot-nudge-env2"
     export CS_ROTATE_NUDGE_CTX=banana
-    out=$(_stop_with_ctx 65 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
-    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "non-numeric override falls back to 65" || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    out=$(_stop_with_ctx 60 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    assert_eq "$(_nudge_text 60)" "$(stop_notice_text "$out")" "non-numeric override falls back to 60" || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     _rot_hook_session "rot-nudge-env3"
-    out=$(_stop_with_ctx 64 "$UUID_A") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    out=$(_stop_with_ctx 59 "$UUID_A") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     unset CS_ROTATE_NUDGE_CTX
     if grep -q "rotate skill" <<< "$out"; then
-        echo "  FAIL: 64 under the 65 fallback must not nudge"
+        echo "  FAIL: 59 under the 60 fallback must not nudge"
         return 1
     fi
     # Twenty digits wrap past 64 bits to a huge positive number, which would
     # silence the nudge for good; the override must fall back instead.
     _rot_hook_session "rot-nudge-env4"
     export CS_ROTATE_NUDGE_CTX=99999999999999999999
-    out=$(_stop_with_ctx 65 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    out=$(_stop_with_ctx 60 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     unset CS_ROTATE_NUDGE_CTX
-    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "a 64-bit-overflowing override falls back to 65" || return 1
+    assert_eq "$(_nudge_text 60)" "$(stop_notice_text "$out")" "a 64-bit-overflowing override falls back to 60" || return 1
 }
 
 # The two Stop hooks run side by side: stop-blocks.sh drains, and
@@ -2461,7 +2461,7 @@ test_ctx_warning_fires_once_in_band() {
     _rot_hook_session "rot-warn"
     local out
     out=$(_stop_with_ctx 40 "$UUID_A") || return 1
-    assert_eq "$(_warning_text 40 65)" "$(stop_notice_text "$out")" \
+    assert_eq "$(_warning_text 40 60)" "$(stop_notice_text "$out")" \
         "the warning names the reading and promises the nudge at its real threshold, as additionalContext" || return 1
     assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/ctx-warned" | tr -d '[:space:]')" \
         "cursor records the warned conversation" || return 1
@@ -2471,10 +2471,10 @@ test_ctx_warning_fires_once_in_band() {
 
 test_ctx_warning_rearms_for_new_conversation() {
     _rot_hook_session "rot-warn-rearm"
-    _stop_with_ctx 60 "$UUID_A" >/dev/null || return 1
+    _stop_with_ctx 55 "$UUID_A" >/dev/null || return 1
     local out
-    out=$(_stop_with_ctx 60 "$UUID_B") || return 1
-    assert_eq "$(_warning_text 60 65)" "$(stop_notice_text "$out")" "new conversation UUID re-arms the warning" || return 1
+    out=$(_stop_with_ctx 55 "$UUID_B") || return 1
+    assert_eq "$(_warning_text 55 60)" "$(stop_notice_text "$out")" "new conversation UUID re-arms the warning" || return 1
 }
 
 test_ctx_warning_silent_below_band() {
@@ -2501,19 +2501,19 @@ test_ctx_warning_threshold_override() {
     assert_eq "" "$out" "45 under a 50 override must not warn" || { unset CS_CTX_WARN_CTX; return 1; }
     out=$(_stop_with_ctx 50 "$UUID_A") || { unset CS_CTX_WARN_CTX; return 1; }
     unset CS_CTX_WARN_CTX
-    assert_eq "$(_warning_text 50 65)" "$(stop_notice_text "$out")" "50 at a 50 override warns" || return 1
+    assert_eq "$(_warning_text 50 60)" "$(stop_notice_text "$out")" "50 at a 50 override warns" || return 1
     _rot_hook_session "rot-warn-env2"
     export CS_CTX_WARN_CTX=banana
     out=$(_stop_with_ctx 40 "$UUID_B") || { unset CS_CTX_WARN_CTX; return 1; }
     unset CS_CTX_WARN_CTX
-    assert_eq "$(_warning_text 40 65)" "$(stop_notice_text "$out")" "non-numeric override falls back to 40" || return 1
+    assert_eq "$(_warning_text 40 60)" "$(stop_notice_text "$out")" "non-numeric override falls back to 40" || return 1
 }
 
 test_ctx_warning_escalates_to_nudge_same_conversation() {
     _rot_hook_session "rot-warn-escalate"
     local out
-    out=$(_stop_with_ctx 60 "$UUID_A") || return 1
-    assert_eq "$(_warning_text 60 65)" "$(stop_notice_text "$out")" "warning fires first at 60" || return 1
+    out=$(_stop_with_ctx 55 "$UUID_A") || return 1
+    assert_eq "$(_warning_text 55 60)" "$(stop_notice_text "$out")" "warning fires first at 55" || return 1
     out=$(_stop_with_ctx 80 "$UUID_A") || return 1
     assert_eq "$(_nudge_text 80)" "$(stop_notice_text "$out")" "the 80 reading belongs to the nudge alone" || return 1
 }
@@ -2521,12 +2521,12 @@ test_ctx_warning_escalates_to_nudge_same_conversation() {
 test_ctx_warning_band_edges() {
     _rot_hook_session "rot-warn-edges"
     local out
-    out=$(_stop_with_ctx 64 "$UUID_A") || return 1
-    assert_eq "$(_warning_text 64 65)" "$(stop_notice_text "$out")" "64 is inside the band" || return 1
-    _rot_hook_session "rot-warn-edge65"
-    out=$(_stop_with_ctx 65 "$UUID_B") || return 1
-    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "the nudge owns exactly 65 under defaults" || return 1
-    out=$(_stop_with_ctx 65 "$UUID_B") || return 1
+    out=$(_stop_with_ctx 59 "$UUID_A") || return 1
+    assert_eq "$(_warning_text 59 60)" "$(stop_notice_text "$out")" "59 is inside the band" || return 1
+    _rot_hook_session "rot-warn-edge60"
+    out=$(_stop_with_ctx 60 "$UUID_B") || return 1
+    assert_eq "$(_nudge_text 60)" "$(stop_notice_text "$out")" "the nudge owns exactly 60 under defaults" || return 1
+    out=$(_stop_with_ctx 60 "$UUID_B") || return 1
     assert_eq "" "$out" "exactly the nudge threshold is outside the band even when the nudge is spent" || return 1
 }
 
@@ -2538,10 +2538,10 @@ test_ctx_warning_band_edges() {
 # may cancel another's.
 test_ctx_warning_survives_an_interleaved_teammate() {
     _rot_hook_session "rot-warn-teammate"
-    _stop_with_ctx 60 "$UUID_A" >/dev/null || return 1
-    _stop_with_ctx 60 "$UUID_B" >/dev/null || return 1
+    _stop_with_ctx 55 "$UUID_A" >/dev/null || return 1
+    _stop_with_ctx 55 "$UUID_B" >/dev/null || return 1
     local out
-    out=$(_stop_with_ctx 60 "$UUID_A") || return 1
+    out=$(_stop_with_ctx 55 "$UUID_A") || return 1
     assert_eq "" "$out" "a teammate's warning must not re-arm the lead's" || return 1
     out=$(_stop_with_ctx 85 "$UUID_A") || return 1
     assert_eq "$(_nudge_text 85)" "$(stop_notice_text "$out")" "the nudge still fires once for A" || return 1
@@ -2564,7 +2564,7 @@ _stop_with_ctx_as_teammate() {  # ctx-pct, session_id
 test_ctx_tiers_are_silent_for_a_teammate() {
     _rot_hook_session "rot-ctx-teammate"
     local out
-    out=$(_stop_with_ctx_as_teammate 64 "$UUID_B") || return 1
+    out=$(_stop_with_ctx_as_teammate 59 "$UUID_B") || return 1
     assert_eq "" "$out" "a teammate must not be warned with the lead's reading" || return 1
     if grep -qx "$UUID_B" "$CLAUDE_SESSION_META_DIR/local/ctx-warned" 2>/dev/null; then
         echo "  FAIL: a teammate must not spend a warning cursor on the lead's reading"
@@ -2573,8 +2573,8 @@ test_ctx_tiers_are_silent_for_a_teammate() {
     out=$(_stop_with_ctx_as_teammate 85 "$UUID_B") || return 1
     assert_eq "" "$out" "a teammate must not be nudged to rotate on the lead's reading" || return 1
     # The lead, same directory, same reading: the notice is its.
-    out=$(_stop_with_ctx 64 "$UUID_A") || return 1
-    assert_eq "$(_warning_text 64 65)" "$(stop_notice_text "$out")" "the lead is still warned" || return 1
+    out=$(_stop_with_ctx 59 "$UUID_A") || return 1
+    assert_eq "$(_warning_text 59 60)" "$(stop_notice_text "$out")" "the lead is still warned" || return 1
 }
 
 # Forced rotation ships on. A machine that has not been told so gets one
@@ -2751,9 +2751,9 @@ test_ctx_warning_is_repeated_once_when_the_transcript_does_not_record_it() {
     local t="$TEST_TMPDIR/transcript.jsonl" out
     : > "$t"
     out=$(_stop_with_ctx_and_transcript 40 "$UUID_A" "$t") || return 1
-    assert_eq "$(_warning_text 40 65)" "$(stop_notice_text "$out")" "the first warning goes out" || return 1
+    assert_eq "$(_warning_text 40 60)" "$(stop_notice_text "$out")" "the first warning goes out" || return 1
     out=$(_stop_with_ctx_and_transcript 45 "$UUID_A" "$t") || return 1
-    assert_eq "$(_warning_text 45 65)" "$(stop_notice_text "$out")" "an unrecorded warning is repeated once" || return 1
+    assert_eq "$(_warning_text 45 60)" "$(stop_notice_text "$out")" "an unrecorded warning is repeated once" || return 1
     assert_eq "$UUID_A
 $UUID_A again" "$(cat "$CLAUDE_SESSION_META_DIR/local/ctx-warned")" "the cursor records the repeat" || return 1
     out=$(_stop_with_ctx_and_transcript 50 "$UUID_A" "$t") || return 1

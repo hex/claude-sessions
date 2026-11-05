@@ -98,7 +98,7 @@ export const PRESSED = '.cs/local/cs.pressed'
 // prompt stops it.
 export const GRACE_SECONDS = 20
 // The percentage a turn must end past for the mod to rotate on its own. Above
-// the 65% nudge, so the ladder stays suggest -> offer -> force, and below where
+// the 60% nudge, so the ladder stays suggest -> offer -> force, and below where
 // Claude Code's own auto-compact lands, so a handoff is written while the
 // conversation is still whole.
 export const FORCE_DEFAULT = 80
