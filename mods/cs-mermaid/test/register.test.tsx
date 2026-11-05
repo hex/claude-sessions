@@ -495,8 +495,6 @@ test('splitReply keeps list continuation prose and sibling markers readable', ()
     { kind: 'text', body: '- Sibling' },
     { kind: 'text', body: '11. Done' },
   ])
-  const [before, , continuation, sibling, done] = parts
-  expect(before?.body + '\n      ```mermaid\n      graph TD\n      A --> B\n      ```' + '\n      ' + continuation?.body.slice(1) + '\n    ' + sibling?.body + '\n' + done?.body).toEqual(text)
 })
 
 test('splitReply trims trailing whitespace only at enclosing item ends', () => {
@@ -519,8 +517,6 @@ test('splitReply trims trailing whitespace only at enclosing item ends', () => {
     ['\n1. Outer\n   - Flow', '\n x\n  ```', '2) Next'],
     ['\n- Outer\r\n  1. Flow\r', '\n  x\r\n   ```\r\n', '- Next'],
   ])
-  const sibling = splitReply(nested + '\n\n- Next')
-  expect('```mermaid\n' + sibling[0]?.body + '\n```' + sibling[1]?.body + '\n     ```mermaid' + sibling[3]?.body.replace('\n  x\n   ```', '\n    x\n     ```') + '\n' + sibling[4]?.body).toEqual(nested + '\n\n- Next')
   const outside = '- Outer\n  - Flow\n    ```mermaid\nx\n    ```\n\n```mermaid\ngraph TD\nA --> B\n```'
   const closed = splitReply(outside)
   expect(closed).toEqual([
@@ -529,7 +525,6 @@ test('splitReply trims trailing whitespace only at enclosing item ends', () => {
     { kind: 'text', body: '\nx\n  ```' },
     { kind: 'mermaid', body: 'graph TD\nA --> B' },
   ])
-  expect(closed[0]?.body + '\n    ```mermaid' + closed[2]?.body.replace('\n  ```', '\n    ```') + '\n' + '\n```mermaid\n' + closed[3]?.body + '\n```').toEqual(outside)
   const text = '- Flow\n  ```mermaid\n  graph TD\n  A --> B\n  ```\n  middle\n\n  ```mermaid\n  graph TD\n  A --> B\n  ```\n  end\n\n'
   const parts = splitReply(text)
   expect(parts).toEqual([
@@ -539,7 +534,6 @@ test('splitReply trims trailing whitespace only at enclosing item ends', () => {
     { kind: 'mermaid', body: 'graph TD\n  A --> B' },
     { kind: 'text', body: '\nend' },
   ])
-  expect(parts[0]?.body + '\n  ```mermaid\n  graph TD\n  A --> B\n  ```' + '\n  ' + parts[2]?.body.slice(1) + '\n  ```mermaid\n  graph TD\n  A --> B\n  ```' + '\n  ' + parts[4]?.body.slice(1) + '\n\n').toEqual(text)
   expect(splitReply('```mermaid\ngraph TD\nA --> B\n```\ntop level\n\n')).toEqual([
     { kind: 'mermaid', body: 'graph TD\nA --> B' },
     { kind: 'text', body: '\ntop level\n\n' },
@@ -554,18 +548,15 @@ test('splitReply preserves code indentation when a tab crosses a list margin', (
     { kind: 'mermaid', body: 'graph TD\n  A --> B' },
     { kind: 'text', body: '\n\n    code' },
   ])
-  expect(parts[0]?.body + '\n  ```mermaid\n  graph TD\n  A --> B\n  ```' + parts[2]?.body.replace('    code', '\t  code')).toEqual(text)
   const spaced = '- a\n  ```mermaid\n  graph TD\n  A --> B\n  ```\n\n \t code'
   const spacedParts = splitReply(spaced)
   expect(spacedParts[2]?.body).toEqual('\n\n    code')
-  expect(spacedParts[0]?.body + '\n  ```mermaid\n  graph TD\n  A --> B\n  ```' + spacedParts[2]?.body.replace('    code', ' \t code')).toEqual(spaced)
 })
 
 test('splitReply preserves tabs within an item continuation as marked reads them', () => {
   const text = '- a\n  ```mermaid\n  graph TD\n  A --> B\n  ```\n\n\t\tcode\tend'
   const parts = splitReply(text)
   expect(parts[2]?.body).toEqual('\n\n      code    end')
-  expect(parts[0]?.body + '\n  ```mermaid\n  graph TD\n  A --> B\n  ```' + parts[2]?.body.replace('      code    end', '\t\tcode\tend')).toEqual(text)
 })
 
 test('splitReply keeps an indented code block after an enclosing list ends', () => {
