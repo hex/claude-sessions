@@ -34,6 +34,16 @@ test('a mermaid fence quoted in a three-backtick block stays source; one after a
   expect(fencesOf('```npm test``` runs it\n```mermaid\ngraph TD\nA --> B\n```')).toEqual(['graph TD\nA --> B'])
 })
 
+// A reply is scanned on every streaming flush, so one long line must not cost time quadratic in
+// its length: the check for a backtick after the opening run reads the line once.
+test('a line of 100k backticks then x` scans in under 200 ms, and the fence after it draws', () => {
+  const text = '`'.repeat(100_000) + 'x`\n```mermaid\ngraph TD\nA --> B\n```'
+  const started = Date.now()
+  const fences = fencesOf(text)
+  expect(Date.now() - started).toBeLessThan(200)
+  expect(fences).toEqual(['graph TD\nA --> B'])
+})
+
 // CommonMark: a fence may be indented up to three spaces; four, or a tab (which reaches the
 // next multiple of four), makes an indented code block, so the fence stays source.
 test('a fence indented four spaces or a tab is an indented code block, not a chart', () => {
