@@ -1,8 +1,8 @@
 // ABOUTME: Engine test-kit tests for the cs-mermaid register module: inline drawing, the fallback to source, fit and palette helpers.
 // ABOUTME: Also pins the drawDiagrams option, which turns off the drawing.
-import { test, expect } from 'claude-code/testing'
+import { test, expect, mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { ConfigRow, On } from 'claude-code'
 
 import { Drawing, OPTION, blockRows, drawFence, fencesOf, fillFor, fit, fitSource, labelColor, paletteFor, roleOf, splitReply } from '../hooks/register'
 import { parse } from '../hooks/parse'
@@ -42,6 +42,7 @@ function engine(on: On, seen: { text: string; isFirstOfReply: boolean }[]) {
 
 test('a reply with a fence hands its prose to the engine and draws the chart as blocks, with no fence left', async ($, on) => {
   on('config.list', () => ({ value: [] }))
+  mock.env(on, {})
   const seen: { text: string; isFirstOfReply: boolean }[] = []
   engine(on, seen)
   const reply = await $.ui.mount({ plugin: 'cs-mermaid', surface: 'terminal', component: 'AssistantMessage', props: { text: TEXT, isFirstOfReply: true } })
@@ -63,6 +64,7 @@ test('a reply with a fence hands its prose to the engine and draws the chart as 
 
 test('a reply that opens with a fence gives the bullet to no prose part', async ($, on) => {
   on('config.list', () => ({ value: [] }))
+  mock.env(on, {})
   const seen: { text: string; isFirstOfReply: boolean }[] = []
   engine(on, seen)
   const text = '```mermaid\ngraph TD\n  A --> B\n```\nafter'
@@ -73,6 +75,7 @@ test('a reply that opens with a fence gives the bullet to no prose part', async 
 
 test('an unsupported chart stays a fence with the reason under it', async ($, on) => {
   on('config.list', () => ({ value: [] }))
+  mock.env(on, {})
   on('ui.render', { component: 'AssistantMessage' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine drew it</Text>
@@ -89,6 +92,7 @@ test('an unsupported chart stays a fence with the reason under it', async ($, on
 
 test('with drawDiagrams off, a reply with a fence is left to the engine', { options: { [OPTION]: false } }, async ($, on) => {
   on('config.list', () => ({ value: [] }))
+  mock.env(on, {})
   on('ui.render', { component: 'AssistantMessage' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
     return <Text>engine drew it</Text>
@@ -147,7 +151,35 @@ test('the palette follows the theme row', () => {
   expect(paletteFor('dark').fill).toBe('#3B3F6B')
   expect(paletteFor('dark-daltonized').fill).toBe('#3B3F6B')
   expect(paletteFor('light').fill).toBe('#ECECFF')
+  expect(paletteFor('light-ansi').fill).toBe('#ECECFF')
   expect(paletteFor(undefined).fill).toBe('#ECECFF')
+})
+
+// Claude Code's `auto` theme names no polarity, and the engine exposes none: cs's own
+// reading of the terminal decides, its theme first, then the measured background.
+test('a theme row that names no polarity falls to the terminal cs measured', () => {
+  expect(paletteFor('auto', { theme: 'dark' }).fill).toBe('#3B3F6B')
+  expect(paletteFor('auto', { theme: 'light' }).fill).toBe('#ECECFF')
+  expect(paletteFor('auto', { bg: '40;44;52' }).fill).toBe('#3B3F6B')
+  expect(paletteFor('auto', { bg: '252;247;229' }).fill).toBe('#ECECFF')
+  // The theme cs read wins over its background measurement; the theme row wins over both.
+  expect(paletteFor('auto', { theme: 'light', bg: '0;0;0' }).fill).toBe('#ECECFF')
+  expect(paletteFor('light', { theme: 'dark', bg: '0;0;0' }).fill).toBe('#ECECFF')
+  // A background that is not three channels is no measurement.
+  expect(paletteFor('auto', { bg: 'default' }).fill).toBe('#ECECFF')
+  expect(paletteFor(undefined, {}).fill).toBe('#ECECFF')
+})
+
+const THEME_ROW = (value: string): ConfigRow => ({ key: 'theme', label: 'Theme', kind: 'choice', value, options: ['auto', 'dark', 'light'], provider: { plugin: 'engine', tier: 'core' }, isLocked: false })
+
+test('a reply under the auto theme on a dark terminal draws the dark palette', async ($, on) => {
+  on('config.list', () => ({ value: [THEME_ROW('auto')] }))
+  mock.env(on, { CS_TERM_THEME: 'dark' })
+  engine(on, [])
+  const reply = await $.ui.mount({ plugin: 'cs-mermaid', surface: 'terminal', component: 'AssistantMessage', props: { text: TEXT, isFirstOfReply: true } })
+  expect((await reply.find({ type: 'Text', text: 'prompt' }))?.props.backgroundColor).toBe('#1F4D2B')
+  expect((await reply.find({ type: 'Text', text: 'no' }))?.props.color).toBe('#FF8787')
+  await reply.unmount()
 })
 
 test('blockRows pads full-width rows with the label centred, measured in cells', () => {
@@ -187,6 +219,7 @@ async function sameAsExports($: Engine, source: string) {
 test('a chart the mod draws is the tree Drawing draws from the fitted chart', async ($, on) => {
   const source = 'graph TD\n  A[prompt] --> B{cached?}\n  B -->|no| C[render]'
   on('config.list', () => ({ value: [] }))
+  mock.env(on, {})
   on('ui.render', { component: 'Pane' }, ($, e) => {
     const elements = $.ui.resolve(e)
     const { Box } = elements
@@ -201,6 +234,7 @@ test('a chart the mod draws is the tree Drawing draws from the fitted chart', as
 test('a chart the parser refuses is the tree drawFence draws from its source and reason', async ($, on) => {
   const source = 'graph TD\n  subgraph S\n  A --> B\n  end'
   on('config.list', () => ({ value: [] }))
+  mock.env(on, {})
   on('ui.render', { component: 'Pane' }, ($, e) => {
     const elements = $.ui.resolve(e)
     const { Box } = elements
