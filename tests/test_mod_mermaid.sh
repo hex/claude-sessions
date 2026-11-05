@@ -60,8 +60,9 @@ test_mod_unit_tests_pass_under_the_engine_test_kit() {
 # measure over every code point and the emoji sequences, under a bun of the version claude embeds.
 test_mod_cell_measure_agrees_with_the_engine_measure() {
     require_tool bun claude || return $?
-    local engine_bun oracle_bun
-    engine_bun="$(LC_ALL=C grep -a -o -m1 'Bun v[0-9][0-9.]*' "$(command -v claude)" || true)"
+    local engine_bun oracle_bun claude_bin
+    claude_bin="$(command -v claude)"
+    engine_bun="$(LC_ALL=C grep -a -o -m1 'Bun v[0-9][0-9.]*' "$claude_bin" || true)"
     oracle_bun="Bun v$(bun --version)"
     if [ "$engine_bun" != "$oracle_bun" ]; then
         echo "    SKIP: claude embeds ${engine_bun:-no Bun}, the bun on PATH is $oracle_bun; the census needs the engine's own measure"
