@@ -109,6 +109,26 @@ _resume_context_pct() {  # session_dir
     printf '%s' "$v"
 }
 
+# Where a context reading sits against the status line's own thresholds,
+# CS_STATUSLINE_CTX_WARN and CS_STATUSLINE_CTX_CRIT: crit, warn, or none, and
+# none for no reading. Each knob parses as the bar's _num_or does, one to three
+# digits or else the default, so a crit of 101 never fires here either. KEEP
+# IN SYNC with the defaults in _seg_ctx (bin/cs-statusline).
+_resume_context_heat() {  # pct
+    local warn=40 crit=60
+    case "${CS_STATUSLINE_CTX_WARN:-}" in ''|*[!0-9]*|????*) ;; *) warn="$CS_STATUSLINE_CTX_WARN" ;; esac
+    case "${CS_STATUSLINE_CTX_CRIT:-}" in ''|*[!0-9]*|????*) ;; *) crit="$CS_STATUSLINE_CTX_CRIT" ;; esac
+    if [ -z "$1" ]; then
+        echo none
+    elif [ "$1" -ge "$crit" ]; then
+        echo crit
+    elif [ "$1" -ge "$warn" ]; then
+        echo warn
+    else
+        echo none
+    fi
+}
+
 # Drop a rotation marker the user declined to consume. Armed by the rotate
 # skill for a /clear, or by an earlier r, it must not outlive the answer: left
 # in place it would be consumed by an unrelated /clear hours later, injecting a
@@ -711,6 +731,14 @@ launch_claude_code() {
         status_icon="↻"
         status_text="resuming"
     fi
+    # The last context reading in this session and where it sits against the
+    # status line's thresholds, read once for the card's context row and the
+    # resume ask. Only a conversation to resume has a figure to describe.
+    local ctx_pct="" ctx_heat=none
+    if [ "$status_text" = "resuming" ]; then
+        ctx_pct=$(_resume_context_pct "$session_dir")
+        ctx_heat=$(_resume_context_heat "$ctx_pct")
+    fi
 
     # Count secrets for this session
     local secret_count=0
@@ -751,12 +779,20 @@ launch_claude_code() {
         [ "$secret_count" -gt 1 ] && secret_word="secrets"
         _seg_secrets="${COMMENT}${ICON_LOCK}${NC} ${YELLOW}$secret_count${NC} ${COMMENT}$secret_word${NC}"
     fi
-    if [ "$status_text" = "resuming" ]; then
-        local _card_ctx=""
-        _card_ctx=$(_resume_context_pct "$session_dir")
-        if [ -n "$_card_ctx" ]; then
-            _seg_ctx="${COMMENT}${ICON_CTX}${NC} ${YELLOW}${_card_ctx}%${NC} ${COMMENT}context used${NC}"
-        fi
+    if [ -n "$ctx_pct" ]; then
+        # The figure in the status line's inks: bold amber from warn, and from
+        # crit the bar's inverted capsule, bold white on the crit red with a
+        # space each side. The spaces belong to the fill, so a card without
+        # colour reads the same at every level.
+        local _ctx_fig="" _pad=""
+        [ -z "$NC" ] || _pad=" "
+        case "$ctx_heat" in
+            none) _ctx_fig="${YELLOW}${ctx_pct}%${NC}" ;;
+            warn) _ctx_fig="${BOLD}${AMBER}${ctx_pct}%${NC}" ;;
+            crit) _ctx_fig="${BOLD}${CRIT_FILL}${_pad}${ctx_pct}%${_pad}${NC}" ;;
+            *) error "context heat '$ctx_heat' is not none, warn or crit" ;;
+        esac
+        _seg_ctx="${COMMENT}${ICON_CTX}${NC} ${_ctx_fig} ${COMMENT}context used${NC}"
     fi
     if [ -n "$_seg_secrets" ] || [ -n "$_seg_ctx" ]; then
         local _row="$_seg_secrets"

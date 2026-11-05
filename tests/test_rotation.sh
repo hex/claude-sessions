@@ -759,6 +759,37 @@ test_esc_at_continue_prompt_cancels_launch() {
     [ "$rc" -ne 0 ] || { echo "  FAIL: ESC cancel should exit non-zero"; return 1; }
 }
 
+# The card's figure wears the status line's inks: bold amber from warn, and
+# from crit the bar's inverted capsule, bold white on the crit red with a space
+# each side. Only a pty gets colour, and the theme is pinned because the inks
+# differ by theme. The pty answers the ask by itself, with the Enter _pty_run
+# types on Linux or the ^D script(1) sends at the end of a null stdin on macOS,
+# and either takes the default, so each launch runs on past the card.
+_pty_launch() {  # theme, session
+    ( export CS_TERM_THEME="$1" CS_NERD_FONTS=0
+      unset NO_COLOR CS_STATUSLINE_CTX_WARN CS_STATUSLINE_CTX_CRIT
+      _pty_run "$CS_BIN" "$2" 2>&1 ) | tr -d '\r'
+}
+
+test_card_paints_the_context_figure_in_the_status_lines_inks() {
+    _rot_session "rot-ink"
+    local dir="$CS_SESSIONS_ROOT/rot-ink" out
+    printf '50\n' > "$dir/.cs/local/context-pct"
+    out=$(_pty_launch light rot-ink) || true
+    grep -qF "$(printf '\033[1m\033[38;2;180;83;9m50%%\033[0m')" <<< "$out" \
+        || { echo "  FAIL: at warn on light the figure is bold amber 180;83;9"; return 1; }
+    out=$(_pty_launch dark rot-ink) || true
+    grep -qF "$(printf '\033[1m\033[38;2;251;191;36m50%%\033[0m')" <<< "$out" \
+        || { echo "  FAIL: at warn on dark the figure is bold amber 251;191;36"; return 1; }
+    printf '70\n' > "$dir/.cs/local/context-pct"
+    out=$(_pty_launch light rot-ink) || true
+    grep -qF "$(printf '\033[1m\033[48;2;215;0;21;38;2;255;255;255m 70%% \033[0m')" <<< "$out" \
+        || { echo "  FAIL: at crit on light the figure is bold white on 215;0;21 with a space each side"; return 1; }
+    out=$(_pty_launch dark rot-ink) || true
+    grep -qF "$(printf '\033[1m\033[48;2;255;69;58;38;2;255;255;255m 70%% \033[0m')" <<< "$out" \
+        || { echo "  FAIL: at crit on dark the figure is bold white on 255;69;58 with a space each side"; return 1; }
+}
+
 test_rotate_answer_consumes_pending_handoff() {
     _rot_session "rot-r"
     local dir="$CS_SESSIONS_ROOT/rot-r"
@@ -1224,6 +1255,7 @@ run_test test_resume_prompt_ignores_a_junk_context_stamp
 run_test test_resume_prompt_ignores_an_out_of_range_context_stamp
 run_test test_resume_prompt_reads_a_zero_padded_context_stamp
 run_test test_esc_at_continue_prompt_cancels_launch
+run_test test_card_paints_the_context_figure_in_the_status_lines_inks
 # r is only offered alongside a pending handoff. Pressed without one it falls
 # through to the resume default, which is a decline like any other.
 test_r_without_a_pending_handoff_disarms_the_marker() {
