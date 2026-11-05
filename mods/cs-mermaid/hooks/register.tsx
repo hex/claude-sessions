@@ -14,6 +14,8 @@ export const OPTION = 'drawDiagrams'
 // A mermaid fence opens and closes on its own line with exactly three backticks. A line of four
 // or more backticks, or of three tildes, opens an outer block that quotes what it holds, closed by
 // a line of the same mark at least as long; a fence inside one is quoted source, not a chart.
+// Any of these marks may be indented up to three columns (CommonMark); at four, or after a tab,
+// which reaches the next multiple of four, the line is an indented code block, not a fence.
 type Fence = { start: number; end: number; body: string }
 export function scanFences(text: string): Fence[] {
   const fences: Fence[] = []
@@ -22,8 +24,8 @@ export function scanFences(text: string): Fence[] {
   let at = 0
   for (const line of text.split('\n')) {
     const next = at + line.length + 1
-    const trimmed = line.trim()
-    const run = /^(`{3,}|~{3,})/.exec(trimmed)
+    const trimmed = fenceLine(line)
+    const run = trimmed === undefined ? null : /^(`{3,}|~{3,})/.exec(trimmed)
     if (run) {
       const mark = run[1]!
       if (outer) {
@@ -43,6 +45,19 @@ export function scanFences(text: string): Fence[] {
     at = next
   }
   return fences
+}
+
+// The line without its indentation and trailing blanks, or nothing when the indentation reaches
+// four columns.
+function fenceLine(line: string): string | undefined {
+  let columns = 0
+  let i = 0
+  for (; i < line.length && columns < 4; i++) {
+    if (line[i] === ' ') columns += 1
+    else if (line[i] === '\t') columns += 4 - (columns % 4)
+    else break
+  }
+  return columns >= 4 ? undefined : line.slice(i).trimEnd()
 }
 
 export function fencesOf(text: string): string[] {
