@@ -1072,16 +1072,27 @@ It hooks one event:
   ` ```mermaid ` fence goes to the engine untouched. A fence indented four or
   more columns (a tab counts to the next multiple of four) is an indented code
   block, as CommonMark reads it, and stays with the engine; one indented up to
-  three draws. A reply with a fence is split
+  three draws. Inside a list item the columns count from the item's content
+  column, past its `-`, `+`, `*`, `1.` or `1)` marker and the blanks after it:
+  a fence under `1. flow:` at four columns draws, and one four columns past the
+  item's content stays source. A line left of that column ends the item and
+  any fence open in it. A mermaid fence inside another code block (a
+  ` ```markdown ` or bare ` ``` ` one, four backticks or tildes) is that
+  block's text and stays source. A reply with a fence is split
   into prose, which goes back to the engine (so the reply keeps its opening
   bullet, on its first part only), and fences, each parsed (`hooks/parse.ts`) and
   laid out (`hooks/layout.ts`) in character cells; the last 32 layouts are
   kept, since a streaming reply re-renders on every flush. Nodes are solid
   blocks, three rows tall, taller or wider where more than one edge meets them,
   coloured by their role in the flow, in a light or dark palette: the `theme`
-  row of `/config` decides when it names `dark` or `light`; under `auto` the
+  row of `/config` decides for a built-in theme (`dark`, `light` and
+  their `-daltonized` and `-ansi` kinds); under `auto` or a `custom:` theme the
   terminal cs read decides, `CS_TERM_THEME` first, else the luminance of
-  `CS_TERM_BG_RGB`, else light. Every line and label colour reads at 4.5:1,
+  `CS_TERM_BG_RGB`, else light. Both come from the environment cs launched
+  claude with. A claude started outside cs has neither, and a teammate pane,
+  whose environment comes from tmux, can lack both: either draws light. A cs
+  config change or a terminal theme switch after launch shows from the next
+  launch. Every line and label colour reads at 4.5:1,
   with 0.1 to spare, on white, cream (252;247;229), Solarized Light
   (253;246;227) and 251;246;233 under the light palette and on black, #1C1C1E
   and #282C34 under the dark one, and every label on its fill. A decision (`{ }`, `{{ }}`, or any node with two
