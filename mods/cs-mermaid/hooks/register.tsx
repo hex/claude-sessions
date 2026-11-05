@@ -117,14 +117,14 @@ type Palette = { fill: string; decision: string; start: string; end: string; tex
 const LIGHT: Palette = { fill: '#ECECFF', decision: '#FFF3BF', start: '#D3F9D8', end: '#E9ECEF', text: '#1F1F1F', line: '#333333', good: '#277C38', bad: '#C92A2A' }
 const DARK: Palette = { fill: '#3B3F6B', decision: '#6B5A1E', start: '#1F4D2B', end: '#3A3D42', text: '#F2F2F2', line: '#D3D3D3', good: '#69DB7C', bad: '#FF8787' }
 
-// The theme row decides when it names a polarity (`dark`, `light-daltonized`). Claude Code's
-// `auto` names none and the engine exposes no resolved one, so the terminal cs read decides:
-// its theme, else its measured background's luminance (the pivot cs's own band uses), else light.
+// The theme row decides when it is a built-in theme, which names its polarity first (`dark`,
+// `light-daltonized`). Claude Code's `auto` and a `custom:<slug>` theme name none, and the engine
+// exposes no resolved one, so the terminal cs read decides: its theme, else its measured
+// background's luminance (the pivot cs's own band uses), else light.
 export function paletteFor(theme: unknown, terminal: { theme?: string; bg?: string } = {}): Palette {
-  if (typeof theme === 'string') {
-    if (theme.includes('dark')) return DARK
-    if (theme.includes('light')) return LIGHT
-  }
+  const polarity = typeof theme === 'string' ? /^(dark|light)(-|$)/.exec(theme)?.[1] : undefined
+  if (polarity === 'dark') return DARK
+  if (polarity === 'light') return LIGHT
   if (terminal.theme === 'dark') return DARK
   if (terminal.theme === 'light') return LIGHT
   const [r, g, b, ...more] = (terminal.bg ?? '').split(';').map(part => (/^\s*\d{1,3}\s*$/.test(part) ? Number(part) : NaN))
