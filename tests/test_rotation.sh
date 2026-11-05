@@ -765,8 +765,9 @@ _launch_at_default_thresholds() {  # session, answer
     CS_NERD_FONTS=0 CS_STATUSLINE_CTX_WARN='' CS_STATUSLINE_CTX_CRIT='' "$CS_BIN" "$1" <<< "$2" 2>&1
 }
 
-_crit_warning() {  # reading
-    printf '◱ The last context reading in this session was %s%%, so a fresh conversation is the default. Press y to resume.' "$1"
+_crit_warning() {  # reading, [the conversation Enter starts]
+    printf '◱ The last context reading in this session was %s%%, so %s is the default. Press y to resume.' \
+        "$1" "${2:-a fresh conversation}"
 }
 
 # From the status line's crit threshold (CS_STATUSLINE_CTX_CRIT, default 60)
@@ -836,33 +837,49 @@ test_crit_context_follows_the_status_line_knob() {
     assert_eq "1" "$(grep -cxF 'Continue previous conversation? [y/N] ' <<< "$output")" "a word falls back to the default 60" || return 1
 }
 
-# With a handoff pending at crit the same line sits above the menu, the
-# default moves from the resume row to the fresh row, and Enter starts fresh
-# with the handoff still waiting for later. r still starts from the handoff.
-test_handoff_menu_at_crit_context_defaults_to_fresh() {
+# With a handoff pending at crit the fresh conversation the default starts is
+# the one that picks up the handoff: the line above the menu says so, and the
+# default moves from the resume row to the r row. Enter, like a key the menu
+# does not offer, takes the r arm: it arms the marker with that handoff and
+# starts fresh. n still starts fresh with the handoff waiting for later.
+test_handoff_menu_at_crit_context_defaults_to_the_handoff() {
     _rot_session "rot-crit-menu"
-    local dir="$CS_SESSIONS_ROOT/rot-crit-menu" output rows warn_at menu_at
+    local dir="$CS_SESSIONS_ROOT/rot-crit-menu" output rows warn_at menu_at answer old new
     _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
     printf '70\n' > "$dir/.cs/local/context-pct"
-    output=$(_launch_at_default_thresholds rot-crit-menu "") || true
-    assert_eq "$(_crit_warning 70)" "$(grep -F 'last context reading' <<< "$output")" "the menu carries the warning" || return 1
-    warn_at=$(grep -nF 'last context reading' <<< "$output" | cut -d: -f1)
-    menu_at=$(grep -nF 'Rotation handoff pending:' <<< "$output" | cut -d: -f1)
-    [ "$warn_at" -lt "$menu_at" ] \
-        || { echo "  FAIL: the warning must sit above the menu (warning row $warn_at, menu row $menu_at)"; return 1; }
-    rows=$(printf '%s\n' "$output" | grep -E '^    [yrnd]  ')
-    assert_eq "    y  resume          continue the previous conversation
-    r  from handoff    fresh conversation that picks up the handoff
-    n  fresh           fresh conversation; the handoff waits for later · default
-    d  discard         retire the handoff, then resume" "$rows" "the default sits on the fresh row" || return 1
-    assert_output_contains "$output" "--session-id " "Enter starts a fresh conversation" || return 1
-    assert_output_not_contains "$output" "--resume" "Enter at 70% must not resume" || return 1
-    assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "^status: unconsumed$" "the handoff waits for later" || return 1
-    assert_not_exists "$dir/.cs/local/pending-handoff" "Enter arms no marker" || return 1
-    # r keeps its meaning while the handoff is offered.
-    output=$(_launch_at_default_thresholds rot-crit-menu r) || true
-    assert_eq "2026-07-16-test.md" "$(tr -d '[:space:]' < "$dir/.cs/local/pending-handoff")" \
-        "r at 70% arms the handoff" || return 1
+    for answer in "" x; do
+        rm -f "$dir/.cs/local/pending-handoff"
+        old=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+        output=$(_launch_at_default_thresholds rot-crit-menu "$answer") || true
+        assert_eq "$(_crit_warning 70 'a fresh conversation from the handoff')" "$(grep -F 'last context reading' <<< "$output")" \
+            "the menu carries the warning (answer '$answer')" || return 1
+        warn_at=$(grep -nF 'last context reading' <<< "$output" | cut -d: -f1)
+        menu_at=$(grep -nF 'Rotation handoff pending:' <<< "$output" | cut -d: -f1)
+        [ "$warn_at" -lt "$menu_at" ] \
+            || { echo "  FAIL: the warning must sit above the menu (warning row $warn_at, menu row $menu_at)"; return 1; }
+        rows=$(printf '%s\n' "$output" | grep -E '^    [yrnd]  ')
+        assert_eq "    y  resume          continue the previous conversation
+    r  from handoff    fresh conversation that picks up the handoff · default
+    n  fresh           fresh conversation; the handoff waits for later
+    d  discard         retire the handoff, then resume" "$rows" "the default sits on the r row (answer '$answer')" || return 1
+        assert_eq "2026-07-16-test.md" "$(tr -d '[:space:]' < "$dir/.cs/local/pending-handoff" 2>/dev/null)" \
+            "answer '$answer' at 70% arms the pending handoff" || return 1
+        new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+        [ "$new" != "$old" ] || { echo "  FAIL: answer '$answer' at 70% must rebind to a fresh conversation"; return 1; }
+        assert_output_contains "$output" "--session-id $new" "answer '$answer' at 70% starts a fresh conversation" || return 1
+        assert_output_not_contains "$output" "--resume" "answer '$answer' at 70% must not resume" || return 1
+        assert_eq "handoff 2026-07-16-test.md" \
+            "$(jq -r 'select(.event == "rotated") | "\(.reason) \(.handoff)"' "$dir/.cs/timeline.jsonl" | tail -1)" \
+            "answer '$answer' rotates from the handoff" || return 1
+    done
+    rm -f "$dir/.cs/local/pending-handoff"
+    output=$(_launch_at_default_thresholds rot-crit-menu n) || true
+    new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    assert_output_contains "$output" "--session-id $new" "n at 70% starts a fresh conversation" || return 1
+    assert_eq "declined-resume" "$(jq -r 'select(.event == "rotated") | .reason' "$dir/.cs/timeline.jsonl" | tail -1)" \
+        "n at 70% declines the resume rather than rotating from the handoff" || return 1
+    assert_not_exists "$dir/.cs/local/pending-handoff" "n at 70% arms no marker" || return 1
+    assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "^status: unconsumed$" "n at 70% leaves the handoff pending" || return 1
 }
 
 # A spawned launch is unattended and resumes at any reading: the fresh default
@@ -1386,7 +1403,7 @@ run_test test_enter_at_crit_context_starts_a_fresh_conversation
 run_test test_y_at_crit_context_resumes
 run_test test_crit_context_starts_at_the_status_lines_default_threshold
 run_test test_crit_context_follows_the_status_line_knob
-run_test test_handoff_menu_at_crit_context_defaults_to_fresh
+run_test test_handoff_menu_at_crit_context_defaults_to_the_handoff
 run_test test_spawned_launch_at_crit_context_still_resumes
 # r is only offered alongside a pending handoff. Pressed without one it falls
 # through to the resume default, which is a decline like any other.

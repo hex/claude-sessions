@@ -202,14 +202,14 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 | Launch answer | Result |
 |---|---|
 | `y` | Resumes the recorded conversation. |
-| Enter | Resumes the recorded conversation. At critical context, starts fresh. |
+| Enter | Resumes the recorded conversation. At critical context, starts fresh, from the handoff when one is pending. |
 | `r` | Starts from the handoff. |
 | `n` | Starts fresh. |
 | `d` | Discards the handoff, then resumes. |
 
 - Resume and fresh disarm the marker with a notice but leave the handoff pending.
 - The launch card shows the last context reading the statusline recorded in the session, when it recorded one. The figure is bold amber from `CS_STATUSLINE_CTX_WARN` (default 40) and white on red from `CS_STATUSLINE_CTX_CRIT` (default 60), as on the status line.
-- Context is critical at or above `CS_STATUSLINE_CTX_CRIT`. There the resume prompt defaults to a fresh conversation, and a bold red line above it gives the reading and says that `y` resumes. The plain prompt reads `[y/N]`, and the handoff menu marks `n` as the default. Enter and any key the prompt does not offer start fresh. A spawned launch still resumes.
+- Context is critical at or above `CS_STATUSLINE_CTX_CRIT`. There the resume prompt defaults to a fresh conversation, and a bold red line above it gives the reading and says that `y` resumes. The plain prompt reads `[y/N]`. With a handoff pending, the menu marks `r` as the default, so the fresh conversation picks up the handoff, and `n` still leaves the handoff for later. Enter and any key the prompt does not offer take the default. A spawned launch still resumes.
 - Cross-checkout handoffs carry a label and remain usable. Choosing one consumes it under the successor's identifier.
 - Names must contain only letters, digits, `._@-`, and at most 160 characters. cs skips invalid names with a notice.
 - A valid armed marker wins. Otherwise, the last unconsumed basename in lexical order wins.

@@ -16172,15 +16172,21 @@ EOF
         else
             # From the status line's crit threshold the ask defaults to a
             # fresh conversation: one line above it says so, and the default
-            # mark moves from resume to fresh. The status line stamps the
-            # figure per session, not per conversation, so the line calls it
-            # the last reading in this session and claims no more.
-            local _resume_default=' · default' _fresh_default='' _ask_keys='[Y/n]'
+            # mark moves off resume. With a handoff pending that conversation
+            # is the one that picks it up, r; without one it is n. The status
+            # line stamps the figure per session, not per conversation, so the
+            # line calls it the last reading in this session and claims no more.
+            local _resume_default=' · default' _handoff_default='' _ask_keys='[Y/n]'
+            local _crit_default=n _crit_start='a fresh conversation'
             if [ "$ctx_heat" = crit ]; then
-                printf "${BOLD}${CRIT}%s${NC}\n" "${ICON_CTX} The last context reading in this session was ${ctx_pct}%, so a fresh conversation is the default. Press y to resume."
                 _resume_default=''
-                _fresh_default=' · default'
                 _ask_keys="[y/${BOLD}N${NC}]"
+                if [ -n "$pending_handoff" ]; then
+                    _crit_default=r
+                    _crit_start='a fresh conversation from the handoff'
+                    _handoff_default=' · default'
+                fi
+                printf "${BOLD}${CRIT}%s${NC}\n" "${ICON_CTX} The last context reading in this session was ${ctx_pct}%, so ${_crit_start} is the default. Press y to resume."
             fi
             if [ -n "$pending_handoff" ]; then
                 # Answering blind is the hazard this label exists for: r arms
@@ -16198,8 +16204,8 @@ EOF
                 echo
                 if [ -n "$claude_session_id" ]; then
                     _resume_menu_row y "$GREEN" 'resume' "continue the previous conversation$_resume_default"
-                    _resume_menu_row r "$GOLD" 'from handoff' 'fresh conversation that picks up the handoff'
-                    _resume_menu_row n "$COMMENT" 'fresh' "fresh conversation; the handoff waits for later$_fresh_default"
+                    _resume_menu_row r "$GOLD" 'from handoff' "fresh conversation that picks up the handoff$_handoff_default"
+                    _resume_menu_row n "$COMMENT" 'fresh' 'fresh conversation; the handoff waits for later'
                     _resume_menu_row d "$ORANGE" 'discard' 'retire the handoff, then resume'
                 else
                     _resume_menu_row r "$GOLD" 'from handoff' 'fresh conversation that picks up the handoff'
@@ -16213,19 +16219,21 @@ EOF
             fi
             # Single keypress, no Enter needed (mirrors the collision menu).
             # ESC or EOF (piped close) cancels the launch; Enter takes the
-            # default: resume via the case's *) arm below, or at crit fresh
-            # via the n arm.
+            # default: resume via the case's *) arm below, or at crit a fresh
+            # conversation, via the r arm with a handoff pending and the n arm
+            # without one.
             IFS= read -rsn1 response || { echo; exit 130; }
             echo
             case "$response" in $'\e') exit 130 ;; esac
-            # At crit only y resumes. Enter and any key not offered go to the
-            # n arm, disarm included; r and d keep their meaning while a
+            # At crit only y resumes, and n starts fresh as it always does.
+            # Enter and any key not offered take the crit default, disarm
+            # included on the n arm; r and d keep their meaning while a
             # handoff is offered.
             if [ "$ctx_heat" = crit ]; then
                 case "$response" in
-                    [yY]) ;;
-                    [rRdD]) [ -n "$pending_handoff" ] || response=n ;;
-                    *) response=n ;;
+                    [yYnN]) ;;
+                    [rRdD]) [ -n "$pending_handoff" ] || response=$_crit_default ;;
+                    *) response=$_crit_default ;;
                 esac
             fi
         fi
