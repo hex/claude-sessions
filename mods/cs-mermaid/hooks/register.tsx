@@ -22,9 +22,11 @@ export const OPTION = 'drawDiagrams'
 // List items end where marked, which Claude Code reads a reply with, ends them; a block still open
 // in an item ends with it (CommonMark 4.5), and a mermaid fence ended so is a chart up to there.
 type Fence = { start: number; end: number; body: string; items: Item[] }
-// A list item open around the line being read: the column its content starts at, and whether a
-// blank line has come inside it (a marker with nothing after it counts as one, as marked reads it).
-type Item = { content: number; blank: boolean; end: number }
+// A list item open around the line being read: its content column and end, whether a blank line
+// has come inside it (a marker with nothing after it counts as one, as marked reads it), and whether
+// its previous line was a fence mark, heading, thematic break or indented code that prevents laziness.
+// The bullet character or ordered delimiter identifies siblings; only a final item trims all trailing whitespace.
+type Item = { content: number; blank: boolean; settled: boolean; end: number; listMark: string; lastInList: boolean }
 export function scanFences(text: string): Fence[] {
   const fences: Fence[] = []
   // The open list items, outermost first. A fenced block keeps how many were open when it opened
@@ -32,9 +34,6 @@ export function scanFences(text: string): Fence[] {
   const items: Item[] = []
   // The fenced block open on the line being read: a mermaid fence keeps where it and its body start.
   let block: { mark: string; length: number; depth: number; mermaid?: { start: number; bodyStart: number; items: Item[] } } | undefined
-  // Whether the line before was a fence mark, heading, thematic break or indented code, after which
-  // a line left of an item's content column ends the item rather than continuing it.
-  let settled = false
   // Whether the line before was a line of text in the innermost container. A line of only `-` or
   // `=` under one underlines it as a heading, and at a reply's top level only a bullet or `1.` or
   // `1)` with text after it starts a list item there (marked reads an item's text a line at a time,
@@ -44,7 +43,11 @@ export function scanFences(text: string): Fence[] {
   // one blank line, so a blank line next ends that item.
   let bare = false
   let at = 0
-  const closeItems = (depth: number) => {
+  const closeItems = (depth: number, sibling?: { listMark: string; column: number }) => {
+    // The closing depth always names an open item.
+    const item = items[depth]!
+    const container = depth > 0 ? items[depth - 1]!.content : 0
+    if (sibling && sibling.column >= container && sibling.column - container < 4 && sibling.listMark === item.listMark) item.lastInList = false
     for (const item of items.slice(depth)) item.end = at
     items.length = depth
     paragraph = false
@@ -55,7 +58,10 @@ export function scanFences(text: string): Fence[] {
   }
   for (const line of text.split('\n')) {
     const next = at + line.length + 1
-    const { column, offset, rest } = indentation(line, 0)
+    const { column: rawColumn, offset, rest } = indentation(line, 0)
+    const column = items.length ? indentation(line.replace(/\t/g, '    '), 0).column : rawColumn
+    const nextItem = listItem(rest, column)
+    const sibling = nextItem ? { listMark: nextItem.marker.slice(-1), column } : undefined
     if (rest === '') {
       if (bare) closeItems(items.length - 1)
       for (const item of items) item.blank = true
@@ -67,10 +73,17 @@ export function scanFences(text: string): Fence[] {
     // A line left of an item's content column is a lazy line, read as the item's content, unless it
     // starts a block of its own within three columns of the item's container, a blank line came
     // inside the item, or the line before settled; then it ends the item and every item inside it.
-    const outermost = items.findIndex(item => column < item.content)
-    const container = outermost > 0 ? items[outermost - 1]!.content : 0
-    const lazy: boolean = outermost !== -1 && !settled && !items.slice(outermost).some(item => item.blank) && !(column - container < 4 && startsBlock(rest))
-    if (outermost !== -1 && !lazy) closeItems(outermost)
+    let lazy = false
+    for (let depth = 0; depth < items.length; depth++) {
+      const item = items[depth]!
+      if (column >= item.content) continue
+      const container = depth > 0 ? items[depth - 1]!.content : 0
+      if (item.settled || item.blank || (column - container < 4 && startsBlock(rest))) {
+        closeItems(depth, sibling)
+        break
+      }
+      lazy = true
+    }
     const margin = items.length > 0 ? items[items.length - 1]!.content : 0
     // Four columns past the margin a line is indented code, which opens nothing; nor does a lazy line.
     const indented = column - margin >= 4
@@ -88,10 +101,10 @@ export function scanFences(text: string): Fence[] {
         block = undefined
       }
     } else if (!indented && !lazy) {
-      const item = listItem(rest, column)
+      const item = nextItem
       if (paragraph && /^(?:-+|=+)$/.test(rest)) underline = true
       else if (item && (items.length > 0 || !paragraph || (item.text !== '' && /^(?:[-+*]|1[.)])$/.test(item.marker)))) {
-        items.push({ content: item.content, blank: item.text === '', end: text.length })
+        items.push({ content: item.content, blank: item.text === '', settled: false, end: text.length, listMark: item.marker.slice(-1), lastInList: true })
         read = { indented: item.textColumn - item.content >= 4, text: item.text, start: read.start + item.textOffset }
         pushed = true
       }
@@ -104,7 +117,15 @@ export function scanFences(text: string): Fence[] {
         block = { mark: mark[0]!, length: mark.length, depth: items.length, mermaid }
       }
     }
-    settled = !lazy && (read.indented || /^(?:```|~~~|#)/.test(read.text) || THEMATIC.test(read.text))
+    // marked expands a continuation tab to four spaces before measuring each item's previous line.
+    const previousLine = line.replace(/\t/g, '    ')
+    for (let depth = 0; depth < items.length; depth++) {
+      const item = items[depth]!
+      const container = depth > 0 ? items[depth - 1]!.content : 0
+      const previous = pushed && depth === items.length - 1 ? { column: read.indented ? 4 : 0, rest: read.text } : indentation(previousLine.slice(item.content), 0)
+      const prefix = Math.min(3, item.content - container - 1)
+      item.settled = previous.column >= 4 || (previous.column <= prefix && (/^(?:```|~~~|#)/.test(previous.rest) || THEMATIC.test(previous.rest)))
+    }
     bare = pushed && read.text === ''
     // An indented line outside a block leaves `paragraph` as it was: its continuation, or code.
     if (block || mark || underline) paragraph = false
@@ -294,7 +315,7 @@ export function splitReply(text: string): { kind: 'text' | 'mermaid'; body: stri
       const line = text.slice(at, lineEnd)
       const ended = items.some(item => item.end === at)
       if (ended && body.trim()) {
-        parts.push({ kind: 'text', body })
+        parts.push({ kind: 'text', body: items.some(item => item.end === at && item.lastInList) ? body.trimEnd() : body.replace(/\r?\n$/, '') })
         body = ''
       }
       const margin = items.filter(item => at < item.end).at(-1)?.content ?? 0
@@ -309,6 +330,10 @@ export function splitReply(text: string): { kind: 'text' | 'mermaid'; body: stri
       body += column < margin ? line : ' '.repeat(column - margin) + (margin ? line.slice(offset).replace(/\t/g, '    ') : line.slice(offset))
       at = lineEnd
     }
+    // A fence owns its preceding newline, so its gap can stop one character before an item ends.
+    const ended = items.some(item => item.lastInList && (item.end === end || (item.end === end + 1 && text[end] === '\n')))
+    if (ended) body = body.trimEnd()
+    else if (items.some(item => item.end === end)) body = body.replace(/\r?\n$/, '')
     if (body.trim()) parts.push({ kind: 'text', body })
   }
   for (const fence of scanFences(text)) {

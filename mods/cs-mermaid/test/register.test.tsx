@@ -4,7 +4,7 @@ import { test, expect, mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { ConfigRow, On } from 'claude-code'
 
-import { Drawing, OPTION, blockRows, drawFence, drawPart, fencesOf, fillFor, fit, fitSource, labelColor, paletteFor, roleOf, splitReply } from '../hooks/register'
+import { Drawing, OPTION, blockRows, drawFence, drawPart, fencesOf, fillFor, fit, fitSource, labelColor, paletteFor, roleOf, scanFences, splitReply } from '../hooks/register'
 import { parse } from '../hooks/parse'
 
 const TEXT = ['Flow:', '', '```mermaid', 'graph TD', '  A[prompt] --> B{cached?}', '  B -->|no| C[render]', '```'].join('\n')
@@ -125,6 +125,45 @@ test('a list item takes its content column from its marker and the blanks after 
 test('a lazy line left of a list item keeps the item and the fence open in it', () => {
   expect(fencesOf('1. Flow:\n   ```mermaid\n   graph TD\nA --> B\n   ```\n\n2. Next:\n\n```mermaid\ngraph LR\nC --> D\n```')).toEqual(['graph TD\nA --> B', 'graph LR\nC --> D'])
   expect(fencesOf('- a\nprose\n    ```mermaid\n    graph TD\n    A --> B\n    ```')).toEqual(['graph TD\n    A --> B'])
+  const nested = [
+    '- Two things matter here.\n    ```mermaid\nx\n```mermaid\nB -->|yes| C[Run]\n```',
+    '- x\n  - x\n    ```mermaid\n      x\nx\n```',
+    '1. Two things matter here.\n   - Here is how the request flows:\n       ```mermaid\nx\n```',
+    '- x\n  - x\n    ```mermaid\nx\n```',
+    '- x\n  ```mermaid\n\t  x\nx\n```',
+    '- x\n  ```mermaid\n \t x\nx\n```',
+    '- x\n  - x\n    ```mermaid\n\t  x\nx\n```',
+    '- x\n   - x\n     ```mermaid\n \tx\nx\n     ```\n\n```mermaid\ngraph TD\nA-->B\n```',
+  ]
+  expect(nested.map(text => scanFences(text).map(fence => fence.body))).toEqual([
+    ['x', 'B -->|yes| C[Run]'], ['      x'], [''], [''],
+    ['\t  x'], [' \t x'], ['\t  x'],
+    [' \tx\nx', 'graph TD\nA-->B'],
+  ])
+  expect(nested.map(text => splitReply(text).filter(part => part.kind === 'mermaid').map(part => part.body))).toEqual([
+    ['x', 'B -->|yes| C[Run]'], ['x'], [''], [''],
+    ['x'], ['x'], ['x'],
+    ['x\nx', 'graph TD\nA-->B'],
+  ])
+  expect(nested.map(fencesOf)).toEqual([
+    ['x', 'B -->|yes| C[Run]'], ['x'], [], [],
+    ['x'], ['x'], ['x'],
+    ['x\nx', 'graph TD\nA-->B'],
+  ])
+  expect([
+    '- x\n   ```mermaid\nx\n```',
+    '- x\n    ```mermaid\nx\n```',
+    '1. x\n     ```mermaid\nx\n```',
+    '1. x\n      ```mermaid\nx\n```',
+  ].map(text => splitReply(text).filter(part => part.kind === 'mermaid').map(part => part.body))).toEqual([
+    [''], ['x'], [''], ['x'],
+  ])
+  for (const previous of ['# h', '***']) {
+    expect([
+      `- x\n   ${previous}\nx\n    \`\`\`mermaid\n    graph TD\n    A --> B\n    \`\`\``,
+      `- x\n    ${previous}\nx\n    \`\`\`mermaid\n    graph TD\n    A --> B\n    \`\`\``,
+    ].map(fencesOf)).toEqual([[], ['graph TD\n    A --> B']])
+  }
 })
 
 // CommonMark and marked read a fence opened on a list marker's own line as a fence in the item.
@@ -451,12 +490,59 @@ test('splitReply keeps list continuation prose and sibling markers readable', ()
   expect(parts).toEqual([
     { kind: 'text', body: '10. Outer\n    - Flow' },
     { kind: 'mermaid', body: 'graph TD\n      A --> B' },
-    { kind: 'text', body: '\nExplanation\n' },
-    { kind: 'text', body: '- Sibling\n' },
+    { kind: 'text', body: '\nExplanation' },
+    { kind: 'text', body: '- Sibling' },
     { kind: 'text', body: '11. Done' },
   ])
   const [before, , continuation, sibling, done] = parts
-  expect(before?.body + '\n      ```mermaid\n      graph TD\n      A --> B\n      ```' + '\n      ' + continuation?.body.slice(1) + '    ' + sibling?.body + done?.body).toEqual(text)
+  expect(before?.body + '\n      ```mermaid\n      graph TD\n      A --> B\n      ```' + '\n      ' + continuation?.body.slice(1) + '\n    ' + sibling?.body + '\n' + done?.body).toEqual(text)
+})
+
+test('splitReply trims trailing whitespace only at enclosing item ends', () => {
+  const nested = '```mermaid\ngraph TD\nA --> B\n```\n- Outer\n  1. Flow\n     ```mermaid\n    x\n     ```'
+  expect(['\n- Next', '\n', '\n \t'].map(ending => splitReply(nested + ending).filter(part => part.kind === 'text').map(part => part.body))).toEqual([
+    ['\n- Outer\n  1. Flow', '\n  x\n   ```', '- Next'],
+    ['\n- Outer\n  1. Flow', '\n  x\n   ```'],
+    ['\n- Outer\n  1. Flow', '\n  x\n   ```'],
+  ])
+  const ordered = '```mermaid\ngraph TD\nA --> B\n```\n1. Outer\n   - Flow\n     ```mermaid\n    x\n     ```'
+  expect([
+    nested + '\n\n- Next', nested + '\n\n* Next', nested + '\n\n',
+    ordered + '\n\n2. Next', ordered + '\n\n2) Next',
+    nested.replaceAll('\n', '\r\n') + '\r\n\r\n- Next',
+  ].map(text => splitReply(text).filter(part => part.kind === 'text').map(part => part.body))).toEqual([
+    ['\n- Outer\n  1. Flow', '\n  x\n   ```\n', '- Next'],
+    ['\n- Outer\n  1. Flow', '\n  x\n   ```', '* Next'],
+    ['\n- Outer\n  1. Flow', '\n  x\n   ```'],
+    ['\n1. Outer\n   - Flow', '\n x\n  ```\n', '2. Next'],
+    ['\n1. Outer\n   - Flow', '\n x\n  ```', '2) Next'],
+    ['\n- Outer\r\n  1. Flow\r', '\n  x\r\n   ```\r\n', '- Next'],
+  ])
+  const sibling = splitReply(nested + '\n\n- Next')
+  expect('```mermaid\n' + sibling[0]?.body + '\n```' + sibling[1]?.body + '\n     ```mermaid' + sibling[3]?.body.replace('\n  x\n   ```', '\n    x\n     ```') + '\n' + sibling[4]?.body).toEqual(nested + '\n\n- Next')
+  const outside = '- Outer\n  - Flow\n    ```mermaid\nx\n    ```\n\n```mermaid\ngraph TD\nA --> B\n```'
+  const closed = splitReply(outside)
+  expect(closed).toEqual([
+    { kind: 'text', body: '- Outer\n  - Flow' },
+    { kind: 'mermaid', body: '' },
+    { kind: 'text', body: '\nx\n  ```' },
+    { kind: 'mermaid', body: 'graph TD\nA --> B' },
+  ])
+  expect(closed[0]?.body + '\n    ```mermaid' + closed[2]?.body.replace('\n  ```', '\n    ```') + '\n' + '\n```mermaid\n' + closed[3]?.body + '\n```').toEqual(outside)
+  const text = '- Flow\n  ```mermaid\n  graph TD\n  A --> B\n  ```\n  middle\n\n  ```mermaid\n  graph TD\n  A --> B\n  ```\n  end\n\n'
+  const parts = splitReply(text)
+  expect(parts).toEqual([
+    { kind: 'text', body: '- Flow' },
+    { kind: 'mermaid', body: 'graph TD\n  A --> B' },
+    { kind: 'text', body: '\nmiddle\n' },
+    { kind: 'mermaid', body: 'graph TD\n  A --> B' },
+    { kind: 'text', body: '\nend' },
+  ])
+  expect(parts[0]?.body + '\n  ```mermaid\n  graph TD\n  A --> B\n  ```' + '\n  ' + parts[2]?.body.slice(1) + '\n  ```mermaid\n  graph TD\n  A --> B\n  ```' + '\n  ' + parts[4]?.body.slice(1) + '\n\n').toEqual(text)
+  expect(splitReply('```mermaid\ngraph TD\nA --> B\n```\ntop level\n\n')).toEqual([
+    { kind: 'mermaid', body: 'graph TD\nA --> B' },
+    { kind: 'text', body: '\ntop level\n\n' },
+  ])
 })
 
 test('splitReply preserves code indentation when a tab crosses a list margin', () => {
@@ -486,7 +572,7 @@ test('splitReply keeps an indented code block after an enclosing list ends', () 
   expect(splitReply(text)).toEqual([
     { kind: 'text', body: '1. a' },
     { kind: 'mermaid', body: 'graph TD\n     A --> B' },
-    { kind: 'text', body: '\n\n  - d\n' },
+    { kind: 'text', body: '\n\n  - d' },
     { kind: 'text', body: 'lazy\n\n     - code' },
   ])
 })

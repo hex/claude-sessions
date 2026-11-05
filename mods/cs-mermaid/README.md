@@ -12,6 +12,11 @@ chart stays in place.
 On a continuation that reaches the enclosing item's margin, `splitReply`
 expands each tab to four spaces before removing the indentation, as marked does.
 
+List continuation uses each enclosing item's own content column and previous
+line. An inner item can end while its parent remains open.
+At an enclosing item's end, `splitReply` removes its final line break. Only
+the last item in a list loses the remaining trailing whitespace, as marked does.
+
 Run the checks from the repository root:
 
 ```sh
