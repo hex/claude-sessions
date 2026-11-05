@@ -1308,8 +1308,7 @@ migrate_session() {
         _existing=$(_read_local_state "$_state" claude_session_id)
         _proj=$(_claude_project_dir "$session_dir")
 
-        if [ -n "$_existing" ] && { [ -f "$_proj/$_existing.jsonl" ] \
-            || _relocated_worktree_transcript "$session_dir" "$_existing" >/dev/null; }; then
+        if [ -n "$_existing" ] && _conversation_transcript "$session_dir" "$_existing" >/dev/null; then
             : # already bound — skip discovery entirely
         else
             local _discovered

@@ -9427,8 +9427,7 @@ migrate_session() {
         _existing=$(_read_local_state "$_state" claude_session_id)
         _proj=$(_claude_project_dir "$session_dir")
 
-        if [ -n "$_existing" ] && { [ -f "$_proj/$_existing.jsonl" ] \
-            || _relocated_worktree_transcript "$session_dir" "$_existing" >/dev/null; }; then
+        if [ -n "$_existing" ] && _conversation_transcript "$session_dir" "$_existing" >/dev/null; then
             : # already bound — skip discovery entirely
         else
             local _discovered
@@ -15958,9 +15957,10 @@ launch_claude_code() {
     # first reply has said nothing, and the stamp beside it is the one its
     # predecessor left. Claude Code writes the transcript with the first
     # prompt, before any reply, so what counts is an assistant record in it.
-    local ctx_pct="" ctx_heat=none
+    local ctx_pct="" ctx_heat=none _transcript
     if [ "$status_text" = "resuming" ] \
-        && grep -q -m1 '"type":"assistant"' "$(_claude_project_dir "$session_dir")/$claude_session_id.jsonl" 2>/dev/null; then
+        && _transcript=$(_conversation_transcript "$session_dir" "$claude_session_id") \
+        && grep -q -m1 '"type":"assistant"' "$_transcript" 2>/dev/null; then
         ctx_pct=$(_resume_context_pct "$session_dir")
         ctx_heat=$(_resume_context_heat "$ctx_pct")
     fi
@@ -16392,11 +16392,26 @@ _resume_lands_in_place() {  # session_dir, conversation id
     local file
     [ -f "$1/.cs/local/vault" ] && return 1
     [ -z "${CLAUDE_CONFIG_DIR+set}" ] || return 1
-    file="$(_claude_project_dir "$1")/$2.jsonl"
-    [ -f "$file" ] || file=$(_relocated_worktree_transcript "$1" "$2") || return 1
-    [ -f "$file" ] && command -v jq >/dev/null 2>&1 || return 1
+    file=$(_conversation_transcript "$1" "$2") || return 1
+    command -v jq >/dev/null 2>&1 || return 1
     jq -n -R -e 'first(inputs | fromjson? | objects | select(.type == "user")) | true' \
         "$file" >/dev/null 2>&1
+}
+
+# The transcript `claude --resume <id>` reads for a session's conversation:
+# the one in the session's project dir, else, once `claude --worktree` has
+# exited, the one it moved into the parent repo's (_relocated_worktree_transcript).
+# The launch card, the resume and migrate's Phase 8 binding all ask this, so
+# they agree on whether the conversation exists. Prints the path; fails when
+# there is none.
+_conversation_transcript() {  # session_dir, conversation id
+    local file
+    file="$(_claude_project_dir "$1")/$2.jsonl"
+    if [ -f "$file" ]; then
+        printf '%s\n' "$file"
+        return 0
+    fi
+    _relocated_worktree_transcript "$1" "$2"
 }
 
 # The transcript of a session's conversation once `claude --worktree` has
