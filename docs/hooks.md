@@ -1058,8 +1058,9 @@ checks the manifest and its `/config` field, the cache-name pin against
 
 `mods/cs-mermaid/` is a Claude Code function-hooks plugin, deployed and gated
 the same way as the `cs` mod: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, which every
-`cs <name>` launch exports and `CS_NO_FUNCTION_HOOKS=1` withholds. It reads no
-environment, writes no file and runs no process. Unlike the `cs` mod it needs no
+`cs <name>` launch exports and `CS_NO_FUNCTION_HOOKS=1` withholds. It reads two
+environment variables (`CS_TERM_THEME` and `CS_TERM_BG_RGB`, cs's reading of the
+terminal), writes no file and runs no process. Unlike the `cs` mod it needs no
 cs session: with function hooks on it draws in any directory. The flowchart
 instruction lives in a cs session's `CLAUDE.local.md`.
 
@@ -1068,14 +1069,20 @@ instruction lives in a cs session's `CLAUDE.local.md`.
 It hooks one event:
 
 - `ui.render` on `AssistantMessage` (terminal surface only). A reply with no
-  ` ```mermaid ` fence goes to the engine untouched. A reply with one is split
+  ` ```mermaid ` fence goes to the engine untouched. A fence indented four or
+  more columns (a tab counts to the next multiple of four) is an indented code
+  block, as CommonMark reads it, and stays with the engine; one indented up to
+  three draws. A reply with a fence is split
   into prose, which goes back to the engine (so the reply keeps its opening
   bullet, on its first part only), and fences, each parsed (`hooks/parse.ts`) and
   laid out (`hooks/layout.ts`) in character cells; the last 32 layouts are
   kept, since a streaming reply re-renders on every flush. Nodes are solid
   blocks, three rows tall, taller or wider where more than one edge meets them,
-  coloured by their role in the flow, in a light or dark palette from the
-  `theme` row of `/config`: a decision (`{ }`, `{{ }}`, or any node with two
+  coloured by their role in the flow, in a light or dark palette: the `theme`
+  row of `/config` decides when it names `dark` or `light`; under `auto` the
+  terminal cs read decides, `CS_TERM_THEME` first, else the luminance of
+  `CS_TERM_BG_RGB`, else light. Every line and label colour reads at 4.5:1 on
+  white, cream and the common dark backgrounds, and every label on its fill. A decision (`{ }`, `{{ }}`, or any node with two
   or more outgoing edges) amber, an end (a node edges arrive at and none leave, a
   `(( ))` circle included) grey, a start (a node edges leave and none arrive at,
   or any other `(( ))` circle) green, every other step lavender.
