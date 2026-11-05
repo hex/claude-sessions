@@ -1081,8 +1081,10 @@ It hooks one event:
   coloured by their role in the flow, in a light or dark palette: the `theme`
   row of `/config` decides when it names `dark` or `light`; under `auto` the
   terminal cs read decides, `CS_TERM_THEME` first, else the luminance of
-  `CS_TERM_BG_RGB`, else light. Every line and label colour reads at 4.5:1 on
-  white, cream and the common dark backgrounds, and every label on its fill. A decision (`{ }`, `{{ }}`, or any node with two
+  `CS_TERM_BG_RGB`, else light. Every line and label colour reads at 4.5:1,
+  with 0.1 to spare, on white, cream (252;247;229), Solarized Light
+  (253;246;227) and 251;246;233 under the light palette and on black, #1C1C1E
+  and #282C34 under the dark one, and every label on its fill. A decision (`{ }`, `{{ }}`, or any node with two
   or more outgoing edges) amber, an end (a node edges arrive at and none leave, a
   `(( ))` circle included) grey, a start (a node edges leave and none arrive at,
   or any other `(( ))` circle) green, every other step lavender.

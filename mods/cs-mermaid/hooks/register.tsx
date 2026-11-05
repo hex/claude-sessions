@@ -114,7 +114,7 @@ export function fit(graph: Graph, columns: number): Fitted {
 // or any node that branches) amber, a start (a circle, or a node nothing leads to) green, an
 // end (a node that leads nowhere) grey. A `style` or `classDef` fill wins over all of it.
 type Palette = { fill: string; decision: string; start: string; end: string; text: string; line: string; good: string; bad: string }
-const LIGHT: Palette = { fill: '#ECECFF', decision: '#FFF3BF', start: '#D3F9D8', end: '#E9ECEF', text: '#1F1F1F', line: '#333333', good: '#28823A', bad: '#C92A2A' }
+const LIGHT: Palette = { fill: '#ECECFF', decision: '#FFF3BF', start: '#D3F9D8', end: '#E9ECEF', text: '#1F1F1F', line: '#333333', good: '#277C38', bad: '#C92A2A' }
 const DARK: Palette = { fill: '#3B3F6B', decision: '#6B5A1E', start: '#1F4D2B', end: '#3A3D42', text: '#F2F2F2', line: '#D3D3D3', good: '#69DB7C', bad: '#FF8787' }
 
 // The theme row decides when it names a polarity (`dark`, `light-daltonized`). Claude Code's

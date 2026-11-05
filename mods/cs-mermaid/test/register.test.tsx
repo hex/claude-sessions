@@ -232,7 +232,7 @@ test('a node takes its role from its shape, else from its place in the flow; a s
 })
 
 test('a decision answer colours its label; other labels take the line colour', () => {
-  expect(labelColor('yes', paletteFor('light'))).toBe('#28823A')
+  expect(labelColor('yes', paletteFor('light'))).toBe('#277C38')
   expect(labelColor('Fail', paletteFor('light'))).toBe('#C92A2A')
   expect(labelColor('degraded', paletteFor('dark'))).toBe('#FF8787')
   expect(labelColor('retry later', paletteFor('light'))).toBe('#333333')
