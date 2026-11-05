@@ -5995,6 +5995,42 @@ EOF
 
 run_test test_finish_yields_to_an_explicit_rotation_choice
 
+test_finish_keeps_the_merge_when_enter_starts_fresh_at_crit_context() {
+    # At critical context Enter starts a fresh conversation. With a merge
+    # armed it is the n arm, which keeps the merge kick, even beside a handoff
+    # the recorded conversation wrote: only a typed r is the user choosing the
+    # handoff over the merge.
+    local base_dir uuid=00000000-0000-4000-8000-000000000000 proj output
+    base_dir=$(create_test_session_with_git "myproj")
+    cs_launch "myproj@fix-auth"
+    mkdir -p "$base_dir/.cs/local"
+    printf 'claude_session_id: %s\n' "$uuid" >> "$base_dir/.cs/local/state"
+    assert_eq "$uuid" "$(awk '/^claude_session_id:/ { print $2; exit }' "$base_dir/.cs/local/state")" \
+        "the base is bound to the conversation the handoff names" || return 1
+    mkdir -p "$base_dir/.cs/handoffs"
+    printf -- '---\nparent: %s\ncreated: 2026-07-16T10:00:00Z\npurpose: test rotation\nstatus: unconsumed\n---\n\n## 7. Next Step\nContinue the test.\n' \
+        "$uuid" > "$base_dir/.cs/handoffs/2026-07-16-test.md"
+    # The status line's stamp for a conversation that has replied: its
+    # transcript and the reading.
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$base_dir")"
+    mkdir -p "$proj"
+    printf '%s\n' '{"type":"user","message":{"role":"user","content":"hi"}}' \
+        '{"type":"assistant","message":{"role":"assistant","content":"hello"}}' > "$proj/$uuid.jsonl"
+    printf '70\n' > "$base_dir/.cs/local/context-pct"
+    output=$(CS_NERD_FONTS=0 CS_STATUSLINE_CTX_WARN='' CS_STATUSLINE_CTX_CRIT='' \
+        "$CS_BIN" "myproj" -finish "fix-auth" <<< "" 2>&1 || true)
+    assert_output_contains "$output" "◱ The last context reading in this session was 70%, so a fresh conversation is the default. Press y to resume." \
+        "the ask is at crit, with the plain fresh default" || return 1
+    assert_output_contains "$output" "n  fresh           fresh conversation; the handoff waits for later · default" \
+        "the default sits on the n row" || return 1
+    assert_output_contains "$output" "/finish fix-auth" "Enter at crit keeps the merge kick" || return 1
+    assert_output_not_contains "$output" "Rotation handoff takes this launch" "Enter at crit displaces no merge" || return 1
+    assert_file_not_exists "$base_dir/.cs/local/pending-handoff" "Enter at crit arms no handoff" || return 1
+    assert_file_contains "$base_dir/.cs/handoffs/2026-07-16-test.md" "^status: unconsumed$" "the handoff stays pending" || return 1
+}
+
+run_test test_finish_keeps_the_merge_when_enter_starts_fresh_at_crit_context
+
 test_features_table_says_one_file_not_one_files() {
     # The count comes from git, so 1 is an ordinary value. The TUI and this
     # table must word it identically or the same fact reads two ways.

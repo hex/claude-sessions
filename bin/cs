@@ -16190,10 +16190,12 @@ EOF
             # fresh conversation: one line above it says so, and the default
             # mark moves off resume. That conversation picks up a pending
             # handoff, r, only when the bound conversation wrote it, its
-            # parent: otherwise it is n and the handoff waits. One from another
-            # checkout, or an older one an earlier conversation here wrote, is
-            # the user's to choose: armed by a key they did not mean for it,
-            # SessionStart would mark it consumed. The status line stamps the
+            # parent, and no merge is armed: otherwise it is n and the handoff
+            # waits. One from another checkout, or an older one an earlier
+            # conversation here wrote, is the user's to choose: armed by a key
+            # they did not mean for it, SessionStart would mark it consumed.
+            # And r displaces the merge -finish armed for this launch, which
+            # only a typed r may do; n keeps it. The status line stamps the
             # figure per session, not per conversation, so the line calls it
             # the last reading in this session and claims no more.
             local _resume_default=' · default' _handoff_default='' _fresh_default='' _ask_keys='[Y/n]'
@@ -16201,7 +16203,7 @@ EOF
             if [ "$ctx_heat" = crit ]; then
                 _resume_default=''
                 _ask_keys="[y/${BOLD}N${NC}]"
-                if [ -n "$pending_handoff" ] \
+                if [ -n "$pending_handoff" ] && [ -z "$merge_kick" ] \
                     && [ "$(_handoff_parent "$pending_handoff")" = "$claude_session_id" ]; then
                     _crit_default=r
                     _crit_start='a fresh conversation from the handoff'
@@ -16244,7 +16246,7 @@ EOF
             # ESC or EOF (piped close) cancels the launch; Enter takes the
             # default: resume via the case's *) arm below, or at crit a fresh
             # conversation, via the r arm for a handoff the bound conversation
-            # wrote and the n arm otherwise.
+            # wrote with no merge armed, and the n arm otherwise.
             IFS= read -rsn1 response || { echo; exit 130; }
             echo
             case "$response" in $'\e') exit 130 ;; esac
