@@ -11,13 +11,14 @@ import { cellWidth, padToWidth, truncateToWidth } from './text'
 // The /config row (`cs-mermaid.drawDiagrams`): off, fences stay source.
 export const OPTION = 'drawDiagrams'
 
-// A mermaid fence opens on its own line with exactly three backticks and `mermaid`. Any other
+// A mermaid fence opens with exactly three backticks and `mermaid`, nothing after. Any other
 // opener (three backticks with another language or none, four or more, or three tildes) opens an
 // outer block that quotes what it holds; a fence inside one is quoted source, not a chart. Either
 // closes on a bare line of its mark at least as long as its opener. A backtick after the opening
 // run makes the line inline code, not an opener. Any of these marks may be indented up to three
-// columns past the margin, or inside a list item past the item's content column (CommonMark); at
-// four, a tab reaching the next multiple of four, the line is an indented code block, not a fence.
+// columns past the margin, or inside a list item past the item's content column, the marker's own
+// line included (CommonMark); at four, a tab reaching the next multiple of four, the line is an
+// indented code block, not a fence.
 // List items end where marked, which Claude Code reads a reply with, ends them; a block still open
 // in an item ends with it (CommonMark 4.5), and a mermaid fence ended so is a chart up to there.
 type Fence = { start: number; end: number; body: string }
@@ -53,7 +54,7 @@ export function scanFences(text: string): Fence[] {
   }
   for (const line of text.split('\n')) {
     const next = at + line.length + 1
-    const { column, rest } = indentation(line, 0)
+    const { column, offset, rest } = indentation(line, 0)
     if (rest === '') {
       if (bare) closeItems(items.length - 1)
       for (const item of items) item.blank = true
@@ -72,28 +73,34 @@ export function scanFences(text: string): Fence[] {
     const margin = items.length > 0 ? items[items.length - 1]!.content : 0
     // Four columns past the margin a line is indented code, which opens nothing; nor does a lazy line.
     const indented = column - margin >= 4
-    const mark = indented || lazy ? undefined : fenceMark(rest)
-    // The line as its innermost container reads it: an item's marker line by what follows the marker.
-    let read = { indented, text: rest }
+    // The line as its innermost container reads it, and where that starts in the reply: an item's
+    // marker line by what follows the marker.
+    let read = { indented, text: rest, start: at + offset }
+    let mark: string | undefined
     let pushed = false
     let underline = false
-    if (mark && block) {
-      if (mark[0] === block.mark && mark.length >= block.length && rest === mark) {
+    if (block) {
+      mark = indented || lazy ? undefined : fenceMark(rest)
+      if (mark && mark[0] === block.mark && mark.length >= block.length && rest === mark) {
         const { mermaid } = block
         if (mermaid) fences.push({ start: mermaid.start, end: at + line.length, body: text.slice(mermaid.bodyStart, Math.max(mermaid.bodyStart, at - 1)) })
         block = undefined
       }
-    } else if (mark) {
-      // The newline before a mermaid fence belongs to it, not to the prose above.
-      const mermaid = mark === '```' && rest.slice(3).trim() === 'mermaid' ? { start: Math.max(0, at - 1), bodyStart: next } : undefined
-      block = { mark: mark[0]!, length: mark.length, depth: items.length, mermaid }
-    } else if (!indented && !lazy && !block) {
+    } else if (!indented && !lazy) {
       const item = listItem(rest, column)
       if (paragraph && /^(?:-+|=+)$/.test(rest)) underline = true
       else if (item && (items.length > 0 || !paragraph || (item.text !== '' && /^(?:[-+*]|1[.)])$/.test(item.marker)))) {
         items.push({ content: item.content, blank: item.text === '' })
-        read = { indented: item.textColumn - item.content >= 4, text: item.text }
+        read = { indented: item.textColumn - item.content >= 4, text: item.text, start: read.start + item.textOffset }
         pushed = true
+      }
+      mark = read.indented ? undefined : fenceMark(read.text)
+      if (mark) {
+        // The newline before a fence on its own line belongs to it, not to the prose above; a fence on
+        // a marker's line starts at its mark, and the marker stays prose.
+        const start = pushed ? read.start : Math.max(0, at - 1)
+        const mermaid = mark === '```' && read.text.slice(3).trim() === 'mermaid' ? { start, bodyStart: next } : undefined
+        block = { mark: mark[0]!, length: mark.length, depth: items.length, mermaid }
       }
     }
     settled = !lazy && (read.indented || /^(?:```|~~~|#)/.test(read.text) || THEMATIC.test(read.text))
@@ -121,15 +128,15 @@ function startsBlock(rest: string): boolean {
 }
 
 // The column a line's text starts at, counting on from `column` (a tab reaches the next multiple
-// of four), and that text without its trailing blanks.
-function indentation(line: string, column: number): { column: number; rest: string } {
+// of four), the offset it starts at, and that text without its trailing blanks.
+function indentation(line: string, column: number): { column: number; offset: number; rest: string } {
   let i = 0
   for (; i < line.length; i++) {
     if (line[i] === ' ') column += 1
     else if (line[i] === '\t') column += 4 - (column % 4)
     else break
   }
-  return { column, rest: line.slice(i).trimEnd() }
+  return { column, offset: i, rest: line.slice(i).trimEnd() }
 }
 
 // Three or more `*`, `-` or `_` alone on a line, blanks between them allowed.
@@ -138,14 +145,14 @@ const THEMATIC = /^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/
 // A list item that opens with `rest` at `column`: a bullet (`-`, `+`, `*`) or 1-9 digits and `.`
 // or `)`, then blanks or nothing; a thematic break is not one. Its content starts past one to four
 // columns of blanks, or one column past the marker when more or nothing follow it (CommonMark).
-// `text` is what follows the marker and its blanks, starting at `textColumn`.
-function listItem(rest: string, column: number): { marker: string; content: number; text: string; textColumn: number } | undefined {
+// `text` is what follows the marker and its blanks, starting at `textColumn`, `textOffset` into `rest`.
+function listItem(rest: string, column: number): { marker: string; content: number; text: string; textColumn: number; textOffset: number } | undefined {
   if (THEMATIC.test(rest)) return undefined
   const marker = /^(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$)/.exec(rest)?.[0]
   if (marker === undefined) return undefined
   const after = column + marker.length
-  const { column: textColumn, rest: text } = indentation(rest.slice(marker.length), after)
-  return { marker, content: text === '' || textColumn - after > 4 ? after + 1 : textColumn, text, textColumn }
+  const { column: textColumn, offset, rest: text } = indentation(rest.slice(marker.length), after)
+  return { marker, content: text === '' || textColumn - after > 4 ? after + 1 : textColumn, text, textColumn, textOffset: marker.length + offset }
 }
 
 export function fencesOf(text: string): string[] {
