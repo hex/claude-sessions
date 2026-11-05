@@ -45,7 +45,7 @@ test('CJK and the other East Asian wide scripts are two cells, a combining mark 
   expect(cellWidth('\u{1100}\u{1161}')).toBe(2) // a Hangul syllable spelled in jamo
   expect(cellWidth('é')).toBe(1)
   expect(cellWidth('\u{301}')).toBe(0)
-  // A spacing mark takes its own cell; a virama none.
+  // A visarga, a spacing mark the engine keeps, takes its own cell; a virama none.
   expect(cellWidth('\u{903}')).toBe(1)
   expect(cellWidth('\u{915}\u{94D}\u{937}')).toBe(2) // क्ष
   expect(cellWidth('\u{200B}')).toBe(0)
