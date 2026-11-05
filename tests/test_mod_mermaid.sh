@@ -71,7 +71,7 @@ test_mod_cell_measure_agrees_with_the_engine_measure() {
     local out err="${TMPDIR:-/tmp}/cs-mod-mermaid-census.$$" status=0
     out="$(bun "$MOD/test/width.census.ts" 2> "$err")" || status=$?
     local errors; errors="$(sed 's/\x1b\[[0-9;]*m//g' "$err")"; rm -f "$err"
-    assert_eq "census: code points 1112064, emoji+FE0E 1438, emoji+FE0F 1438, regional 702, keycaps 72, skin tones 675, zwj 4185, labels 16; differ 0; known wider: Indic signs 77, unassigned 158" \
+    assert_eq "census: code points 1112064, emoji+FE0E 1438, emoji+FE0F 1438, regional 702, keycaps 72, skin tones 675, zwj 4185, labels 29; differ 0; known wider: Indic letters 3, unassigned 158" \
         "$(tail -n 1 <<< "$out")" "the mod measures every census string as the engine does, but the known classes, which it measures wider" \
         || { echo "$out" | head -40; echo "$errors" | tail -5; return 1; }
     assert_eq "0" "$status" "the census exits 0" || { echo "$errors"; return 1; }

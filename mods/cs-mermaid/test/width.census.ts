@@ -42,6 +42,10 @@ const sets: [string, string[]][] = [
     'v1 \u{2192} v2', '\u{26A0}\u{FE0F} warn', '1\u{FE0F}\u{20E3} first', '\u{1F1EF}\u{1F1F5} Japan', '\u{1F44D}\u{1F3FD} ok',
     '\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} family', '\u{1F3F3}\u{FE0F}\u{200D}\u{1F308} pride',
     '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F} England', '\u{D55C}\u{AD6D}\u{C5B4}', '\u{1100}\u{1161}\u{11A8}',
+    '\u{915}\u{93E}', '\u{939}\u{93F}\u{928}\u{94D}\u{926}\u{940}', '\u{928}\u{92E}\u{938}\u{94D}\u{924}\u{947}', '\u{92E}\u{930}\u{93E}\u{920}\u{940} \u{921}\u{947}\u{91F}\u{93E}',
+    '\u{9AC}\u{9BE}\u{982}\u{9B2}\u{9BE}', '\u{A2A}\u{A70}\u{A1C}\u{A3E}\u{A2C}\u{A40}', '\u{A97}\u{AC1}\u{A9C}\u{AB0}\u{ABE}\u{AA4}\u{AC0}', '\u{B13}\u{B21}\u{B3C}\u{B3F}\u{B06}',
+    '\u{BA4}\u{BAE}\u{BBF}\u{BB4}\u{BCD}', '\u{C24}\u{C46}\u{C32}\u{C41}\u{C17}\u{C41}', '\u{C95}\u{CA8}\u{CCD}\u{CA8}\u{CA1}', '\u{D2E}\u{D32}\u{D2F}\u{D3E}\u{D33}\u{D02}',
+    '\u{DC3}\u{DD2}\u{D82}\u{DC4}\u{DBD}',
   ]],
 ]
 
@@ -49,7 +53,7 @@ const sets: [string, string[]][] = [
 // wider than Bun, never narrower, so a block sized by it still holds the label the engine draws.
 const INDIC = /^[\p{sc=Deva}\p{sc=Beng}\p{sc=Guru}\p{sc=Gujr}\p{sc=Orya}\p{sc=Taml}\p{sc=Telu}\p{sc=Knda}\p{sc=Mlym}]$/u
 const known: [string, (char: string, ours: number, bun: number) => boolean][] = [
-  ['Indic signs', (char, ours, bun) => INDIC.test(char) && bun === 0 && ours === 1],
+  ['Indic letters', (char, ours, bun) => INDIC.test(char) && /^\p{Lo}$/u.test(char) && bun === 0 && ours === 1],
   ['unassigned', (char, ours, bun) => /^\p{Cn}$/u.test(char) && ours > bun],
 ]
 

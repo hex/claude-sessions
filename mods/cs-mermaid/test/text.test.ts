@@ -54,6 +54,17 @@ test('CJK and the other East Asian wide scripts are two cells, a combining mark 
   expect(cellWidth('ok ✅')).toBe(5)
 })
 
+// Bun's measure gives no cell to most vowel signs of the Indic scripts, spacing marks (Mc) drawn
+// beside the consonant they follow, so a Hindi or Bengali label is narrower than its code points.
+test('an Indic word measures the cells the engine measures it in', () => {
+  expect(cellWidth('का')).toBe(1)
+  expect(cellWidth('हिन्दी')).toBe(3)
+  expect(cellWidth('বাংলা')).toBe(2)
+  expect(cellWidth('मराठी डेटा')).toBe(6)
+  // Three cells of label in a twelve-cell block: four of air before it, five after.
+  expect(blockRows('हिन्दी', 12, 3)).toEqual(['            ', '    हिन्दी     ', '            '])
+})
+
 test('a block row with an emoji label is padded to the block width in cells', () => {
   // `ok ✅` is five cells; in a nine-cell block two cells of air sit on each side.
   expect(blockRows('ok ✅', 9, 3)).toEqual(['         ', '  ok ✅  ', '         '])
