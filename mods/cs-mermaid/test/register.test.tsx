@@ -168,6 +168,7 @@ test('a lazy line left of a list item keeps the item and the fence open in it', 
 
 // CommonMark and marked read a fence opened on a list marker's own line as a fence in the item.
 test('a fence opened on a list marker\'s own line is a fence in the item', () => {
+  expect(scanFences('- x\n  -\t```mermaid\nx\n```mermaid\ngraph TD\nA-->B\n```').map(fence => fence.body.trim())).toEqual(['', 'graph TD\nA-->B'])
   expect(fencesOf('- ```mermaid\n  graph TD\n  A --> B\n  ```')).toEqual(['graph TD\n  A --> B'])
   expect(fencesOf('1. ```mermaid\n   graph TD\n   A --> B\n   ```')).toEqual(['graph TD\n   A --> B'])
   expect(fencesOf('- ```bash\n  ls\n  ```\n  ```mermaid\n  graph TD\n  A --> B\n  ```')).toEqual(['graph TD\n  A --> B'])
@@ -498,6 +499,12 @@ test('splitReply keeps list continuation prose and sibling markers readable', ()
 })
 
 test('splitReply trims trailing whitespace only at enclosing item ends', () => {
+  expect(splitReply('-    x\n     ```mermaid\n     x\n     ```\n     tail  \n\n    - y')).toEqual([
+    { kind: 'text', body: '-    x' },
+    { kind: 'mermaid', body: 'x' },
+    { kind: 'text', body: '\ntail' },
+    { kind: 'text', body: '    - y' },
+  ])
   const nested = '```mermaid\ngraph TD\nA --> B\n```\n- Outer\n  1. Flow\n     ```mermaid\n    x\n     ```'
   expect(['\n- Next', '\n', '\n \t'].map(ending => splitReply(nested + ending).filter(part => part.kind === 'text').map(part => part.body))).toEqual([
     ['\n- Outer\n  1. Flow', '\n  x\n   ```', '- Next'],
