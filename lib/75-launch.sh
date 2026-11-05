@@ -171,13 +171,18 @@ _disarm_rotation_marker() {  # session_dir [surviving_handoff]
 # the one the shell would use: CLAUDE_SECURESTORAGE_CONFIG_DIR names the
 # keychain entry independently of the config dir, and empty selects the
 # default entry. A value inherited from a parent launch into such a session is
-# recognisable by its path and dropped, so a session without the link opens
-# on the shell's own config.
+# recognisable by its path. That launch kept the shell's own config dir in
+# CLAUDE_SECURESTORAGE_CONFIG_DIR (empty for ~/.claude), so the shell's
+# variables are put back as they were: a session without the link opens on the
+# shell's own config, where _claude_project_dir looked for its conversations
+# before this export ran, and an encrypted one shares from it.
 _export_session_claude_config() {  # session_dir
-    local config="$1/.cs/claude-config"
+    local config="$1/.cs/claude-config" shell_config
     case "${CLAUDE_CONFIG_DIR:-}" in
         */.cs/claude-config)
+            shell_config="${CLAUDE_SECURESTORAGE_CONFIG_DIR:-}"
             unset CLAUDE_CONFIG_DIR CLAUDE_SECURESTORAGE_CONFIG_DIR
+            [ -z "$shell_config" ] || export CLAUDE_CONFIG_DIR="$shell_config"
             ;;
     esac
     [ -e "$config" ] || return 0

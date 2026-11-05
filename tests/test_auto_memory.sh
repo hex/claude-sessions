@@ -1329,19 +1329,28 @@ test_claude_config_link_moves_claude_code_into_the_vault() {
 
 # A cs launched from inside an encrypted session inherits that session's config
 # variables; the session it opens has no vault, so it must get the shell's
-# config, not the parent's vault. A config dir the user set themselves is theirs.
+# config, not the parent's vault: the dir the parent's launch kept in
+# CLAUDE_SECURESTORAGE_CONFIG_DIR, or none for ~/.claude when that is empty,
+# the variables a launch from the shell itself would see. A config dir the user
+# set themselves is theirs, and a shell with none gets none.
 test_session_without_claude_config_drops_an_inherited_vault_config() {
     "$CS_BIN" plain <<< "" >/dev/null 2>&1 || true
     _make_config_sentinel
 
+    env -u CLAUDE_CONFIG_DIR -u CLAUDE_SECURESTORAGE_CONFIG_DIR \
+        "$CS_BIN" plain <<< "" >/dev/null 2>&1 || true
     CLAUDE_CONFIG_DIR="$TEST_TMPDIR/other/.cs/claude-config" CLAUDE_SECURESTORAGE_CONFIG_DIR="" \
         "$CS_BIN" plain <<< "" >/dev/null 2>&1 || true
-    CLAUDE_CONFIG_DIR="$TEST_TMPDIR/profile-b" \
+    CLAUDE_CONFIG_DIR="$TEST_TMPDIR/other/.cs/claude-config" CLAUDE_SECURESTORAGE_CONFIG_DIR="$TEST_TMPDIR/profile-b" \
+        "$CS_BIN" plain <<< "" >/dev/null 2>&1 || true
+    env -u CLAUDE_SECURESTORAGE_CONFIG_DIR CLAUDE_CONFIG_DIR="$TEST_TMPDIR/profile-b" \
         "$CS_BIN" plain <<< "" >/dev/null 2>&1 || true
 
     assert_eq "config=unset secure=unset
+config=unset secure=unset
+config=$TEST_TMPDIR/profile-b secure=unset
 config=$TEST_TMPDIR/profile-b secure=unset" "$(cat "$TEST_TMPDIR/launched")" \
-        "an inherited vault config is dropped; the user's own config dir is kept" || return 1
+        "a shell with no config dir sets none; an inherited vault config gives way to the shell's recorded one; the user's own config dir is kept" || return 1
 }
 
 # Under a non-default profile the login lives in that profile's keychain entry.
@@ -1530,6 +1539,19 @@ test_claude_config_shares_from_the_shell_config_not_an_inherited_vault() {
         "the copy should come from the shell's .claude.json" || return 1
     assert_eq "config=$config secure=" "$(cat "$TEST_TMPDIR/launched")" \
         "claude should run on this vault and the default login" || return 1
+
+    # Under a shell profile, the parent's launch kept that profile as the
+    # shell's config dir: this vault shares from it and logs in through it.
+    local profile="$TEST_TMPDIR/profile-b"
+    mkdir -p "$profile"
+    printf '{"model":"profile-b"}\n' > "$profile/settings.json"
+    rm -f "$config/settings.json" "$TEST_TMPDIR/launched"
+    CLAUDE_CONFIG_DIR="$other" CLAUDE_SECURESTORAGE_CONFIG_DIR="$profile" \
+        "$CS_BIN" vt <<< "" >/dev/null 2>&1 || true
+    assert_eq "$profile/settings.json" "$(readlink "$config/settings.json")" \
+        "settings.json should link to the shell profile's config" || return 1
+    assert_eq "config=$config secure=$profile" "$(cat "$TEST_TMPDIR/launched")" \
+        "claude should run on this vault and the shell profile's login" || return 1
 }
 
 # A session whose cs files (command log, mail, traces) live on its encrypted

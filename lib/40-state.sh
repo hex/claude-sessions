@@ -115,7 +115,9 @@ _unset_local_state() {
 # session's .cs/claude-config was inherited from a claude running in that
 # session and says nothing about this one, so the shell's own config dir,
 # which the launch keeps in CLAUDE_SECURESTORAGE_CONFIG_DIR (empty for
-# ~/.claude), stands in, as it does for the keybindings (_cs_keybindings_file).
+# ~/.claude), stands in, as it does for the keybindings (_cs_keybindings_file)
+# and for the claude the launch starts (_export_session_claude_config), so a
+# lookup before that export and one after it read the same dir.
 _claude_project_dir() {
     local cwd="$1" config="${CLAUDE_CONFIG_DIR:-}"
     case "$config" in

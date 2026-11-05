@@ -1064,6 +1064,53 @@ test_reading_follows_a_user_claude_config_dir() {
     assert_output_contains "$output" "--resume $id" "y resumes it" || return 1
 }
 
+# A cs run inside an encrypted session's claude inherits that session's
+# .cs/claude-config as CLAUDE_CONFIG_DIR, and the shell's own config dir in
+# CLAUDE_SECURESTORAGE_CONFIG_DIR, where that launch kept it. A session with no
+# config dir of its own opens on the shell's: the claude it starts writes its
+# conversation there, and the next open finds it there, binds nothing else and
+# shows its reading. The stub, like Claude Code, writes the conversation it is
+# given into the projects/ of the config dir it runs on.
+test_a_launch_inside_an_encrypted_session_opens_on_the_shells_config_dir() {
+    local dir="$CS_SESSIONS_ROOT/rot-nested" cfg="$TEST_TMPDIR/user-config" state first fresh output
+    local inherited="$TEST_TMPDIR/vaulted/.cs/claude-config"
+    cat > "$TEST_TMPDIR/claude-stub" << 'SCRIPT'
+#!/bin/bash
+echo "STUB_ARGS: $*"
+echo "STUB_CFG: ${CLAUDE_CONFIG_DIR-unset}"
+id=""
+while [ $# -gt 0 ]; do
+    case "$1" in --session-id|--resume) id="$2"; shift ;; esac
+    shift
+done
+proj="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')"
+mkdir -p "$proj"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"hi"}}' \
+    '{"type":"assistant","message":{"role":"assistant","content":"hello"}}' >> "$proj/$id.jsonl"
+SCRIPT
+    chmod +x "$TEST_TMPDIR/claude-stub"
+    export CLAUDE_CODE_BIN="$TEST_TMPDIR/claude-stub"
+    state="$dir/.cs/local/state"
+    ( unset CS_TRANSCRIPTS_DIR CLAUDE_SECURESTORAGE_CONFIG_DIR; export CLAUDE_CONFIG_DIR="$cfg"; "$CS_BIN" rot-nested </dev/null >/dev/null 2>&1 ) || true
+    first=$(awk '/^claude_session_id:/ { print $2; exit }' "$state")
+    output=$( (unset CS_TRANSCRIPTS_DIR; export CLAUDE_CONFIG_DIR="$inherited" CLAUDE_SECURESTORAGE_CONFIG_DIR="$cfg"; _launch_at_default_thresholds rot-nested n) ) || true
+    fresh=$(awk '/^claude_session_id:/ { print $2; exit }' "$state")
+    [ -n "$first" ] && [ "$fresh" != "$first" ] \
+        || { echo "  FAIL: n inside the encrypted session should start a fresh conversation (first '$first', now '$fresh')"; return 1; }
+    assert_eq "STUB_CFG: $cfg" "$(grep '^STUB_CFG:' <<< "$output")" \
+        "the fresh conversation runs on the shell's config dir" || return 1
+    printf '70\n' > "$dir/.cs/local/context-pct"
+    output=$( (unset CS_TRANSCRIPTS_DIR; export CLAUDE_CONFIG_DIR="$inherited" CLAUDE_SECURESTORAGE_CONFIG_DIR="$cfg"; _launch_at_default_thresholds rot-nested y) ) || true
+    assert_output_not_contains "$output" "repaired orphan" "the conversation the last open started is where this open looks" || return 1
+    assert_eq "$fresh" "$(awk '/^claude_session_id:/ { print $2; exit }' "$state")" \
+        "the session stays bound to the conversation the last open started" || return 1
+    assert_eq "◱ 70% context used" "$(grep -F 'context used' <<< "$output" | sed 's/.*▌ //')" \
+        "the card shows that conversation's reading" || return 1
+    assert_output_contains "$output" "--resume $fresh" "y resumes it" || return 1
+    assert_eq "STUB_CFG: $cfg" "$(grep '^STUB_CFG:' <<< "$output")" \
+        "the resumed conversation runs on the shell's config dir" || return 1
+}
+
 # The card's figure wears the status line's inks: bold amber from warn, and
 # from crit the bar's inverted capsule, bold white on the crit red with a space
 # each side, and at crit the warning in the crit ink above a [y/N] whose N is
@@ -1584,6 +1631,7 @@ run_test test_handoff_menu_at_crit_context_leaves_another_conversations_handoff_
 run_test test_spawned_launch_at_crit_context_still_resumes
 run_test test_reading_is_not_shown_for_a_conversation_that_has_not_replied
 run_test test_reading_follows_a_user_claude_config_dir
+run_test test_a_launch_inside_an_encrypted_session_opens_on_the_shells_config_dir
 # r is only offered alongside a pending handoff. Pressed without one it falls
 # through to the resume default, which is a decline like any other.
 test_r_without_a_pending_handoff_disarms_the_marker() {
