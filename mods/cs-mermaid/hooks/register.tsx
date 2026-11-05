@@ -75,8 +75,20 @@ type Palette = { fill: string; decision: string; start: string; end: string; tex
 const LIGHT: Palette = { fill: '#ECECFF', decision: '#FFF3BF', start: '#D3F9D8', end: '#E9ECEF', text: '#1F1F1F', line: '#333333', good: '#2B8A3E', bad: '#C92A2A' }
 const DARK: Palette = { fill: '#3B3F6B', decision: '#6B5A1E', start: '#1F4D2B', end: '#3A3D42', text: '#F2F2F2', line: '#D3D3D3', good: '#69DB7C', bad: '#FF8787' }
 
-export function paletteFor(theme: unknown): Palette {
-  return typeof theme === 'string' && theme.startsWith('dark') ? DARK : LIGHT
+// The theme row decides when it names a polarity (`dark`, `light-daltonized`). Claude Code's
+// `auto` names none and the engine exposes no resolved one, so the terminal cs read decides:
+// its theme, else its measured background's luminance (the pivot cs's own band uses), else light.
+export function paletteFor(theme: unknown, terminal: { theme?: string; bg?: string } = {}): Palette {
+  if (typeof theme === 'string') {
+    if (theme.includes('dark')) return DARK
+    if (theme.includes('light')) return LIGHT
+  }
+  if (terminal.theme === 'dark') return DARK
+  if (terminal.theme === 'light') return LIGHT
+  const [r, g, b, ...more] = (terminal.bg ?? '').split(';').map(part => (/^\s*\d{1,3}\s*$/.test(part) ? Number(part) : NaN))
+  const measured = r !== undefined && g !== undefined && b !== undefined && more.length === 0 && r <= 255 && g <= 255 && b <= 255
+  if (measured && 2126 * r + 7152 * g + 722 * b < 1530000) return DARK
+  return LIGHT
 }
 
 export type Role = 'step' | 'decision' | 'start' | 'end'
@@ -199,7 +211,7 @@ export const register: Register = (on, options) => {
     const elements = $.ui.resolve(e)
     const { Box } = elements
     const theme = (await $.config.list()).find(row => row.key === 'theme')?.value
-    const palette = paletteFor(theme)
+    const palette = paletteFor(theme, { theme: await $.env.get('CS_TERM_THEME'), bg: await $.env.get('CS_TERM_BG_RGB') })
     const columns = Math.max(20, (e.viewport?.columns ?? 80) - 6)
     const parts = splitReply(e.props.text)
     // The engine draws the prose, the opening bullet on the reply's first part only.
