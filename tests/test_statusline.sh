@@ -861,6 +861,42 @@ test_ctx_warn_edge_is_amber_at_the_threshold() {
     assert_output_not_contains_f "$out" "48;2;215;0;21" "ctx 40% must not reach the crit fill" || return 1
 }
 
+# The launch card and the resume prompt paint the bar's context inks from
+# setup_palette (lib/05-term.sh), by CS_TERM_THEME: amber, the crit red, and the
+# crit capsule, white on that red. Each is a literal in both files, read here
+# out of the amber), crit) and critink) arms of _sgr and out of setup_palette's
+# light and dark branches, so a colour changed in one and not the other fails.
+_card_ink() {  # theme, variable
+    awk -v theme="$1" '
+        /^    if \[ "\$\{CS_TERM_THEME:-dark\}" = "light" \]; then$/ { branch = "light"; next }
+        branch != "" && /^    else$/ { branch = "dark"; next }
+        branch != "" && /^    fi$/ { branch = ""; next }
+        branch == theme { print }
+    ' "$SCRIPT_DIR/../lib/05-term.sh" | sed -n "s/^ *$2='\\\\033\\[\\([0-9;]*\\)m'\$/\\1/p"
+}
+
+test_launch_card_inks_are_the_statuslines() {
+    local truecolor amber crit critink amber_dark amber_light crit_dark crit_light
+    truecolor="$(sed -n '/^_sgr() {/,/^        256)/p' "$SL")"
+    amber="$(sed -n '/^ *amber)$/,/fi ;;/p' <<< "$truecolor")"
+    amber_dark="$(sed -n 's/^ *elif \[ "\$SL_THEME" = "dark" \]; then rgb="\([0-9;]*\)"$/\1/p' <<< "$amber")"
+    amber_light="$(sed -n 's/^ *else rgb="\([0-9;]*\)"; fi ;;$/\1/p' <<< "$amber")"
+    crit="$(sed -n '/^ *crit)$/,/;;/p' <<< "$truecolor" \
+        | sed -n 's/^ *\[ "\$SL_THEME" = "dark" \] && rgb="\([0-9;]*\)" || rgb="\([0-9;]*\)" ;;$/\1 \2/p')"
+    crit_dark=${crit% *}
+    crit_light=${crit#* }
+    critink="$(sed -n 's/^ *critink) rgb="\([0-9;]*\)" ;;$/\1/p' <<< "$truecolor")"
+    [ -n "$amber_dark" ] && [ -n "$amber_light" ] || { echo "  FAIL: the theme arms of _sgr's amber) not found"; return 1; }
+    [ -n "$crit_dark" ] && [ -n "$crit_light" ] && [ "$crit_dark" != "$crit" ] || { echo "  FAIL: _sgr's crit) arm not found"; return 1; }
+    [ -n "$critink" ] || { echo "  FAIL: _sgr's critink) arm not found"; return 1; }
+    assert_eq "38;2;$amber_light" "$(_card_ink light AMBER)" "the card's light amber is the bar's" || return 1
+    assert_eq "38;2;$crit_light" "$(_card_ink light CRIT)" "the card's light crit ink is the bar's" || return 1
+    assert_eq "48;2;$crit_light;38;2;$critink" "$(_card_ink light CRIT_FILL)" "the card's light crit capsule is the bar's" || return 1
+    assert_eq "38;2;$amber_dark" "$(_card_ink dark AMBER)" "the card's dark amber is the bar's" || return 1
+    assert_eq "38;2;$crit_dark" "$(_card_ink dark CRIT)" "the card's dark crit ink is the bar's" || return 1
+    assert_eq "48;2;$crit_dark;38;2;$critink" "$(_card_ink dark CRIT_FILL)" "the card's dark crit capsule is the bar's" || return 1
+}
+
 # A threshold override is environment, so it can be anything. Anything that is
 # not a plain integer of at most three digits takes the default, the way the
 # Stop hook's tiers do: a word must not switch a band off, and a number too wide
@@ -1722,6 +1758,7 @@ run_test test_ctx_warn_band_still_amber
 run_test test_ctx_below_crit_is_amber_not_red
 run_test test_ctx_warn_threshold_is_configurable
 run_test test_ctx_warn_edge_is_amber_at_the_threshold
+run_test test_launch_card_inks_are_the_statuslines
 run_test test_ctx_threshold_non_numeric_falls_back_to_default
 run_test test_ctx_threshold_out_of_range_falls_back_to_default
 run_test test_ctx_threshold_above_100_disables_its_band
