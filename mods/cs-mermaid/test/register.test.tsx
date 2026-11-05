@@ -44,6 +44,18 @@ test('a line of 100k backticks then x` scans in under 200 ms, and the fence afte
   expect(fences).toEqual(['graph TD\nA --> B'])
 })
 
+// CommonMark: a fence closes on a bare run of its mark at least as long as its opener, with
+// only blanks after it.
+test('a mermaid fence closes on a bare line of three or more backticks', () => {
+  const text = '```mermaid\ngraph TD\nA --> B\n````\n\ntext\n```bash\nls\n```'
+  expect(fencesOf(text)).toEqual(['graph TD\nA --> B'])
+  expect(splitReply(text)).toEqual([
+    { kind: 'mermaid', body: 'graph TD\nA --> B' },
+    { kind: 'text', body: '\n\ntext\n```bash\nls\n```' },
+  ])
+  expect(fencesOf('```mermaid\ngraph TD\nA --> B\n`````  \nafter')).toEqual(['graph TD\nA --> B'])
+})
+
 // CommonMark: a fence may be indented up to three spaces; four, or a tab (which reaches the
 // next multiple of four), makes an indented code block, so the fence stays source.
 test('a fence indented four spaces or a tab is an indented code block, not a chart', () => {
