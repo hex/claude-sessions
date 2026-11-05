@@ -565,12 +565,14 @@ the prompt being read, and `/cs first`, `/cs last` and `/cs N`, which go to
 that prompt, all mid-turn too, for keybindings. A
 refusal is toasted once a session; a prompt no row has drawn since a resume
 toasts `cs: that prompt is not on screen yet` once. The prompts come from the
-session's transcript, `<slug>/<id>.jsonl` in the directory cs itself reads
-conversations from: an encrypted session's own `.cs/claude-config/projects`,
-else `CS_TRANSCRIPTS_DIR`, else `$CLAUDE_CONFIG_DIR/projects`, else
-`~/.claude/projects`. A `CLAUDE_CONFIG_DIR` that names another session's
-`.cs/claude-config`, inherited from a claude running there, gives way to your
-shell's own config dir. The band reads the transcript again after each turn
+session's transcript, `<slug>/<id>.jsonl` in the directory Claude Code writes
+it to: an encrypted session's own `.cs/claude-config/projects`, else
+`CS_TRANSCRIPTS_DIR`, else `$CLAUDE_CONFIG_DIR/projects`, else
+`~/.claude/projects`. The band takes `CLAUDE_CONFIG_DIR` as the claude it runs
+in has it, even when it names another session's `.cs/claude-config`, because
+that claude writes its transcript there. cs itself, launching a session from
+inside such a claude, reads your shell's own config dir instead, since the
+claude it starts runs on that. The band reads the transcript again after each turn
 and at session start only when its size or
 modification time moved, and only its live branch is listed: a `/rewind`
 drops the prompts it abandoned, a `/compact` keeps the earlier ones. Tool

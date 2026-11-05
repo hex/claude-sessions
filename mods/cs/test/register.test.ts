@@ -2371,19 +2371,16 @@ test('a CLAUDE_CONFIG_DIR the person exported holds the transcript, after CS_TRA
   expect(rail(await band())).toHaveLength(2)
 })
 
-test('a CLAUDE_CONFIG_DIR naming another session\'s .cs/claude-config, inherited from a claude running there, gives way to CLAUDE_SECURESTORAGE_CONFIG_DIR, else ~/.claude', async () => {
+test('this claude\'s CLAUDE_CONFIG_DIR holds its transcript even when it names another session\'s .cs/claude-config; neither ~/.claude nor CLAUDE_SECURESTORAGE_CONFIG_DIR stands in', async () => {
   envVars.CLAUDE_CONFIG_DIR = '/other/.cs/claude-config'
   files['/other/.cs/claude-config/projects/-work/uuid-lead.jsonl'] = `${LINEAR.join('\n')}\n`
   files[TRANSCRIPT] = `${LINEAR.slice(0, 6).join('\n')}\n`
   await turnComplete()
-  expect(rail(await band())).toHaveLength(3)
+  expect(rail(await band())).toHaveLength(4)
   envVars.CLAUDE_SECURESTORAGE_CONFIG_DIR = '/shell'
   files['/shell/projects/-work/uuid-lead.jsonl'] = `${LINEAR.slice(0, 4).join('\n')}\n`
   await turnComplete()
-  expect(rail(await band())).toHaveLength(2)
-  envVars.CLAUDE_SECURESTORAGE_CONFIG_DIR = ''
-  await turnComplete()
-  expect(rail(await band())).toHaveLength(3)
+  expect(rail(await band())).toHaveLength(4)
 })
 
 test('a session\'s own claude-config whose link dangles, its vault locked, still names the transcript\'s dir; the shell\'s never stands in', async () => {

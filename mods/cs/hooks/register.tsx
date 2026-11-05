@@ -1457,21 +1457,22 @@ async function refreshRail($: EngineInterface) {
   if (changed) $.ui.invalidate('ui.render')
 }
 
-// Where Claude Code writes this conversation's transcript, the way cs's own
-// _claude_project_dir finds it (lib/40-state.sh): the session's own config
-// dir's projects/ when it has one (.cs/claude-config, an encrypted session;
-// a link a locked vault left dangling still names it, so $.fs.stat, which
-// answers such a link, asks rather than $.fs.exists, which follows it), else
-// CS_TRANSCRIPTS_DIR, else CLAUDE_CONFIG_DIR's projects/, else
-// ~/.claude/projects. A CLAUDE_CONFIG_DIR naming some session's
-// .cs/claude-config was inherited from a claude running there, so the shell's
-// own config dir, which the launch keeps in CLAUDE_SECURESTORAGE_CONFIG_DIR
-// (empty for ~/.claude), stands in. Under that, the cwd as resolved with
-// every character outside [A-Za-z0-9] made `-`, then <session id>.jsonl.
+// Where Claude Code writes this conversation's transcript: the session's own
+// config dir's projects/ when it has one (.cs/claude-config, an encrypted
+// session; a link a locked vault left dangling still names it, so $.fs.stat,
+// which answers such a link, asks rather than $.fs.exists, which follows it),
+// else CS_TRANSCRIPTS_DIR, else CLAUDE_CONFIG_DIR's projects/, else
+// ~/.claude/projects. Under that, the cwd as resolved with every character
+// outside [A-Za-z0-9] made `-`, then <session id>.jsonl. cs's own
+// _claude_project_dir (lib/40-state.sh) reads a CLAUDE_CONFIG_DIR naming some
+// session's .cs/claude-config as inherited and looks in the shell's config dir
+// instead, because a launch decides there for the claude it is about to start,
+// which runs on the shell's config. The mod runs inside the claude that writes
+// the transcript, and Claude Code writes it under that process's own
+// CLAUDE_CONFIG_DIR, whatever the dir is named.
 async function transcriptPath($: EngineInterface): Promise<string> {
   const cwd = await $.session.cwd()
-  let config = await $.env.get("CLAUDE_CONFIG_DIR")
-  if (config?.endsWith('/.cs/claude-config')) config = await $.env.get("CLAUDE_SECURESTORAGE_CONFIG_DIR")
+  const config = await $.env.get("CLAUDE_CONFIG_DIR")
   let base = (await $.env.get("CS_TRANSCRIPTS_DIR")) || `${config || `${await $.env.get("HOME")}/.claude`}/projects`
   const own = `${cwd}/.cs/claude-config`
   if (await $.fs.stat(own).then(() => true, () => false)) base = `${own}/projects`
