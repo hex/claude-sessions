@@ -603,15 +603,16 @@ Continue the test.
 EOF
 }
 
-# A transcript for the conversation a session is bound to, holding one user
-# record: the conversation has said something, which is what lets the card
-# describe a context reading as its own.
+# A transcript for the conversation a session is bound to, holding a prompt
+# and its reply: the conversation has said something, which is what lets the
+# card describe a context reading as its own.
 _stage_transcript() {  # session
     local dir="$CS_SESSIONS_ROOT/$1" id proj
     id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
     proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$dir")"
     mkdir -p "$proj"
-    printf '{"type":"user","message":{"role":"user","content":"hi"}}\n' > "$proj/$id.jsonl"
+    printf '%s\n' '{"type":"user","message":{"role":"user","content":"hi"}}' \
+        '{"type":"assistant","message":{"role":"assistant","content":"hello"}}' > "$proj/$id.jsonl"
 }
 
 # The status line's stamp for the conversation a session is bound to, as it
@@ -997,14 +998,16 @@ test_spawned_launch_at_crit_context_still_resumes() {
 # The status line stamps context-pct per session, not per conversation, and
 # only once a conversation replies, so a fresh conversation left before its
 # first reply inherits the reading of the one before it. Only a conversation
-# with a transcript has said anything for a reading to describe: without one
+# that has replied has said anything for a reading to describe: until then
 # the card shows no figure and the ask keeps its resume default, whatever the
-# stamp says. No transcript exists anywhere in the project dir here, so the
-# open has none to rebind the session to and the bound conversation stays the
-# one without a transcript.
-test_reading_is_not_shown_for_a_conversation_without_a_transcript() {
+# stamp says. First a conversation with no transcript: none exists anywhere in
+# the project dir, so the open has none to rebind the session to and the bound
+# conversation stays the one without a transcript. Then one quit before its
+# first reply: Claude Code writes the transcript with the prompt, before any
+# reply, so it has a transcript that holds a user record and no assistant one.
+test_reading_is_not_shown_for_a_conversation_that_has_not_replied() {
     _rot_session "rot-stale"
-    local dir="$CS_SESSIONS_ROOT/rot-stale" output id answer
+    local dir="$CS_SESSIONS_ROOT/rot-stale" output id answer proj
     printf '72\n' > "$dir/.cs/local/context-pct"
     for answer in n ""; do
         id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
@@ -1015,6 +1018,19 @@ test_reading_is_not_shown_for_a_conversation_without_a_transcript() {
             "the ask keeps [Y/n] (answer '$answer')" || return 1
     done
     assert_output_contains "$output" "--resume $id" "Enter resumes the fresh conversation the n before it started" || return 1
+    _rot_session "rot-unreplied"
+    dir="$CS_SESSIONS_ROOT/rot-unreplied"
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$dir")"
+    mkdir -p "$proj"
+    printf '{"type":"user","message":{"role":"user","content":"hi"}}\n' > "$proj/$id.jsonl"
+    printf '72\n' > "$dir/.cs/local/context-pct"
+    output=$(_launch_at_default_thresholds rot-unreplied "") || true
+    assert_output_not_contains "$output" "context used" "no figure for a conversation whose transcript holds no reply" || return 1
+    assert_output_not_contains "$output" "last context reading" "no warning for a conversation whose transcript holds no reply" || return 1
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [Y/n] ' <<< "$output")" \
+        "the ask keeps [Y/n] for a conversation whose transcript holds no reply" || return 1
+    assert_output_contains "$output" "--resume $id" "Enter resumes the conversation whose transcript holds no reply" || return 1
 }
 
 # The card's figure wears the status line's inks: bold amber from warn, and
@@ -1535,7 +1551,7 @@ run_test test_crit_context_follows_the_status_line_knob
 run_test test_handoff_menu_at_crit_context_defaults_to_the_bound_conversations_handoff
 run_test test_handoff_menu_at_crit_context_leaves_another_conversations_handoff_waiting
 run_test test_spawned_launch_at_crit_context_still_resumes
-run_test test_reading_is_not_shown_for_a_conversation_without_a_transcript
+run_test test_reading_is_not_shown_for_a_conversation_that_has_not_replied
 # r is only offered alongside a pending handoff. Pressed without one it falls
 # through to the resume default, which is a decline like any other.
 test_r_without_a_pending_handoff_disarms_the_marker() {

@@ -745,13 +745,14 @@ launch_claude_code() {
     # The last context reading in this session and where it sits against the
     # status line's thresholds, read once for the card's context row and the
     # resume ask. Only a conversation to resume has a figure to describe, and
-    # only one with a transcript: the status line stamps the reading per
+    # only one that has replied: the status line stamps the reading per
     # session once a conversation replies, so a conversation left before its
     # first reply has said nothing, and the stamp beside it is the one its
-    # predecessor left.
+    # predecessor left. Claude Code writes the transcript with the first
+    # prompt, before any reply, so what counts is an assistant record in it.
     local ctx_pct="" ctx_heat=none
     if [ "$status_text" = "resuming" ] \
-        && [ -f "$(_claude_project_dir "$session_dir")/$claude_session_id.jsonl" ]; then
+        && grep -q -m1 '"type":"assistant"' "$(_claude_project_dir "$session_dir")/$claude_session_id.jsonl" 2>/dev/null; then
         ctx_pct=$(_resume_context_pct "$session_dir")
         ctx_heat=$(_resume_context_heat "$ctx_pct")
     fi
