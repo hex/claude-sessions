@@ -262,6 +262,18 @@ test('a theme row that names no polarity falls to the terminal cs measured', () 
   expect(paletteFor(undefined, {}).fill).toBe('#ECECFF')
 })
 
+// Only a built-in theme names a polarity (`dark`, `light`, and their `-daltonized` and `-ansi`
+// kinds); a `custom:<slug>` theme does not, whatever its slug spells.
+test('a custom theme falls to the terminal cs measured, whatever its name holds', () => {
+  expect(paletteFor('custom:moonlight', { theme: 'dark' }).fill).toBe('#3B3F6B')
+  expect(paletteFor('custom:twilight', { theme: 'dark' }).fill).toBe('#3B3F6B')
+  expect(paletteFor('custom:highlight', { bg: '0;0;0' }).fill).toBe('#3B3F6B')
+  expect(paletteFor('custom:darkroom', { theme: 'light' }).fill).toBe('#ECECFF')
+  expect(paletteFor('custom:darkroom', {}).fill).toBe('#ECECFF')
+  expect(paletteFor('dark-ansi', { theme: 'light' }).fill).toBe('#3B3F6B')
+  expect(paletteFor('light-daltonized', { theme: 'dark' }).fill).toBe('#ECECFF')
+})
+
 const THEME_ROW = (value: string): ConfigRow => ({ key: 'theme', label: 'Theme', kind: 'choice', value, options: ['auto', 'dark', 'light'], provider: { plugin: 'engine', tier: 'core' }, isLocked: false })
 
 test('a reply under the auto theme on a dark terminal draws the dark palette', async ($, on) => {
