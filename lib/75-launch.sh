@@ -1176,8 +1176,9 @@ EOF
 }
 
 # A resume may run in place of cs when it is sure to land and cs has nothing
-# to do after it: claude reads its transcripts from where cs looks (no
-# CLAUDE_CONFIG_DIR set at all, even empty), the transcript holds a whole
+# to do after it: claude runs on the default config dir (no CLAUDE_CONFIG_DIR
+# set at all, even empty), so its transcripts sit where cs looks, the
+# transcript holds a whole
 # top-level user record (a torn line, or a user message nested inside
 # another record, does not count), and no vault waits on cs to detach it
 # when claude ends without its hooks. Without jq the resume stays a child.

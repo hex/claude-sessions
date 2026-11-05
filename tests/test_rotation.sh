@@ -1033,6 +1033,36 @@ test_reading_is_not_shown_for_a_conversation_that_has_not_replied() {
     assert_output_contains "$output" "--resume $id" "Enter resumes the conversation whose transcript holds no reply" || return 1
 }
 
+# Claude Code keeps its transcripts under a CLAUDE_CONFIG_DIR the user exports,
+# and cs reads them there: the card shows the bound conversation's reading, and
+# an open whose recorded conversation has no transcript finds the one Claude
+# Code keeps there, binds it and resumes it. The test override that outranks
+# the user's dir is cleared, and HOME's ~/.claude holds nothing.
+test_reading_follows_a_user_claude_config_dir() {
+    _rot_session "rot-cfgdir"
+    local dir="$CS_SESSIONS_ROOT/rot-cfgdir" cfg="$TEST_TMPDIR/user-config" id proj output state
+    local orphan="44444444-4444-4444-8444-444444444444"
+    state="$dir/.cs/local/state"
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$state")
+    proj="$cfg/projects/$(_encode_cwd_for_claude_test "$dir")"
+    mkdir -p "$proj"
+    printf '%s\n' '{"type":"user","message":{"role":"user","content":"hi"}}' \
+        '{"type":"assistant","message":{"role":"assistant","content":"hello"}}' > "$proj/$id.jsonl"
+    printf '70\n' > "$dir/.cs/local/context-pct"
+    output=$( (unset CS_TRANSCRIPTS_DIR; export CLAUDE_CONFIG_DIR="$cfg"; _launch_at_default_thresholds rot-cfgdir y) ) || true
+    assert_eq "◱ 70% context used" "$(grep -F 'context used' <<< "$output" | sed 's/.*▌ //')" \
+        "the card shows the reading of the conversation under CLAUDE_CONFIG_DIR" || return 1
+    assert_eq "$(_crit_warning 70)" "$(grep -F 'last context reading' <<< "$output")" "the ask is at crit" || return 1
+    assert_output_contains "$output" "--resume $id" "y resumes it" || return 1
+    awk 'index($0, "claude_session_id:") != 1' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+    printf 'claude_session_id: %s\n' "$orphan" >> "$state"
+    output=$( (unset CS_TRANSCRIPTS_DIR; export CLAUDE_CONFIG_DIR="$cfg"; _launch_at_default_thresholds rot-cfgdir y) ) || true
+    assert_output_contains "$output" "repaired orphan claude_session_id (was $orphan)" \
+        "the open finds the conversation under CLAUDE_CONFIG_DIR for a recorded one with no transcript" || return 1
+    assert_eq "$id" "$(awk '/^claude_session_id:/ { print $2; exit }' "$state")" "the session is bound to it" || return 1
+    assert_output_contains "$output" "--resume $id" "y resumes it" || return 1
+}
+
 # The card's figure wears the status line's inks: bold amber from warn, and
 # from crit the bar's inverted capsule, bold white on the crit red with a space
 # each side, and at crit the warning in the crit ink above a [y/N] whose N is
@@ -1552,6 +1582,7 @@ run_test test_handoff_menu_at_crit_context_defaults_to_the_bound_conversations_h
 run_test test_handoff_menu_at_crit_context_leaves_another_conversations_handoff_waiting
 run_test test_spawned_launch_at_crit_context_still_resumes
 run_test test_reading_is_not_shown_for_a_conversation_that_has_not_replied
+run_test test_reading_follows_a_user_claude_config_dir
 # r is only offered alongside a pending handoff. Pressed without one it falls
 # through to the resume default, which is a decline like any other.
 test_r_without_a_pending_handoff_disarms_the_marker() {

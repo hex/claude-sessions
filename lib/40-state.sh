@@ -106,13 +106,22 @@ _unset_local_state() {
 # input are resolved via `pwd -P` so the encoding matches claude's own —
 # macOS mktemp returns /var/folders/... which is a symlink to
 # /private/var/folders/... and claude realpaths cwd before encoding.
-# CS_TRANSCRIPTS_DIR overrides the base for tests (also used by doctor).
 # A session with .cs/claude-config runs Claude Code on that config dir, so its
 # transcripts live in the dir's projects/. A dangling link (vault locked) still
 # names that base: the shared one never holds the session's conversations.
+# Otherwise CS_TRANSCRIPTS_DIR overrides the base for tests (also used by
+# doctor), then Claude Code's own config dir holds them: CLAUDE_CONFIG_DIR's
+# projects/, else ~/.claude/projects. A CLAUDE_CONFIG_DIR naming some
+# session's .cs/claude-config was inherited from a claude running in that
+# session and says nothing about this one, so the shell's own config dir,
+# which the launch keeps in CLAUDE_SECURESTORAGE_CONFIG_DIR (empty for
+# ~/.claude), stands in, as it does for the keybindings (_cs_keybindings_file).
 _claude_project_dir() {
-    local cwd="$1"
-    local resolved base="${CS_TRANSCRIPTS_DIR:-$HOME/.claude/projects}"
+    local cwd="$1" config="${CLAUDE_CONFIG_DIR:-}"
+    case "$config" in
+        */.cs/claude-config) config="${CLAUDE_SECURESTORAGE_CONFIG_DIR:-}" ;;
+    esac
+    local resolved base="${CS_TRANSCRIPTS_DIR:-${config:-$HOME/.claude}/projects}"
     resolved=$( (cd -- "$cwd" 2>/dev/null && pwd -P) || printf '%s' "$cwd" )
     if [ -e "$cwd/.cs/claude-config" ] || [ -L "$cwd/.cs/claude-config" ]; then
         base="$cwd/.cs/claude-config/projects"
