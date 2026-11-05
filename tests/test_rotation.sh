@@ -759,9 +759,131 @@ test_esc_at_continue_prompt_cancels_launch() {
     [ "$rc" -ne 0 ] || { echo "  FAIL: ESC cancel should exit non-zero"; return 1; }
 }
 
+# A launch at the status line's default context thresholds, with the plain
+# glyphs, whatever the shell running the suite exports.
+_launch_at_default_thresholds() {  # session, answer
+    CS_NERD_FONTS=0 CS_STATUSLINE_CTX_WARN='' CS_STATUSLINE_CTX_CRIT='' "$CS_BIN" "$1" <<< "$2" 2>&1
+}
+
+_crit_warning() {  # reading
+    printf '◱ The last context reading in this session was %s%%, so a fresh conversation is the default. Press y to resume.' "$1"
+}
+
+# From the status line's crit threshold (CS_STATUSLINE_CTX_CRIT, default 60)
+# the ask's default is a fresh conversation: one line directly above the ask
+# says so, the suffix reads [y/N], and Enter, like a key the ask does not
+# offer, starts fresh. The figure is the last reading in this session, and the
+# line claims no more than that.
+test_enter_at_crit_context_starts_a_fresh_conversation() {
+    _rot_session "rot-crit"
+    local dir="$CS_SESSIONS_ROOT/rot-crit" old new output answer
+    printf '70\n' > "$dir/.cs/local/context-pct"
+    for answer in "" "x"; do
+        old=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+        output=$(_launch_at_default_thresholds rot-crit "$answer") || true
+        assert_eq "$(_crit_warning 70)
+Continue previous conversation? [y/N] " "$(grep -A1 -F 'last context reading' <<< "$output")" \
+            "the warning sits directly above the [y/N] ask (answer '$answer')" || return 1
+        new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+        [ "$new" != "$old" ] || { echo "  FAIL: answer '$answer' at 70% must rebind to a fresh conversation"; return 1; }
+        assert_output_contains "$output" "--session-id $new" "answer '$answer' at 70% starts a fresh conversation" || return 1
+        assert_output_not_contains "$output" "--resume" "answer '$answer' at 70% must not resume" || return 1
+    done
+}
+
+test_y_at_crit_context_resumes() {
+    _rot_session "rot-crit-y"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-y" id output
+    printf '70\n' > "$dir/.cs/local/context-pct"
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    output=$(_launch_at_default_thresholds rot-crit-y y) || true
+    assert_output_contains "$output" "--resume $id" "y at 70% resumes the recorded conversation" || return 1
+}
+
+# The default moved from 65 to 60, so the boundary is the property: 60 asks
+# [y/N] and starts fresh on Enter, 59 keeps [Y/n] and resumes.
+test_crit_context_starts_at_the_status_lines_default_threshold() {
+    _rot_session "rot-crit-edge"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-edge" output
+    printf '60\n' > "$dir/.cs/local/context-pct"
+    output=$(_launch_at_default_thresholds rot-crit-edge "") || true
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [y/N] ' <<< "$output")" "60 asks [y/N]" || return 1
+    assert_eq "$(_crit_warning 60)" "$(grep -F 'last context reading' <<< "$output")" "60 warns" || return 1
+    assert_output_not_contains "$output" "--resume" "Enter at 60 starts fresh" || return 1
+    printf '59\n' > "$dir/.cs/local/context-pct"
+    output=$(_launch_at_default_thresholds rot-crit-edge "") || true
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [Y/n] ' <<< "$output")" "59 keeps [Y/n]" || return 1
+    assert_output_not_contains "$output" "last context reading" "59 prints no warning" || return 1
+    assert_output_contains "$output" "--resume " "Enter at 59 resumes" || return 1
+}
+
+# The threshold is the status line's knob, parsed as the bar parses it: moved
+# to 80, a 70% reading keeps the resume default; 101 is out of reach of any
+# reading; a word falls back to the default 60.
+test_crit_context_follows_the_status_line_knob() {
+    _rot_session "rot-crit-knob"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-knob" output
+    printf '70\n' > "$dir/.cs/local/context-pct"
+    output=$(CS_NERD_FONTS=0 CS_STATUSLINE_CTX_CRIT=80 "$CS_BIN" rot-crit-knob <<< "" 2>&1) || true
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [Y/n] ' <<< "$output")" "a crit of 80 keeps [Y/n] at 70" || return 1
+    assert_output_not_contains "$output" "last context reading" "a crit of 80 prints no warning at 70" || return 1
+    assert_output_contains "$output" "--resume " "Enter under a crit of 80 resumes at 70" || return 1
+    printf '100\n' > "$dir/.cs/local/context-pct"
+    output=$(CS_NERD_FONTS=0 CS_STATUSLINE_CTX_CRIT=101 "$CS_BIN" rot-crit-knob <<< "" 2>&1) || true
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [Y/n] ' <<< "$output")" "a crit of 101 never fires, even at 100" || return 1
+    printf '70\n' > "$dir/.cs/local/context-pct"
+    output=$(CS_NERD_FONTS=0 CS_STATUSLINE_CTX_CRIT=hot "$CS_BIN" rot-crit-knob <<< "" 2>&1) || true
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [y/N] ' <<< "$output")" "a word falls back to the default 60" || return 1
+}
+
+# With a handoff pending at crit the same line sits above the menu, the
+# default moves from the resume row to the fresh row, and Enter starts fresh
+# with the handoff still waiting for later. r still starts from the handoff.
+test_handoff_menu_at_crit_context_defaults_to_fresh() {
+    _rot_session "rot-crit-menu"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-menu" output rows warn_at menu_at
+    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+    printf '70\n' > "$dir/.cs/local/context-pct"
+    output=$(_launch_at_default_thresholds rot-crit-menu "") || true
+    assert_eq "$(_crit_warning 70)" "$(grep -F 'last context reading' <<< "$output")" "the menu carries the warning" || return 1
+    warn_at=$(grep -nF 'last context reading' <<< "$output" | cut -d: -f1)
+    menu_at=$(grep -nF 'Rotation handoff pending:' <<< "$output" | cut -d: -f1)
+    [ "$warn_at" -lt "$menu_at" ] \
+        || { echo "  FAIL: the warning must sit above the menu (warning row $warn_at, menu row $menu_at)"; return 1; }
+    rows=$(printf '%s\n' "$output" | grep -E '^    [yrnd]  ')
+    assert_eq "    y  resume          continue the previous conversation
+    r  from handoff    fresh conversation that picks up the handoff
+    n  fresh           fresh conversation; the handoff waits for later · default
+    d  discard         retire the handoff, then resume" "$rows" "the default sits on the fresh row" || return 1
+    assert_output_contains "$output" "--session-id " "Enter starts a fresh conversation" || return 1
+    assert_output_not_contains "$output" "--resume" "Enter at 70% must not resume" || return 1
+    assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "^status: unconsumed$" "the handoff waits for later" || return 1
+    assert_not_exists "$dir/.cs/local/pending-handoff" "Enter arms no marker" || return 1
+    # r keeps its meaning while the handoff is offered.
+    output=$(_launch_at_default_thresholds rot-crit-menu r) || true
+    assert_eq "2026-07-16-test.md" "$(tr -d '[:space:]' < "$dir/.cs/local/pending-handoff")" \
+        "r at 70% arms the handoff" || return 1
+}
+
+# A spawned launch is unattended and resumes at any reading: the fresh default
+# belongs to an ask, and a spawn asks nothing.
+test_spawned_launch_at_crit_context_still_resumes() {
+    _rot_session "rot-crit-spawn"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-spawn" id output
+    printf '70\n' > "$dir/.cs/local/context-pct"
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'feedfacefeedfacefeedfacefeedface\nspawner\ndo the thing\n' > "$CS_SESSIONS_ROOT/.spawn/rot-crit-spawn.seed"
+    output=$(CS_SPAWN_TOKEN=feedfacefeedfacefeedfacefeedface CS_STATUSLINE_CTX_CRIT='' \
+        "$CS_BIN" rot-crit-spawn </dev/null 2>&1) || true
+    assert_output_not_contains "$output" "last context reading" "an unattended launch warns nothing" || return 1
+    assert_output_contains "$output" "--resume $id" "a spawned launch at 70% resumes" || return 1
+}
+
 # The card's figure wears the status line's inks: bold amber from warn, and
 # from crit the bar's inverted capsule, bold white on the crit red with a space
-# each side. Only a pty gets colour, and the theme is pinned because the inks
+# each side, and at crit the warning in the crit ink above a [y/N] whose N is
+# bold. Only a pty gets colour, and the theme is pinned because the inks
 # differ by theme. The pty answers the ask by itself, with the Enter _pty_run
 # types on Linux or the ^D script(1) sends at the end of a null stdin on macOS,
 # and either takes the default, so each launch runs on past the card.
@@ -785,6 +907,10 @@ test_card_paints_the_context_figure_in_the_status_lines_inks() {
     out=$(_pty_launch light rot-ink) || true
     grep -qF "$(printf '\033[1m\033[48;2;215;0;21;38;2;255;255;255m 70%% \033[0m')" <<< "$out" \
         || { echo "  FAIL: at crit on light the figure is bold white on 215;0;21 with a space each side"; return 1; }
+    grep -qF "$(printf '\033[1m\033[38;2;215;0;21m%s\033[0m' "$(_crit_warning 70)")" <<< "$out" \
+        || { echo "  FAIL: at crit on light the warning is bold in the crit ink 215;0;21"; return 1; }
+    grep -qF "$(printf '[y/\033[1mN\033[0m] ')" <<< "$out" \
+        || { echo "  FAIL: at crit the N of [y/N] is bold"; return 1; }
     out=$(_pty_launch dark rot-ink) || true
     grep -qF "$(printf '\033[1m\033[48;2;255;69;58;38;2;255;255;255m 70%% \033[0m')" <<< "$out" \
         || { echo "  FAIL: at crit on dark the figure is bold white on 255;69;58 with a space each side"; return 1; }
@@ -1256,6 +1382,12 @@ run_test test_resume_prompt_ignores_an_out_of_range_context_stamp
 run_test test_resume_prompt_reads_a_zero_padded_context_stamp
 run_test test_esc_at_continue_prompt_cancels_launch
 run_test test_card_paints_the_context_figure_in_the_status_lines_inks
+run_test test_enter_at_crit_context_starts_a_fresh_conversation
+run_test test_y_at_crit_context_resumes
+run_test test_crit_context_starts_at_the_status_lines_default_threshold
+run_test test_crit_context_follows_the_status_line_knob
+run_test test_handoff_menu_at_crit_context_defaults_to_fresh
+run_test test_spawned_launch_at_crit_context_still_resumes
 # r is only offered alongside a pending handoff. Pressed without one it falls
 # through to the resume default, which is a decline like any other.
 test_r_without_a_pending_handoff_disarms_the_marker() {

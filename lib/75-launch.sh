@@ -952,14 +952,28 @@ EOF
             fi
         fi
         # A spawned launch is unattended: take the default (resume) instead
-        # of parking the tmux window on an interactive ask. Unbound, the
-        # default is fresh, and a pending handoff waits for an attended open.
+        # of parking the tmux window on an interactive ask, whatever the
+        # context reading: the fresh default at crit is the attended ask's.
+        # Unbound, the default is fresh, and a pending handoff waits for an
+        # attended open.
         if [ -n "$spawn_kick" ]; then
             response=""
             [ -n "$claude_session_id" ] || response="n"
         elif [ -z "$claude_session_id" ] && [ -z "$pending_handoff" ]; then
             response="n"
         else
+            # From the status line's crit threshold the ask defaults to a
+            # fresh conversation: one line above it says so, and the default
+            # mark moves from resume to fresh. The status line stamps the
+            # figure per session, not per conversation, so the line calls it
+            # the last reading in this session and claims no more.
+            local _resume_default=' · default' _fresh_default='' _ask_keys='[Y/n]'
+            if [ "$ctx_heat" = crit ]; then
+                printf "${BOLD}${CRIT}%s${NC}\n" "${ICON_CTX} The last context reading in this session was ${ctx_pct}%, so a fresh conversation is the default. Press y to resume."
+                _resume_default=''
+                _fresh_default=' · default'
+                _ask_keys="[y/${BOLD}N${NC}]"
+            fi
             if [ -n "$pending_handoff" ]; then
                 # Answering blind is the hazard this label exists for: r arms
                 # the marker with this basename, and the next SessionStart flips
@@ -975,9 +989,9 @@ EOF
                 # menu; the keys stay the letters the one-line ask used.
                 echo
                 if [ -n "$claude_session_id" ]; then
-                    _resume_menu_row y "$GREEN" 'resume' 'continue the previous conversation · default'
+                    _resume_menu_row y "$GREEN" 'resume' "continue the previous conversation$_resume_default"
                     _resume_menu_row r "$GOLD" 'from handoff' 'fresh conversation that picks up the handoff'
-                    _resume_menu_row n "$COMMENT" 'fresh' 'fresh conversation; the handoff waits for later'
+                    _resume_menu_row n "$COMMENT" 'fresh' "fresh conversation; the handoff waits for later$_fresh_default"
                     _resume_menu_row d "$ORANGE" 'discard' 'retire the handoff, then resume'
                 else
                     _resume_menu_row r "$GOLD" 'from handoff' 'fresh conversation that picks up the handoff'
@@ -987,14 +1001,25 @@ EOF
                 echo
                 printf '    %b›%b ' "$GOLD" "$NC"
             else
-                printf "${DIM}Continue previous conversation?${NC} [Y/n] "
+                printf "${DIM}Continue previous conversation?${NC} ${_ask_keys} "
             fi
             # Single keypress, no Enter needed (mirrors the collision menu).
             # ESC or EOF (piped close) cancels the launch; Enter takes the
-            # default (resume) via the case's *) arm below.
+            # default: resume via the case's *) arm below, or at crit fresh
+            # via the n arm.
             IFS= read -rsn1 response || { echo; exit 130; }
             echo
             case "$response" in $'\e') exit 130 ;; esac
+            # At crit only y resumes. Enter and any key not offered go to the
+            # n arm, disarm included; r and d keep their meaning while a
+            # handoff is offered.
+            if [ "$ctx_heat" = crit ]; then
+                case "$response" in
+                    [yY]) ;;
+                    [rRdD]) [ -n "$pending_handoff" ] || response=n ;;
+                    *) response=n ;;
+                esac
+            fi
         fi
         case "$response" in
             [nN]|[nN][oO])
@@ -1014,8 +1039,9 @@ EOF
                     fi
                     _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")" "$spawn_kick" ""
                 fi
-                # r without a pending handoff was never offered: treat as the
-                # default resume answer, disarm included.
+                # r without a pending handoff was never offered. At crit the
+                # ask has already turned it into n, so it reaches here only
+                # below crit, where the default is resume, disarm included.
                 _disarm_rotation_marker "$session_dir"
                 resume_id="$claude_session_id"
                 ;;
@@ -1036,13 +1062,13 @@ EOF
                     ' "$pending_handoff" 2>/dev/null || true
                     printf "${DIM}Handoff discarded:${NC} %s\n" "$(_cs_plain_name "$(basename "$pending_handoff")" 160)"
                 fi
-                # d without a pending handoff was never offered: treat as the
-                # default resume answer.
+                # d without a pending handoff was never offered. As with r, it
+                # reaches here only below crit, where the default is resume.
                 resume_id="$claude_session_id"
                 ;;
             *)
-                # Also the unattended spawn path, which takes this default
-                # without asking.
+                # y, and below crit Enter or any key not offered. Also the
+                # unattended spawn path, which resumes without asking.
                 _disarm_rotation_marker "$session_dir" "$pending_handoff"
                 # --resume <uuid>, never --continue: the uuid names the exact
                 # conversation, while --continue means "most recent" and may
