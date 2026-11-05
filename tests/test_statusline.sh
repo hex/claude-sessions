@@ -764,10 +764,10 @@ test_non_git_workspace_absent() {
 
 test_ctx_threshold_red() {
     export COLORTERM=truecolor
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":65}}'
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":60}}'
     local out
     out=$(CS_STATUSLINE_NOW=1000 run_sl "$json")
-    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◕ ctx" "ctx 65% should invert to the crit fill" || return 1
+    assert_output_contains_f "$out" "48;2;215;0;21;38;2;255;255;255;1m◕ ctx" "ctx 60% should invert to the crit fill" || return 1
     if ! grep -qF "$(printf '\033[0m')" <<< "$out"; then
         echo "  FAIL: colored line must contain a reset"
         return 1
@@ -832,11 +832,11 @@ test_ctx_warn_band_still_amber() {
 
 test_ctx_below_crit_is_amber_not_red() {
     export COLORTERM=truecolor
-    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":64}}'
+    local json='{"session_name":"s","workspace":{"current_dir":"/none"},"context_window":{"used_percentage":59}}'
     local out
     out=$(run_sl "$json")
-    assert_output_contains_f "$out" "38;2;180;83;9;1m64%" "ctx 64% should still be amber" || return 1
-    assert_output_not_contains "$out" "48;2;215;0;21" "ctx 64% must not use the crit fill" || return 1
+    assert_output_contains_f "$out" "38;2;180;83;9;1m59%" "ctx 59% should still be amber" || return 1
+    assert_output_not_contains "$out" "48;2;215;0;21" "ctx 59% must not use the crit fill" || return 1
 }
 
 test_ctx_warn_threshold_is_configurable() {
@@ -901,7 +901,7 @@ test_ctx_threshold_above_100_disables_its_band() {
     local out
     out=$(run_sl "$json")
     assert_output_contains_f "$out" "38;2;180;83;9;1m100%" "ctx 100% stays amber when crit is out of reach" || return 1
-    assert_output_not_contains "$out" "48;2;215;0;21" "a crit of 101 must switch the crit fill off, not fall back to 65" || return 1
+    assert_output_not_contains "$out" "48;2;215;0;21" "a crit of 101 must switch the crit fill off, not fall back to 60" || return 1
 }
 
 test_model_neutral_not_blue() {

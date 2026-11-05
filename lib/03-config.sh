@@ -19,7 +19,7 @@ _CS_CONFIG_SPEC=(
     'CS_STATUSLINE_COLS|Status line|Width in columns|text|cols|-|measured|now|applies at the next repaint|A fixed width for the status line; unset, it fits the terminal.'
     'CS_STATUSLINE_FRAME|Status line|Frame columns|text|num|-|4|now|applies at the next repaint|Columns the prompt frame takes from the measured width, so the line is not cut short.'
     'CS_STATUSLINE_CTX_WARN|Status line|Context warn %|text|num|-|40|now|applies at the next repaint|Context use at which the gauge turns to its warning colour.'
-    'CS_STATUSLINE_CTX_CRIT|Status line|Context critical %|text|num|-|65|now|applies at the next repaint|Context use at which the gauge turns to its critical colour.'
+    'CS_STATUSLINE_CTX_CRIT|Status line|Context critical %|text|num|-|60|now|applies at the next repaint|Context use at which the gauge turns to its critical colour.'
     'CS_USAGE_NO_REFRESH|Status line|Usage refresh|flagoff|flag|-|off|now|applies at the next repaint|Fetches your Fable usage for the status line; off, it shows only what is already cached.'
     'CS_SUBAGENT_STATUSLINE_DISABLE|Status line|Subagent rows|flagoff|flag|-|off|now|applies at the next repaint|Styles the rows Claude Code shows for running subagents to match the status line.'
     'CS_SCOPE_DISABLE|Prompts|Scope grounding|flagoff|flag|-|off|now|applies at your next prompt|Adds a short summary of the relevant code to each prompt that asks for code work.'

@@ -336,7 +336,7 @@ const GOLDEN_AT_58 = [
   at58('Width in columns', 'measured'),
   at58('Frame columns', '6'),
   at58('Context warn %', '50%'),
-  at58('Context critical %', '65%'),
+  at58('Context critical %', '60%'),
   at58('Usage refresh', '● on'),
   at58('Subagent rows', '● on'),
   '',

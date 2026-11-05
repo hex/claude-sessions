@@ -256,7 +256,7 @@ export CS_REWRITE_CMD="/path/to/my-rewriter"
 # default shown. A value above 100 is out of the gauge's reach and so switches
 # that band off, the same idiom cs -doctor uses on the Stop hook's tiers below.
 export CS_STATUSLINE_CTX_WARN="40"
-export CS_STATUSLINE_CTX_CRIT="65"
+export CS_STATUSLINE_CTX_CRIT="60"
 
 # Disable the subagent (agent-panel) statusline rows without unregistering
 export CS_SUBAGENT_STATUSLINE_DISABLE="1"
@@ -479,7 +479,7 @@ stays with its session.
 | `CS_STATUSLINE_COLS` | a column count from 1 to 9999 | measured | at the next repaint |
 | `CS_STATUSLINE_FRAME` | a whole number of 1 to 3 digits | 4 | at the next repaint |
 | `CS_STATUSLINE_CTX_WARN` | a whole number of 1 to 3 digits | 40 | at the next repaint |
-| `CS_STATUSLINE_CTX_CRIT` | a whole number of 1 to 3 digits | 65 | at the next repaint |
+| `CS_STATUSLINE_CTX_CRIT` | a whole number of 1 to 3 digits | 60 | at the next repaint |
 | `CS_USAGE_NO_REFRESH` | `1` (on) or `0` (off) | off | at the next repaint |
 | `CS_SUBAGENT_STATUSLINE_DISABLE` | `1` (on) or `0` (off) | off | at the next repaint |
 | `CS_SCOPE_DISABLE` | `1` (on) or `0` (off) | off | at your next prompt |
