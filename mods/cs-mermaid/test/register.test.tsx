@@ -90,9 +90,9 @@ test('a fence in a list item is indented from the item, not the margin', () => {
   // Right after the opener a body line back at the margin ends the item and the fence open in
   // it, with nothing in it: no chart.
   expect(fencesOf('1. flow:\n   ```mermaid\ngraph TD\nA --> B\n   ```')).toEqual([])
-  // A fence on the marker's own line is not read, so its closer opens an outer block; that block
-  // closes with the item, and a chart after the list still draws.
-  expect(fencesOf('- ```mermaid\n  graph TD\n  A --> B\n  ```\n\nlater:\n```mermaid\ngraph TD\nC --> D\n```')).toEqual(['graph TD\nC --> D'])
+  // A fence opened on the marker's own line is a fence in the item, and a chart after the list
+  // draws too.
+  expect(fencesOf('- ```mermaid\n  graph TD\n  A --> B\n  ```\n\nlater:\n```mermaid\ngraph TD\nC --> D\n```')).toEqual(['graph TD\n  A --> B', 'graph TD\nC --> D'])
   // A blockquote's `>` is not read: a quoted fence stays source.
   expect(fencesOf('> ```mermaid\n> graph TD\n> A --> B\n> ```')).toEqual([])
 })
@@ -104,6 +104,23 @@ test('a fence in a list item is indented from the item, not the margin', () => {
 test('a lazy line left of a list item keeps the item and the fence open in it', () => {
   expect(fencesOf('1. Flow:\n   ```mermaid\n   graph TD\nA --> B\n   ```\n\n2. Next:\n\n```mermaid\ngraph LR\nC --> D\n```')).toEqual(['graph TD\nA --> B', 'graph LR\nC --> D'])
   expect(fencesOf('- a\nprose\n    ```mermaid\n    graph TD\n    A --> B\n    ```')).toEqual(['graph TD\n    A --> B'])
+})
+
+// CommonMark and marked read a fence opened on a list marker's own line as a fence in the item.
+test('a fence opened on a list marker\'s own line is a fence in the item', () => {
+  expect(fencesOf('- ```mermaid\n  graph TD\n  A --> B\n  ```')).toEqual(['graph TD\n  A --> B'])
+  expect(fencesOf('1. ```mermaid\n   graph TD\n   A --> B\n   ```')).toEqual(['graph TD\n   A --> B'])
+  expect(fencesOf('- ```bash\n  ls\n  ```\n  ```mermaid\n  graph TD\n  A --> B\n  ```')).toEqual(['graph TD\n  A --> B'])
+  expect(fencesOf('- ```markdown\n  ```mermaid\n  graph TD\n  A --> B\n  ```\n  ```')).toEqual([])
+  // Right after the opener a line back at the margin ends the item and its empty fence; the bare
+  // ``` under it then opens a block of its own, quoting the chart after it.
+  expect(fencesOf('- ```mermaid\ngraph TD\n  ```\n```mermaid\ngraph LR\nC --> D\n```')).toEqual([])
+  // The marker goes to the engine with the prose, so the list keeps its bullet.
+  expect(splitReply('- ```mermaid\n  graph TD\n  A --> B\n  ```\n- next')).toEqual([
+    { kind: 'text', body: '- ' },
+    { kind: 'mermaid', body: 'graph TD\n  A --> B' },
+    { kind: 'text', body: '\n- next' },
+  ])
 })
 
 // A paragraph at a reply's top level runs on through a list marker unless it is a bullet or `1.`
