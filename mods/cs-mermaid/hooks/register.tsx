@@ -200,6 +200,21 @@ export function fitSource(source: string, columns: number): Fitted | ParseError 
   return fitted
 }
 
+// One fence: the chart when it fits, else its source with the reason. Model-written source
+// crosses into the parser and layout here; a throw is caught and shown under the fence with
+// its message, where uncaught it would make the engine draw the whole reply plain.
+export function drawPart(source: string, columns: number, palette: Palette, elements: Elements, fitter: typeof fitSource = fitSource) {
+  const { Box } = elements
+  let fitted: Fitted | ParseError
+  try {
+    fitted = fitter(source, columns)
+  } catch (thrown) {
+    fitted = { error: `could not draw: ${thrown instanceof Error ? thrown.message : String(thrown)}` }
+  }
+  if ('error' in fitted) return drawFence(source, fitted.error, elements)
+  return <Box marginY={1}><Drawing drawn={fitted.drawn} graph={fitted.graph} palette={palette} elements={elements} /></Box>
+}
+
 export const register: Register = (on, options) => {
   if (options[OPTION] === false) return
 
@@ -220,12 +235,7 @@ export const register: Register = (on, options) => {
       : undefined))
     return (
       <Box flexDirection="column">
-        {parts.map((part, index) => {
-          if (part.kind === 'text') return prose[index]
-          const fitted = fitSource(part.body, columns)
-          if ('error' in fitted) return drawFence(part.body, fitted.error, elements)
-          return <Box marginY={1}><Drawing drawn={fitted.drawn} graph={fitted.graph} palette={palette} elements={elements} /></Box>
-        })}
+        {parts.map((part, index) => (part.kind === 'text' ? prose[index] : drawPart(part.body, columns, palette, elements)))}
       </Box>
     )
   })
