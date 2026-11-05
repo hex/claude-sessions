@@ -793,15 +793,19 @@ _crit_warning() {  # reading, [the conversation Enter starts]
 # From the status line's crit threshold (CS_STATUSLINE_CTX_CRIT, default 60)
 # the ask's default is a fresh conversation: one line directly above the ask
 # says so, the suffix reads [y/N], and Enter, like a key the ask does not
-# offer, starts fresh. The figure is the last reading in this session, and the
-# line claims no more than that.
+# offer, starts fresh; r and d are not offered without a handoff. The figure is
+# the last reading in this session, and the line claims no more than that. A
+# card with no colour reads the figure as it reads any other, one space each
+# side, since the capsule's spaces belong to its fill.
 test_enter_at_crit_context_starts_a_fresh_conversation() {
     _rot_session "rot-crit"
     local dir="$CS_SESSIONS_ROOT/rot-crit" old new output answer
-    for answer in "" "x"; do
+    for answer in "" "x" "r" "d"; do
         _stamp_context rot-crit 70
         old=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
         output=$(_launch_at_default_thresholds rot-crit "$answer") || true
+        assert_eq "◱ 70% context used" "$(grep -F 'context used' <<< "$output" | sed 's/.*▌ //')" \
+            "the plain card reads the crit figure with single spaces (answer '$answer')" || return 1
         assert_eq "$(_crit_warning 70)
 Continue previous conversation? [y/N] " "$(grep -A1 -F 'last context reading' <<< "$output")" \
             "the warning sits directly above the [y/N] ask (answer '$answer')" || return 1
@@ -819,6 +823,22 @@ test_y_at_crit_context_resumes() {
     id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
     output=$(_launch_at_default_thresholds rot-crit-y y) || true
     assert_output_contains "$output" "--resume $id" "y at 70% resumes the recorded conversation" || return 1
+}
+
+# A marker naming a handoff consumed elsewhere is an orphan: no handoff is
+# offered, so the ask is the plain one, and Enter at crit takes the n arm,
+# which disarms the marker and says so.
+test_enter_at_crit_context_disarms_an_orphaned_marker() {
+    _rot_session "rot-crit-orphan"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-orphan" output
+    _seed_handoff "$dir" "2026-07-16-test.md" "consumed"
+    printf '%s\n' "2026-07-16-test.md" > "$dir/.cs/local/pending-handoff"
+    _stamp_context rot-crit-orphan 70
+    output=$(_launch_at_default_thresholds rot-crit-orphan "") || true
+    assert_eq "$(_crit_warning 70)" "$(grep -F 'last context reading' <<< "$output")" "the ask is at crit" || return 1
+    assert_eq "1" "$(grep -cxF 'Rotation marker disarmed.' <<< "$output")" "Enter at 70% announces the disarm" || return 1
+    assert_not_exists "$dir/.cs/local/pending-handoff" "Enter at 70% drops the orphaned marker" || return 1
+    assert_output_contains "$output" "--session-id " "Enter at 70% starts a fresh conversation" || return 1
 }
 
 # The default moved from 65 to 60, so the boundary is the property: 60 asks
@@ -957,6 +977,11 @@ _pty_launch() {  # theme, session
 test_card_paints_the_context_figure_in_the_status_lines_inks() {
     _rot_session "rot-ink"
     local out
+    # The warn edge is inclusive, as on the bar: 40 is already amber.
+    _stamp_context rot-ink 40
+    out=$(_pty_launch light rot-ink) || true
+    grep -qF "$(printf '\033[1m\033[38;2;180;83;9m40%%\033[0m')" <<< "$out" \
+        || { echo "  FAIL: at the warn edge, 40, on light the figure is bold amber 180;83;9"; return 1; }
     _stamp_context rot-ink 50
     out=$(_pty_launch light rot-ink) || true
     grep -qF "$(printf '\033[1m\033[38;2;180;83;9m50%%\033[0m')" <<< "$out" \
@@ -976,6 +1001,8 @@ test_card_paints_the_context_figure_in_the_status_lines_inks() {
     out=$(_pty_launch dark rot-ink) || true
     grep -qF "$(printf '\033[1m\033[48;2;255;69;58;38;2;255;255;255m 70%% \033[0m')" <<< "$out" \
         || { echo "  FAIL: at crit on dark the figure is bold white on 255;69;58 with a space each side"; return 1; }
+    grep -qF "$(printf '\033[1m\033[38;2;255;69;58m%s\033[0m' "$(_crit_warning 70)")" <<< "$out" \
+        || { echo "  FAIL: at crit on dark the warning is bold in the crit ink 255;69;58"; return 1; }
 }
 
 test_rotate_answer_consumes_pending_handoff() {
@@ -1446,6 +1473,7 @@ run_test test_esc_at_continue_prompt_cancels_launch
 run_test test_card_paints_the_context_figure_in_the_status_lines_inks
 run_test test_enter_at_crit_context_starts_a_fresh_conversation
 run_test test_y_at_crit_context_resumes
+run_test test_enter_at_crit_context_disarms_an_orphaned_marker
 run_test test_crit_context_starts_at_the_status_lines_default_threshold
 run_test test_crit_context_follows_the_status_line_knob
 run_test test_handoff_menu_at_crit_context_defaults_to_the_handoff
