@@ -332,8 +332,9 @@ test_rotate_skill_puts_the_next_step_first() {
 }
 
 # Arming is the last step. An armed marker is disarmed by the launch prompt on
-# Y, n or Enter and nothing re-arms it, while an unarmed handoff on disk is
-# still offered by that prompt's scan — so arming before the ritual can finish
+# Y, n or Enter (Enter at critical context with the conversation's own handoff
+# pending arms it instead) and nothing re-arms it, while an unarmed handoff on
+# disk is still offered by that prompt's scan — so arming before the ritual can finish
 # turns an interruption into a bare /clear. Pinned by ORDER in the file: the arm
 # step must come after the retire step and the task archive, and no numbered
 # step commits.
