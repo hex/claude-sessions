@@ -4,7 +4,7 @@ import { test, expect, mock } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { ConfigRow, On } from 'claude-code'
 
-import { Drawing, OPTION, blockRows, drawFence, fencesOf, fillFor, fit, fitSource, labelColor, paletteFor, roleOf, splitReply } from '../hooks/register'
+import { Drawing, OPTION, blockRows, drawFence, drawPart, fencesOf, fillFor, fit, fitSource, labelColor, paletteFor, roleOf, splitReply } from '../hooks/register'
 import { parse } from '../hooks/parse'
 
 const TEXT = ['Flow:', '', '```mermaid', 'graph TD', '  A[prompt] --> B{cached?}', '  B -->|no| C[render]', '```'].join('\n')
@@ -87,6 +87,37 @@ test('an unsupported chart stays a fence with the reason under it', async ($, on
   expect(reason?.props.dimColor).toBe(true)
   // The source first, the reason under it.
   expect((await reply.findAll({})).map(node => node.type).filter(type => type === 'Code' || type === 'Text')).toEqual(['Code', 'Text'])
+  await reply.unmount()
+})
+
+// A throw while fitting a fence is the engine's cue to draw the whole reply plain (the hook
+// is skipped). No fence found by fuzzing parse and layout throws, so a fitter that does
+// stands in: the fence shows its source and the message, as a refused chart does.
+test('a fence whose fitting throws shows its source with the error named under it', async ($, on) => {
+  const source = 'graph TD\n  A --> B'
+  const thrower = () => { throw new Error('boom at layer 2') }
+  on('ui.render', { component: 'Pane' }, ($, e) => {
+    const elements = $.ui.resolve(e)
+    const { Box } = elements
+    return <Box flexDirection="column">{drawPart(source, 74, paletteFor(undefined), elements, thrower)}</Box>
+  })
+  const pane = await $.ui.mount({ plugin: 'cs-mermaid', surface: 'terminal', component: 'Pane', requestId: 'thrown', props: { title: 'thrown', isFocused: false, placement: 'inline', bodyColumns: 80, scroll: { offset: 0, bodyRows: 24 }, view: {} } })
+  expect(await pane.find({ type: 'Code', text: 'graph TD\n  A --> B' })).toBeDefined()
+  expect((await pane.find({ type: 'Text', text: 'mermaid: could not draw: boom at layer 2' }))?.props.dimColor).toBe(true)
+  await pane.unmount()
+})
+
+test('a reply with a refused fence still draws its prose and the fence that fits', async ($, on) => {
+  on('config.list', () => ({ value: [] }))
+  mock.env(on, {})
+  const seen: { text: string; isFirstOfReply: boolean }[] = []
+  engine(on, seen)
+  const text = 'Two charts:\n```mermaid\ngraph TD\n  subgraph S\n  A --> B\n  end\n```\nthen\n```mermaid\ngraph TD\n  C[ok] --> D[done]\n```'
+  const reply = await $.ui.mount({ plugin: 'cs-mermaid', surface: 'terminal', component: 'AssistantMessage', props: { text, isFirstOfReply: true } })
+  expect(seen).toEqual([{ text: 'Two charts:', isFirstOfReply: true }, { text: '\nthen', isFirstOfReply: false }])
+  expect(await reply.find({ type: 'Code', text: 'graph TD\n  subgraph S\n  A --> B\n  end' })).toBeDefined()
+  expect(await reply.find({ type: 'Text', text: 'mermaid: subgraphs are not supported' })).toBeDefined()
+  expect((await reply.find({ type: 'Text', text: 'done' }))?.props.backgroundColor).toBe('#E9ECEF')
   await reply.unmount()
 })
 
