@@ -1138,8 +1138,9 @@ list marker, a lone CR line break, or a lazy nested line under a wide numbered
 marker can give different fence boundaries. Openers ` ````mermaid ` and
 `~~~mermaid` stay source by design, as do replies whose
 only Mermaid fences are empty. Because the engine reads prose parts separately,
-an ordered list with nonconsecutive source numbers can restart at a source
-number where marked would continue counting from the earlier part.
+an ordered list with repeated or restarted source numbers can restart where
+marked would continue counting. For example, a `1.` after a chart can show as
+`1.` where marked shows `2.` in the whole reply.
 
 cs adds a `cs:mermaid-diagrams` section headed `Diagrams` to `CLAUDE.local.md`
 when it creates a session, or on migration when the sentinel is absent. The
