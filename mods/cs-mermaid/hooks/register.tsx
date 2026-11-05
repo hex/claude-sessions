@@ -34,9 +34,18 @@ export function scanFences(text: string): Fence[] {
   // Whether the line before was a fence mark, heading, thematic break or indented code, after which
   // a line left of an item's content column ends the item rather than continuing it.
   let settled = false
+  // Whether the line before was a line of text in the innermost container. A line of only `-` or
+  // `=` under one underlines it as a heading, and at a reply's top level only a bullet or `1.` or
+  // `1)` with text after it starts a list item there (marked reads an item's text a line at a time,
+  // so inside an item any marker does).
+  let paragraph = false
+  // Whether the line before was a list marker with nothing after it: an item begins with at most
+  // one blank line, so a blank line next ends that item.
+  let bare = false
   let at = 0
   const closeItems = (depth: number) => {
     items.length = depth
+    paragraph = false
     if (!block || block.depth <= depth) return
     const { mermaid } = block
     if (mermaid) fences.push({ start: mermaid.start, end: at - 1, body: text.slice(mermaid.bodyStart, Math.max(mermaid.bodyStart, at - 1)) })
@@ -46,7 +55,10 @@ export function scanFences(text: string): Fence[] {
     const next = at + line.length + 1
     const { column, rest } = indentation(line, 0)
     if (rest === '') {
+      if (bare) closeItems(items.length - 1)
       for (const item of items) item.blank = true
+      paragraph = false
+      bare = false
       at = next
       continue
     }
@@ -63,6 +75,8 @@ export function scanFences(text: string): Fence[] {
     const mark = indented || lazy ? undefined : fenceMark(rest)
     // The line as its innermost container reads it: an item's marker line by what follows the marker.
     let read = { indented, text: rest }
+    let pushed = false
+    let underline = false
     if (mark && block) {
       if (mark[0] === block.mark && mark.length >= block.length && rest === mark) {
         const { mermaid } = block
@@ -75,12 +89,19 @@ export function scanFences(text: string): Fence[] {
       block = { mark: mark[0]!, length: mark.length, depth: items.length, mermaid }
     } else if (!indented && !lazy && !block) {
       const item = listItem(rest, column)
-      if (item) {
+      if (paragraph && /^(?:-+|=+)$/.test(rest)) underline = true
+      else if (item && (items.length > 0 || !paragraph || (item.text !== '' && /^(?:[-+*]|1[.)])$/.test(item.marker)))) {
         items.push({ content: item.content, blank: item.text === '' })
         read = { indented: item.textColumn - item.content >= 4, text: item.text }
+        pushed = true
       }
     }
     settled = !lazy && (read.indented || /^(?:```|~~~|#)/.test(read.text) || THEMATIC.test(read.text))
+    bare = pushed && read.text === ''
+    // An indented line outside a block leaves `paragraph` as it was: its continuation, or code.
+    if (block || mark || underline) paragraph = false
+    else if (lazy) paragraph = true
+    else if (pushed || !indented) paragraph = !read.indented && read.text !== '' && !/^#{1,6}(?:[ \t]|$)/.test(read.text) && !THEMATIC.test(read.text)
     at = next
   }
   return fences
@@ -118,13 +139,13 @@ const THEMATIC = /^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/
 // or `)`, then blanks or nothing; a thematic break is not one. Its content starts past one to four
 // columns of blanks, or one column past the marker when more or nothing follow it (CommonMark).
 // `text` is what follows the marker and its blanks, starting at `textColumn`.
-function listItem(rest: string, column: number): { content: number; text: string; textColumn: number } | undefined {
+function listItem(rest: string, column: number): { marker: string; content: number; text: string; textColumn: number } | undefined {
   if (THEMATIC.test(rest)) return undefined
   const marker = /^(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$)/.exec(rest)?.[0]
   if (marker === undefined) return undefined
   const after = column + marker.length
   const { column: textColumn, rest: text } = indentation(rest.slice(marker.length), after)
-  return { content: text === '' || textColumn - after > 4 ? after + 1 : textColumn, text, textColumn }
+  return { marker, content: text === '' || textColumn - after > 4 ? after + 1 : textColumn, text, textColumn }
 }
 
 export function fencesOf(text: string): string[] {
