@@ -28,14 +28,31 @@ test('a fence indented four spaces or a tab is an indented code block, not a cha
   expect(fencesOf('    ```mermaid\ngraph TD\nA --> B\n    ```')).toEqual([])
   expect(fencesOf('\t```mermaid\ngraph TD\nA --> B\n\t```')).toEqual([])
   expect(fencesOf(' \t```mermaid\ngraph TD\nA --> B\n ```')).toEqual([])
-  // Under a bullet the fence sits two columns in and still draws; under `1. ` it sits four
-  // in, which CommonMark reads relative to the item but this scanner does not: it stays source.
-  expect(fencesOf('- flow:\n  ```mermaid\n  graph TD\n  A --> B\n  ```')).toEqual(['graph TD\n  A --> B'])
-  expect(fencesOf('1. flow:\n    ```mermaid\n    graph TD\n    A --> B\n    ```')).toEqual([])
   // A line of three backticks indented four inside a fence is its content, not its closer.
   expect(fencesOf('```mermaid\ngraph TD\n    ```\nA --> B\n```')).toEqual(['graph TD\n    ```\nA --> B'])
   // An outer block's marks follow the same rule.
   expect(fencesOf('    ````\n```mermaid\ngraph TD\nA --> B\n```\n    ````')).toEqual(['graph TD\nA --> B'])
+})
+
+// CommonMark measures a fence inside a list item from the item's content column: the marker
+// (`-`, `+`, `*`, or 1-9 digits and `.` or `)`) and the spaces after it.
+test('a fence in a list item is indented from the item, not the margin', () => {
+  const chart = (indent: string) => ['```mermaid', 'graph TD', 'A --> B', '```'].map(line => indent + line).join('\n')
+  expect(fencesOf(`- a\n${chart('  ')}`)).toEqual(['graph TD\n  A --> B'])
+  expect(fencesOf(`1. flow:\n${chart('   ')}`)).toEqual(['graph TD\n   A --> B'])
+  expect(fencesOf(`1. flow:\n${chart('    ')}`)).toEqual(['graph TD\n    A --> B'])
+  expect(fencesOf(`10. flow:\n${chart('    ')}`)).toEqual(['graph TD\n    A --> B'])
+  expect(fencesOf(`- a\n  - b\n${chart('    ')}`)).toEqual(['graph TD\n    A --> B'])
+  // Four columns past the item's content is an indented code block inside the item.
+  expect(fencesOf(`1. x\n${chart('       ')}`)).toEqual([])
+  // With no list item, four columns is an indented code block, as is the same fence once
+  // prose at the margin has closed the list.
+  expect(fencesOf(chart('    '))).toEqual([])
+  expect(fencesOf(`- a\n\nprose\n${chart('    ')}`)).toEqual([])
+  // A body line back at the margin closes the item and the fence open in it: no chart.
+  expect(fencesOf('1. flow:\n   ```mermaid\ngraph TD\nA --> B\n   ```')).toEqual([])
+  // A blockquote's `>` is not read: a quoted fence stays source.
+  expect(fencesOf('> ```mermaid\n> graph TD\n> A --> B\n> ```')).toEqual([])
 })
 
 test('a reply whose only fence is indented four spaces is left to the engine', async ($, on) => {
