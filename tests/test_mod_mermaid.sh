@@ -55,6 +55,28 @@ test_mod_unit_tests_pass_under_the_engine_test_kit() {
     assert_output_not_contains "$out" " 0 pass" "the suite ran something" || return 1
 }
 
+# Claude Code lays text out by Bun.stringWidth(text, { ambiguousIsNarrow: true }) and a hooks
+# module has no Bun, so the mod measures by its own rules. The census holds them to the engine's
+# measure over every code point and the emoji sequences, under a bun of the version claude embeds.
+test_mod_cell_measure_agrees_with_the_engine_measure() {
+    require_tool bun claude || return $?
+    local engine_bun oracle_bun
+    engine_bun="$(LC_ALL=C grep -a -o -m1 'Bun v[0-9][0-9.]*' "$(command -v claude)" || true)"
+    oracle_bun="Bun v$(bun --version)"
+    if [ "$engine_bun" != "$oracle_bun" ]; then
+        echo "    SKIP: claude embeds ${engine_bun:-no Bun}, the bun on PATH is $oracle_bun; the census needs the engine's own measure"
+        SKIP_REASON="bun on PATH is not the Bun claude embeds"
+        return 77
+    fi
+    local out err="${TMPDIR:-/tmp}/cs-mod-mermaid-census.$$" status=0
+    out="$(bun "$MOD/test/width.census.ts" 2> "$err")" || status=$?
+    local errors; errors="$(sed 's/\x1b\[[0-9;]*m//g' "$err")"; rm -f "$err"
+    assert_eq "census: code points 1112064, emoji+FE0E 1438, emoji+FE0F 1438, regional 702, keycaps 72, skin tones 675, zwj 4185, labels 16; differ 0; known wider: Indic signs 77, unassigned 158" \
+        "$(tail -n 1 <<< "$out")" "the mod measures every census string as the engine does, but the known classes, which it measures wider" \
+        || { echo "$out" | head -40; echo "$errors" | tail -5; return 1; }
+    assert_eq "0" "$status" "the census exits 0" || { echo "$errors"; return 1; }
+}
+
 test_mod_validate_inventories_the_hooks_and_calls() {
     require_tool claude || return $?
     local out raw="${TMPDIR:-/tmp}/cs-mod-mermaid-validate.$$"
@@ -75,6 +97,7 @@ run_test test_mod_manifest_names_the_plugin_its_module_and_the_config_field
 run_test test_mod_is_deployed_by_the_installer
 run_test test_show_me_skill_names_itself_and_its_triggers
 run_test test_mod_unit_tests_pass_under_the_engine_test_kit
+run_test test_mod_cell_measure_agrees_with_the_engine_measure
 run_test test_mod_validate_inventories_the_hooks_and_calls
 
 report_results
