@@ -333,6 +333,83 @@ test_cs_launch_kicks_dropped() {
         "brief kick wording moved; update the corpus filter" || return 1
 }
 
+# A side agent's note reaches the prompt in one of two drafts the person sends
+# unedited, so Claude Code stamps it typed: Claude Code's own "Here is a note
+# offered by a side agent:", and the claude-council heads-up mod's "A side check
+# by <seat> (not you) flagged this:", which transcripts also carry as "raised
+# this:".
+test_side_agent_relays_dropped() {
+    local f; f="$(proj_file projA)"
+    add_msg "$f" "$(printf 'Here is a note offered by a side agent:\n\n> Heads up · the fixture had no rows')" \
+        "2026-07-01T10:00:00Z" '{"promptSource": "typed"}'
+    add_msg "$f" "A side check by codex (not you) flagged this: the backfill path never ran" \
+        "2026-07-01T10:00:01Z" '{"promptSource": "typed"}'
+    add_msg "$f" "A side check by gemini (not you) raised this: the migration used an empty fixture" \
+        "2026-07-01T10:00:02Z" '{"promptSource": "queued"}'
+    add_msg "$f" "what did the side check by codex say about the fixture?" "2026-07-01T10:00:03Z"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    if grep -q -e "fixture had no rows" -e "backfill path never ran" -e "used an empty fixture" "$(corpus_path)"; then
+        echo "  FAIL: a relayed side-agent note reached the corpus"; return 1
+    fi
+    assert_file_contains "$(corpus_path)" "1 side-agent notes, 2 side checks" \
+        "stats should count the side-agent note and both side-check wordings" || return 1
+    assert_file_contains "$(corpus_path)" "what did the side check by codex say" \
+        "a typed message that mentions a side check must be kept" || return 1
+}
+
+# Claude Code records a paste between <pasted_content id="..."> and
+# </pasted_content id="...">, and what the person typed around it sits outside
+# the tags. The block is someone else's text; the remark is the person's, and a
+# message that is nothing but a block is dropped.
+test_tagged_paste_cut_and_typed_remark_kept() {
+    local f blob; f="$(proj_file projA)"
+    blob="$(printf '%02100d' 0 | tr '0' 'x')"
+    add_msg "$f" "$(printf '<pasted_content id="ae13">\n# Black October: check your Mac\n</pasted_content id="ae13">\n\nis this bigger than the one we ship?')" \
+        "2026-07-01T10:00:00Z"
+    add_msg "$f" "$(printf 'what is this exactly, the new log format?\n\n<pasted_content id="60fc">\n%s\n</pasted_content id="60fc">' "$blob")" \
+        "2026-07-01T10:00:01Z"
+    add_msg "$f" "$(printf '<pasted_content id="ba55">\nPASTED_ONLY_BODY timers [driver 4879]\n</pasted_content id="ba55">')" \
+        "2026-07-01T10:00:02Z"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    if grep -q -e "Black October" -e "xxxxxxxxxx" -e "PASTED_ONLY_BODY" -e "pasted_content" "$(corpus_path)"; then
+        echo "  FAIL: a tagged paste reached the corpus"; return 1
+    fi
+    assert_file_contains "$(corpus_path)" "^is this bigger than the one we ship?$" \
+        "the remark typed after a paste must be kept on its own" || return 1
+    assert_file_contains "$(corpus_path)" "^what is this exactly, the new log format?$" \
+        "the remark typed before a long paste must be kept on its own" || return 1
+    assert_file_contains "$(corpus_path)" "0 pastes over 2000 chars" \
+        "a long tagged paste must not count against the typed remark around it" || return 1
+    assert_file_contains "$(corpus_path)" "1 tagged pastes with no typed text" \
+        "stats should count the message that was only a paste" || return 1
+    assert_file_contains "$(corpus_path)" "^Tagged pastes cut from typed messages: 2$" \
+        "stats should count the pastes cut from kept messages" || return 1
+}
+
+# A project directory is the launch directory with every character that is not
+# a letter or digit turned into "-". Claude launched under the system temp
+# directory or a session's .cs/local/ is an E2E harness or a live probe, whose
+# prompts are scripted.
+test_test_session_projects_dropped() {
+    local p
+    for p in -private-tmp-claude-501--Users-me-app-scratchpad-heads-up-live \
+             -private-var-folders-jw-p42m-T-heads-up-e2e-IcskAc-app \
+             -tmp-probe-run \
+             -Users-me--claude-sessions-app--cs-local-e2e-live; do
+        add_msg "$CS_TRANSCRIPTS_DIR/$p/session-1.jsonl" "scripted prompt from the $p harness run"
+    done
+    add_msg "$CS_TRANSCRIPTS_DIR/-Users-me-code-tmp-tools/session-1.jsonl" \
+        "typed in a project whose path holds tmp further in"
+    run_build > /dev/null || { echo "  FAIL: build exited non-zero"; return 1; }
+    if grep -q "scripted prompt from" "$(corpus_path)"; then
+        echo "  FAIL: a test-session prompt reached the corpus"; return 1
+    fi
+    assert_file_contains "$(corpus_path)" "4 from test sessions" \
+        "stats should count the four test-session prompts" || return 1
+    assert_file_contains "$(corpus_path)" "typed in a project whose path holds tmp" \
+        "a project with tmp past the start of its path must be kept" || return 1
+}
+
 # The deny-list matched `sk-` with a hyphen and a 40+ run of [A-Za-z0-9+/=],
 # which let every one of these through. Each entry is a real token family.
 #
@@ -596,6 +673,9 @@ run_test test_corrupt_line_skipped_not_fatal
 run_test test_machine_prompt_sources_dropped
 run_test test_human_prompt_sources_kept
 run_test test_cs_launch_kicks_dropped
+run_test test_side_agent_relays_dropped
+run_test test_tagged_paste_cut_and_typed_remark_kept
+run_test test_test_session_projects_dropped
 run_test test_token_families_redacted
 run_test test_url_userinfo_and_bearer_redacted
 run_test test_anthropic_key_shape_redacted
