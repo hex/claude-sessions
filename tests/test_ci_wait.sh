@@ -81,6 +81,17 @@ _ci_log_lines() { # job text lines
     done
 }
 
+test_workflow_run_line_matches_the_log_reader() {
+    local workflow="$SCRIPT_DIR/../.github/workflows/test.yml" run_line
+    run_line=$(awk '
+        /^  [^ ]/ { bash_job = ($0 == "  bash:") }
+        bash_job && /^      - / { test_step = ($0 == "      - name: Run bash test suites") }
+        bash_job && test_step && /^        run:/ { sub(/^        /, ""); print }
+    ' "$workflow")
+    assert_eq 'run: bash tests/run_all.sh' "$run_line" \
+        "ci_wait.sh:70 needs the bash job's run_all log header" || return 1
+}
+
 test_pending_jobs_wait_until_every_conclusion_exists() {
     _ci_fixture || return $?
     _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"","steps":[],"databaseId":101}]'
@@ -690,6 +701,7 @@ SLEEP
     _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
 }
 
+run_test test_workflow_run_line_matches_the_log_reader
 run_test test_pending_jobs_wait_until_every_conclusion_exists
 run_test test_failure_and_skipped_dependent_stop
 run_test test_cancellation_after_steps_is_a_failure
