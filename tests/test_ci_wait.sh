@@ -73,6 +73,14 @@ _ci_calls() {
     assert_eq "$1" "$(cat "$TEST_TMPDIR/calls")" 'exact gh arguments'
 }
 
+_ci_log_lines() { # job text lines
+    local job="$1" line
+    shift
+    for line in "$@"; do
+        printf '%s\tUNKNOWN STEP\t2026-11-06T08:22:20Z %s\n' "$job" "$line"
+    done
+}
+
 test_pending_jobs_wait_until_every_conclusion_exists() {
     _ci_fixture || return $?
     _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"","steps":[],"databaseId":101}]'
@@ -269,7 +277,7 @@ test_skip_blocks_preserve_job_names_and_reasons() {
 
 test_log_without_a_skip_block_reports_none() {
     _ci_fixture || return $?
-    _ci_success 1 $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z OK: all suites passed\n'
+    _ci_success 1 $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z ##[group]Run bash tests/run_all.sh\nbash\tUNKNOWN STEP\t2026-11-06T08:22:21Z \nbash\tUNKNOWN STEP\t2026-11-06T08:22:21Z ================================================================\nbash\tUNKNOWN STEP\t2026-11-06T08:22:21Z OK: all 44 suites passed\n'
     _ci_wait 123
     assert_eq 0 "$CI_RC" 'no skips exits 0' || return 1
     assert_eq $'success\t1\tbash\nskipped tests: none' "$CI_OUT" 'explicit no-skips line' || return 1
@@ -494,6 +502,69 @@ test_stray_skip_text_without_the_verdict_rule_is_ignored() {
     _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
 }
 
+test_run_all_log_requires_a_verdict() {
+    _ci_fixture || return $?
+    _ci_git_range
+    _ci_run_json completed 1 '[{"name":"bash (ubuntu-latest, 2/2)","conclusion":"success","steps":[{}]},{"name":"bash (macos-latest, 2/2)","conclusion":"success","steps":[{}]}]'
+    _ci_reply $'bash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:20Z ##[group]Run bash tests/run_all.sh\nbash (macos-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:20Z ##[group]Run bash tests/run_all.sh\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z skipped tests:\nbash (macos-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z skipped tests:\n'
+    _ci_wait 123 --since base
+    assert_eq 4 "$CI_RC" 'truncated run_all log exits 4' || return 1
+    assert_eq 'ci_wait: log for job bash (ubuntu-latest, 2/2) has 0 skip lines; run_all verdict count is missing' "$CI_ERR" 'missing verdict names job and counts' || return 1
+    assert_eq $'success\t1\tbash (ubuntu-latest, 2/2)\nsuccess\t1\tbash (macos-latest, 2/2)' "$CI_OUT" 'truncated logs print no skip verdict' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_run_all_verdict_count_must_match_the_skip_block() {
+    _ci_fixture || return $?
+    _ci_success 1 $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z ##[group]Run bash tests/run_all.sh\n'"$(_ci_skip_log test_checks.sh test_existing)"$'\nbash\tUNKNOWN STEP\t2026-11-06T08:22:22Z OK: all 44 suites passed, 2 tests skipped\n'
+    _ci_wait 123
+    assert_eq 4 "$CI_RC" 'mismatched run_all skip count exits 4' || return 1
+    assert_eq 'ci_wait: log for job bash has 1 skip lines; run_all verdict count is 2' "$CI_ERR" 'count mismatch names job and both counts' || return 1
+    assert_eq $'success\t1\tbash' "$CI_OUT" 'count mismatch prints no skip verdict' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]' || return 1
+
+    local shape log expected
+    for shape in release test-tools test-checks; do
+        _ci_fixture || return $?
+        case "$shape" in
+            release)
+                _ci_run_json completed 2 '[{"name":"build (darwin-arm64, macos-latest, aarch64-apple-darwin)","conclusion":"success","steps":[{}]},{"name":"release","conclusion":"success","steps":[{}]}]'
+                log=$(_ci_log_lines 'build (darwin-arm64, macos-latest, aarch64-apple-darwin)' 'done'
+                    _ci_log_lines release 'done')
+                expected=$'success\t1\tbuild (darwin-arm64, macos-latest, aarch64-apple-darwin)\nsuccess\t1\trelease\nskipped tests: none'
+                ;;
+            test-tools)
+                _ci_run_json completed 1 '[{"name":"bash (ubuntu-latest, 2/2)","conclusion":"success","steps":[{}]},{"name":"bash (macos-latest, 2/2)","conclusion":"success","steps":[{}]},{"name":"rust (ubuntu-latest)","conclusion":"success","steps":[{}]}]'
+                log=$(_ci_log_lines 'bash (ubuntu-latest, 2/2)' '##[group]Run bash tests/run_all.sh' \
+                    'skipped tests:' '  test_local_state.sh: test_atomic_write_keeps_the_mode_with_gnu_stat_on_a_mac (gstat not on PATH)' \
+                    '' '================================================================' 'OK: all 44 suites passed, 1 test skipped'
+                    _ci_log_lines 'bash (macos-latest, 2/2)' '##[group]Run bash tests/run_all.sh' \
+                    'skipped tests:' '  test_mod_mermaid.sh: test_mod_unit_tests_pass_under_the_engine_test_kit (claude not on PATH)' \
+                    '  test_suite_guards.sh: test_release_tags_match_changelog_headings' \
+                    '' '================================================================' 'OK: all 44 suites passed, 2 tests skipped'
+                    _ci_log_lines 'rust (ubuntu-latest)' 'done')
+                expected=$'success\t1\tbash (ubuntu-latest, 2/2)\nsuccess\t1\tbash (macos-latest, 2/2)\nsuccess\t1\trust (ubuntu-latest)\nskipped tests (bash (ubuntu-latest, 2/2)):\n  test_local_state.sh: test_atomic_write_keeps_the_mode_with_gnu_stat_on_a_mac (gstat not on PATH)\nskipped tests (bash (macos-latest, 2/2)):\n  test_mod_mermaid.sh: test_mod_unit_tests_pass_under_the_engine_test_kit (claude not on PATH)\n  test_suite_guards.sh: test_release_tags_match_changelog_headings'
+                ;;
+            test-checks)
+                _ci_run_json completed 1 '[{"name":"bash (ubuntu-latest, 1/2)","conclusion":"success","steps":[{}]},{"name":"bash (macos-latest, 1/2)","conclusion":"success","steps":[{}]},{"name":"build-sync","conclusion":"success","steps":[{}]}]'
+                log=$(_ci_log_lines 'bash (ubuntu-latest, 1/2)' '##[group]Run bash tests/run_all.sh' \
+                    'skipped tests:' '  test_queue.sh: test_queue_write' \
+                    '' '================================================================' 'OK: all 44 suites passed, 1 test skipped'
+                    _ci_log_lines 'bash (macos-latest, 1/2)' '##[group]Run bash tests/run_all.sh' \
+                    '' '================================================================' 'OK: all 44 suites passed'
+                    _ci_log_lines build-sync 'done')
+                expected=$'success\t1\tbash (ubuntu-latest, 1/2)\nsuccess\t1\tbash (macos-latest, 1/2)\nsuccess\t1\tbuild-sync\nskipped tests (bash (ubuntu-latest, 1/2)):\n  test_queue.sh: test_queue_write'
+                ;;
+        esac
+        _ci_reply "$log"
+        _ci_wait 123
+        assert_eq 0 "$CI_RC" "$shape log with matching counts passes" || return 1
+        assert_eq "$expected" "$CI_OUT" "$shape table and skips" || return 1
+        assert_eq '' "$CI_ERR" "$shape log has no error" || return 1
+        _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]' || return 1
+    done
+}
+
 test_empty_since_revision_prints_usage_without_gh() {
     _ci_fixture || return $?
     _ci_success 1
@@ -608,6 +679,8 @@ run_test test_empty_or_garbled_logs_fail_closed
 run_test test_crlf_logs_preserve_the_skip_verdict
 run_test test_each_completed_job_needs_log_lines
 run_test test_stray_skip_text_without_the_verdict_rule_is_ignored
+run_test test_run_all_log_requires_a_verdict
+run_test test_run_all_verdict_count_must_match_the_skip_block
 run_test test_empty_since_revision_prints_usage_without_gh
 run_test test_missing_since_revision_prints_usage_without_gh
 run_test test_zero_step_failure_prevents_a_cancellation_rerun

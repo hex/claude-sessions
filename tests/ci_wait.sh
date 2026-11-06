@@ -56,7 +56,7 @@ _gh() {
 }
 
 _report_skips() {
-    local missing_job
+    local missing_job invalid_counts
     jq '[.jobs[].name]' "$scratch/response" > "$scratch/jobs"
     _gh run view "$run_id" --log
     jq -Rn '
@@ -65,7 +65,15 @@ _report_skips() {
                 capture("^(?<job>[^\\t]+)\\t[^\\t]*\\t[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+ (?<text>.*)$") // null) as $entry |
             if $entry == null then .
             else
-                .[$entry.job] //= {job:$entry.job, phase:"outside", candidate:[], lines:null} |
+                .[$entry.job] //= {job:$entry.job, phase:"outside", candidate:[], lines:null,
+                    runs_run_all:false, verdict_skips:null} |
+                if ($entry.text | test("^(##\\[group\\])?Run bash tests/run_all\\.sh( |$)")) then
+                    .[$entry.job].runs_run_all = true
+                else . end |
+                ($entry.text | capture("^OK: all [0-9]+ suites passed(?:, (?<skipped>[0-9]+) tests? skipped)?$") // null) as $verdict |
+                if $verdict != null then
+                    .[$entry.job].verdict_skips = ($verdict.skipped // "0" | tonumber)
+                else . end |
                 if $entry.text == "skipped tests:" then
                     .[$entry.job].phase = "lines" | .[$entry.job].candidate = []
                 elif .[$entry.job].phase == "lines" then
@@ -87,6 +95,15 @@ _report_skips() {
     ' "$scratch/job-logs")
     if [ -n "$missing_job" ]; then
         printf 'ci_wait: log has no lines for job %s\n' "$missing_job" >&2
+        exit 4
+    fi
+    invalid_counts=$(jq -r '
+        [.[] | select(.runs_run_all and
+            (.verdict_skips == null or .verdict_skips != ((.lines // []) | length))) |
+            "ci_wait: log for job \(.job) has \((.lines // []) | length) skip lines; run_all verdict count is \(.verdict_skips // "missing")"][0] // empty
+    ' "$scratch/job-logs")
+    if [ -n "$invalid_counts" ]; then
+        printf '%s\n' "$invalid_counts" >&2
         exit 4
     fi
     jq '[.[] | select(.lines != null) | {job, lines}]' "$scratch/job-logs" > "$scratch/skips"
