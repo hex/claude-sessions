@@ -14,6 +14,8 @@ _ci_fixture() {
     printf '0\n' > "$TEST_TMPDIR/count"
     : > "$TEST_TMPDIR/calls"
     REPLY_COUNT=0
+    CI_REPO="$PWD"
+    CI_HEAD=abc123
     cat > "$TEST_TMPDIR/fakebin/gh" <<'GH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -40,8 +42,8 @@ _ci_reply() { # stdout stderr exit
 }
 
 _ci_run_json() { # status attempt jobs
-    _ci_reply "$(jq -cn --arg status "$1" --argjson attempt "$2" --argjson jobs "$3" \
-        '{status:$status,attempt:$attempt,headSha:"abc123",jobs:$jobs}')"
+    _ci_reply "$(jq -cn --arg status "$1" --argjson attempt "$2" --argjson jobs "$3" --arg head "$CI_HEAD" \
+        '{status:$status,attempt:$attempt,headSha:$head,jobs:$jobs}')"
 }
 
 _ci_success() { # attempt log
@@ -51,8 +53,8 @@ _ci_success() { # attempt log
 
 _ci_wait() {
     CI_RC=0
-    PATH="$TEST_TMPDIR/fakebin:$PATH" CI_FIXTURE="$TEST_TMPDIR" CI_WAIT_INTERVAL=0 \
-        bash "$CI_WAIT" "$@" > "$TEST_TMPDIR/stdout" 2> "$TEST_TMPDIR/stderr" || CI_RC=$?
+    (cd "$CI_REPO" && PATH="$TEST_TMPDIR/fakebin:$PATH" CI_FIXTURE="$TEST_TMPDIR" CI_WAIT_INTERVAL=0 \
+        bash "$CI_WAIT" "$@") > "$TEST_TMPDIR/stdout" 2> "$TEST_TMPDIR/stderr" || CI_RC=$?
     CI_OUT=$(cat "$TEST_TMPDIR/stdout")
     CI_ERR=$(cat "$TEST_TMPDIR/stderr")
 }
@@ -63,15 +65,16 @@ _ci_calls() {
 
 test_pending_jobs_wait_until_every_conclusion_exists() {
     _ci_fixture || return $?
+    _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"","steps":[],"databaseId":101}]'
     _ci_run_json in_progress 1 '[{"name":"bash","status":"in_progress","conclusion":"","steps":[],"databaseId":101}]'
-    _ci_run_json in_progress 1 '[{"name":"bash","status":"in_progress","conclusion":"","steps":[],"databaseId":101}]'
+    _ci_run_json in_progress 1 '[{"name":"bash","status":"completed","conclusion":"success","steps":[{}],"databaseId":101}]'
     _ci_success 1
     _ci_wait 123
     assert_eq 0 "$CI_RC" 'completed success exits 0' || return 1
-    assert_eq $'waiting: 1 of 1 jobs pending (attempt 1)\nsuccess\t1\tbash\nskipped tests: none' "$CI_OUT" 'waiting line prints only on change' || return 1
+    assert_eq $'waiting: 1 of 1 jobs pending (attempt 1)\nwaiting: 0 of 1 jobs pending (attempt 1)\nsuccess\t1\tbash\nskipped tests: none' "$CI_OUT" 'waiting line prints only on change' || return 1
     assert_eq '' "$CI_ERR" 'success has no error output' || return 1
-    assert_eq 4 "$(cat "$TEST_TMPDIR/count")" 'three status reads and one log read' || return 1
-    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+    assert_eq 5 "$(cat "$TEST_TMPDIR/count")" 'four status reads and one log read' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
 }
 
 test_failure_and_skipped_dependent_stop() {
@@ -86,12 +89,15 @@ test_failure_and_skipped_dependent_stop() {
 
 test_cancellation_after_steps_is_a_failure() {
     _ci_fixture || return $?
-    _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"cancelled","steps":[{}],"databaseId":101}]'
-    _ci_wait 123
-    assert_eq 1 "$CI_RC" 'started cancellation exits 1' || return 1
-    assert_eq $'cancelled\t1\tbash' "$CI_OUT" 'cancelled job table' || return 1
-    assert_eq '' "$CI_ERR" 'verdict has no error output' || return 1
-    _ci_calls '["run","view","123","--json","status,attempt,headSha,jobs"]'
+    local conclusion
+    for conclusion in cancelled failure skipped; do
+        _ci_run_json completed 1 "$(jq -cn --arg conclusion "$conclusion" '[{name:"bash",status:"completed",conclusion:$conclusion,steps:[{}],databaseId:101},{name:"runner",status:"completed",conclusion:"cancelled",steps:[],databaseId:102}]')"
+        _ci_wait 123
+        assert_eq 1 "$CI_RC" 'started non-success job prevents rerun' || return 1
+        assert_eq "$conclusion"$'\t1\tbash\ncancelled\t0\trunner' "$CI_OUT" 'mixed job table' || return 1
+        assert_eq '' "$CI_ERR" 'verdict has no error output' || return 1
+    done
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]'
 }
 
 test_failed_gh_read_reports_stderr() {
@@ -239,6 +245,96 @@ test_failed_log_fetch_reports_stderr() {
     _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
 }
 
+_ci_git_range() {
+    CI_REPO="$TEST_TMPDIR/repo"
+    mkdir -p "$CI_REPO/tests"
+    git -C "$CI_REPO" init -q
+    git -C "$CI_REPO" config user.name 'Test User'
+    git -C "$CI_REPO" config user.email 'test@example.com'
+    printf 'run_test test_existing\n' > "$CI_REPO/tests/test_checks.sh"
+    git -C "$CI_REPO" add tests/test_checks.sh
+    git -C "$CI_REPO" commit -qm 'Register existing check'
+    git -C "$CI_REPO" tag base
+    printf 'run_test test_new\n# run_test test_comment\n' >> "$CI_REPO/tests/test_checks.sh"
+    git -C "$CI_REPO" add tests/test_checks.sh
+    git -C "$CI_REPO" commit -qm 'Register another check'
+    CI_HEAD=$(git -C "$CI_REPO" rev-parse HEAD)
+    printf 'run_test test_after\n' >> "$CI_REPO/tests/test_checks.sh"
+    git -C "$CI_REPO" add tests/test_checks.sh
+    git -C "$CI_REPO" commit -qm 'Register a later check'
+}
+
+_ci_skip_log() { # suite test
+    printf 'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   %s: %s (tool not on PATH)\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \n' "$1" "$2"
+}
+
+test_skipped_added_registration_stops_the_release() {
+    _ci_fixture || return $?
+    _ci_git_range
+    _ci_success 1 "$(_ci_skip_log test_checks.sh test_new)"
+    _ci_wait 123 --since base
+    assert_eq 5 "$CI_RC" 'added check skipped exits 5' || return 1
+    assert_eq $'success\t1\tbash\nskipped tests (bash):\n  test_checks.sh: test_new (tool not on PATH)\nskipped tests added since base:\n  test_checks.sh: test_new (bash)' "$CI_OUT" 'added skip names suite, check and job' || return 1
+    assert_eq '' "$CI_ERR" 'skip violation has no command error' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_skips_outside_the_run_commit_range_do_not_fail() {
+    _ci_fixture || return $?
+    _ci_git_range
+    local name
+    for name in test_existing test_after test_comment; do
+        _ci_success 1 "$(_ci_skip_log test_checks.sh "$name")"
+        _ci_wait 123 --since base
+        assert_eq 0 "$CI_RC" "$name was not registered in the run range" || return 1
+        assert_eq $'success\t1\tbash\nskipped tests (bash):\n  test_checks.sh: '"$name (tool not on PATH)" "$CI_OUT" 'skip list stays visible' || return 1
+        assert_eq '' "$CI_ERR" 'no command error' || return 1
+    done
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_added_names_are_matched_with_their_suite() {
+    _ci_fixture || return $?
+    _ci_git_range
+    _ci_success 1 "$(_ci_skip_log test_other.sh test_new)"
+    _ci_wait 123 --since base
+    assert_eq 0 "$CI_RC" 'same name in another suite is not the added registration' || return 1
+    assert_eq $'success\t1\tbash\nskipped tests (bash):\n  test_other.sh: test_new (tool not on PATH)' "$CI_OUT" 'unrelated suite skip is reported' || return 1
+    assert_eq '' "$CI_ERR" 'no command error' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_unknown_revision_reports_the_unresolved_name() {
+    _ci_fixture || return $?
+    _ci_git_range
+    _ci_success 1
+    _ci_wait 123 --since missing-revision
+    assert_eq 4 "$CI_RC" 'unknown revision exits 4' || return 1
+    assert_eq 'ci_wait: cannot resolve revision "missing-revision": "fatal: Needed a single revision"' "$CI_ERR" 'unresolved revision named' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_unknown_run_head_reports_the_unresolved_name() {
+    _ci_fixture || return $?
+    _ci_git_range
+    CI_HEAD="missing-head"
+    _ci_success 1
+    _ci_wait 123 --since base
+    assert_eq 4 "$CI_RC" 'unknown head exits 4' || return 1
+    assert_eq 'ci_wait: cannot resolve revision "missing-head": "fatal: Needed a single revision"' "$CI_ERR" 'unresolved head named' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_invalid_attempt_numbers_are_rejected() {
+    _ci_fixture || return $?
+    _ci_run_json completed 1.5 '[{"name":"bash","status":"completed","conclusion":"success","steps":[],"databaseId":101}]'
+    _ci_wait 123
+    assert_eq 4 "$CI_RC" 'fractional attempt exits 4' || return 1
+    assert_eq '' "$CI_OUT" 'invalid attempt produces no verdict' || return 1
+    assert_eq 'ci_wait: invalid run JSON from gh run view 123: ""' "$CI_ERR" 'invalid attempt is rejected before integer comparison' || return 1
+    _ci_calls '["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
 run_test test_pending_jobs_wait_until_every_conclusion_exists
 run_test test_failure_and_skipped_dependent_stop
 run_test test_cancellation_after_steps_is_a_failure
@@ -254,4 +350,10 @@ run_test test_skip_blocks_preserve_job_names_and_reasons
 run_test test_log_without_a_skip_block_reports_none
 run_test test_only_the_last_skip_block_in_each_job_is_reported
 run_test test_failed_log_fetch_reports_stderr
+run_test test_skipped_added_registration_stops_the_release
+run_test test_skips_outside_the_run_commit_range_do_not_fail
+run_test test_added_names_are_matched_with_their_suite
+run_test test_unknown_revision_reports_the_unresolved_name
+run_test test_unknown_run_head_reports_the_unresolved_name
+run_test test_invalid_attempt_numbers_are_rejected
 report_results
