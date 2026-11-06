@@ -121,12 +121,40 @@ The full gate takes minutes. Most of the time you do not want it.
 | About to commit | `bash tests/run_all.sh --changed` |
 | About to merge, or cutting a release | `bash tests/run_all.sh` |
 | About to push a shell change | `bash tests/lint_shell.sh` (the shellcheck lane CI runs; the suites never run it) |
+| Waiting for a GitHub Actions run | `bash tests/ci_wait.sh <run-id> [--max-reruns N] [--since <rev>]` |
 
 `tests/lint_shell.sh` fails on any shellcheck error, and on a warning count that differs from
 `.shellcheck-warnings`. It runs shellcheck once per file, as many at once as the machine has
 processors, and stops with exit 2 naming any file shellcheck could not run on. The count is measured with the shellcheck version CI pins in
 `.github/workflows/test.yml` (v0.11.0); another version can count differently. When you fix
 warnings, lower that number in the same commit.
+
+`tests/ci_wait.sh` runs from the repo root with an authenticated `gh`, `jq`, and Git.
+It waits until the run completes and every job has a conclusion, then prints each
+job's conclusion, step count, and name. `CI_WAIT_INTERVAL` sets the poll interval
+in seconds, with a default of 30.
+
+The script reruns failed jobs only when at least one job has a `cancelled`
+conclusion and zero steps. Every other non-success job must have a `cancelled`
+or `skipped` conclusion and zero steps.
+It waits for a higher attempt number before judging the rerun. The default limit
+is three reruns; `--max-reruns N` changes it, and 0 disables reruns.
+
+After every job succeeds, the script fetches the logs once and prints each job's
+last skipped-test block, including missing-tool reasons, or `skipped tests: none`.
+`--since <rev>` compares added `run_test` registrations between that revision and
+the run's `headSha`. A skipped registration added in that range stops the release.
+Read the rest of the skip list for checks the range depends on; the script cannot
+judge those dependencies.
+
+| Exit | Meaning |
+|---|---|
+| 0 | Every job succeeded, with no skipped registration added in the requested range. |
+| 1 | A job failed or has another non-success conclusion that does not qualify for an infrastructure rerun. |
+| 2 | Invalid arguments; read the usage line. |
+| 3 | Infrastructure cancellations persisted through the rerun limit. |
+| 4 | A command failed, the run JSON was invalid, or Git could not resolve a revision. Read the error before retrying the same run. |
+| 5 | A test registration added since the requested revision appears in the skip list. Investigate before tagging. |
 
 `--changed` reads the working tree against `HEAD` plus untracked files and runs
 only the suites whose text names a changed path (a changed suite runs itself).
