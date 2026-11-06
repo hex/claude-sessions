@@ -119,9 +119,92 @@ test_invalid_arguments_print_usage_without_gh() {
     _ci_calls ''
 }
 
+_ci_cancelled_build() { # attempt
+    _ci_run_json completed "$1" '[{"name":"build (darwin-arm64, macos-latest, aarch64-apple-darwin)","status":"completed","conclusion":"cancelled","steps":[],"databaseId":101},{"name":"release","status":"completed","conclusion":"skipped","steps":[],"databaseId":102},{"name":"linux","status":"completed","conclusion":"success","steps":[{}],"databaseId":103}]'
+}
+
+test_zero_step_runner_cancellations_rerun() {
+    _ci_fixture || return $?
+    _ci_run_json completed 5 "$(jq -cn '[{"name":"rust (macos-latest)","status":"completed","conclusion":"cancelled","steps":[],"databaseId":101},{"name":"bash (macos-latest, 2/2)","status":"completed","conclusion":"cancelled","steps":[],"databaseId":102}] + [range(0;6) | {name:("job-" + tostring),status:"completed",conclusion:"success",steps:[range(0;5) | {}],databaseId:(200 + .)}]')"
+    _ci_reply ''
+    _ci_success 6
+    _ci_wait 123
+    assert_eq 0 "$CI_RC" 'successful rerun exits 0' || return 1
+    assert_eq $'cancelled\t0\trust (macos-latest)\ncancelled\t0\tbash (macos-latest, 2/2)\nsuccess\t5\tjob-0\nsuccess\t5\tjob-1\nsuccess\t5\tjob-2\nsuccess\t5\tjob-3\nsuccess\t5\tjob-4\nsuccess\t5\tjob-5\ninfrastructure: rerunning failed jobs (1 of 3)\nsuccess\t1\tbash' "$CI_OUT" 'runner cancellations and one rerun' || return 1
+    assert_eq '' "$CI_ERR" 'rerun has no error output' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]\n["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
+test_cancelled_build_and_skipped_release_rerun_after_stale_read() {
+    _ci_fixture || return $?
+    _ci_cancelled_build 1
+    _ci_reply ''
+    _ci_cancelled_build 1
+    _ci_success 2
+    _ci_wait 123
+    assert_eq 0 "$CI_RC" 'dependent skip reruns with its build' || return 1
+    assert_eq $'cancelled\t0\tbuild (darwin-arm64, macos-latest, aarch64-apple-darwin)\nskipped\t0\trelease\nsuccess\t1\tlinux\ninfrastructure: rerunning failed jobs (1 of 3)\nsuccess\t1\tbash' "$CI_OUT" 'stale attempt has no second verdict' || return 1
+    assert_eq '' "$CI_ERR" 'stale read has no error output' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
+test_persistent_cancellations_exhaust_the_rerun_limit() {
+    _ci_fixture || return $?
+    _ci_cancelled_build 1
+    _ci_reply ''
+    _ci_cancelled_build 2
+    _ci_reply ''
+    _ci_cancelled_build 3
+    _ci_wait 123 --max-reruns 2
+    assert_eq 3 "$CI_RC" 'two retries exhausted exits 3' || return 1
+    local table=$'cancelled\t0\tbuild (darwin-arm64, macos-latest, aarch64-apple-darwin)\nskipped\t0\trelease\nsuccess\t1\tlinux'
+    assert_eq "$table"$'\ninfrastructure: rerunning failed jobs (1 of 2)\n'"$table"$'\ninfrastructure: rerunning failed jobs (2 of 2)\n'"$table" "$CI_OUT" 'each completed attempt prints its table' || return 1
+    assert_eq '' "$CI_ERR" 'exhaustion has no command error' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]\n["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
+test_skipped_job_without_a_cancelled_job_fails() {
+    _ci_fixture || return $?
+    _ci_run_json completed 1 '[{"name":"release","status":"completed","conclusion":"skipped","steps":[],"databaseId":101}]'
+    _ci_wait 123
+    assert_eq 1 "$CI_RC" 'skip alone is a failure' || return 1
+    assert_eq $'skipped\t0\trelease' "$CI_OUT" 'skipped job table' || return 1
+    assert_eq '' "$CI_ERR" 'skip has no command error' || return 1
+    _ci_calls '["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
+test_failed_rerun_reports_stderr() {
+    _ci_fixture || return $?
+    _ci_cancelled_build 1
+    _ci_reply '' 'rerun denied' 1
+    _ci_wait 123
+    assert_eq 4 "$CI_RC" 'failed rerun exits 4' || return 1
+    assert_eq 'ci_wait: gh run rerun 123 --failed failed: "rerun denied"' "$CI_ERR" 'failed rerun names the call' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]'
+}
+
+test_invalid_rerun_limits_print_usage() {
+    _ci_fixture || return $?
+    local limit
+    for limit in '' -1 x 99999999999999999999; do
+        _ci_wait 123 --max-reruns "$limit"
+        assert_eq 2 "$CI_RC" 'invalid limit exits 2' || return 1
+        assert_eq 'usage: bash tests/ci_wait.sh <run-id> [--max-reruns N] [--since <rev>]' "$CI_ERR" 'invalid limit prints usage' || return 1
+    done
+    _ci_wait 123 --max-reruns
+    assert_eq 2 "$CI_RC" 'missing limit exits 2' || return 1
+    _ci_calls ''
+}
+
 run_test test_pending_jobs_wait_until_every_conclusion_exists
 run_test test_failure_and_skipped_dependent_stop
 run_test test_cancellation_after_steps_is_a_failure
 run_test test_failed_gh_read_reports_stderr
 run_test test_invalid_arguments_print_usage_without_gh
+run_test test_zero_step_runner_cancellations_rerun
+run_test test_cancelled_build_and_skipped_release_rerun_after_stale_read
+run_test test_persistent_cancellations_exhaust_the_rerun_limit
+run_test test_skipped_job_without_a_cancelled_job_fails
+run_test test_failed_rerun_reports_stderr
+run_test test_invalid_rerun_limits_print_usage
 report_results

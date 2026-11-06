@@ -9,9 +9,22 @@ _usage() {
     exit 2
 }
 
-[ "$#" -eq 1 ] || _usage
+[ "$#" -ge 1 ] || _usage
 run_id="$1"
 case "$run_id" in '' | *[!0-9]*) _usage ;; esac
+shift
+max_reruns=3
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --max-reruns)
+            [ "$#" -ge 2 ] || _usage
+            case "$2" in '' | *[!0-9]* | ??????????*) _usage ;; esac
+            max_reruns=$((10#$2))
+            shift 2
+            ;;
+        *) _usage ;;
+    esac
+done
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/ci_wait.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
@@ -24,6 +37,8 @@ _gh() {
 }
 
 last_wait=''
+reruns=0
+rerun_attempt=0
 while :; do
     _gh run view "$run_id" --json status,attempt,headSha,jobs
     if ! jq -e '
@@ -41,6 +56,10 @@ while :; do
     fi
     status=$(jq -r '.status' "$scratch/response")
     attempt=$(jq -r '.attempt' "$scratch/response")
+    if [ "$attempt" -le "$rerun_attempt" ]; then
+        sleep "${CI_WAIT_INTERVAL:-30}"
+        continue
+    fi
     pending=$(jq '[.jobs[] | select(.conclusion == "")] | length' "$scratch/response")
     total=$(jq '.jobs | length' "$scratch/response")
     if [ "$status" != completed ] || [ "$pending" -gt 0 ]; then
@@ -55,6 +74,18 @@ while :; do
     jq -r '.jobs[] | [.conclusion, (.steps | length), .name] | @tsv' "$scratch/response"
     if jq -e '(.jobs | length > 0) and all(.jobs[]; .conclusion == "success")' "$scratch/response" > /dev/null; then
         exit 0
+    fi
+    if jq -e '
+        any(.jobs[]; .conclusion == "cancelled" and (.steps | length == 0)) and
+        all(.jobs[]; .conclusion == "success" or
+            ((.conclusion == "cancelled" or .conclusion == "skipped") and (.steps | length == 0)))
+    ' "$scratch/response" > /dev/null; then
+        [ "$reruns" -lt "$max_reruns" ] || exit 3
+        reruns=$((reruns + 1))
+        rerun_attempt="$attempt"
+        printf 'infrastructure: rerunning failed jobs (%s of %s)\n' "$reruns" "$max_reruns"
+        _gh run rerun "$run_id" --failed
+        continue
     fi
     exit 1
 done
