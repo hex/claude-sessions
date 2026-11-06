@@ -16,8 +16,8 @@ _ci_fixture() {
     REPLY_COUNT=0
     CI_INTERVAL=0
     CI_TMPDIR="${TMPDIR:-/tmp}"
-    CI_REPO="$PWD"
-    CI_HEAD=$(git rev-parse HEAD)
+    CI_REPO="$SCRIPT_DIR/.."
+    CI_HEAD=$(git -C "$CI_REPO" rev-parse HEAD)
     cat > "$TEST_TMPDIR/fakebin/gh" <<'GH'
 #!/usr/bin/env bash
 set -euo pipefail
