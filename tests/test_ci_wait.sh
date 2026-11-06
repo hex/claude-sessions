@@ -216,6 +216,28 @@ test_rerun_wait_stops_on_the_twenty_first_stale_read() {
     _ci_calls "$expected"
 }
 
+test_each_rerun_gets_its_own_stale_read_limit() {
+    _ci_fixture || return $?
+    local attempt i expected_calls='' read_call='["run","view","123","--json","status,attempt,headSha,jobs"]'
+    for attempt in 1 2; do
+        _ci_cancelled_build "$attempt"
+        _ci_reply ''
+        expected_calls+="$read_call"$'\n["run","rerun","123","--failed"]\n'
+        for ((i = 0; i < 15; i++)); do
+            _ci_cancelled_build "$attempt"
+            expected_calls+="$read_call"$'\n'
+        done
+    done
+    _ci_success 3
+    _ci_wait 123
+    assert_eq 0 "$CI_RC" 'two reruns with fifteen stale reads each succeed' || return 1
+    local table=$'cancelled\t0\tbuild (darwin-arm64, macos-latest, aarch64-apple-darwin)\nskipped\t0\trelease\nsuccess\t1\tlinux'
+    assert_eq "$table"$'\ninfrastructure: rerunning failed jobs (1 of 3)\nwaiting: rerun requested, attempt 2 not started yet\n'"$table"$'\ninfrastructure: rerunning failed jobs (2 of 3)\nwaiting: rerun requested, attempt 3 not started yet\nsuccess\t1\tbash\nskipped tests: none' "$CI_OUT" 'one waiting notice per rerun' || return 1
+    assert_eq '' "$CI_ERR" 'separate stale waits have no error' || return 1
+    assert_eq 36 "$(cat "$TEST_TMPDIR/count")" 'two reruns, thirty stale reads and the final verdict' || return 1
+    _ci_calls "$expected_calls$read_call"$'\n["run","view","123","--log"]'
+}
+
 test_persistent_cancellations_exhaust_the_rerun_limit() {
     _ci_fixture || return $?
     _ci_cancelled_build 1
@@ -565,6 +587,26 @@ test_run_all_verdict_count_must_match_the_skip_block() {
     done
 }
 
+test_command_failure_inside_a_function_exits_four() {
+    _ci_fixture || return $?
+    _ci_git_range
+    cat > "$TEST_TMPDIR/fakebin/comm" <<'COMM'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$#" "$1" > "$CI_FIXTURE/comm-call"
+printf 'comm: simulated failure\n' >&2
+exit 5
+COMM
+    chmod +x "$TEST_TMPDIR/fakebin/comm"
+    _ci_success 1
+    _ci_wait 123 --since base
+    assert_eq 4 "$CI_RC" 'command failure inside a function exits 4' || return 1
+    assert_eq 'comm: simulated failure' "$CI_ERR" 'function command error is preserved' || return 1
+    assert_eq $'success\t1\tbash\nskipped tests: none' "$CI_OUT" 'command failure cannot print an added-skip verdict' || return 1
+    assert_eq $'3\n-23' "$(cat "$TEST_TMPDIR/comm-call")" 'failing comm receives the set comparison arguments' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
 test_empty_since_revision_prints_usage_without_gh() {
     _ci_fixture || return $?
     _ci_success 1
@@ -658,6 +700,7 @@ run_test test_invalid_arguments_print_usage_without_gh
 run_test test_zero_step_runner_cancellations_rerun
 run_test test_cancelled_build_and_skipped_release_rerun_after_stale_read
 run_test test_rerun_wait_stops_on_the_twenty_first_stale_read
+run_test test_each_rerun_gets_its_own_stale_read_limit
 run_test test_persistent_cancellations_exhaust_the_rerun_limit
 run_test test_skipped_job_without_a_cancelled_job_fails
 run_test test_failed_rerun_reports_stderr
@@ -681,6 +724,7 @@ run_test test_each_completed_job_needs_log_lines
 run_test test_stray_skip_text_without_the_verdict_rule_is_ignored
 run_test test_run_all_log_requires_a_verdict
 run_test test_run_all_verdict_count_must_match_the_skip_block
+run_test test_command_failure_inside_a_function_exits_four
 run_test test_empty_since_revision_prints_usage_without_gh
 run_test test_missing_since_revision_prints_usage_without_gh
 run_test test_zero_step_failure_prevents_a_cancellation_rerun
