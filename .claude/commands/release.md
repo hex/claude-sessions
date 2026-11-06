@@ -50,16 +50,40 @@ job:
 
 ```bash
 git push                       # the release content, not the release commit
-gh run list --workflow=test.yml --branch main --limit 1 \
-  --json status,conclusion,headSha --jq '.[0]'
-# once completed, read the per-job results — an overall "success" is not enough
-gh run list --workflow=test.yml --branch main --limit 1 --json databaseId --jq '.[0].databaseId' \
-  | xargs -I{} gh run view {} --json jobs --jq '.jobs[] | "\(.conclusion)\t\(.name)"'
+PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1)
+CONTENT_SHA=$(git rev-parse HEAD)
+gh run list --workflow=test.yml --branch main --commit "$CONTENT_SHA" --limit 1 \
+  --json databaseId,status,conclusion,headSha --jq '.[0]'
 ```
 
-Confirm the run's `headSha` is the commit you are about to release from — a
-green run on an older commit proves nothing about this one. If any job failed,
-STOP: fix it and re-verify before bumping.
+Set `RUN_ID` to the returned `databaseId`. An empty run id means GitHub has not
+created the run yet; repeat the lookup. Confirm the run's `headSha` equals
+`$CONTENT_SHA`, the commit you are about to release from. A green run on an
+older commit proves nothing about this one.
+
+Run the following from the repo root in a background shell, then read its exit
+code. The run's "success" conclusion is not enough; the script waits for every job's
+conclusion and prints the job table and skipped tests.
+
+```bash
+bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
+```
+
+If `PREV_TAG` is empty, confirm the first-release comparison revision before
+calling the script; `--since` needs a revision Git can resolve. Step 4b uses the
+same tag selection command.
+
+| Exit | Action before bumping |
+|---|---|
+| 0 | Continue after reading the printed skip list. |
+| 1 | Stop, fix the failure in a new commit, and re-verify. |
+| 2 | Correct the arguments shown by the usage line. |
+| 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
+| 4 | Read the error and run the script again; it waits on the same run. |
+| 5 | A check added by the range did not run. Investigate before tagging. |
+
+Read the printed skip list for checks the release range depends on, including
+checks it did not add. The script cannot judge those dependencies.
 
 **Why this step exists.** 2026.8.10 and 2026.8.11 were both tagged on commits
 whose CI then went red, and both were repaired by the very next commit — so
@@ -345,18 +369,37 @@ Step 8 and this step on the new sha.
 ```bash
 git push
 gh run list --workflow=test.yml --commit "$SHA" --limit 1 \
-  --json databaseId,status,conclusion --jq '.[0]'
-# once completed, read every job; an overall "success" is not enough
-gh run view <databaseId> --json jobs --jq '.jobs[] | "\(.conclusion)\t\(.name)"'
+  --json databaseId,status,conclusion,headSha --jq '.[0]'
 ```
 
-Poll from a background shell; the lanes take about 15 minutes. Judge by the
-per-job conclusions of the run whose commit is `$SHA`, never by
+Set `RUN_ID` to the returned `databaseId`. An empty run id means GitHub has not
+created the run yet; repeat the lookup. Confirm the run's `headSha` is `$SHA`.
+Run the following from the repo root in a background shell and read its exit
+code; the lanes take about 15 minutes. Use the same `PREV_TAG` selected in Step 0b.
+
+```bash
+bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
+```
+
+Judge by the per-job conclusions, never by
 `gh run watch`'s exit status, which can return 1 while a job is still running.
-A job `cancelled` with zero steps is infrastructure, not code: check
-`https://www.githubstatus.com/api/v2/incidents/unresolved.json`, then
-`gh run rerun <databaseId> --failed`. A code failure gets a fix in a new
-commit; repeat Step 8 from its `./build.sh --add-release-hashes` line (the fix
+The run's "success" conclusion is not enough. A job `cancelled` with zero steps is
+infrastructure; the script reruns it only when every other non-success job is
+also cancelled or skipped with zero steps.
+
+| Exit | Action before tagging |
+|---|---|
+| 0 | Continue after reading the printed skip list. |
+| 1 | Stop and fix the failure in a new commit. |
+| 2 | Correct the arguments shown by the usage line. |
+| 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
+| 4 | Read the error and run the script again; it waits on the same run. |
+| 5 | A check added by the range did not run. Investigate before tagging. |
+
+Read the printed skip list for checks the release range depends on, including
+checks it did not add. The script cannot judge those dependencies.
+
+After a code fix, repeat Step 8 from its `./build.sh --add-release-hashes` line (the fix
 may touch a hook, command, skill or mod file), then Steps 8b and 8c on the new
 sha. Do not tag until every job is `success`.
 
@@ -385,11 +428,25 @@ Wait for the release workflow for this tag to succeed before signing its assets.
 ```bash
 gh run list --workflow=release.yml --branch vX.Y.Z --limit 1 \
   --json databaseId,status,conclusion,headSha
-gh run view <databaseId> --json jobs --jq '.jobs[] | "\(.conclusion)\t\(.name)"'
 ```
 
-Confirm that the run's `headSha` is `$SHA` and every job succeeded. If any job
-failed, stop and report the failure before signing.
+Set `RUN_ID` to the returned `databaseId`. An empty run id means GitHub has not
+created the run yet; repeat the lookup. Confirm that the run's `headSha` is `$SHA`.
+Run the following from the repo root in a background shell and read its exit code.
+Do not pass `--since`; `release.yml` runs no test suites.
+
+```bash
+bash tests/ci_wait.sh "$RUN_ID"
+```
+
+| Exit | Action before signing |
+|---|---|
+| 0 | Continue; every job succeeded. |
+| 1 | Stop and report the failure before signing. Fix it in a new commit and repeat the release gates. |
+| 2 | Correct the arguments shown by the usage line. |
+| 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
+| 4 | Read the error and run the script again; it waits on the same run. |
+| 5 | A check added by the range did not run; investigate before tagging. This exit requires `--since`, so this step cannot return it. |
 
 Download the assets, verify every manifest digest, and compare the installer
 with the tagged commit. The only permitted difference is `CS_DEFAULT_REF=main`

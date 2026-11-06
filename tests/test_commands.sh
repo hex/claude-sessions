@@ -514,6 +514,18 @@ test_release_verifies_ci_workflow() {
         "release.md must describe the signing key override" || return 1
 }
 
+test_release_uses_ci_wait_for_each_workflow_gate() {
+    local calls
+    calls=$(awk '
+        /^### / { step = $2 }
+        /^bash tests\/ci_wait.sh / && (step == "0b." || step == "8c." || step == "10.") {
+            print step "\t" $0
+        }
+    ' "$RELEASE_MD")
+    assert_eq $'0b.\tbash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n8c.\tbash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n10.\tbash tests/ci_wait.sh "$RUN_ID"' "$calls" \
+        'release steps 0b, 8c and 10 must call ci_wait with the right range' || return 1
+}
+
 # ============================================================================
 # Runner
 # ============================================================================
@@ -609,6 +621,7 @@ run_test test_release_handles_empty_prev_tag
 run_test test_release_approval_has_cancel_and_reapproval_loop
 run_test test_release_guards_stray_files_before_add_all
 run_test test_release_verifies_ci_workflow
+run_test test_release_uses_ci_wait_for_each_workflow_gate
 run_test test_release_has_code_review_gate
 
 # A shared .cs/memory/ makes "the user is X" false on every other actor's
