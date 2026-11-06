@@ -1132,15 +1132,17 @@ markers and the indentation of items opened after the chart. On a continuation
 that reaches an enclosing item's margin, it expands each tab to four spaces
 before removing indentation, as marked does. Lazy lines keep their literal text.
 
-Known differences from marked remain. The scanner does not track HTML blocks
+The scanner follows marked 15.0.12, whose block rules Claude Code's bundle
+carries. Known differences from it remain. The scanner does not track HTML blocks
 such as `<details>` or blockquotes inside list items. A tab immediately after a
 list marker, a lone CR line break, or a lazy nested line under a wide numbered
 marker can give different fence boundaries. Openers ` ````mermaid ` and
 `~~~mermaid` stay source by design, as do replies whose
 only Mermaid fences are empty. Because the engine reads prose parts separately,
-an ordered list with repeated or restarted source numbers can restart where
-marked would continue counting. For example, a `1.` after a chart can show as
-`1.` where marked shows `2.` in the whole reply.
+an ordered list a chart splits numbers each later part from that part's first
+source number, where marked counts on from the list's first number. For
+example, a `1.` or a `3.` after a chart that follows `1.` shows as written,
+where marked shows `2.` in the whole reply.
 
 cs adds a `cs:mermaid-diagrams` section headed `Diagrams` to `CLAUDE.local.md`
 when it creates a session, or on migration when the sentinel is absent. The
