@@ -518,12 +518,12 @@ test_release_uses_ci_wait_for_each_workflow_gate() {
     local calls
     calls=$(awk '
         /^### / { step = $2 }
-        /^bash tests\/ci_wait.sh / && (step == "0b." || step == "8c." || step == "10.") {
+        /(^| && )bash tests\/ci_wait.sh / && (step == "0b." || step == "8c." || step == "10.") {
             print step "\t" $0
         }
     ' "$RELEASE_MD")
-    assert_eq $'0b.\tbash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n8c.\tbash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n10.\tbash tests/ci_wait.sh "$RUN_ID"' "$calls" \
-        'release steps 0b, 8c and 10 must call ci_wait with the right range' || return 1
+    assert_eq $'0b.\tPREV_TAG=$(git tag --list \'v*\' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n8c.\tPREV_TAG=$(git tag --list \'v*\' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n10.\tbash tests/ci_wait.sh "$RUN_ID"' "$calls" \
+        'release gates must compute the comparison tag in the helper command' || return 1
 }
 
 # ============================================================================
