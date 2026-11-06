@@ -121,12 +121,59 @@ The full gate takes minutes. Most of the time you do not want it.
 | About to commit | `bash tests/run_all.sh --changed` |
 | About to merge, or cutting a release | `bash tests/run_all.sh` |
 | About to push a shell change | `bash tests/lint_shell.sh` (the shellcheck lane CI runs; the suites never run it) |
+| Waiting for a GitHub Actions run on `main` or a release tag | `bash tests/ci_wait.sh <run-id> [--max-reruns N] [--since <rev>]` |
 
 `tests/lint_shell.sh` fails on any shellcheck error, and on a warning count that differs from
 `.shellcheck-warnings`. It runs shellcheck once per file, as many at once as the machine has
 processors, and stops with exit 2 naming any file shellcheck could not run on. The count is measured with the shellcheck version CI pins in
 `.github/workflows/test.yml` (v0.11.0); another version can count differently. When you fix
 warnings, lower that number in the same commit.
+
+Use `tests/ci_wait.sh` for runs on `main` and release tags, with an authenticated
+`gh`, `jq`, and Git. On a pull request, a newer push intentionally cancels the
+older run through `test.yml`'s `cancel-in-progress`. The script could rerun that
+intended cancellation, so do not use it for pull-request runs.
+
+It waits until the run completes and every job has a conclusion, then prints each
+job's conclusion, step count, and name. `CI_WAIT_INTERVAL` sets the poll interval
+in seconds, with a default of 30; use one or more digits.
+
+The script reruns failed jobs only when at least one job has a `cancelled`
+conclusion and zero steps. Every other non-success job must have a `cancelled`
+or `skipped` conclusion and zero steps.
+It prints a notice while waiting for a higher attempt number before judging the
+rerun. If the attempt has not increased on the 21st stale read, it exits 4.
+The default limit is three reruns; `--max-reruns N` changes it, and 0 disables reruns.
+
+After every job succeeds, the script fetches the logs once and prints each job's
+last skipped-test block, including missing-tool reasons, or `skipped tests: none`.
+Every job must have a log line. A skip block must end with a blank line followed
+by the 64-character `=` rule that `run_all.sh` prints. Logs with Windows line
+endings work too.
+A job that runs `bash tests/run_all.sh` must include its
+`OK: all <N> suites passed` verdict. The verdict's skipped-test count must match
+the number of lines in that job's skip block. A verdict without a skip count
+means zero skips, so it needs no skip block. A missing verdict or a count mismatch
+exits 4, naming the job and both counts.
+`--since <rev>` compares the sets of `run_test` names in each suite at that revision
+and the run's `headSha`, using the same file path in both trees. The comparison
+works from the repo root or a subdirectory. Moving a registration within its
+suite does not add it, and removing one does not add it either.
+A renamed suite counts all its registrations as added. A skipped registration
+added in that range stops the release.
+The script resolves `--since` before calling gh and checks that the run's
+`headSha` exists locally before waiting.
+Read the rest of the skip list for checks the range depends on; the script cannot
+judge those dependencies.
+
+| Exit | Meaning |
+|---|---|
+| 0 | Every job succeeded, with no skipped registration added in the requested range. |
+| 1 | A job failed, has another non-success conclusion that does not qualify for an infrastructure rerun, or the completed run has no jobs. |
+| 2 | Invalid arguments, an unresolvable `--since` revision, or an invalid `CI_WAIT_INTERVAL`; read the usage line. |
+| 3 | Infrastructure cancellations persisted through the rerun limit. |
+| 4 | A command failed, the run JSON was invalid, a log or verdict check failed, the run's head was missing locally, or a rerun never appeared. Read the error; fetch a missing head before retrying the same run. |
+| 5 | A test registration added since the requested revision appears in the skip list. Investigate each skip before tagging. Record skips CI produces by design in the session narrative (`.cs/memory/narrative.<actor>.md`) and name them to the user before Step 9 of `.claude/commands/release.md`. Never edit approved release notes; fix any other skips before tagging. |
 
 `--changed` reads the working tree against `HEAD` plus untracked files and runs
 only the suites whose text names a changed path (a changed suite runs itself).

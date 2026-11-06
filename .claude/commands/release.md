@@ -50,16 +50,54 @@ job:
 
 ```bash
 git push                       # the release content, not the release commit
-gh run list --workflow=test.yml --branch main --limit 1 \
-  --json status,conclusion,headSha --jq '.[0]'
-# once completed, read the per-job results — an overall "success" is not enough
-gh run list --workflow=test.yml --branch main --limit 1 --json databaseId --jq '.[0].databaseId' \
-  | xargs -I{} gh run view {} --json jobs --jq '.jobs[] | "\(.conclusion)\t\(.name)"'
+CONTENT_SHA=$(git rev-parse HEAD)
+gh run list --workflow=test.yml --branch main --commit "$CONTENT_SHA" --limit 1 \
+  --json databaseId,status,conclusion,headSha --jq '.[0]'
 ```
 
-Confirm the run's `headSha` is the commit you are about to release from — a
-green run on an older commit proves nothing about this one. If any job failed,
-STOP: fix it and re-verify before bumping.
+Set `RUN_ID` to the returned `databaseId`. An empty run id means GitHub has not
+created the run yet; repeat the lookup. Confirm the run's `headSha` equals
+`$CONTENT_SHA`, the commit you are about to release from.
+
+If no run appears within a few minutes, check
+`git diff --name-only <newest commit with a run>..HEAD`. The Test workflow ignores
+pushes that touch only `docs/superpowers/**` and `docs/upstream/**`. If the diff
+lists only those paths, set `CONTENT_SHA` to that earlier commit and judge its
+run. For any other changed path, an older green run does not cover this commit;
+keep waiting for the run on `HEAD`.
+
+Run the following from the repo root with the Bash tool's `run_in_background`
+and longest timeout, `7200000` ms. The default kills a background command after
+30 minutes; one rerun of a 15-minute lane can exceed that. Read the script's exit
+code. If the shell kills the wait without an exit code, use the attempt/status
+check in the exit-4 row before running the script again on the same run id.
+The run's "success" conclusion is not enough; the script waits
+for every job's conclusion and prints the job table and skipped tests.
+
+Replace the `CONTENT_SHA` placeholder with the full hash of the commit you are checking.
+This Bash call resolves `RUN_ID` and `PREV_TAG` because shell variables do not
+carry between Bash tool calls:
+
+```bash
+CONTENT_SHA='<full SHA selected above>'
+RUN_ID=$(gh run list --workflow=test.yml --branch main --commit "$CONTENT_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty') || { echo 'ci_wait: gh run list failed' >&2; exit 4; }; [ -n "$RUN_ID" ] || { echo "ci_wait: no run yet for $CONTENT_SHA; list again in a minute" >&2; exit 4; }; PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
+```
+
+If `PREV_TAG` is empty, confirm the first-release comparison revision before
+calling the script; `--since` needs a revision Git can resolve. Step 4b uses the
+same tag selection command.
+
+| Exit | Action before bumping |
+|---|---|
+| 0 | Continue after reading the printed skip list. |
+| 1 | Stop, fix the failure in a new commit, and re-verify. |
+| 2 | Correct the arguments shown by the usage line, including an unresolvable `--since` revision. |
+| 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
+| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, including `ci_wait: gh run list failed`, wait one minute and repeat the lookup. `ci_wait: no run yet for <commit or tag>; list again in a minute` means GitHub has not created the run; repeat the lookup after one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
+| 5 | A check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the session narrative (`.cs/memory/narrative.<actor>.md`) and name it to the user before Step 9, then continue. Never edit approved release notes. Fix any other skip before tagging. |
+
+Read the printed skip list for checks the release range depends on, including
+checks it did not add. The script cannot judge those dependencies.
 
 **Why this step exists.** 2026.8.10 and 2026.8.11 were both tagged on commits
 whose CI then went red, and both were repaired by the very next commit — so
@@ -345,18 +383,46 @@ Step 8 and this step on the new sha.
 ```bash
 git push
 gh run list --workflow=test.yml --commit "$SHA" --limit 1 \
-  --json databaseId,status,conclusion --jq '.[0]'
-# once completed, read every job; an overall "success" is not enough
-gh run view <databaseId> --json jobs --jq '.jobs[] | "\(.conclusion)\t\(.name)"'
+  --json databaseId,status,conclusion,headSha --jq '.[0]'
 ```
 
-Poll from a background shell; the lanes take about 15 minutes. Judge by the
-per-job conclusions of the run whose commit is `$SHA`, never by
+Set `RUN_ID` to the returned `databaseId`. An empty run id means GitHub has not
+created the run yet; repeat the lookup. Confirm the run's `headSha` is `$SHA`.
+Run the following from the repo root with the Bash tool's `run_in_background`
+and longest timeout, `7200000` ms. The default kills a background command after
+30 minutes; the lanes take about 15 minutes, so one rerun can exceed it. Read
+the script's exit code. If the shell kills the wait without an exit code, use
+the attempt/status check in the exit-4 row before running the script again on the
+same run id.
+
+Replace the `SHA` placeholder with the full release commit from Step 8.
+Resolve `RUN_ID` here and select `PREV_TAG` as in Step 0b because shell variables
+do not carry between Bash tool calls:
+
+```bash
+SHA='<full release SHA from Step 8>'
+RUN_ID=$(gh run list --workflow=test.yml --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty') || { echo 'ci_wait: gh run list failed' >&2; exit 4; }; [ -n "$RUN_ID" ] || { echo "ci_wait: no run yet for $SHA; list again in a minute" >&2; exit 4; }; PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
+```
+
+Judge by the per-job conclusions, never by
 `gh run watch`'s exit status, which can return 1 while a job is still running.
-A job `cancelled` with zero steps is infrastructure, not code: check
-`https://www.githubstatus.com/api/v2/incidents/unresolved.json`, then
-`gh run rerun <databaseId> --failed`. A code failure gets a fix in a new
-commit; repeat Step 8 from its `./build.sh --add-release-hashes` line (the fix
+The run's "success" conclusion is not enough. A job `cancelled` with zero steps is
+infrastructure; the script reruns it only when every other non-success job is
+also cancelled or skipped with zero steps.
+
+| Exit | Action before tagging |
+|---|---|
+| 0 | Continue after reading the printed skip list. |
+| 1 | Stop and fix the failure in a new commit. |
+| 2 | Correct the arguments shown by the usage line, including an unresolvable `--since` revision. |
+| 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
+| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, including `ci_wait: gh run list failed`, wait one minute and repeat the lookup. `ci_wait: no run yet for <commit or tag>; list again in a minute` means GitHub has not created the run; repeat the lookup after one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
+| 5 | A check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the session narrative (`.cs/memory/narrative.<actor>.md`) and name it to the user before Step 9, then continue. Never edit approved release notes. Fix any other skip before tagging. |
+
+Read the printed skip list for checks the release range depends on, including
+checks it did not add. The script cannot judge those dependencies.
+
+After a code fix, repeat Step 8 from its `./build.sh --add-release-hashes` line (the fix
 may touch a hook, command, skill or mod file), then Steps 8b and 8c on the new
 sha. Do not tag until every job is `success`.
 
@@ -383,13 +449,34 @@ the tag, and a cancelled build leaves the release public with none.
 Wait for the release workflow for this tag to succeed before signing its assets.
 
 ```bash
-gh run list --workflow=release.yml --branch vX.Y.Z --limit 1 \
+gh run list --workflow=release.yml --branch vX.Y.Z --commit "$SHA" --limit 1 \
   --json databaseId,status,conclusion,headSha
-gh run view <databaseId> --json jobs --jq '.jobs[] | "\(.conclusion)\t\(.name)"'
 ```
 
-Confirm that the run's `headSha` is `$SHA` and every job succeeded. If any job
-failed, stop and report the failure before signing.
+Set `RUN_ID` to the returned `databaseId`. An empty run id means GitHub has not
+created the run yet; repeat the lookup. Confirm that the run's `headSha` is `$SHA`.
+Run the following from the repo root with the Bash tool's `run_in_background`
+and longest timeout, `7200000` ms. The default kills a background command after
+30 minutes; one rerun of a 15-minute lane can exceed that. Read the script's exit
+code. If the shell kills the wait without an exit code, use the attempt/status
+check in the exit-4 row before running the script again on the same run id.
+Replace the `SHA` placeholder with the full release commit from Step 8.
+Resolve `RUN_ID` in this Bash call because variables do not carry between calls.
+Do not pass `--since`; `release.yml` runs no test suites.
+
+```bash
+SHA='<full release SHA from Step 8>'
+RUN_ID=$(gh run list --workflow=release.yml --branch vX.Y.Z --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty') || { echo 'ci_wait: gh run list failed' >&2; exit 4; }; [ -n "$RUN_ID" ] || { echo 'ci_wait: no run yet for vX.Y.Z; list again in a minute' >&2; exit 4; }; bash tests/ci_wait.sh "$RUN_ID"
+```
+
+| Exit | Action before signing |
+|---|---|
+| 0 | Continue; every job succeeded. |
+| 1 | Step 9 has already published the release. Stop and report the failure before signing; never re-tag. |
+| 2 | Correct the arguments shown by the usage line. An unresolvable `--since` revision also returns 2, though this step passes no `--since`. |
+| 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
+| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, including `ci_wait: gh run list failed`, wait one minute and repeat the lookup. `ci_wait: no run yet for <commit or tag>; list again in a minute` means GitHub has not created the run; repeat the lookup after one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
+| 5 | This step cannot return 5 because it passes no `--since`. In a `--since` gate, 5 means a check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the session narrative (`.cs/memory/narrative.<actor>.md`) and name it to the user before Step 9, then continue. Never edit approved release notes. Fix any other skip before tagging. |
 
 Download the assets, verify every manifest digest, and compare the installer
 with the tagged commit. The only permitted difference is `CS_DEFAULT_REF=main`
