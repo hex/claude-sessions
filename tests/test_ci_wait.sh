@@ -147,12 +147,31 @@ test_cancelled_build_and_skipped_release_rerun_after_stale_read() {
     _ci_cancelled_build 1
     _ci_reply ''
     _ci_cancelled_build 1
+    _ci_cancelled_build 1
+    _ci_cancelled_build 1
     _ci_success 2
     _ci_wait 123
     assert_eq 0 "$CI_RC" 'dependent skip reruns with its build' || return 1
-    assert_eq $'cancelled\t0\tbuild (darwin-arm64, macos-latest, aarch64-apple-darwin)\nskipped\t0\trelease\nsuccess\t1\tlinux\ninfrastructure: rerunning failed jobs (1 of 3)\nsuccess\t1\tbash\nskipped tests: none' "$CI_OUT" 'stale attempt has no second verdict' || return 1
+    assert_eq $'cancelled\t0\tbuild (darwin-arm64, macos-latest, aarch64-apple-darwin)\nskipped\t0\trelease\nsuccess\t1\tlinux\ninfrastructure: rerunning failed jobs (1 of 3)\nwaiting: rerun requested, attempt 2 not started yet\nsuccess\t1\tbash\nskipped tests: none' "$CI_OUT" 'stale attempts print one waiting notice' || return 1
     assert_eq '' "$CI_ERR" 'stale read has no error output' || return 1
-    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_rerun_wait_stops_on_the_twenty_first_stale_read() {
+    _ci_fixture || return $?
+    _ci_cancelled_build 1
+    _ci_reply ''
+    local i expected=$'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]'
+    for ((i = 0; i < 31; i++)); do _ci_cancelled_build 1; done
+    _ci_wait 123
+    assert_eq 4 "$CI_RC" 'stale rerun limit exits 4' || return 1
+    assert_eq 'ci_wait: attempt never rose past 1 after the rerun' "$CI_ERR" 'stale rerun limit names the attempt' || return 1
+    assert_eq $'cancelled\t0\tbuild (darwin-arm64, macos-latest, aarch64-apple-darwin)\nskipped\t0\trelease\nsuccess\t1\tlinux\ninfrastructure: rerunning failed jobs (1 of 3)\nwaiting: rerun requested, attempt 2 not started yet' "$CI_OUT" 'one notice and no extra rerun verdicts' || return 1
+    assert_eq 23 "$(cat "$TEST_TMPDIR/count")" 'initial read, one rerun, exactly 21 stale reads' || return 1
+    for ((i = 0; i < 21; i++)); do
+        expected+=$'\n["run","view","123","--json","status,attempt,headSha,jobs"]'
+    done
+    _ci_calls "$expected"
 }
 
 test_persistent_cancellations_exhaust_the_rerun_limit() {
@@ -448,6 +467,7 @@ run_test test_failed_gh_read_reports_stderr
 run_test test_invalid_arguments_print_usage_without_gh
 run_test test_zero_step_runner_cancellations_rerun
 run_test test_cancelled_build_and_skipped_release_rerun_after_stale_read
+run_test test_rerun_wait_stops_on_the_twenty_first_stale_read
 run_test test_persistent_cancellations_exhaust_the_rerun_limit
 run_test test_skipped_job_without_a_cancelled_job_fails
 run_test test_failed_rerun_reports_stderr

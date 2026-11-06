@@ -132,6 +132,7 @@ _check_added_skips() {
 last_wait=''
 reruns=0
 rerun_attempt=0
+stale_reads=0
 head_sha=''
 while :; do
     _gh run view "$run_id" --json status,attempt,headSha,jobs
@@ -158,6 +159,14 @@ while :; do
     status=$(jq -r '.status' "$scratch/response")
     attempt=$(jq -r '.attempt' "$scratch/response")
     if [ "$attempt" -le "$rerun_attempt" ]; then
+        stale_reads=$((stale_reads + 1))
+        if [ "$stale_reads" -eq 1 ]; then
+            printf 'waiting: rerun requested, attempt %s not started yet\n' "$((rerun_attempt + 1))"
+        fi
+        if [ "$stale_reads" -gt 20 ]; then
+            printf 'ci_wait: attempt never rose past %s after the rerun\n' "$rerun_attempt" >&2
+            exit 4
+        fi
         sleep "${CI_WAIT_INTERVAL:-30}"
         continue
     fi
@@ -188,6 +197,7 @@ while :; do
         [ "$reruns" -lt "$max_reruns" ] || exit 3
         reruns=$((reruns + 1))
         rerun_attempt="$attempt"
+        stale_reads=0
         printf 'infrastructure: rerunning failed jobs (%s of %s)\n' "$reruns" "$max_reruns"
         _gh run rerun "$run_id" --failed
         continue
