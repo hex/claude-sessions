@@ -150,6 +150,11 @@ last skipped-test block, including missing-tool reasons, or `skipped tests: none
 Every job must have a log line. A skip block must end with a blank line followed
 by the 64-character `=` rule that `run_all.sh` prints. Logs with Windows line
 endings work too.
+A job that runs `bash tests/run_all.sh` must include its
+`OK: all <N> suites passed` verdict. The verdict's skipped-test count must match
+the number of lines in that job's skip block. A verdict without a skip count
+means zero skips, so it needs no skip block. A missing verdict or a count mismatch
+exits 4, naming the job and both counts.
 `--since <rev>` compares the sets of `run_test` names in each suite at that revision
 and the run's `headSha`, using the same file path in both trees. The comparison
 works from the repo root or a subdirectory. Moving a registration within its
@@ -167,7 +172,7 @@ judge those dependencies.
 | 1 | A job failed, has another non-success conclusion that does not qualify for an infrastructure rerun, or the completed run has no jobs. |
 | 2 | Invalid arguments, an unresolvable `--since` revision, or an invalid `CI_WAIT_INTERVAL`; read the usage line. |
 | 3 | Infrastructure cancellations persisted through the rerun limit. |
-| 4 | A command failed, the run JSON was invalid, a job had no log lines, the run's head was missing locally, or a rerun never appeared. Read the error; fetch a missing head before retrying the same run. |
+| 4 | A command failed, the run JSON was invalid, a log or verdict check failed, the run's head was missing locally, or a rerun never appeared. Read the error; fetch a missing head before retrying the same run. |
 | 5 | A test registration added since the requested revision appears in the skip list. Investigate each skip before tagging; record skips CI produces by design in the release narrative, and fix any others. |
 
 `--changed` reads the working tree against `HEAD` plus untracked files and runs
