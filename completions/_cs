@@ -324,6 +324,7 @@ _cs() {
             '-features:List this base session'\''s feature worktrees'
             '-finish:Open the base and run /finish for a feature (integrate, then retire the worktree)'
             '--force:Override active session lock'
+            '--resume:Resume without asking'
             '--remote:Serve the session through claude remote-control'
             '--permission-mode:With --remote, the permission mode of the sessions it starts'
         )

@@ -997,6 +997,92 @@ test_spawned_launch_at_crit_context_still_resumes() {
     assert_output_contains "$output" "--resume $id" "a spawned launch at 70% resumes" || return 1
 }
 
+_pin_session_color() {  # session_dir, color
+    local state="$1/.cs/local/state"
+    awk 'index($0, "claude_session_color:") != 1' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+    printf 'claude_session_color: %s\n' "$2" >> "$state"
+}
+
+_assert_unattended_resume_launch() {  # output, exact claude args
+    assert_eq "STUB_ARGS: $2" "$(grep '^STUB_ARGS:' <<< "$1")" \
+        "--resume launches the requested conversation without an extra prompt" || return 1
+    assert_output_not_contains "$1" "last context reading" "--resume prints no context warning" || return 1
+    assert_output_not_contains "$1" "Continue previous conversation?" "--resume asks no resume question" || return 1
+    assert_output_not_contains "$1" '\[y/N\]\|\[Y/n\]' "--resume prints no answer keys" || return 1
+    assert_output_not_contains "$1" "Rotation handoff pending:" "--resume offers no handoff menu" || return 1
+}
+
+test_resume_flag_at_crit_context_resumes_without_asking() {
+    _rot_session "rot-resume-crit"
+    local dir="$CS_SESSIONS_ROOT/rot-resume-crit" id output
+    _pin_session_color "$dir" blue
+    _stamp_context rot-resume-crit 70
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    output=$(CS_STATUSLINE_CTX_CRIT='' "$CS_BIN" rot-resume-crit --resume </dev/null 2>&1) || true
+    _assert_unattended_resume_launch "$output" "--name rot-resume-crit --resume $id /color blue"
+}
+
+test_resume_flag_below_warn_keeps_color_and_finish() {
+    _rot_session "rot-resume-low"
+    local dir="$CS_SESSIONS_ROOT/rot-resume-low" id output
+    _pin_session_color "$dir" blue
+    _stamp_context rot-resume-low 20
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    output=$(CS_STATUSLINE_CTX_WARN='' "$CS_BIN" rot-resume-low --resume </dev/null 2>&1) || true
+    _assert_unattended_resume_launch "$output" "--name rot-resume-low --resume $id /color blue" || return 1
+    "$CS_BIN" rot-resume-low@fix-auth </dev/null >/dev/null 2>&1 \
+        || { echo "  FAIL: could not create the feature for -finish"; return 1; }
+    _stamp_context rot-resume-low 70
+    output=$(CS_STATUSLINE_CTX_CRIT='' "$CS_BIN" rot-resume-low -finish fix-auth --resume </dev/null 2>&1) || true
+    _assert_unattended_resume_launch "$output" "--name rot-resume-low --resume $id /finish fix-auth"
+}
+
+test_resume_flag_unbound_starts_fresh_without_asking() {
+    _rot_unbound_session "rot-resume-unbound"
+    local dir="$CS_SESSIONS_ROOT/rot-resume-unbound" id output
+    _pin_session_color "$dir" blue
+    output=$("$CS_BIN" rot-resume-unbound --resume </dev/null 2>&1) || true
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    [ -n "$id" ] || { echo "  FAIL: --resume must record the unbound session's first conversation"; return 1; }
+    _assert_unattended_resume_launch "$output" "--name rot-resume-unbound --session-id $id /color blue"
+}
+
+test_resume_flag_leaves_own_handoff_pending_and_disarms_marker() {
+    _rot_session "rot-resume-handoff"
+    local dir="$CS_SESSIONS_ROOT/rot-resume-handoff" id output
+    _pin_session_color "$dir" blue
+    _stamp_context rot-resume-handoff 70
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed" "$id"
+    printf '2026-07-16-test.md\n' > "$dir/.cs/local/pending-handoff"
+    output=$(CS_STATUSLINE_CTX_CRIT='' "$CS_BIN" rot-resume-handoff --resume </dev/null 2>&1) || true
+    _assert_unattended_resume_launch "$output" "--name rot-resume-handoff --resume $id /color blue" || return 1
+    assert_eq "status: unconsumed" "$(grep '^status:' "$dir/.cs/handoffs/2026-07-16-test.md")" \
+        "--resume leaves the handoff unconsumed" || return 1
+    assert_not_exists "$dir/.cs/local/pending-handoff" "--resume disarms the rotation marker" || return 1
+    assert_eq "Rotation marker disarmed; the handoff stays pending — answer r, or re-run the rotate skill." \
+        "$(grep '^Rotation marker disarmed' <<< "$output")" "--resume prints the y answer's disarm notice"
+}
+
+test_resume_flag_rejects_remote() {
+    local output rc=0
+    output=$("$CS_BIN" rot-resume-remote --resume --remote </dev/null 2>&1) || rc=$?
+    assert_eq "1" "$rc" "--resume --remote is refused" || return 1
+    assert_eq "Error: --resume cannot be used with --remote: a served session never asks whether to resume." \
+        "$output" "--resume --remote explains why it is refused" || return 1
+    assert_not_exists "$CS_SESSIONS_ROOT/rot-resume-remote" "the refused launch creates no session"
+}
+
+test_resume_flag_from_session_directory_resumes() {
+    _rot_session "rot-resume-dot"
+    local dir="$CS_SESSIONS_ROOT/rot-resume-dot" id output
+    _pin_session_color "$dir" blue
+    _stamp_context rot-resume-dot 70
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    output=$(cd "$dir" && CS_STATUSLINE_CTX_CRIT='' "$CS_BIN" . --resume </dev/null 2>&1) || true
+    _assert_unattended_resume_launch "$output" "--name rot-resume-dot --resume $id /color blue"
+}
+
 # The status line stamps context-pct per session, not per conversation, and
 # only once a conversation replies, so a fresh conversation left before its
 # first reply inherits the reading of the one before it. Only a conversation
@@ -1630,6 +1716,12 @@ run_test test_crit_context_follows_the_status_line_knob
 run_test test_handoff_menu_at_crit_context_defaults_to_the_bound_conversations_handoff
 run_test test_handoff_menu_at_crit_context_leaves_another_conversations_handoff_waiting
 run_test test_spawned_launch_at_crit_context_still_resumes
+run_test test_resume_flag_at_crit_context_resumes_without_asking
+run_test test_resume_flag_below_warn_keeps_color_and_finish
+run_test test_resume_flag_unbound_starts_fresh_without_asking
+run_test test_resume_flag_leaves_own_handoff_pending_and_disarms_marker
+run_test test_resume_flag_rejects_remote
+run_test test_resume_flag_from_session_directory_resumes
 run_test test_reading_is_not_shown_for_a_conversation_that_has_not_replied
 run_test test_reading_follows_a_user_claude_config_dir
 run_test test_a_launch_inside_an_encrypted_session_opens_on_the_shells_config_dir

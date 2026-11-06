@@ -3413,6 +3413,7 @@ Usage: cs                             Open the session manager
 Commands:
   <name>              Create or resume session <name> (locks session)
   <name> --force      Override active session lock
+  <name> --resume     Resume <name> without asking, or start fresh when it has no recorded conversation (for a launcher that cannot press a key)
   <name> --remote     Serve <name> through claude remote-control instead of opening claude (in its own window of the cs tmux session when run inside tmux)
   <name> --remote --permission-mode <mode>  The permission mode of the sessions the server starts (default: the mode CLAUDE_CODE_BIN sets, else default)
   <base>@<feature>    Open a parallel feature worktree of session <base>
@@ -15467,6 +15468,7 @@ launch_claude_code() {
     # Set for `cs <name> --remote`: the permission mode the server passes to
     # the sessions it starts. Empty for every other open.
     local remote_mode="${6:-}"
+    local resume_flag="${7:-}"
 
     # The spawn token (see the seed consumer below) proves THIS window to
     # THIS session only. Taken into a plain variable and dropped from the
@@ -16197,9 +16199,10 @@ EOF
         # A spawned launch is unattended: take the default (resume) instead
         # of parking the tmux window on an interactive ask, whatever the
         # context reading: the fresh default at crit is the attended ask's.
-        # Unbound, the default is fresh, and a pending handoff waits for an
-        # attended open.
-        if [ -n "$spawn_kick" ]; then
+        # --resume gives the same answer for a launcher that cannot press a
+        # key. Unbound, the default is fresh, and a pending handoff waits for
+        # an attended open.
+        if [ -n "$spawn_kick" ] || [ -n "$resume_flag" ]; then
             response=""
             [ -n "$claude_session_id" ] || response="n"
         elif [ -z "$claude_session_id" ] && [ -z "$pending_handoff" ]; then
@@ -16328,7 +16331,8 @@ EOF
                 ;;
             *)
                 # y, and below crit Enter or any key not offered. Also the
-                # unattended spawn path, which resumes without asking.
+                # unattended spawn path and --resume, which resume without
+                # asking.
                 _disarm_rotation_marker "$session_dir" "$pending_handoff"
                 # --resume <uuid>, never --continue: the uuid names the exact
                 # conversation, while --continue means "most recent" and may
@@ -18161,6 +18165,7 @@ main() {
 
     local session_name="$cmd"
     local force_flag=""
+    local resume_flag=""
     local merge_feature=""
     local remote_flag="" remote_mode=""
 
@@ -18365,6 +18370,10 @@ main() {
                 force_flag="true"
                 shift
                 ;;
+            --resume)
+                resume_flag="true"
+                shift
+                ;;
             --remote)
                 remote_flag="true"
                 shift
@@ -18377,7 +18386,7 @@ main() {
                 shift 2
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -config, -usage, -tag, -features, -finish, --force, --remote, or --permission-mode."
+                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -config, -usage, -tag, -features, -finish, --force, --resume, --remote, or --permission-mode."
                 ;;
         esac
     done
@@ -18393,6 +18402,8 @@ main() {
     if [ -n "$remote_flag" ]; then
         [ -z "$force_flag" ] \
             || error "--force cannot be used with --remote: a served session never shares its directory with another claude."
+        [ -z "$resume_flag" ] \
+            || error "--resume cannot be used with --remote: a served session never asks whether to resume."
         [ -z "$merge_feature" ] \
             || error "-finish cannot be used with --remote: remote-control takes no prompt to run /finish with."
         # Set only on the command _remote_open_window gives the server's tmux
@@ -18539,7 +18550,7 @@ $merge_feature
     fi
 
     # Launch Claude Code
-    launch_claude_code "$session_name" "$session_dir" "$is_new" "$force_flag" "$merge_feature" "$remote_mode"
+    launch_claude_code "$session_name" "$session_dir" "$is_new" "$force_flag" "$merge_feature" "$remote_mode" "$resume_flag"
 }
 
 main "$@"

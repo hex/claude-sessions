@@ -59,6 +59,7 @@ The [statusline guide](docs/statusline.md) covers the quiet default layout, the 
 | Existing projects | `cs -adopt <name>` registers your project without moving it. | [Adoption](docs/commands.md#adopt-an-existing-project) |
 | Parallel worktrees | `cs <base>@<feature>` gives each feature its own checkout and session records. | [Worktrees](docs/commands.md#parallel-worktrees) |
 | Remote control | `cs <name> --remote` serves a session for the Claude app or web. | [Remote control](docs/commands.md#remote-control) |
+| Resume launch | `cs <name> --resume` resumes without asking, or starts fresh with no recorded conversation. | [Launch answers](docs/commands.md#conversation-rotation-and-wrap) |
 | Task queue | Runs confirmed tasks at turn boundaries, with failure, context, and quota breakers. | [Queue behavior](docs/hooks.md#stop-blockssh-stop-filechanged-cwdchanged) |
 | Cross-session mail | Delivers local messages and wakes idle sessions for unread arrivals. | [Mail wakes](docs/hooks.md#stop-blockssh-stop-filechanged-cwdchanged) |
 | Secrets | Uses the macOS keychain or encrypted files, with signed age exports for sync. | [Secrets guide](docs/secrets.md) |

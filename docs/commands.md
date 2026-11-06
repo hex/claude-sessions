@@ -143,6 +143,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 | `cs myproj@perf` | Opens another independent feature. |
 | `cs <base> -features [--porcelain]` | Lists each feature's branch, commits ahead and readiness: `ready`, `no commits`, `merged`, `retire staged`, `uncommitted changes`, `N files untracked`, `base session is live` or `worktree session is live`, `base has uncommitted changes`, or `base vault is locked`. `--porcelain` prints one tab-separated record per feature with the raw state key. |
 | `cs <base> -finish <feature>` | Opens the base with `/finish <feature>`. |
+| `cs <name> --resume` | Resumes without asking, or starts fresh with no recorded conversation. Refuses `--remote`. |
 | `cs -rm myproj@fix-auth` | Abandons the feature. |
 
 - A live base offers existing features, a new feature, a forced launch, the picker, or cancellation.
@@ -207,6 +208,8 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 | `n` | Starts fresh. |
 | `d` | Discards the handoff, then resumes. With no recorded conversation, discards the handoff, then starts fresh. |
 | Escape | Cancels the launch and leaves the marker untouched. An arrow key sends Escape first, so it cancels too. |
+
+For launchers that cannot press a key, `cs <name> --resume` answers `y` without asking.
 
 - Every answer that does not start from the handoff, Escape aside, disarms an armed marker with a notice. Resume and fresh leave the handoff pending, and `d` retires it. Starting from the handoff, with `r` or, at critical context, with Enter or any key the table does not list, arms the marker, so the fresh conversation's SessionStart consumes the handoff.
 - The launch card shows the last context reading the statusline recorded in the session, when it recorded one and the conversation to resume has replied. A conversation left before its first reply has a transcript with no reply in it, and the reading beside it belongs to its predecessor, so the card shows no figure for it and the prompt keeps its resume default. The figure is bold amber from `CS_STATUSLINE_CTX_WARN` (default 40) and white on red from `CS_STATUSLINE_CTX_CRIT` (default 60), as on the status line.

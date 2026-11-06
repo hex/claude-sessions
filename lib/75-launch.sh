@@ -249,6 +249,7 @@ launch_claude_code() {
     # Set for `cs <name> --remote`: the permission mode the server passes to
     # the sessions it starts. Empty for every other open.
     local remote_mode="${6:-}"
+    local resume_flag="${7:-}"
 
     # The spawn token (see the seed consumer below) proves THIS window to
     # THIS session only. Taken into a plain variable and dropped from the
@@ -979,9 +980,10 @@ EOF
         # A spawned launch is unattended: take the default (resume) instead
         # of parking the tmux window on an interactive ask, whatever the
         # context reading: the fresh default at crit is the attended ask's.
-        # Unbound, the default is fresh, and a pending handoff waits for an
-        # attended open.
-        if [ -n "$spawn_kick" ]; then
+        # --resume gives the same answer for a launcher that cannot press a
+        # key. Unbound, the default is fresh, and a pending handoff waits for
+        # an attended open.
+        if [ -n "$spawn_kick" ] || [ -n "$resume_flag" ]; then
             response=""
             [ -n "$claude_session_id" ] || response="n"
         elif [ -z "$claude_session_id" ] && [ -z "$pending_handoff" ]; then
@@ -1110,7 +1112,8 @@ EOF
                 ;;
             *)
                 # y, and below crit Enter or any key not offered. Also the
-                # unattended spawn path, which resumes without asking.
+                # unattended spawn path and --resume, which resume without
+                # asking.
                 _disarm_rotation_marker "$session_dir" "$pending_handoff"
                 # --resume <uuid>, never --continue: the uuid names the exact
                 # conversation, while --continue means "most recent" and may

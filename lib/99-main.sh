@@ -280,6 +280,7 @@ main() {
 
     local session_name="$cmd"
     local force_flag=""
+    local resume_flag=""
     local merge_feature=""
     local remote_flag="" remote_mode=""
 
@@ -484,6 +485,10 @@ main() {
                 force_flag="true"
                 shift
                 ;;
+            --resume)
+                resume_flag="true"
+                shift
+                ;;
             --remote)
                 remote_flag="true"
                 shift
@@ -496,7 +501,7 @@ main() {
                 shift 2
                 ;;
             *)
-                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -config, -usage, -tag, -features, -finish, --force, --remote, or --permission-mode."
+                error "Unknown session command: $1. Use -secrets, -queue, -msg, -narrative, -conversations, -config, -usage, -tag, -features, -finish, --force, --resume, --remote, or --permission-mode."
                 ;;
         esac
     done
@@ -512,6 +517,8 @@ main() {
     if [ -n "$remote_flag" ]; then
         [ -z "$force_flag" ] \
             || error "--force cannot be used with --remote: a served session never shares its directory with another claude."
+        [ -z "$resume_flag" ] \
+            || error "--resume cannot be used with --remote: a served session never asks whether to resume."
         [ -z "$merge_feature" ] \
             || error "-finish cannot be used with --remote: remote-control takes no prompt to run /finish with."
         # Set only on the command _remote_open_window gives the server's tmux
@@ -658,7 +665,7 @@ $merge_feature
     fi
 
     # Launch Claude Code
-    launch_claude_code "$session_name" "$session_dir" "$is_new" "$force_flag" "$merge_feature" "$remote_mode"
+    launch_claude_code "$session_name" "$session_dir" "$is_new" "$force_flag" "$merge_feature" "$remote_mode" "$resume_flag"
 }
 
 main "$@"
