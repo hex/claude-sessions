@@ -15,7 +15,7 @@ _ci_fixture() {
     : > "$TEST_TMPDIR/calls"
     REPLY_COUNT=0
     CI_REPO="$PWD"
-    CI_HEAD=abc123
+    CI_HEAD=$(git rev-parse HEAD)
     cat > "$TEST_TMPDIR/fakebin/gh" <<'GH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -309,20 +309,73 @@ test_unknown_revision_reports_the_unresolved_name() {
     _ci_git_range
     _ci_success 1
     _ci_wait 123 --since missing-revision
-    assert_eq 4 "$CI_RC" 'unknown revision exits 4' || return 1
-    assert_eq 'ci_wait: cannot resolve revision "missing-revision": "fatal: Needed a single revision"' "$CI_ERR" 'unresolved revision named' || return 1
-    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+    assert_eq 2 "$CI_RC" 'unknown revision exits 2 before gh' || return 1
+    assert_eq $'usage: bash tests/ci_wait.sh <run-id> [--max-reruns N] [--since <rev>]\nci_wait: cannot resolve revision "missing-revision": "fatal: Needed a single revision"' "$CI_ERR" 'usage and unresolved revision named' || return 1
+    assert_eq '' "$CI_OUT" 'invalid revision has no verdict' || return 1
+    _ci_calls ''
 }
 
 test_unknown_run_head_reports_the_unresolved_name() {
     _ci_fixture || return $?
     _ci_git_range
     CI_HEAD="missing-head"
-    _ci_success 1
+    _ci_run_json in_progress 1 '[{"name":"bash","status":"in_progress","conclusion":"","steps":[],"databaseId":101}]'
     _ci_wait 123 --since base
     assert_eq 4 "$CI_RC" 'unknown head exits 4' || return 1
-    assert_eq 'ci_wait: cannot resolve revision "missing-head": "fatal: Needed a single revision"' "$CI_ERR" 'unresolved head named' || return 1
-    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+    assert_eq 'ci_wait: run head missing-head is not in this clone; git fetch and run again' "$CI_ERR" 'unresolved head named before waiting' || return 1
+    assert_eq '' "$CI_OUT" 'missing head does not wait' || return 1
+    _ci_calls '["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
+test_range_verdict_is_independent_of_working_directory() {
+    _ci_fixture || return $?
+    _ci_git_range
+    local directory repo="$CI_REPO"
+    for directory in "$repo" "$repo/tests"; do
+        CI_REPO="$directory"
+        _ci_success 1 "$(_ci_skip_log test_checks.sh test_new)"
+        _ci_wait 123 --since base
+        assert_eq 5 "$CI_RC" 'added skip fails from root and tests directory' || return 1
+        assert_eq $'success\t1\tbash\nskipped tests (bash):\n  test_checks.sh: test_new (tool not on PATH)\nskipped tests added since base:\n  test_checks.sh: test_new (bash)' "$CI_OUT" 'same output from both directories' || return 1
+        assert_eq '' "$CI_ERR" 'no directory error' || return 1
+    done
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_renamed_suites_count_as_added_regardless_of_diff_config() {
+    _ci_fixture || return $?
+    _ci_git_range
+    git -C "$CI_REPO" tag before_rename
+    git -C "$CI_REPO" mv tests/test_checks.sh tests/test_renamed.sh
+    git -C "$CI_REPO" commit -qm 'Rename check suite'
+    CI_HEAD=$(git -C "$CI_REPO" rev-parse HEAD)
+    local renames
+    for renames in true false; do
+        git -C "$CI_REPO" config diff.renames "$renames"
+        _ci_success 1 "$(_ci_skip_log test_renamed.sh test_existing)"
+        _ci_wait 123 --since before_rename
+        assert_eq 5 "$CI_RC" 'renamed suite counts as added with either diff setting' || return 1
+        assert_eq $'success\t1\tbash\nskipped tests (bash):\n  test_renamed.sh: test_existing (tool not on PATH)\nskipped tests added since before_rename:\n  test_renamed.sh: test_existing (bash)' "$CI_OUT" 'renamed suite output' || return 1
+    done
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_moved_and_removed_registrations_are_not_added() {
+    _ci_fixture || return $?
+    _ci_git_range
+    git -C "$CI_REPO" tag before_move
+    printf 'run_test test_new\n# run_test test_comment\nrun_test test_existing\n' > "$CI_REPO/tests/test_checks.sh"
+    git -C "$CI_REPO" add tests/test_checks.sh
+    git -C "$CI_REPO" commit -qm 'Move and remove registrations'
+    CI_HEAD=$(git -C "$CI_REPO" rev-parse HEAD)
+    local name
+    for name in test_existing test_after; do
+        _ci_success 1 "$(_ci_skip_log test_checks.sh "$name")"
+        _ci_wait 123 --since before_move
+        assert_eq 0 "$CI_RC" 'moved and removed registrations do not fail the range' || return 1
+        assert_eq $'success\t1\tbash\nskipped tests (bash):\n  test_checks.sh: '"$name (tool not on PATH)" "$CI_OUT" 'skip is reported without an added-test verdict' || return 1
+    done
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
 }
 
 test_invalid_attempt_numbers_are_rejected() {
@@ -356,4 +409,7 @@ run_test test_added_names_are_matched_with_their_suite
 run_test test_unknown_revision_reports_the_unresolved_name
 run_test test_unknown_run_head_reports_the_unresolved_name
 run_test test_invalid_attempt_numbers_are_rejected
+run_test test_range_verdict_is_independent_of_working_directory
+run_test test_renamed_suites_count_as_added_regardless_of_diff_config
+run_test test_moved_and_removed_registrations_are_not_added
 report_results

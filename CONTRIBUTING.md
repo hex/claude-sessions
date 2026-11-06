@@ -142,8 +142,10 @@ is three reruns; `--max-reruns N` changes it, and 0 disables reruns.
 
 After every job succeeds, the script fetches the logs once and prints each job's
 last skipped-test block, including missing-tool reasons, or `skipped tests: none`.
-`--since <rev>` compares added `run_test` registrations between that revision and
-the run's `headSha`. A skipped registration added in that range stops the release.
+`--since <rev>` compares the sets of `run_test` names in each suite at that revision
+and the run's `headSha`. Moving a registration within its suite does not add it.
+A renamed suite counts all its registrations as added. A skipped registration
+added in that range stops the release.
 Read the rest of the skip list for checks the range depends on; the script cannot
 judge those dependencies.
 
