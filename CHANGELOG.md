@@ -4,6 +4,19 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Changed
+- `cs <name>`'s resume prompt shows how full the conversation it would resume got. The launch card gives the last context reading the status line recorded, in the status line's colours: bold amber from `CS_STATUSLINE_CTX_WARN` (40), white on red from `CS_STATUSLINE_CTX_CRIT`. At the crit mark the prompt defaults to a fresh conversation. A bold red line above it says `The last context reading in this session was 72%, so a fresh conversation is the default. Press y to resume.` and the plain prompt reads `[y/N]`. When the conversation to resume wrote the pending handoff and `-finish` armed no merge, the default is `r`, so Enter starts the fresh conversation from that handoff. A handoff from another checkout, or one an older conversation wrote, keeps `n` as the default. The card shows no figure for a conversation left before its first reply, since the reading beside it belongs to its predecessor.
+- `CS_STATUSLINE_CTX_CRIT` and `CS_ROTATE_NUDGE_CTX` default to 60 instead of 65, so the red context figure, Claude's rotation suggestion and the resume prompt's fresh default start at the same reading.
+- The `cs-mermaid` mod picks its palette from cs's reading of the terminal under `/config`'s `auto` theme and any `custom:` theme: `CS_TERM_THEME` first, then the luminance of `CS_TERM_BG_RGB`. It drew the light palette there before. A claude started outside cs has neither and still draws light. Every line and label colour reads at 4.5:1 or better on white, cream and Solarized Light under the light palette, and on black, `#1C1C1E` and `#282C34` under the dark one. The green of a good label was 4.07:1 on cream.
+
+### Fixes
+- cs finds a conversation's transcript under `$CLAUDE_CONFIG_DIR/projects` when you set `CLAUDE_CONFIG_DIR`, where it only looked in `~/.claude/projects`. The launch card, the resume check, the repair of an orphaned conversation id and the `cs` band all read it from there.
+- With your own `CLAUDE_CONFIG_DIR` set, a `cs <name>` run from inside an encrypted session's claude starts its claude on that dir. It cleared the variable before, so that claude ran on `~/.claude`.
+- `cs-mermaid` counts `✅`, `🚀`, `❤️` and `⭐` as two columns, and wide East Asian text and Indic vowel signs at the width the terminal draws them, so a chart with them in its labels keeps its boxes and lines aligned.
+- `cs-mermaid` finds fences the way Claude Code's markdown renderer does. A fence indented four or more columns is an indented code block and stays as text. A fence inside a list item counts its indent from the item's content. A mermaid fence quoted inside another code block, such as a ` ```markdown ` example, stays as text. The prose after a chart in a nested list keeps its list instead of showing as code. [docs/hooks.md](docs/hooks.md) lists the cases where the mod and the renderer still differ.
+
 ## 2026.11.3
 
 ### Performance
