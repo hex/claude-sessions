@@ -205,6 +205,6 @@ test('a chart at the parser limits with crossings to minimise lays out in bounde
   if ('error' in graph) throw new Error(graph.error)
   const started = Date.now()
   const drawn = layout(graph)
-  expect(Date.now() - started).toBeLessThan(6000)
+  expect(Date.now() - started).toBeLessThan(4500)
   expect('error' in drawn ? drawn.error : 'drawn').toMatch(/^diagram would be \d+x\d+ cells$/)
 })

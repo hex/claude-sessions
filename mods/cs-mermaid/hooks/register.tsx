@@ -11,38 +11,170 @@ import { cellWidth, padToWidth, truncateToWidth } from './text'
 // The /config row (`cs-mermaid.drawDiagrams`): off, fences stay source.
 export const OPTION = 'drawDiagrams'
 
-// A mermaid fence opens and closes on its own line with exactly three backticks. A line of four
-// or more backticks, or of three tildes, opens an outer block that quotes what it holds, closed by
-// a line of the same mark at least as long; a fence inside one is quoted source, not a chart.
-type Fence = { start: number; end: number; body: string }
+// A mermaid fence opens with exactly three backticks and `mermaid`, nothing after. Any other
+// opener (three backticks with another language or none, four or more, or three tildes) opens an
+// outer block that quotes what it holds; a fence inside one is quoted source, not a chart. Either
+// closes on a bare line of its mark at least as long as its opener. A backtick after the opening
+// run makes the line inline code, not an opener. Any of these marks may be indented up to three
+// columns past the margin, or inside a list item past the item's content column, the marker's own
+// line included (CommonMark); at four, the line is an indented code block, not a fence. Outside
+// lists a tab reaches the next multiple of four; list continuations count each tab as four spaces.
+// A block still open in an item ends with it (CommonMark 4.5), and a mermaid fence ended so is a
+// chart up to there. Each item's continuation rules are measured at its own content column.
+type Fence = { start: number; end: number; body: string; items: Item[] }
+// A list item open around the line being read: its content column and end, whether a blank line
+// has come inside it (a marker with nothing after it counts as one, as marked reads it), and whether
+// its previous line was a fence mark, heading, thematic break or indented code that prevents laziness.
+// The bullet character or ordered delimiter identifies siblings; only a final item trims all trailing whitespace.
+type Item = { content: number; blank: boolean; settled: boolean; end: number; listMark: string; lastInList: boolean }
 export function scanFences(text: string): Fence[] {
   const fences: Fence[] = []
-  let outer: { mark: string; length: number } | undefined
-  let open: { start: number; bodyStart: number } | undefined
+  // The open list items, outermost first. A fenced block keeps how many were open when it opened
+  // (`depth`), and ends with the item it opened in.
+  const items: Item[] = []
+  // The fenced block open on the line being read: a mermaid fence keeps where it and its body start.
+  let block: { mark: string; length: number; depth: number; mermaid?: { start: number; bodyStart: number; items: Item[] } } | undefined
+  // Whether the line before was a line of text in the innermost container. A line of only `-` or
+  // `=` under one underlines it as a heading, and at a reply's top level only a bullet or `1.` or
+  // `1)` with text after it starts a list item there (marked reads an item's text a line at a time,
+  // so inside an item any marker does).
+  let paragraph = false
+  // Whether the line before was a list marker with nothing after it: an item begins with at most
+  // one blank line, so a blank line next ends that item.
+  let bare = false
   let at = 0
+  const closeItems = (depth: number, sibling?: { listMark: string; column: number }) => {
+    // The closing depth always names an open item.
+    const item = items[depth]!
+    const container = depth > 0 ? items[depth - 1]!.content : 0
+    if (sibling && sibling.column >= container && sibling.column - container < 4 && sibling.listMark === item.listMark) item.lastInList = false
+    for (const item of items.slice(depth)) item.end = at
+    items.length = depth
+    paragraph = false
+    if (!block || block.depth <= depth) return
+    const { mermaid } = block
+    if (mermaid) fences.push({ start: mermaid.start, end: at - 1, body: text.slice(mermaid.bodyStart, Math.max(mermaid.bodyStart, at - 1)), items: mermaid.items })
+    block = undefined
+  }
   for (const line of text.split('\n')) {
     const next = at + line.length + 1
-    const trimmed = line.trim()
-    const run = /^(`{3,}|~{3,})/.exec(trimmed)
-    if (run) {
-      const mark = run[1]!
-      if (outer) {
-        if (mark[0] === outer.mark && mark.length >= outer.length && trimmed === mark) outer = undefined
-      } else if (open) {
-        if (trimmed === '```') {
-          fences.push({ start: open.start, end: at + line.length, body: text.slice(open.bodyStart, Math.max(open.bodyStart, at - 1)) })
-          open = undefined
-        }
-      } else if (mark === '```' && trimmed.slice(3).trim() === 'mermaid') {
-        // The newline before the fence belongs to it, not to the prose above.
-        open = { start: Math.max(0, at - 1), bodyStart: next }
-      } else if (mark.length > 3 || mark[0] === '~') {
-        outer = { mark: mark[0]!, length: mark.length }
+    const { column: rawColumn, offset, rest } = indentation(line, 0)
+    const column = items.length ? indentation(line.replace(/\t/g, '    '), 0).column : rawColumn
+    const nextItem = listItem(rest, column)
+    const sibling = nextItem ? { listMark: nextItem.marker.slice(-1), column } : undefined
+    if (rest === '') {
+      if (bare) closeItems(items.length - 1)
+      for (const item of items) item.blank = true
+      paragraph = false
+      bare = false
+      at = next
+      continue
+    }
+    // A line left of an item's content column is a lazy line, read as the item's content, unless it
+    // starts a block of its own within three columns of the item's container, a blank line came
+    // inside the item, or the line before settled; then it ends the item and every item inside it.
+    let lazy = false
+    for (let depth = 0; depth < items.length; depth++) {
+      const item = items[depth]!
+      if (column >= item.content) continue
+      const container = depth > 0 ? items[depth - 1]!.content : 0
+      if (item.settled || item.blank || (column - container < 4 && startsBlock(rest))) {
+        closeItems(depth, sibling)
+        break
+      }
+      lazy = true
+    }
+    const margin = items.length > 0 ? items[items.length - 1]!.content : 0
+    // Four columns past the margin a line is indented code, which opens nothing; nor does a lazy line.
+    const indented = column - margin >= 4
+    // The line as its innermost container reads it, and where that starts in the reply: an item's
+    // marker line by what follows the marker.
+    let read = { indented, text: rest, start: at + offset }
+    let mark: string | undefined
+    let pushed = false
+    let underline = false
+    if (block) {
+      mark = indented || lazy ? undefined : fenceMark(rest)
+      if (mark && mark[0] === block.mark && mark.length >= block.length && rest === mark) {
+        const { mermaid } = block
+        if (mermaid) fences.push({ start: mermaid.start, end: at + line.length, body: text.slice(mermaid.bodyStart, Math.max(mermaid.bodyStart, at - 1)), items: mermaid.items })
+        block = undefined
+      }
+    } else if (!indented && !lazy) {
+      const item = nextItem
+      if (paragraph && /^(?:-+|=+)$/.test(rest)) underline = true
+      else if (item && (items.length > 0 || !paragraph || (item.text !== '' && /^(?:[-+*]|1[.)])$/.test(item.marker)))) {
+        items.push({ content: item.content, blank: item.text === '', settled: false, end: text.length, listMark: item.marker.slice(-1), lastInList: true })
+        read = { indented: item.textColumn - item.content >= 4, text: item.text, start: read.start + item.textOffset }
+        pushed = true
+      }
+      mark = read.indented ? undefined : fenceMark(read.text)
+      if (mark) {
+        // The newline before a fence on its own line belongs to it, not to the prose above; a fence on
+        // a marker's line starts at its mark, and the marker stays prose.
+        const start = pushed ? read.start : Math.max(0, at - 1)
+        const mermaid = mark === '```' && read.text.slice(3).trim() === 'mermaid' ? { start, bodyStart: next, items: items.slice() } : undefined
+        block = { mark: mark[0]!, length: mark.length, depth: items.length, mermaid }
       }
     }
+    // marked expands a continuation tab to four spaces before measuring each item's previous line.
+    const previousLine = line.replace(/\t/g, '    ')
+    for (let depth = 0; depth < items.length; depth++) {
+      const item = items[depth]!
+      const container = depth > 0 ? items[depth - 1]!.content : 0
+      const previous = pushed && depth === items.length - 1 ? { column: read.indented ? 4 : 0, rest: read.text } : indentation(previousLine.slice(item.content), 0)
+      const prefix = Math.min(3, item.content - container - 1)
+      item.settled = previous.column >= 4 || (previous.column <= prefix && (/^(?:```|~~~|#)/.test(previous.rest) || THEMATIC.test(previous.rest)))
+    }
+    bare = pushed && read.text === ''
+    // An indented line outside a block leaves `paragraph` as it was: its continuation, or code.
+    if (block || mark || underline) paragraph = false
+    else if (lazy) paragraph = true
+    else if (pushed || !indented) paragraph = !read.indented && read.text !== '' && !/^#{1,6}(?:[ \t]|$)/.test(read.text) && !THEMATIC.test(read.text)
     at = next
   }
   return fences
+}
+
+// The fence mark a line opens with: three or more backticks with no backtick after them (one
+// makes the line inline code), or three or more tildes. One pass over the line, however long.
+function fenceMark(rest: string): string | undefined {
+  const mark = /^(?:`{3,}|~{3,})/.exec(rest)?.[0]
+  return mark?.[0] === '`' && rest.includes('`', mark.length) ? undefined : mark
+}
+
+// A line that starts a block of its own, which a list item does not take as a lazy line: a fence
+// mark, a heading, an HTML tag, a list marker or a thematic break (marked's list rules).
+function startsBlock(rest: string): boolean {
+  return /^(?:```|~~~|#|<(?:[a-z].*>|!--)|(?:[-+*]|\d{1,9}[.)])(?:[ \t]|$))/i.test(rest) || THEMATIC.test(rest)
+}
+
+// The column a line's text starts at, counting on from `column` (a tab reaches the next multiple
+// of four), the offset it starts at, and that text without its trailing blanks.
+function indentation(line: string, column: number): { column: number; offset: number; rest: string } {
+  let i = 0
+  for (; i < line.length; i++) {
+    if (line[i] === ' ') column += 1
+    else if (line[i] === '\t') column += 4 - (column % 4)
+    else break
+  }
+  return { column, offset: i, rest: line.slice(i).trimEnd() }
+}
+
+// Three or more `*`, `-` or `_` alone on a line, blanks between them allowed.
+const THEMATIC = /^(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})$/
+
+// A list item that opens with `rest` at `column`: a bullet (`-`, `+`, `*`) or 1-9 digits and `.`
+// or `)`, then blanks or nothing; a thematic break is not one. Its content starts past one to four
+// columns of blanks, or one column past the marker when more or nothing follow it (CommonMark).
+// `text` is what follows the marker and its blanks, starting at `textColumn`, `textOffset` into `rest`.
+function listItem(rest: string, column: number): { marker: string; content: number; text: string; textColumn: number; textOffset: number } | undefined {
+  if (THEMATIC.test(rest)) return undefined
+  const marker = /^(?:[-+*]|\d{1,9}[.)])(?=[ \t]|$)/.exec(rest)?.[0]
+  if (marker === undefined) return undefined
+  const after = column + marker.length
+  const { column: textColumn, offset, rest: text } = indentation(rest.slice(marker.length), after)
+  return { marker, content: text === '' || textColumn - after > 4 ? after + 1 : textColumn, text, textColumn, textOffset: marker.length + offset }
 }
 
 export function fencesOf(text: string): string[] {
@@ -72,11 +204,23 @@ export function fit(graph: Graph, columns: number): Fitted {
 // or any node that branches) amber, a start (a circle, or a node nothing leads to) green, an
 // end (a node that leads nowhere) grey. A `style` or `classDef` fill wins over all of it.
 type Palette = { fill: string; decision: string; start: string; end: string; text: string; line: string; good: string; bad: string }
-const LIGHT: Palette = { fill: '#ECECFF', decision: '#FFF3BF', start: '#D3F9D8', end: '#E9ECEF', text: '#1F1F1F', line: '#333333', good: '#2B8A3E', bad: '#C92A2A' }
+const LIGHT: Palette = { fill: '#ECECFF', decision: '#FFF3BF', start: '#D3F9D8', end: '#E9ECEF', text: '#1F1F1F', line: '#333333', good: '#277C38', bad: '#C92A2A' }
 const DARK: Palette = { fill: '#3B3F6B', decision: '#6B5A1E', start: '#1F4D2B', end: '#3A3D42', text: '#F2F2F2', line: '#D3D3D3', good: '#69DB7C', bad: '#FF8787' }
 
-export function paletteFor(theme: unknown): Palette {
-  return typeof theme === 'string' && theme.startsWith('dark') ? DARK : LIGHT
+// The theme row decides when it is a built-in theme, which names its polarity first (`dark`,
+// `light-daltonized`). Claude Code's `auto` and a `custom:<slug>` theme name none, and the engine
+// exposes no resolved one, so the terminal cs read decides: its theme, else its measured
+// background's luminance (the pivot cs's own band uses), else light.
+export function paletteFor(theme: unknown, terminal: { theme?: string; bg?: string } = {}): Palette {
+  const polarity = typeof theme === 'string' ? /^(dark|light)(-|$)/.exec(theme)?.[1] : undefined
+  if (polarity === 'dark') return DARK
+  if (polarity === 'light') return LIGHT
+  if (terminal.theme === 'dark') return DARK
+  if (terminal.theme === 'light') return LIGHT
+  const [r, g, b, ...more] = (terminal.bg ?? '').split(';').map(part => (/^\s*\d{1,3}\s*$/.test(part) ? Number(part) : NaN))
+  const measured = r !== undefined && g !== undefined && b !== undefined && more.length === 0 && r <= 255 && g <= 255 && b <= 255
+  if (measured && 2126 * r + 7152 * g + 722 * b < 1530000) return DARK
+  return LIGHT
 }
 
 export type Role = 'step' | 'decision' | 'start' | 'end'
@@ -161,14 +305,44 @@ export function drawFence(source: string, error: string, elements: Elements) {
 export function splitReply(text: string): { kind: 'text' | 'mermaid'; body: string }[] {
   const parts: { kind: 'text' | 'mermaid'; body: string }[] = []
   let last = 0
+  let items: Item[] = []
+  const addText = (end: number) => {
+    let body = ''
+    let at = last
+    while (at < end) {
+      const newline = text.indexOf('\n', at)
+      const lineEnd = newline < 0 || newline >= end ? end : newline + 1
+      const line = text.slice(at, lineEnd)
+      const ended = items.some(item => item.end === at)
+      if (ended && body.trim()) {
+        parts.push({ kind: 'text', body: items.some(item => item.end === at && item.lastInList) ? body.trimEnd() : body.replace(/\r?\n$/, '') })
+        body = ''
+      }
+      const margin = items.filter(item => at < item.end).at(-1)?.content ?? 0
+      let column = 0
+      let offset = 0
+      while (offset < line.length && column < margin) {
+        if (line[offset] === ' ') column++
+        else if (line[offset] === '\t') column += 4
+        else break
+        offset++
+      }
+      body += column < margin ? line : ' '.repeat(column - margin) + (margin ? line.slice(offset).replace(/\t/g, '    ') : line.slice(offset))
+      at = lineEnd
+    }
+    // A fence owns its preceding newline, so its gap can stop one character before an item ends.
+    const ended = items.some(item => item.lastInList && (item.end === end || (item.end === end + 1 && text[end] === '\n')))
+    if (ended) body = body.trimEnd()
+    else if (items.some(item => item.end === end)) body = body.replace(/\r?\n$/, '')
+    if (body.trim()) parts.push({ kind: 'text', body })
+  }
   for (const fence of scanFences(text)) {
-    const before = text.slice(last, fence.start)
-    if (before.trim()) parts.push({ kind: 'text', body: before })
+    addText(fence.start)
     parts.push({ kind: 'mermaid', body: fence.body.trim() })
     last = fence.end
+    items = fence.items
   }
-  const after = text.slice(last)
-  if (after.trim()) parts.push({ kind: 'text', body: after })
+  addText(text.length)
   return parts
 }
 
@@ -188,6 +362,21 @@ export function fitSource(source: string, columns: number): Fitted | ParseError 
   return fitted
 }
 
+// One fence: the chart when it fits, else its source with the reason. Model-written source
+// crosses into the parser and layout here; a throw is caught and shown under the fence with
+// its message, where uncaught it would make the engine draw the whole reply plain.
+export function drawPart(source: string, columns: number, palette: Palette, elements: Elements, fitter: typeof fitSource = fitSource) {
+  const { Box } = elements
+  let fitted: Fitted | ParseError
+  try {
+    fitted = fitter(source, columns)
+  } catch (thrown) {
+    fitted = { error: `could not draw: ${thrown instanceof Error ? thrown.message : String(thrown)}` }
+  }
+  if ('error' in fitted) return drawFence(source, fitted.error, elements)
+  return <Box marginY={1}><Drawing drawn={fitted.drawn} graph={fitted.graph} palette={palette} elements={elements} /></Box>
+}
+
 export const register: Register = (on, options) => {
   if (options[OPTION] === false) return
 
@@ -199,7 +388,7 @@ export const register: Register = (on, options) => {
     const elements = $.ui.resolve(e)
     const { Box } = elements
     const theme = (await $.config.list()).find(row => row.key === 'theme')?.value
-    const palette = paletteFor(theme)
+    const palette = paletteFor(theme, { theme: await $.env.get('CS_TERM_THEME'), bg: await $.env.get('CS_TERM_BG_RGB') })
     const columns = Math.max(20, (e.viewport?.columns ?? 80) - 6)
     const parts = splitReply(e.props.text)
     // The engine draws the prose, the opening bullet on the reply's first part only.
@@ -208,12 +397,7 @@ export const register: Register = (on, options) => {
       : undefined))
     return (
       <Box flexDirection="column">
-        {parts.map((part, index) => {
-          if (part.kind === 'text') return prose[index]
-          const fitted = fitSource(part.body, columns)
-          if ('error' in fitted) return drawFence(part.body, fitted.error, elements)
-          return <Box marginY={1}><Drawing drawn={fitted.drawn} graph={fitted.graph} palette={palette} elements={elements} /></Box>
-        })}
+        {parts.map((part, index) => (part.kind === 'text' ? prose[index] : drawPart(part.body, columns, palette, elements)))}
       </Box>
     )
   })

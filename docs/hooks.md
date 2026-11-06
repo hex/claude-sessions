@@ -1064,8 +1064,9 @@ checks the manifest and its `/config` field, the cache-name pin against
 
 `mods/cs-mermaid/` is a Claude Code function-hooks plugin, deployed and gated
 the same way as the `cs` mod: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, which every
-`cs <name>` launch exports and `CS_NO_FUNCTION_HOOKS=1` withholds. It reads no
-environment, writes no file and runs no process. Unlike the `cs` mod it needs no
+`cs <name>` launch exports and `CS_NO_FUNCTION_HOOKS=1` withholds. It reads two
+environment variables (`CS_TERM_THEME` and `CS_TERM_BG_RGB`, cs's reading of the
+terminal), writes no file and runs no process. Unlike the `cs` mod it needs no
 cs session: with function hooks on it draws in any directory. The flowchart
 instruction lives in a cs session's `CLAUDE.local.md`.
 
@@ -1074,14 +1075,42 @@ instruction lives in a cs session's `CLAUDE.local.md`.
 It hooks one event:
 
 - `ui.render` on `AssistantMessage` (terminal surface only). A reply with no
-  ` ```mermaid ` fence goes to the engine untouched. A reply with one is split
+  ` ```mermaid ` fence goes to the engine untouched. A fence indented four or
+  more columns (a tab counts to the next multiple of four) is an indented code
+  block, as CommonMark reads it, and stays with the engine; one indented up to
+  three draws. Inside a list item the columns count from the item's content
+  column, past its `-`, `+`, `*`, `1.` or `1)` marker and the blanks after it,
+  and a fence may open on the marker's own line: a fence under `1. flow:` at
+  four columns draws, and one four columns past the item's content stays
+  source. The scanner checks list continuation from the outermost item inward.
+  A line left of an item's content column ends that item if it starts a block
+  within three columns of its parent's content column, follows a blank line in
+  that item, or follows a fence mark, heading, thematic break or indented code
+  at that level. The previous-line checks
+  use each item's content column: four spaces make indented code; a fence,
+  heading or thematic break counts only within `min(3, item indent - 1)` spaces.
+  A mermaid fence still
+  open when its item ends draws up to there. A mermaid fence closes on a bare
+  line of three or more backticks. A mermaid fence inside another code block (a
+  ` ```markdown ` or bare ` ``` ` one, four backticks or tildes) is that
+  block's text and stays source. A reply with a fence is split
   into prose, which goes back to the engine (so the reply keeps its opening
   bullet, on its first part only), and fences, each parsed (`hooks/parse.ts`) and
   laid out (`hooks/layout.ts`) in character cells; the last 32 layouts are
   kept, since a streaming reply re-renders on every flush. Nodes are solid
   blocks, three rows tall, taller or wider where more than one edge meets them,
-  coloured by their role in the flow, in a light or dark palette from the
-  `theme` row of `/config`: a decision (`{ }`, `{{ }}`, or any node with two
+  coloured by their role in the flow, in a light or dark palette: the `theme`
+  row of `/config` decides for a built-in theme (`dark`, `light` and
+  their `-daltonized` and `-ansi` kinds); under `auto` or a `custom:` theme the
+  terminal cs read decides, `CS_TERM_THEME` first, else the luminance of
+  `CS_TERM_BG_RGB`, else light. Both come from the environment cs launched
+  claude with. A claude started outside cs has neither, and a teammate pane,
+  whose environment comes from tmux, can lack both: either draws light. A cs
+  config change or a terminal theme switch after launch shows from the next
+  launch. Every line and label colour reads at 4.5:1,
+  with 0.1 to spare, on white, cream (252;247;229), Solarized Light
+  (253;246;227) and 251;246;233 under the light palette and on black, #1C1C1E
+  and #282C34 under the dark one, and every label on its fill. A decision (`{ }`, `{{ }}`, or any node with two
   or more outgoing edges) amber, an end (a node edges arrive at and none leave, a
   `(( ))` circle included) grey, a start (a node edges leave and none arrive at,
   or any other `(( ))` circle) green, every other step lavender.
@@ -1099,6 +1128,27 @@ It hooks one event:
   diagram types, more than 200 nodes, 400 edges or 60-cell
   labels) or one still too wide stays a code block with `mermaid: <reason>`
   under it.
+
+After a chart in a list, `splitReply` removes the indentation of the enclosing
+items still open on each prose line. It starts a separate prose part when one
+of those items ends, so a numbered sibling can start a list. It removes the
+item's final line break; only the last item in a list loses the remaining
+trailing whitespace, as marked does. It keeps the list
+markers and the indentation of items opened after the chart. On a continuation
+that reaches an enclosing item's margin, it expands each tab to four spaces
+before removing indentation, as marked does. Lazy lines keep their literal text.
+
+The scanner follows marked 15.0.12, whose block rules Claude Code's bundle
+carries. Known differences from it remain. The scanner does not track HTML blocks
+such as `<details>` or blockquotes inside list items. A tab immediately after a
+list marker, a lone CR line break, or a lazy nested line under a wide numbered
+marker can give different fence boundaries. Openers ` ````mermaid ` and
+`~~~mermaid` stay source by design, as do replies whose
+only Mermaid fences are empty. Because the engine reads prose parts separately,
+an ordered list a chart splits numbers each later part from that part's first
+source number, where marked counts on from the list's first number. For
+example, a `1.` or a `3.` after a chart that follows `1.` shows as written,
+where marked shows `2.` in the whole reply.
 
 cs adds a `cs:mermaid-diagrams` section headed `Diagrams` to `CLAUDE.local.md`
 when it creates a session, or on migration when the sentinel is absent. The
@@ -1147,6 +1197,8 @@ the hook inventory check skips when validation cannot list function hooks.
 The shell suite always checks the manifest, its `/config` field and that the
 installer names the mod. `tests/test_mermaid_section.sh` checks the session
 instruction and tombstone, and `tests/test_migrate_claude_md.sh` covers migration.
+After changing `mods/cs-mermaid/hooks/`, run `./build.sh` to refresh the payload
+hashes in `install.sh`.
 
 ## cs-panel (not a hook script — a Claude Code mod)
 
