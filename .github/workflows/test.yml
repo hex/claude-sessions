@@ -36,7 +36,11 @@ jobs:
         shard: [1, 2]
     runs-on: ${{ matrix.os }}
     steps:
+      # tests/test_suite_guards.sh checks every release tag against its
+      # CHANGELOG.md heading, so the checkout fetches the tags too.
       - uses: actions/checkout@v5
+        with:
+          fetch-tags: true
 
       # Bare runners have no global git identity; cs creates commits when it
       # initializes a session, so the session-lifecycle suites need one.
