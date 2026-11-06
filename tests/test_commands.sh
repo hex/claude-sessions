@@ -522,8 +522,8 @@ test_release_uses_ci_wait_for_each_workflow_gate() {
             print step "\t" $0
         }
     ' "$RELEASE_MD")
-    assert_eq $'0b.\tPREV_TAG=$(git tag --list \'v*\' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n8c.\tPREV_TAG=$(git tag --list \'v*\' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n10.\tbash tests/ci_wait.sh "$RUN_ID"' "$calls" \
-        'release gates must compute the comparison tag in the helper command' || return 1
+    assert_eq $'0b.\tRUN_ID=$(gh run list --workflow=test.yml --branch main --commit "$CONTENT_SHA" --limit 1 --json databaseId --jq \'.[0].databaseId // empty\') && PREV_TAG=$(git tag --list \'v*\' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n8c.\tRUN_ID=$(gh run list --workflow=test.yml --commit "$SHA" --limit 1 --json databaseId --jq \'.[0].databaseId // empty\') && PREV_TAG=$(git tag --list \'v*\' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n10.\tRUN_ID=$(gh run list --workflow=release.yml --branch vX.Y.Z --limit 1 --json databaseId --jq \'.[0].databaseId // empty\') && bash tests/ci_wait.sh "$RUN_ID"' "$calls" \
+        'release gates must resolve the run id in the helper command' || return 1
 }
 
 # ============================================================================

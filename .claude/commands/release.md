@@ -69,15 +69,18 @@ keep waiting for the run on `HEAD`.
 Run the following from the repo root with the Bash tool's `run_in_background`
 and longest timeout, `7200000` ms. The default kills a background command after
 30 minutes; one rerun of a 15-minute lane can exceed that. Read the script's exit
-code. If the shell kills the wait without an exit code, run the script again on
-the same run id. The run's "success" conclusion is not enough; the script waits
+code. If the shell kills the wait without an exit code, use the attempt/status
+check in the exit-4 row before running the script again on the same run id.
+The run's "success" conclusion is not enough; the script waits
 for every job's conclusion and prints the job table and skipped tests.
 
-Set `RUN_ID` in that same Bash call. Shell variables do not carry between Bash
-tool calls, so compute `PREV_TAG` in the command that invokes the script:
+Replace the `CONTENT_SHA` placeholder with the full hash of the commit you are checking.
+This Bash call resolves `RUN_ID` and `PREV_TAG` because shell variables do not
+carry between Bash tool calls:
 
 ```bash
-PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
+CONTENT_SHA='<full SHA selected above>'
+RUN_ID=$(gh run list --workflow=test.yml --branch main --commit "$CONTENT_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty') && PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
 ```
 
 If `PREV_TAG` is empty, confirm the first-release comparison revision before
@@ -90,8 +93,8 @@ same tag selection command.
 | 1 | Stop, fix the failure in a new commit, and re-verify. |
 | 2 | Correct the arguments shown by the usage line, including an unresolvable `--since` revision. |
 | 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
-| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, wait one minute. Run the script again on the same run id; a rerun already requested is visible and waited on, not requested again. |
-| 5 | A check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the release narrative and continue. Fix any other skip before tagging. |
+| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, wait one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
+| 5 | A check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the session narrative (`.cs/memory/narrative.<actor>.md`) and in one line of the release notes, then continue. Fix any other skip before tagging. |
 
 Read the printed skip list for checks the release range depends on, including
 checks it did not add. The script cannot judge those dependencies.
@@ -388,14 +391,17 @@ created the run yet; repeat the lookup. Confirm the run's `headSha` is `$SHA`.
 Run the following from the repo root with the Bash tool's `run_in_background`
 and longest timeout, `7200000` ms. The default kills a background command after
 30 minutes; the lanes take about 15 minutes, so one rerun can exceed it. Read
-the script's exit code. If the shell kills the wait without an exit code, run
-the script again on the same run id.
+the script's exit code. If the shell kills the wait without an exit code, use
+the attempt/status check in the exit-4 row before running the script again on the
+same run id.
 
-Set `RUN_ID` in that same Bash call. Recompute `PREV_TAG` with the selection from
-Step 0b because shell variables do not carry between Bash tool calls:
+Replace the `SHA` placeholder with the full release commit from Step 8.
+Resolve `RUN_ID` here and select `PREV_TAG` as in Step 0b because shell variables
+do not carry between Bash tool calls:
 
 ```bash
-PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
+SHA='<full release SHA from Step 8>'
+RUN_ID=$(gh run list --workflow=test.yml --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty') && PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
 ```
 
 Judge by the per-job conclusions, never by
@@ -410,8 +416,8 @@ also cancelled or skipped with zero steps.
 | 1 | Stop and fix the failure in a new commit. |
 | 2 | Correct the arguments shown by the usage line, including an unresolvable `--since` revision. |
 | 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
-| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, wait one minute. Run the script again on the same run id; a rerun already requested is visible and waited on, not requested again. |
-| 5 | A check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the release narrative and continue. Fix any other skip before tagging. |
+| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, wait one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
+| 5 | A check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the session narrative (`.cs/memory/narrative.<actor>.md`) and in one line of the release notes, then continue. Fix any other skip before tagging. |
 
 Read the printed skip list for checks the release range depends on, including
 checks it did not add. The script cannot judge those dependencies.
@@ -452,12 +458,13 @@ created the run yet; repeat the lookup. Confirm that the run's `headSha` is `$SH
 Run the following from the repo root with the Bash tool's `run_in_background`
 and longest timeout, `7200000` ms. The default kills a background command after
 30 minutes; one rerun of a 15-minute lane can exceed that. Read the script's exit
-code. If the shell kills the wait without an exit code, run the script again on
-the same run id. Set `RUN_ID` in that same Bash call; variables do not carry
-between Bash tool calls. Do not pass `--since`; `release.yml` runs no test suites.
+code. If the shell kills the wait without an exit code, use the attempt/status
+check in the exit-4 row before running the script again on the same run id.
+Resolve `RUN_ID` in this Bash call because variables do not carry between calls.
+Do not pass `--since`; `release.yml` runs no test suites.
 
 ```bash
-bash tests/ci_wait.sh "$RUN_ID"
+RUN_ID=$(gh run list --workflow=release.yml --branch vX.Y.Z --limit 1 --json databaseId --jq '.[0].databaseId // empty') && bash tests/ci_wait.sh "$RUN_ID"
 ```
 
 | Exit | Action before signing |
@@ -466,8 +473,8 @@ bash tests/ci_wait.sh "$RUN_ID"
 | 1 | Step 9 has already published the release. Stop and report the failure before signing; never re-tag. |
 | 2 | Correct the arguments shown by the usage line. An unresolvable `--since` revision also returns 2, though this step passes no `--since`. |
 | 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
-| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, wait one minute. Run the script again on the same run id; a rerun already requested is visible and waited on, not requested again. |
-| 5 | This step cannot return 5 because it passes no `--since`. In a `--since` gate, 5 means a check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the release narrative and continue. Fix any other skip before tagging. |
+| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, wait one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
+| 5 | This step cannot return 5 because it passes no `--since`. In a `--since` gate, 5 means a check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the session narrative (`.cs/memory/narrative.<actor>.md`) and in one line of the release notes, then continue. Fix any other skip before tagging. |
 
 Download the assets, verify every manifest digest, and compare the installer
 with the tagged commit. The only permitted difference is `CS_DEFAULT_REF=main`
