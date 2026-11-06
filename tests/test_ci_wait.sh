@@ -14,6 +14,8 @@ _ci_fixture() {
     printf '0\n' > "$TEST_TMPDIR/count"
     : > "$TEST_TMPDIR/calls"
     REPLY_COUNT=0
+    CI_INTERVAL=0
+    CI_TMPDIR="${TMPDIR:-/tmp}"
     CI_REPO="$PWD"
     CI_HEAD=$(git rev-parse HEAD)
     cat > "$TEST_TMPDIR/fakebin/gh" <<'GH'
@@ -53,7 +55,7 @@ _ci_success() { # attempt log
 
 _ci_wait() {
     CI_RC=0
-    (cd "$CI_REPO" && PATH="$TEST_TMPDIR/fakebin:$PATH" CI_FIXTURE="$TEST_TMPDIR" CI_WAIT_INTERVAL=0 \
+    (cd "$CI_REPO" && PATH="$TEST_TMPDIR/fakebin:$PATH" CI_FIXTURE="$TEST_TMPDIR" CI_WAIT_INTERVAL="$CI_INTERVAL" TMPDIR="$CI_TMPDIR" \
         bash "$CI_WAIT" "$@") > "$TEST_TMPDIR/stdout" 2> "$TEST_TMPDIR/stderr" || CI_RC=$?
     CI_OUT=$(cat "$TEST_TMPDIR/stdout")
     CI_ERR=$(cat "$TEST_TMPDIR/stderr")
@@ -108,6 +110,30 @@ test_failed_gh_read_reports_stderr() {
     assert_eq '' "$CI_OUT" 'no verdict from a failed call' || return 1
     assert_eq 'ci_wait: gh run view 123 --json status,attempt,headSha,jobs failed: "network unavailable"' "$CI_ERR" 'call and stderr quoted' || return 1
     _ci_calls '["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
+test_invalid_interval_prints_usage_without_gh() {
+    _ci_fixture || return $?
+    CI_INTERVAL=abc
+    _ci_run_json in_progress 1 '[{"name":"bash","conclusion":"","steps":[]}]'
+    _ci_wait 123
+    assert_eq 2 "$CI_RC" 'invalid interval exits 2 before gh' || return 1
+    assert_eq '' "$CI_OUT" 'invalid interval has no verdict' || return 1
+    assert_eq 'usage: bash tests/ci_wait.sh <run-id> [--max-reruns N] [--since <rev>]' "$CI_ERR" 'invalid interval prints usage' || return 1
+    _ci_calls ''
+}
+
+test_unavailable_temp_directory_is_a_command_error() {
+    _ci_fixture || return $?
+    CI_TMPDIR="$TEST_TMPDIR/nonexistent-dir"
+    local expected_error
+    expected_error=$(mktemp -d "$CI_TMPDIR/ci_wait.XXXXXX" 2>&1) && return 1
+    expected_error=$(printf '%s\n' "$expected_error" | sed 's/ci_wait\.[[:alnum:]]\{6\}/ci_wait.XXXXXX/')
+    _ci_wait 123
+    assert_eq 4 "$CI_RC" 'unavailable temporary directory exits 4' || return 1
+    assert_eq '' "$CI_OUT" 'temporary directory failure has no verdict' || return 1
+    assert_eq "$expected_error" "$(printf '%s\n' "$CI_ERR" | sed 's/ci_wait\.[[:alnum:]]\{6\}/ci_wait.XXXXXX/')" 'native mktemp diagnostic is preserved' || return 1
+    _ci_calls ''
 }
 
 test_invalid_arguments_print_usage_without_gh() {
@@ -464,6 +490,8 @@ run_test test_pending_jobs_wait_until_every_conclusion_exists
 run_test test_failure_and_skipped_dependent_stop
 run_test test_cancellation_after_steps_is_a_failure
 run_test test_failed_gh_read_reports_stderr
+run_test test_invalid_interval_prints_usage_without_gh
+run_test test_unavailable_temp_directory_is_a_command_error
 run_test test_invalid_arguments_print_usage_without_gh
 run_test test_zero_step_runner_cancellations_rerun
 run_test test_cancelled_build_and_skipped_release_rerun_after_stale_read

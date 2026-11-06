@@ -2,7 +2,8 @@
 # ABOUTME: Waits for GitHub Actions jobs and reports their completed verdicts.
 # ABOUTME: Distinguishes failed commands from pending runs and failed jobs.
 
-set -euo pipefail
+set -Eeuo pipefail
+trap 'exit 4' ERR
 
 _usage() {
     echo 'usage: bash tests/ci_wait.sh <run-id> [--max-reruns N] [--since <rev>]' >&2
@@ -33,6 +34,9 @@ while [ "$#" -gt 0 ]; do
         *) _usage ;;
     esac
 done
+
+interval="${CI_WAIT_INTERVAL-30}"
+case "$interval" in '' | *[!0-9]*) _usage ;; esac
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/ci_wait.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
@@ -167,7 +171,7 @@ while :; do
             printf 'ci_wait: attempt never rose past %s after the rerun\n' "$rerun_attempt" >&2
             exit 4
         fi
-        sleep "${CI_WAIT_INTERVAL:-30}"
+        sleep "$interval"
         continue
     fi
     pending=$(jq '[.jobs[] | select(.conclusion == "")] | length' "$scratch/response")
@@ -178,7 +182,7 @@ while :; do
             printf '%s\n' "$waiting"
             last_wait="$waiting"
         fi
-        sleep "${CI_WAIT_INTERVAL:-30}"
+        sleep "$interval"
         continue
     fi
     jq -r '.jobs[] | [.conclusion, (.steps | length), .name] | @tsv' "$scratch/response"
