@@ -1539,8 +1539,8 @@ CS_PAYLOAD_SHA256=(
     "6cca574728693b2fa8072182015e17d9dce47a3ca8118b41ca0e09928546aa41  mods/cs-filter-chat/hooks/verdict.ts"
     "ef2434b735efc6c5727d230eac9d4f439a9439d59946289b024b6e1bcd8f2c80  mods/cs-filter-chat/hooks/words.ts"
     "a5d9864215c3f7b99a49bd59524b72bbc2a75d8df15c97caa23c1aba31ddb428  mods/cs-filter-chat/hooks/draw.tsx"
-    "3595bfd6c3e3e266456eee69eb552ba28294cbb9d7a447ac4e6cb9b297cae178  completions/cs.bash"
-    "b34174fb73e20a6cf00db1c59bdb0905bec55154da11bb6ec15b49a580dfcd00  completions/_cs"
+    "9849b45576edc19f7fa98683bf514b9e122948eb81c71a167d0830e6491fe3a8  completions/cs.bash"
+    "589d791795a2c78c26079374bfcff92a35f23bde51d39a8ad9498d5f1d9f6c27  completions/_cs"
 )
 
 # Everything that lands in HOOKS_DIR, for the copy and cleanup loops. The

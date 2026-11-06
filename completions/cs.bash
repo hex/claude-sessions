@@ -33,7 +33,7 @@ _cs_completions() {
     local update_cmds="--check -c --force -f"
 
     # Session-level options
-    local session_opts="-secrets -queue -msg -narrative -conversations -config -usage -tag -features -finish --force --remote --permission-mode"
+    local session_opts="-secrets -queue -msg -narrative -conversations -config -usage -tag -features -finish --force --resume --remote --permission-mode"
 
     # Get list of session names. cs owns the definition of a session, including
     # which symlinks and marker directories count; asking it keeps this script
