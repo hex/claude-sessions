@@ -173,7 +173,7 @@ judge those dependencies.
 | 2 | Invalid arguments, an unresolvable `--since` revision, or an invalid `CI_WAIT_INTERVAL`; read the usage line. |
 | 3 | Infrastructure cancellations persisted through the rerun limit. |
 | 4 | A command failed, the run JSON was invalid, a log or verdict check failed, the run's head was missing locally, or a rerun never appeared. Read the error; fetch a missing head before retrying the same run. |
-| 5 | A test registration added since the requested revision appears in the skip list. Investigate each skip before tagging; record skips CI produces by design in the release narrative, and fix any others. |
+| 5 | A test registration added since the requested revision appears in the skip list. Investigate each skip before tagging. Record skips CI produces by design in the session narrative (`.cs/memory/narrative.<actor>.md`) and name them to the user before Step 9 of `.claude/commands/release.md`. Never edit approved release notes; fix any other skips before tagging. |
 
 `--changed` reads the working tree against `HEAD` plus untracked files and runs
 only the suites whose text names a changed path (a changed suite runs itself).
