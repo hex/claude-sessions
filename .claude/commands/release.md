@@ -449,7 +449,7 @@ the tag, and a cancelled build leaves the release public with none.
 Wait for the release workflow for this tag to succeed before signing its assets.
 
 ```bash
-gh run list --workflow=release.yml --branch vX.Y.Z --limit 1 \
+gh run list --workflow=release.yml --branch vX.Y.Z --commit "$SHA" --limit 1 \
   --json databaseId,status,conclusion,headSha
 ```
 
@@ -460,11 +460,13 @@ and longest timeout, `7200000` ms. The default kills a background command after
 30 minutes; one rerun of a 15-minute lane can exceed that. Read the script's exit
 code. If the shell kills the wait without an exit code, use the attempt/status
 check in the exit-4 row before running the script again on the same run id.
+Replace the `SHA` placeholder with the full release commit from Step 8.
 Resolve `RUN_ID` in this Bash call because variables do not carry between calls.
 Do not pass `--since`; `release.yml` runs no test suites.
 
 ```bash
-RUN_ID=$(gh run list --workflow=release.yml --branch vX.Y.Z --limit 1 --json databaseId --jq '.[0].databaseId // empty') || { echo 'ci_wait: gh run list failed' >&2; exit 4; }; [ -n "$RUN_ID" ] || { echo 'ci_wait: no run yet for vX.Y.Z; list again in a minute' >&2; exit 4; }; bash tests/ci_wait.sh "$RUN_ID"
+SHA='<full release SHA from Step 8>'
+RUN_ID=$(gh run list --workflow=release.yml --branch vX.Y.Z --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty') || { echo 'ci_wait: gh run list failed' >&2; exit 4; }; [ -n "$RUN_ID" ] || { echo 'ci_wait: no run yet for vX.Y.Z; list again in a minute' >&2; exit 4; }; bash tests/ci_wait.sh "$RUN_ID"
 ```
 
 | Exit | Action before signing |
