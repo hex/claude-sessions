@@ -249,6 +249,7 @@ launch_claude_code() {
     # Set for `cs <name> --remote`: the permission mode the server passes to
     # the sessions it starts. Empty for every other open.
     local remote_mode="${6:-}"
+    local resume_flag="${7:-}"
 
     # The spawn token (see the seed consumer below) proves THIS window to
     # THIS session only. Taken into a plain variable and dropped from the
