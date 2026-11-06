@@ -16,6 +16,20 @@ _handoff_is_unconsumed() {  # handoff_file
     ' "$1" 2>/dev/null
 }
 
+# The parent: UUID in a handoff's YAML frontmatter, the conversation that wrote
+# it. Prints nothing when the frontmatter names none.
+_handoff_parent() {  # handoff_file
+    awk '
+        NR==1 { if ($0 != "---") exit; next }
+        $0 == "---" { exit }
+        /^parent:[[:space:]]*/ {
+            sub(/^parent:[[:space:]]*/, "")
+            gsub(/[[:space:]\r]+$/, "")
+            print; exit
+        }
+    ' "$1" 2>/dev/null
+}
+
 # True when the handoff's parent: UUID appears in this checkout's session log,
 # meaning this machine ran the conversation that wrote it. The log is
 # machine-local by design, so a co-worker's handoff — and this user's own from a
@@ -26,15 +40,7 @@ _handoff_is_local() {  # handoff_file, session_dir
     local log parent
     log="$(cs_private_dir "$2/.cs")/session.log" || return 1
     [ -f "$log" ] || return 1
-    parent=$(awk '
-        NR==1 { if ($0 != "---") exit; next }
-        $0 == "---" { exit }
-        /^parent:[[:space:]]*/ {
-            sub(/^parent:[[:space:]]*/, "")
-            gsub(/[[:space:]\r]+$/, "")
-            print; exit
-        }
-    ' "$1" 2>/dev/null)
+    parent=$(_handoff_parent "$1")
     [ -n "$parent" ] || return 1
     # Anchored to the line session-start.sh writes, not a bare substring: this
     # file can hold the `BASH:` command lines the retired bash-logger hook
@@ -109,6 +115,31 @@ _resume_context_pct() {  # session_dir
     printf '%s' "$v"
 }
 
+# Where a context reading sits against the status line's own thresholds,
+# CS_STATUSLINE_CTX_WARN and CS_STATUSLINE_CTX_CRIT: crit, warn, or none, and
+# none for no reading. Each knob parses as the bar's _num_or does, one to three
+# digits or else the default, so a crit of 101 never fires here either. The
+# defaults are the config record's; test_config.sh holds the bar's own
+# literals to the same record.
+_resume_context_heat() {  # pct
+    local warn crit
+    _config_fields CS_STATUSLINE_CTX_WARN
+    warn=$_CF_DEFAULT
+    _config_fields CS_STATUSLINE_CTX_CRIT
+    crit=$_CF_DEFAULT
+    case "${CS_STATUSLINE_CTX_WARN:-}" in ''|*[!0-9]*|????*) ;; *) warn="$CS_STATUSLINE_CTX_WARN" ;; esac
+    case "${CS_STATUSLINE_CTX_CRIT:-}" in ''|*[!0-9]*|????*) ;; *) crit="$CS_STATUSLINE_CTX_CRIT" ;; esac
+    if [ -z "$1" ]; then
+        echo none
+    elif [ "$1" -ge "$crit" ]; then
+        echo crit
+    elif [ "$1" -ge "$warn" ]; then
+        echo warn
+    else
+        echo none
+    fi
+}
+
 # Drop a rotation marker the user declined to consume. Armed by the rotate
 # skill for a /clear, or by an earlier r, it must not outlive the answer: left
 # in place it would be consumed by an unrelated /clear hours later, injecting a
@@ -140,13 +171,20 @@ _disarm_rotation_marker() {  # session_dir [surviving_handoff]
 # the one the shell would use: CLAUDE_SECURESTORAGE_CONFIG_DIR names the
 # keychain entry independently of the config dir, and empty selects the
 # default entry. A value inherited from a parent launch into such a session is
-# recognisable by its path and dropped, so a session without the link opens
-# on the shell's own config.
+# recognisable by its path. That launch kept the shell's own config dir in
+# CLAUDE_SECURESTORAGE_CONFIG_DIR (empty for ~/.claude), so CLAUDE_CONFIG_DIR
+# goes back to that dir: a session without the link opens on the shell's own
+# config, where _claude_project_dir looked for its conversations before this
+# export ran, and an encrypted one shares from it. A shell that exported its own
+# CLAUDE_SECURESTORAGE_CONFIG_DIR handed the parent launch that value instead,
+# so the nested launch opens on it: one variable cannot carry both.
 _export_session_claude_config() {  # session_dir
-    local config="$1/.cs/claude-config"
+    local config="$1/.cs/claude-config" shell_config
     case "${CLAUDE_CONFIG_DIR:-}" in
         */.cs/claude-config)
+            shell_config="${CLAUDE_SECURESTORAGE_CONFIG_DIR:-}"
             unset CLAUDE_CONFIG_DIR CLAUDE_SECURESTORAGE_CONFIG_DIR
+            [ -z "$shell_config" ] || export CLAUDE_CONFIG_DIR="$shell_config"
             ;;
     esac
     [ -e "$config" ] || return 0
@@ -711,6 +749,21 @@ launch_claude_code() {
         status_icon="↻"
         status_text="resuming"
     fi
+    # The last context reading in this session and where it sits against the
+    # status line's thresholds, read once for the card's context row and the
+    # resume ask. Only a conversation to resume has a figure to describe, and
+    # only one that has replied: the status line stamps the reading per
+    # session once a conversation replies, so a conversation left before its
+    # first reply has said nothing, and the stamp beside it is the one its
+    # predecessor left. Claude Code writes the transcript with the first
+    # prompt, before any reply, so what counts is an assistant record in it.
+    local ctx_pct="" ctx_heat=none _transcript
+    if [ "$status_text" = "resuming" ] \
+        && _transcript=$(_conversation_transcript "$session_dir" "$claude_session_id") \
+        && grep -q -m1 '"type":"assistant"' "$_transcript" 2>/dev/null; then
+        ctx_pct=$(_resume_context_pct "$session_dir")
+        ctx_heat=$(_resume_context_heat "$ctx_pct")
+    fi
 
     # Count secrets for this session
     local secret_count=0
@@ -751,12 +804,20 @@ launch_claude_code() {
         [ "$secret_count" -gt 1 ] && secret_word="secrets"
         _seg_secrets="${COMMENT}${ICON_LOCK}${NC} ${YELLOW}$secret_count${NC} ${COMMENT}$secret_word${NC}"
     fi
-    if [ "$status_text" = "resuming" ]; then
-        local _card_ctx=""
-        _card_ctx=$(_resume_context_pct "$session_dir")
-        if [ -n "$_card_ctx" ]; then
-            _seg_ctx="${COMMENT}${ICON_CTX}${NC} ${YELLOW}${_card_ctx}%${NC} ${COMMENT}context used${NC}"
-        fi
+    if [ -n "$ctx_pct" ]; then
+        # The figure in the status line's inks: bold amber from warn, and from
+        # crit the bar's inverted capsule, bold white on the crit red with a
+        # space each side. The spaces belong to the fill, so a card without
+        # colour reads the same at every level.
+        local _ctx_fig="" _pad=""
+        [ -z "$NC" ] || _pad=" "
+        case "$ctx_heat" in
+            none) _ctx_fig="${YELLOW}${ctx_pct}%${NC}" ;;
+            warn) _ctx_fig="${BOLD}${AMBER}${ctx_pct}%${NC}" ;;
+            crit) _ctx_fig="${BOLD}${CRIT_FILL}${_pad}${ctx_pct}%${_pad}${NC}" ;;
+            *) error "context heat '$ctx_heat' is not none, warn or crit" ;;
+        esac
+        _seg_ctx="${COMMENT}${ICON_CTX}${NC} ${_ctx_fig} ${COMMENT}context used${NC}"
     fi
     if [ -n "$_seg_secrets" ] || [ -n "$_seg_ctx" ]; then
         local _row="$_seg_secrets"
@@ -916,14 +977,43 @@ EOF
             fi
         fi
         # A spawned launch is unattended: take the default (resume) instead
-        # of parking the tmux window on an interactive ask. Unbound, the
-        # default is fresh, and a pending handoff waits for an attended open.
+        # of parking the tmux window on an interactive ask, whatever the
+        # context reading: the fresh default at crit is the attended ask's.
+        # Unbound, the default is fresh, and a pending handoff waits for an
+        # attended open.
         if [ -n "$spawn_kick" ]; then
             response=""
             [ -n "$claude_session_id" ] || response="n"
         elif [ -z "$claude_session_id" ] && [ -z "$pending_handoff" ]; then
             response="n"
         else
+            # From the status line's crit threshold the ask defaults to a
+            # fresh conversation: one line above it says so, and the default
+            # mark moves off resume. That conversation picks up a pending
+            # handoff, r, only when the bound conversation wrote it, its
+            # parent, and no merge is armed: otherwise it is n and the handoff
+            # waits. One from another checkout, or an older one an earlier
+            # conversation here wrote, is the user's to choose: armed by a key
+            # they did not mean for it, SessionStart would mark it consumed.
+            # And r displaces the merge -finish armed for this launch, which
+            # only a typed r may do; n keeps it. The status line stamps the
+            # figure per session, not per conversation, so the line calls it
+            # the last reading in this session and claims no more.
+            local _resume_default=' · default' _handoff_default='' _fresh_default='' _ask_keys='[Y/n]'
+            local _crit_default=n _crit_start='a fresh conversation'
+            if [ "$ctx_heat" = crit ]; then
+                _resume_default=''
+                _ask_keys="[y/${BOLD}N${NC}]"
+                if [ -n "$pending_handoff" ] && [ -z "$merge_kick" ] \
+                    && [ "$(_handoff_parent "$pending_handoff")" = "$claude_session_id" ]; then
+                    _crit_default=r
+                    _crit_start='a fresh conversation from the handoff'
+                    _handoff_default=' · default'
+                else
+                    _fresh_default=' · default'
+                fi
+                printf "${BOLD}${CRIT}%s${NC}\n" "${ICON_CTX} The last context reading in this session was ${ctx_pct}%, so ${_crit_start} is the default. Press y to resume."
+            fi
             if [ -n "$pending_handoff" ]; then
                 # Answering blind is the hazard this label exists for: r arms
                 # the marker with this basename, and the next SessionStart flips
@@ -939,9 +1029,9 @@ EOF
                 # menu; the keys stay the letters the one-line ask used.
                 echo
                 if [ -n "$claude_session_id" ]; then
-                    _resume_menu_row y "$GREEN" 'resume' 'continue the previous conversation · default'
-                    _resume_menu_row r "$GOLD" 'from handoff' 'fresh conversation that picks up the handoff'
-                    _resume_menu_row n "$COMMENT" 'fresh' 'fresh conversation; the handoff waits for later'
+                    _resume_menu_row y "$GREEN" 'resume' "continue the previous conversation$_resume_default"
+                    _resume_menu_row r "$GOLD" 'from handoff' "fresh conversation that picks up the handoff$_handoff_default"
+                    _resume_menu_row n "$COMMENT" 'fresh' "fresh conversation; the handoff waits for later$_fresh_default"
                     _resume_menu_row d "$ORANGE" 'discard' 'retire the handoff, then resume'
                 else
                     _resume_menu_row r "$GOLD" 'from handoff' 'fresh conversation that picks up the handoff'
@@ -951,14 +1041,27 @@ EOF
                 echo
                 printf '    %b›%b ' "$GOLD" "$NC"
             else
-                printf "${DIM}Continue previous conversation?${NC} [Y/n] "
+                printf "${DIM}Continue previous conversation?${NC} ${_ask_keys} "
             fi
             # Single keypress, no Enter needed (mirrors the collision menu).
             # ESC or EOF (piped close) cancels the launch; Enter takes the
-            # default (resume) via the case's *) arm below.
+            # default: resume via the case's *) arm below, or at crit a fresh
+            # conversation, via the r arm for a handoff the bound conversation
+            # wrote with no merge armed, and the n arm otherwise.
             IFS= read -rsn1 response || { echo; exit 130; }
             echo
             case "$response" in $'\e') exit 130 ;; esac
+            # At crit only y resumes, and n starts fresh as it always does.
+            # Enter and any key not offered take the crit default, disarm
+            # included on the n arm; r and d keep their meaning while a
+            # handoff is offered.
+            if [ "$ctx_heat" = crit ]; then
+                case "$response" in
+                    [yYnN]) ;;
+                    [rRdD]) [ -n "$pending_handoff" ] || response=$_crit_default ;;
+                    *) response=$_crit_default ;;
+                esac
+            fi
         fi
         case "$response" in
             [nN]|[nN][oO])
@@ -978,8 +1081,9 @@ EOF
                     fi
                     _exec_fresh_rebind "$session_dir" handoff "$(basename "$pending_handoff")" "$spawn_kick" ""
                 fi
-                # r without a pending handoff was never offered: treat as the
-                # default resume answer, disarm included.
+                # r without a pending handoff was never offered. At crit the
+                # ask has already turned it into n, so it reaches here only
+                # below crit, where the default is resume, disarm included.
                 _disarm_rotation_marker "$session_dir"
                 resume_id="$claude_session_id"
                 ;;
@@ -1000,13 +1104,13 @@ EOF
                     ' "$pending_handoff" 2>/dev/null || true
                     printf "${DIM}Handoff discarded:${NC} %s\n" "$(_cs_plain_name "$(basename "$pending_handoff")" 160)"
                 fi
-                # d without a pending handoff was never offered: treat as the
-                # default resume answer.
+                # d without a pending handoff was never offered. As with r, it
+                # reaches here only below crit, where the default is resume.
                 resume_id="$claude_session_id"
                 ;;
             *)
-                # Also the unattended spawn path, which takes this default
-                # without asking.
+                # y, and below crit Enter or any key not offered. Also the
+                # unattended spawn path, which resumes without asking.
                 _disarm_rotation_marker "$session_dir" "$pending_handoff"
                 # --resume <uuid>, never --continue: the uuid names the exact
                 # conversation, while --continue means "most recent" and may
@@ -1079,8 +1183,9 @@ EOF
 }
 
 # A resume may run in place of cs when it is sure to land and cs has nothing
-# to do after it: claude reads its transcripts from where cs looks (no
-# CLAUDE_CONFIG_DIR set at all, even empty), the transcript holds a whole
+# to do after it: claude runs on the default config dir (no CLAUDE_CONFIG_DIR
+# set at all, even empty), so its transcripts sit where cs looks, the
+# transcript holds a whole
 # top-level user record (a torn line, or a user message nested inside
 # another record, does not count), and no vault waits on cs to detach it
 # when claude ends without its hooks. Without jq the resume stays a child.
@@ -1088,11 +1193,26 @@ _resume_lands_in_place() {  # session_dir, conversation id
     local file
     [ -f "$1/.cs/local/vault" ] && return 1
     [ -z "${CLAUDE_CONFIG_DIR+set}" ] || return 1
-    file="$(_claude_project_dir "$1")/$2.jsonl"
-    [ -f "$file" ] || file=$(_relocated_worktree_transcript "$1" "$2") || return 1
-    [ -f "$file" ] && command -v jq >/dev/null 2>&1 || return 1
+    file=$(_conversation_transcript "$1" "$2") || return 1
+    command -v jq >/dev/null 2>&1 || return 1
     jq -n -R -e 'first(inputs | fromjson? | objects | select(.type == "user")) | true' \
         "$file" >/dev/null 2>&1
+}
+
+# The transcript `claude --resume <id>` reads for a session's conversation:
+# the one in the session's project dir, else, once `claude --worktree` has
+# exited, the one it moved into the parent repo's (_relocated_worktree_transcript).
+# The launch card, the resume and migrate's Phase 8 binding all ask this, so
+# they agree on whether the conversation exists. Prints the path; fails when
+# there is none.
+_conversation_transcript() {  # session_dir, conversation id
+    local file
+    file="$(_claude_project_dir "$1")/$2.jsonl"
+    if [ -f "$file" ]; then
+        printf '%s\n' "$file"
+        return 0
+    fi
+    _relocated_worktree_transcript "$1" "$2"
 }
 
 # The transcript of a session's conversation once `claude --worktree` has

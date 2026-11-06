@@ -23,7 +23,7 @@ Default order: `logo,session,notes,mail,git,model,ctx,limits`. One capsule holds
 | `pane` | identity | `◫ 7` (the `%` dropped), secondary ink; only when named | — | not named, or outside a real tmux | `TMUX_PANE` from inherited environment (no fork); requires `TMUX` too, and that this process is genuinely inside that tmux server, so an inherited pane id never renders |
 | `git` | identity | branch with the arrows and `+N!N` marks, bold ink | — | no `.git` here or above | One `git status --porcelain=v1 -b` call |
 | `model` | identity | display name in bold ink; the effort word, regular weight, in Claude Code's own `/effort` colour for its level (low gold, medium green, high blue, xhigh violet, max a blue-to-pink gradient across its letters) | — | no model on stdin | stdin `model.display_name`, `effort.level` |
-| `ctx` | ctx | `◔ ctx N%`, secondary ink; the pie fills with the band: `○` below 13, `◔` to warn, `◑` through amber, `◕` at crit, `●` from 88 | amber ink on the number at 40; crit inversion at 65 (`CS_STATUSLINE_CTX_WARN`/`_CRIT`; the half and three-quarter steps follow them) | no `context_window` on stdin | stdin `context_window.used_percentage` |
+| `ctx` | ctx | `◔ ctx N%`, secondary ink; the pie fills with the band: `○` below 13, `◔` to warn, `◑` through amber, `◕` at crit, `●` from 88 | amber ink on the number at 40; crit inversion at 60 (`CS_STATUSLINE_CTX_WARN`/`_CRIT`; the half and three-quarter steps follow them) | no `context_window` on stdin | stdin `context_window.used_percentage` |
 | `limits` | limits | `◷ 5h N%` | the quota capsule `5h N% ⋮ wk N%` (5h always, wk from 50, joined by a vertical ellipsis) and a separate `fable N%` capsule from 50 on a Fable session: `5h N% · 2h14m`, `wk N% · 5d16h`, `fable N% · 18h`; neutral below 70, amber ink at 70, crit inversion at 90; the countdown joins 5h at 70 and the coarse windows at 80 | wk and fable below 50 | stdin `rate_limits.*.used_percentage`, `rate_limits.five_hour.resets_at`, `rate_limits.seven_day.resets_at`, plus the usage cache when the model is Fable |
 | `fable` | limits | accepted as a name: the Fable window alone when `limits` is not named; a no-op beside `limits` | — | below 50, like wk | `GET /api/oauth/usage`, cached machine-globally (see [Fable usage](#fable-usage)) |
 | `cost` | cost | `$N.NN`, secondary ink, its own capsule after limits; only when named | — | not named, or no cost on stdin | stdin `cost.total_cost_usd` |
@@ -348,7 +348,7 @@ export CS_STATUSLINE_CAPS="0"
 
 # Context thresholds (percent)
 export CS_STATUSLINE_CTX_WARN=40
-export CS_STATUSLINE_CTX_CRIT=65
+export CS_STATUSLINE_CTX_CRIT=60
 
 # Where the machine-global usage cache lives (default $CS_SESSIONS_ROOT/.usage)
 export CS_USAGE_DIR="$HOME/.claude-sessions/.usage"

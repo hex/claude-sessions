@@ -256,34 +256,34 @@ test_content_escapes_esc_as_unicode() {
 test_ctx_escalates_to_amber_then_red() {
     export COLORTERM=truecolor CS_TERM_THEME=light
     local fx out c
-    # 110000/200000 = 55% -> past warn (40), below crit (65) -> amber ink 180;83;9
+    # 110000/200000 = 55% -> past warn (40), below crit (60) -> amber ink 180;83;9
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":110000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
     assert_output_contains "$c" "38;2;180;83;9" "55% context renders amber" || return 1
 
-    # 170000/200000 = 85% -> past crit (65) -> crit 215;0;21
+    # 170000/200000 = 85% -> past crit (60) -> crit 215;0;21
     fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":170000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
     assert_output_contains "$c" "38;2;215;0;21" "85% context renders red" || return 1
 }
 
 # The row's crit default is the bar's, so red starts where the rotation nudge
-# does. Only readings either side of the cut point tell 65 apart from 66, and
-# only an exact multiple of the window keeps jq's floor out of it.
+# does. Only readings either side of the cut point tell 60 apart from 59 or 61,
+# and only an exact multiple of the window keeps jq's floor out of it.
 test_ctx_crit_edge_matches_the_bar() {
     export COLORTERM=truecolor CS_TERM_THEME=light
     local fx out c
-    # 128000/200000 = 64% -> one below crit -> still amber
-    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":128000}]}'
+    # 118000/200000 = 59% -> one below crit -> still amber
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":118000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_contains "$c" "38;2;180;83;9" "64% context is still amber" || return 1
-    assert_output_not_contains "$c" "38;2;215;0;21" "64% context must not reach red" || return 1
+    assert_output_contains "$c" "38;2;180;83;9" "59% context is still amber" || return 1
+    assert_output_not_contains "$c" "38;2;215;0;21" "59% context must not reach red" || return 1
 
-    # 130000/200000 = 65% -> at crit -> crit fill
-    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":130000}]}'
+    # 120000/200000 = 60% -> at crit -> crit fill
+    fx='{"columns":96,"tasks":[{"id":"t1","name":"a","description":"d","model":"claude-sonnet-5","contextWindowSize":200000,"tokenCount":120000}]}'
     out=$(run_ssl "$fx"); c=$(row_content "$out" "t1")
-    assert_output_contains "$c" "38;2;215;0;21" "65% context renders red, as it does on the bar" || return 1
-    assert_output_not_contains "$c" "38;2;180;83;9" "65% context must not stay amber" || return 1
+    assert_output_contains "$c" "38;2;215;0;21" "60% context renders red, as it does on the bar" || return 1
+    assert_output_not_contains "$c" "38;2;180;83;9" "60% context must not stay amber" || return 1
 }
 
 # Amber's cut point is inclusive too, and 40 is the only reading that separates

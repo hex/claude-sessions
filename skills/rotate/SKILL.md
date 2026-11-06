@@ -306,9 +306,16 @@ vault is locked: tell the user to mount it and stop.
 
    Arming is the final step because an armed marker is fragile in a way the
    handoff file on disk is not. If Claude Code exits before the ritual finishes and
-   the user relaunches, `cs <name>`'s prompt disarms the marker on `Y`, `n`
-   or Enter (lib/75-launch.sh), and nothing re-arms it; a later `/clear`
-   then opens a bare conversation with this handoff left `unconsumed`. The
+   the user relaunches, `cs <name>`'s prompt disarms the marker on `Y`, `n`,
+   Enter or any key the prompt does not offer (lib/75-launch.sh). The one
+   exception is critical context with this conversation's own handoff
+   pending and no merge armed. There Enter and every key the menu does not
+   offer (`x`, a space, `q`, `1`) take the default, which starts a fresh
+   conversation from the handoff and arms the marker for it. Escape, which
+   an arrow key also sends first, cancels the launch at any context and
+   leaves the marker untouched. Nothing
+   re-arms a disarmed marker, so a later `/clear` then opens
+   a bare conversation with this handoff left `unconsumed`. The
    launch prompt recovers either state — it scans the store and offers an
    unconsumed handoff with `r` whether or not it was armed — but only the
    marker makes `/clear` continue, and only an interrupted ritual leaves a

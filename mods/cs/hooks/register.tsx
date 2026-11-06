@@ -98,7 +98,7 @@ export const PRESSED = '.cs/local/cs.pressed'
 // prompt stops it.
 export const GRACE_SECONDS = 20
 // The percentage a turn must end past for the mod to rotate on its own. Above
-// the 65% nudge, so the ladder stays suggest -> offer -> force, and below where
+// the 60% nudge, so the ladder stays suggest -> offer -> force, and below where
 // Claude Code's own auto-compact lands, so a handoff is written while the
 // conversation is still whole.
 export const FORCE_DEFAULT = 80
@@ -1457,16 +1457,25 @@ async function refreshRail($: EngineInterface) {
   if (changed) $.ui.invalidate('ui.render')
 }
 
-// Where Claude Code writes this conversation's transcript, the way cs's own
-// _claude_project_dir finds it (lib/40-state.sh): CS_TRANSCRIPTS_DIR, else
-// ~/.claude/projects, or the session's own config dir's projects/ when it
-// has one (.cs/claude-config, an encrypted session); under that, the cwd as
-// resolved with every character outside [A-Za-z0-9] made `-`, then
-// <session id>.jsonl.
+// Where Claude Code writes this conversation's transcript: the session's own
+// config dir's projects/ when it has one (.cs/claude-config, an encrypted
+// session; a link a locked vault left dangling still names it, so $.fs.stat,
+// which answers such a link, asks rather than $.fs.exists, which follows it),
+// else CS_TRANSCRIPTS_DIR, else CLAUDE_CONFIG_DIR's projects/, else
+// ~/.claude/projects. Under that, the cwd as resolved with every character
+// outside [A-Za-z0-9] made `-`, then <session id>.jsonl. cs's own
+// _claude_project_dir (lib/40-state.sh) reads a CLAUDE_CONFIG_DIR naming some
+// session's .cs/claude-config as inherited and looks in the shell's config dir
+// instead, because a launch decides there for the claude it is about to start,
+// which runs on the shell's config. The mod runs inside the claude that writes
+// the transcript, and Claude Code writes it under that process's own
+// CLAUDE_CONFIG_DIR, whatever the dir is named.
 async function transcriptPath($: EngineInterface): Promise<string> {
   const cwd = await $.session.cwd()
-  let base = (await $.env.get("CS_TRANSCRIPTS_DIR")) || `${await $.env.get("HOME")}/.claude/projects`
-  if (await $.fs.exists(`${cwd}/.cs/claude-config`)) base = `${cwd}/.cs/claude-config/projects`
+  const config = await $.env.get("CLAUDE_CONFIG_DIR")
+  let base = (await $.env.get("CS_TRANSCRIPTS_DIR")) || `${config || `${await $.env.get("HOME")}/.claude`}/projects`
+  const own = `${cwd}/.cs/claude-config`
+  if (await $.fs.stat(own).then(() => true, () => false)) base = `${own}/projects`
   const resolved = (await resolvedPath($, cwd)) ?? cwd
   return `${base}/${resolved.replace(/[^A-Za-z0-9]/g, '-')}/${await $.session.id()}.jsonl`
 }

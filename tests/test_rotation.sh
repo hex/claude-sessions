@@ -332,8 +332,10 @@ test_rotate_skill_puts_the_next_step_first() {
 }
 
 # Arming is the last step. An armed marker is disarmed by the launch prompt on
-# Y, n or Enter and nothing re-arms it, while an unarmed handoff on disk is
-# still offered by that prompt's scan — so arming before the ritual can finish
+# Y, n, Enter or a key the prompt does not offer (at critical context with the
+# conversation's own handoff pending, Enter or such a key arms it instead) and
+# nothing re-arms it, while an unarmed handoff on
+# disk is still offered by that prompt's scan — so arming before the ritual can finish
 # turns an interruption into a bare /clear. Pinned by ORDER in the file: the arm
 # step must come after the retire step and the task archive, and no numbered
 # step commits.
@@ -588,11 +590,11 @@ run_test test_rotate_skill_reads_parent_from_state_not_the_launch_env
 # Cycle 3: three-way launch prompt
 # ============================================================================
 
-_seed_handoff() {  # session_dir, basename, status
+_seed_handoff() {  # session_dir, basename, status, [parent, default $UUID_A]
     mkdir -p "$1/.cs/handoffs"
     cat > "$1/.cs/handoffs/$2" << EOF
 ---
-parent: $UUID_A
+parent: ${4:-$UUID_A}
 created: 2026-07-16T10:00:00Z
 purpose: test rotation
 status: $3
@@ -601,6 +603,26 @@ status: $3
 ## 7. Next Step
 Continue the test.
 EOF
+}
+
+# A transcript for the conversation a session is bound to, holding a prompt
+# and its reply: the conversation has said something, which is what lets the
+# card describe a context reading as its own.
+_stage_transcript() {  # session
+    local dir="$CS_SESSIONS_ROOT/$1" id proj
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$dir")"
+    mkdir -p "$proj"
+    printf '%s\n' '{"type":"user","message":{"role":"user","content":"hi"}}' \
+        '{"type":"assistant","message":{"role":"assistant","content":"hello"}}' > "$proj/$id.jsonl"
+}
+
+# The status line's stamp for the conversation a session is bound to, as it
+# writes it once that conversation has replied: the reading in context-pct,
+# and the conversation's transcript beside it.
+_stamp_context() {  # session, reading
+    _stage_transcript "$1"
+    printf '%s\n' "$2" > "$CS_SESSIONS_ROOT/$1/.cs/local/context-pct"
 }
 
 test_prompt_unchanged_without_handoff() {
@@ -626,7 +648,7 @@ test_prompt_unchanged_without_handoff() {
 # says exactly that rather than attributing it to the one being resumed.
 test_resume_prompt_shows_the_previous_conversations_context() {
     _rot_session "rot-ctx"
-    printf '64\n' > "$CS_SESSIONS_ROOT/rot-ctx/.cs/local/context-pct"
+    _stamp_context rot-ctx 64
     local output
     output=$("$CS_BIN" rot-ctx <<< "n" 2>&1) || true
     # Piped stdout has no colour at all (setup_palette blanks every code when
@@ -642,7 +664,7 @@ test_resume_prompt_shows_the_previous_conversations_context() {
 # pipe, and a pty here would stop on the resume prompt with nothing to answer it.
 test_context_row_sits_in_the_card_above_the_prompt() {
     _rot_session "rot-card"
-    printf '64\n' > "$CS_SESSIONS_ROOT/rot-card/.cs/local/context-pct"
+    _stamp_context rot-card 64
     local output ctx_line prompt_line
     output=$("$CS_BIN" rot-card <<< "n" 2>&1) || true
     ctx_line=$(printf '%s\n' "$output" | grep -n "64% context used" | head -1 | cut -d: -f1)
@@ -667,7 +689,7 @@ test_context_row_sits_in_the_card_above_the_prompt() {
 # against a number the card never actually computes.
 test_secrets_and_context_share_one_card_row() {
     _rot_session "rot-pair"
-    printf '64\n' > "$CS_SESSIONS_ROOT/rot-pair/.cs/local/context-pct"
+    _stamp_context rot-pair 64
     # No SKIP branch: test_lib puts bin/ on PATH and scopes HOME, so the seed
     # runs the tree under review into a throwaway store, on CI as much as
     # here. A skip would return 0 exactly where the suite is gated.
@@ -703,7 +725,7 @@ test_secrets_and_context_share_one_card_row() {
 # the other being present. No secret is seeded here, so the count is zero.
 test_context_alone_still_gets_a_row() {
     _rot_session "rot-ctxonly"
-    printf '64\n' > "$CS_SESSIONS_ROOT/rot-ctxonly/.cs/local/context-pct"
+    _stamp_context rot-ctxonly 64
     local output
     output=$("$CS_BIN" rot-ctxonly <<< "n" 2>&1) || true
     assert_output_contains "$output" "64% context used" "context still renders alone" || return 1
@@ -715,6 +737,7 @@ test_context_alone_still_gets_a_row() {
 # absence must cost nothing rather than print a blank or a zero.
 test_resume_prompt_omits_context_when_never_stamped() {
     _rot_session "rot-noctx"
+    _stage_transcript rot-noctx
     rm -f "$CS_SESSIONS_ROOT/rot-noctx/.cs/local/context-pct"
     local output
     output=$("$CS_BIN" rot-noctx <<< "n" 2>&1) || true
@@ -724,7 +747,7 @@ test_resume_prompt_omits_context_when_never_stamped() {
 
 test_resume_prompt_ignores_a_junk_context_stamp() {
     _rot_session "rot-junk"
-    printf 'not-a-number\n' > "$CS_SESSIONS_ROOT/rot-junk/.cs/local/context-pct"
+    _stamp_context rot-junk not-a-number
     local output
     output=$("$CS_BIN" rot-junk <<< "n" 2>&1) || true
     assert_output_not_contains "$output" "context used" "a junk stamp reads as no stamp" || return 1
@@ -732,7 +755,7 @@ test_resume_prompt_ignores_a_junk_context_stamp() {
 
 test_resume_prompt_ignores_an_out_of_range_context_stamp() {
     _rot_session "rot-over"
-    printf '150\n' > "$CS_SESSIONS_ROOT/rot-over/.cs/local/context-pct"
+    _stamp_context rot-over 150
     local output
     output=$("$CS_BIN" rot-over <<< "n" 2>&1) || true
     assert_output_not_contains "$output" "context used" "a percentage over 100 is not a percentage" || return 1
@@ -742,7 +765,7 @@ test_resume_prompt_ignores_an_out_of_range_context_stamp() {
 # arithmetic error rather than a wrong number.
 test_resume_prompt_reads_a_zero_padded_context_stamp() {
     _rot_session "rot-pad"
-    printf '08\n' > "$CS_SESSIONS_ROOT/rot-pad/.cs/local/context-pct"
+    _stamp_context rot-pad 08
     local output
     output=$("$CS_BIN" rot-pad <<< "n" 2>&1) || true
     assert_output_contains "$output" "8% context used" "08 is eight percent, not an octal error" || return 1
@@ -757,6 +780,380 @@ test_esc_at_continue_prompt_cancels_launch() {
         echo "  FAIL: ESC must cancel the launch — the stub must not run"; return 1
     fi
     [ "$rc" -ne 0 ] || { echo "  FAIL: ESC cancel should exit non-zero"; return 1; }
+}
+
+# A launch at the status line's default context thresholds, with the plain
+# glyphs, whatever the shell running the suite exports.
+_launch_at_default_thresholds() {  # session, answer
+    CS_NERD_FONTS=0 CS_STATUSLINE_CTX_WARN='' CS_STATUSLINE_CTX_CRIT='' "$CS_BIN" "$1" <<< "$2" 2>&1
+}
+
+_crit_warning() {  # reading, [the conversation Enter starts]
+    printf '◱ The last context reading in this session was %s%%, so %s is the default. Press y to resume.' \
+        "$1" "${2:-a fresh conversation}"
+}
+
+# From the status line's crit threshold (CS_STATUSLINE_CTX_CRIT, default 60)
+# the ask's default is a fresh conversation: one line directly above the ask
+# says so, the suffix reads [y/N], and Enter, like a key the ask does not
+# offer, starts fresh; r and d are not offered without a handoff. The figure is
+# the last reading in this session, and the line claims no more than that. A
+# card with no colour reads the figure as it reads any other, one space each
+# side, since the capsule's spaces belong to its fill.
+test_enter_at_crit_context_starts_a_fresh_conversation() {
+    _rot_session "rot-crit"
+    local dir="$CS_SESSIONS_ROOT/rot-crit" old new output answer
+    for answer in "" "x" "r" "d"; do
+        _stamp_context rot-crit 70
+        old=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+        output=$(_launch_at_default_thresholds rot-crit "$answer") || true
+        assert_eq "◱ 70% context used" "$(grep -F 'context used' <<< "$output" | sed 's/.*▌ //')" \
+            "the plain card reads the crit figure with single spaces (answer '$answer')" || return 1
+        assert_eq "$(_crit_warning 70)
+Continue previous conversation? [y/N] " "$(grep -A1 -F 'last context reading' <<< "$output")" \
+            "the warning sits directly above the [y/N] ask (answer '$answer')" || return 1
+        new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+        [ "$new" != "$old" ] || { echo "  FAIL: answer '$answer' at 70% must rebind to a fresh conversation"; return 1; }
+        assert_output_contains "$output" "--session-id $new" "answer '$answer' at 70% starts a fresh conversation" || return 1
+        assert_output_not_contains "$output" "--resume" "answer '$answer' at 70% must not resume" || return 1
+    done
+}
+
+test_y_at_crit_context_resumes() {
+    _rot_session "rot-crit-y"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-y" id output
+    _stamp_context rot-crit-y 70
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    output=$(_launch_at_default_thresholds rot-crit-y y) || true
+    assert_output_contains "$output" "--resume $id" "y at 70% resumes the recorded conversation" || return 1
+}
+
+# A marker naming a handoff consumed elsewhere is an orphan: no handoff is
+# offered, so the ask is the plain one, and Enter at crit takes the n arm,
+# which disarms the marker and says so.
+test_enter_at_crit_context_disarms_an_orphaned_marker() {
+    _rot_session "rot-crit-orphan"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-orphan" output
+    _seed_handoff "$dir" "2026-07-16-test.md" "consumed"
+    printf '%s\n' "2026-07-16-test.md" > "$dir/.cs/local/pending-handoff"
+    _stamp_context rot-crit-orphan 70
+    output=$(_launch_at_default_thresholds rot-crit-orphan "") || true
+    assert_eq "$(_crit_warning 70)" "$(grep -F 'last context reading' <<< "$output")" "the ask is at crit" || return 1
+    assert_eq "1" "$(grep -cxF 'Rotation marker disarmed.' <<< "$output")" "Enter at 70% announces the disarm" || return 1
+    assert_not_exists "$dir/.cs/local/pending-handoff" "Enter at 70% drops the orphaned marker" || return 1
+    assert_output_contains "$output" "--session-id " "Enter at 70% starts a fresh conversation" || return 1
+}
+
+# The default moved from 65 to 60, so the boundary is the property: 60 asks
+# [y/N] and starts fresh on Enter, 59 keeps [Y/n] and resumes.
+test_crit_context_starts_at_the_status_lines_default_threshold() {
+    _rot_session "rot-crit-edge"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-edge" output
+    _stamp_context rot-crit-edge 60
+    output=$(_launch_at_default_thresholds rot-crit-edge "") || true
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [y/N] ' <<< "$output")" "60 asks [y/N]" || return 1
+    assert_eq "$(_crit_warning 60)" "$(grep -F 'last context reading' <<< "$output")" "60 warns" || return 1
+    assert_output_not_contains "$output" "--resume" "Enter at 60 starts fresh" || return 1
+    _stamp_context rot-crit-edge 59
+    output=$(_launch_at_default_thresholds rot-crit-edge "") || true
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [Y/n] ' <<< "$output")" "59 keeps [Y/n]" || return 1
+    assert_output_not_contains "$output" "last context reading" "59 prints no warning" || return 1
+    assert_output_contains "$output" "--resume " "Enter at 59 resumes" || return 1
+}
+
+# The threshold is the status line's knob, parsed as the bar parses it: moved
+# to 80, a 70% reading keeps the resume default; 101 is out of reach of any
+# reading; a word falls back to the default 60.
+test_crit_context_follows_the_status_line_knob() {
+    _rot_session "rot-crit-knob"
+    local output
+    _stamp_context rot-crit-knob 70
+    output=$(CS_NERD_FONTS=0 CS_STATUSLINE_CTX_CRIT=80 "$CS_BIN" rot-crit-knob <<< "" 2>&1) || true
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [Y/n] ' <<< "$output")" "a crit of 80 keeps [Y/n] at 70" || return 1
+    assert_output_not_contains "$output" "last context reading" "a crit of 80 prints no warning at 70" || return 1
+    assert_output_contains "$output" "--resume " "Enter under a crit of 80 resumes at 70" || return 1
+    _stamp_context rot-crit-knob 100
+    output=$(CS_NERD_FONTS=0 CS_STATUSLINE_CTX_CRIT=101 "$CS_BIN" rot-crit-knob <<< "" 2>&1) || true
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [Y/n] ' <<< "$output")" "a crit of 101 never fires, even at 100" || return 1
+    _stamp_context rot-crit-knob 70
+    output=$(CS_NERD_FONTS=0 CS_STATUSLINE_CTX_CRIT=hot "$CS_BIN" rot-crit-knob <<< "" 2>&1) || true
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [y/N] ' <<< "$output")" "a word falls back to the default 60" || return 1
+}
+
+# With a handoff pending at crit, the fresh conversation the default starts is
+# the one that picks up the handoff when the bound conversation wrote it, its
+# parent: the line above the menu says so, and the default moves from the
+# resume row to the r row. Enter, like a key the menu does not offer, takes
+# the r arm: it arms the marker with that handoff and starts fresh. n still
+# starts fresh with the handoff waiting for later.
+test_handoff_menu_at_crit_context_defaults_to_the_bound_conversations_handoff() {
+    _rot_session "rot-crit-menu"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-menu" output rows warn_at menu_at answer old new
+    for answer in "" x; do
+        _stamp_context rot-crit-menu 70
+        rm -f "$dir/.cs/local/pending-handoff"
+        old=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+        _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed" "$old"
+        output=$(_launch_at_default_thresholds rot-crit-menu "$answer") || true
+        assert_eq "$(_crit_warning 70 'a fresh conversation from the handoff')" "$(grep -F 'last context reading' <<< "$output")" \
+            "the menu carries the warning (answer '$answer')" || return 1
+        warn_at=$(grep -nF 'last context reading' <<< "$output" | cut -d: -f1)
+        menu_at=$(grep -nF 'Rotation handoff pending:' <<< "$output" | cut -d: -f1)
+        [ "$warn_at" -lt "$menu_at" ] \
+            || { echo "  FAIL: the warning must sit above the menu (warning row $warn_at, menu row $menu_at)"; return 1; }
+        rows=$(printf '%s\n' "$output" | grep -E '^    [yrnd]  ')
+        assert_eq "    y  resume          continue the previous conversation
+    r  from handoff    fresh conversation that picks up the handoff · default
+    n  fresh           fresh conversation; the handoff waits for later
+    d  discard         retire the handoff, then resume" "$rows" "the default sits on the r row (answer '$answer')" || return 1
+        assert_eq "2026-07-16-test.md" "$(tr -d '[:space:]' < "$dir/.cs/local/pending-handoff" 2>/dev/null)" \
+            "answer '$answer' at 70% arms the pending handoff" || return 1
+        new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+        [ "$new" != "$old" ] || { echo "  FAIL: answer '$answer' at 70% must rebind to a fresh conversation"; return 1; }
+        assert_output_contains "$output" "--session-id $new" "answer '$answer' at 70% starts a fresh conversation" || return 1
+        assert_output_not_contains "$output" "--resume" "answer '$answer' at 70% must not resume" || return 1
+        assert_eq "handoff 2026-07-16-test.md" \
+            "$(jq -r 'select(.event == "rotated") | "\(.reason) \(.handoff)"' "$dir/.cs/timeline.jsonl" | tail -1)" \
+            "answer '$answer' rotates from the handoff" || return 1
+    done
+    _stamp_context rot-crit-menu 70
+    rm -f "$dir/.cs/local/pending-handoff"
+    _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed" "$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")"
+    output=$(_launch_at_default_thresholds rot-crit-menu n) || true
+    new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    assert_output_contains "$output" "--session-id $new" "n at 70% starts a fresh conversation" || return 1
+    assert_eq "declined-resume" "$(jq -r 'select(.event == "rotated") | .reason' "$dir/.cs/timeline.jsonl" | tail -1)" \
+        "n at 70% declines the resume rather than rotating from the handoff" || return 1
+    assert_not_exists "$dir/.cs/local/pending-handoff" "n at 70% arms no marker" || return 1
+    assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "^status: unconsumed$" "n at 70% leaves the handoff pending" || return 1
+}
+
+# A handoff whose parent is not the bound conversation waits at crit: one
+# from another checkout, or an older one an earlier conversation here wrote.
+# Enter, or any key the menu does not offer, starts fresh and leaves it
+# pending, since SessionStart marks an armed handoff consumed and a stray key
+# must not take one the user never chose. The line above the menu gives the
+# plain default and the default mark sits on the n row. A typed r still takes
+# the handoff.
+test_handoff_menu_at_crit_context_leaves_another_conversations_handoff_waiting() {
+    _rot_session "rot-crit-other"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-other" output rows origin answer old new
+    for origin in foreign local; do
+        if [ "$origin" = local ]; then
+            # An earlier conversation in this checkout wrote it: its start is
+            # in session.log, but the session has moved on to another one.
+            printf '2026-07-16 10:00:00 - Session started (source: startup, ID: %s)\n' "$UUID_A" >> "$dir/.cs/local/session.log"
+        fi
+        for answer in "" x " " q 1; do
+            _stamp_context rot-crit-other 70
+            rm -f "$dir/.cs/local/pending-handoff"
+            _seed_handoff "$dir" "2026-07-16-test.md" "unconsumed"
+            old=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+            output=$(_launch_at_default_thresholds rot-crit-other "$answer") || true
+            if [ "$origin" = foreign ]; then
+                assert_output_contains "$output" "(from another checkout)" "the $origin handoff is labelled (answer '$answer')" || return 1
+            else
+                assert_output_not_contains "$output" "(from another checkout)" "the $origin handoff carries no label (answer '$answer')" || return 1
+            fi
+            assert_eq "$(_crit_warning 70)" "$(grep -F 'last context reading' <<< "$output")" \
+                "the $origin handoff leaves the plain default (answer '$answer')" || return 1
+            rows=$(printf '%s\n' "$output" | grep -E '^    [yrnd]  ')
+            assert_eq "    y  resume          continue the previous conversation
+    r  from handoff    fresh conversation that picks up the handoff
+    n  fresh           fresh conversation; the handoff waits for later · default
+    d  discard         retire the handoff, then resume" "$rows" "the default sits on the n row ($origin, answer '$answer')" || return 1
+            assert_not_exists "$dir/.cs/local/pending-handoff" "answer '$answer' arms no marker for the $origin handoff" || return 1
+            assert_file_contains "$dir/.cs/handoffs/2026-07-16-test.md" "^status: unconsumed$" \
+                "answer '$answer' leaves the $origin handoff pending" || return 1
+            assert_eq "declined-resume" "$(jq -r 'select(.event == "rotated") | .reason' "$dir/.cs/timeline.jsonl" | tail -1)" \
+                "answer '$answer' declines the resume rather than rotating from the $origin handoff" || return 1
+            new=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+            [ "$new" != "$old" ] || { echo "  FAIL: answer '$answer' at 70% must rebind to a fresh conversation ($origin)"; return 1; }
+            assert_output_contains "$output" "--session-id $new" "answer '$answer' at 70% starts a fresh conversation ($origin)" || return 1
+            assert_output_not_contains "$output" "--resume" "answer '$answer' at 70% must not resume ($origin)" || return 1
+        done
+    done
+    _stamp_context rot-crit-other 70
+    output=$(_launch_at_default_thresholds rot-crit-other r) || true
+    assert_eq "2026-07-16-test.md" "$(tr -d '[:space:]' < "$dir/.cs/local/pending-handoff" 2>/dev/null)" \
+        "a typed r arms the handoff another conversation wrote" || return 1
+    assert_eq "handoff 2026-07-16-test.md" \
+        "$(jq -r 'select(.event == "rotated") | "\(.reason) \(.handoff)"' "$dir/.cs/timeline.jsonl" | tail -1)" \
+        "a typed r rotates from it" || return 1
+}
+
+# A spawned launch is unattended and resumes at any reading: the fresh default
+# belongs to an ask, and a spawn asks nothing.
+test_spawned_launch_at_crit_context_still_resumes() {
+    _rot_session "rot-crit-spawn"
+    local dir="$CS_SESSIONS_ROOT/rot-crit-spawn" id output
+    _stamp_context rot-crit-spawn 70
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'feedfacefeedfacefeedfacefeedface\nspawner\ndo the thing\n' > "$CS_SESSIONS_ROOT/.spawn/rot-crit-spawn.seed"
+    output=$(CS_SPAWN_TOKEN=feedfacefeedfacefeedfacefeedface CS_STATUSLINE_CTX_CRIT='' \
+        "$CS_BIN" rot-crit-spawn </dev/null 2>&1) || true
+    assert_output_not_contains "$output" "last context reading" "an unattended launch warns nothing" || return 1
+    assert_output_contains "$output" "--resume $id" "a spawned launch at 70% resumes" || return 1
+}
+
+# The status line stamps context-pct per session, not per conversation, and
+# only once a conversation replies, so a fresh conversation left before its
+# first reply inherits the reading of the one before it. Only a conversation
+# that has replied has said anything for a reading to describe: until then
+# the card shows no figure and the ask keeps its resume default, whatever the
+# stamp says. First a conversation with no transcript: none exists anywhere in
+# the project dir, so the open has none to rebind the session to and the bound
+# conversation stays the one without a transcript. Then one quit before its
+# first reply: Claude Code writes the transcript with the prompt, before any
+# reply, so it has a transcript that holds a user record and no assistant one.
+test_reading_is_not_shown_for_a_conversation_that_has_not_replied() {
+    _rot_session "rot-stale"
+    local dir="$CS_SESSIONS_ROOT/rot-stale" output id answer proj
+    printf '72\n' > "$dir/.cs/local/context-pct"
+    for answer in n ""; do
+        id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+        output=$(_launch_at_default_thresholds rot-stale "$answer") || true
+        assert_output_not_contains "$output" "context used" "no figure for a conversation without a transcript (answer '$answer')" || return 1
+        assert_output_not_contains "$output" "last context reading" "no warning for a conversation without a transcript (answer '$answer')" || return 1
+        assert_eq "1" "$(grep -cxF 'Continue previous conversation? [Y/n] ' <<< "$output")" \
+            "the ask keeps [Y/n] (answer '$answer')" || return 1
+    done
+    assert_output_contains "$output" "--resume $id" "Enter resumes the fresh conversation the n before it started" || return 1
+    _rot_session "rot-unreplied"
+    dir="$CS_SESSIONS_ROOT/rot-unreplied"
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$dir/.cs/local/state")
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$dir")"
+    mkdir -p "$proj"
+    printf '{"type":"user","message":{"role":"user","content":"hi"}}\n' > "$proj/$id.jsonl"
+    printf '72\n' > "$dir/.cs/local/context-pct"
+    output=$(_launch_at_default_thresholds rot-unreplied "") || true
+    assert_output_not_contains "$output" "context used" "no figure for a conversation whose transcript holds no reply" || return 1
+    assert_output_not_contains "$output" "last context reading" "no warning for a conversation whose transcript holds no reply" || return 1
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [Y/n] ' <<< "$output")" \
+        "the ask keeps [Y/n] for a conversation whose transcript holds no reply" || return 1
+    assert_output_contains "$output" "--resume $id" "Enter resumes the conversation whose transcript holds no reply" || return 1
+}
+
+# Claude Code keeps its transcripts under a CLAUDE_CONFIG_DIR the user exports,
+# and cs reads them there: the card shows the bound conversation's reading, and
+# an open whose recorded conversation has no transcript finds the one Claude
+# Code keeps there, binds it and resumes it. The test override that outranks
+# the user's dir is cleared, and HOME's ~/.claude holds nothing.
+test_reading_follows_a_user_claude_config_dir() {
+    _rot_session "rot-cfgdir"
+    local dir="$CS_SESSIONS_ROOT/rot-cfgdir" cfg="$TEST_TMPDIR/user-config" id proj output state
+    local orphan="44444444-4444-4444-8444-444444444444"
+    state="$dir/.cs/local/state"
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$state")
+    proj="$cfg/projects/$(_encode_cwd_for_claude_test "$dir")"
+    mkdir -p "$proj"
+    printf '%s\n' '{"type":"user","message":{"role":"user","content":"hi"}}' \
+        '{"type":"assistant","message":{"role":"assistant","content":"hello"}}' > "$proj/$id.jsonl"
+    printf '70\n' > "$dir/.cs/local/context-pct"
+    output=$( (unset CS_TRANSCRIPTS_DIR; export CLAUDE_CONFIG_DIR="$cfg"; _launch_at_default_thresholds rot-cfgdir y) ) || true
+    assert_eq "◱ 70% context used" "$(grep -F 'context used' <<< "$output" | sed 's/.*▌ //')" \
+        "the card shows the reading of the conversation under CLAUDE_CONFIG_DIR" || return 1
+    assert_eq "$(_crit_warning 70)" "$(grep -F 'last context reading' <<< "$output")" "the ask is at crit" || return 1
+    assert_output_contains "$output" "--resume $id" "y resumes it" || return 1
+    awk 'index($0, "claude_session_id:") != 1' "$state" > "$state.tmp" && mv "$state.tmp" "$state"
+    printf 'claude_session_id: %s\n' "$orphan" >> "$state"
+    output=$( (unset CS_TRANSCRIPTS_DIR; export CLAUDE_CONFIG_DIR="$cfg"; _launch_at_default_thresholds rot-cfgdir y) ) || true
+    assert_output_contains "$output" "repaired orphan claude_session_id (was $orphan)" \
+        "the open finds the conversation under CLAUDE_CONFIG_DIR for a recorded one with no transcript" || return 1
+    assert_eq "$id" "$(awk '/^claude_session_id:/ { print $2; exit }' "$state")" "the session is bound to it" || return 1
+    assert_output_contains "$output" "--resume $id" "y resumes it" || return 1
+}
+
+# A cs run inside an encrypted session's claude inherits that session's
+# .cs/claude-config as CLAUDE_CONFIG_DIR, and the shell's own config dir in
+# CLAUDE_SECURESTORAGE_CONFIG_DIR, where that launch kept it. A session with no
+# config dir of its own opens on the shell's: the claude it starts writes its
+# conversation there, and the next open finds it there, binds nothing else and
+# shows its reading. The stub, like Claude Code, writes the conversation it is
+# given into the projects/ of the config dir it runs on.
+test_a_launch_inside_an_encrypted_session_opens_on_the_shells_config_dir() {
+    local dir="$CS_SESSIONS_ROOT/rot-nested" cfg="$TEST_TMPDIR/user-config" state first fresh output
+    local inherited="$TEST_TMPDIR/vaulted/.cs/claude-config"
+    cat > "$TEST_TMPDIR/claude-stub" << 'SCRIPT'
+#!/bin/bash
+echo "STUB_ARGS: $*"
+echo "STUB_CFG: ${CLAUDE_CONFIG_DIR-unset}"
+id=""
+while [ $# -gt 0 ]; do
+    case "$1" in --session-id|--resume) id="$2"; shift ;; esac
+    shift
+done
+proj="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(pwd -P | sed 's/[^A-Za-z0-9]/-/g')"
+mkdir -p "$proj"
+printf '%s\n' '{"type":"user","message":{"role":"user","content":"hi"}}' \
+    '{"type":"assistant","message":{"role":"assistant","content":"hello"}}' >> "$proj/$id.jsonl"
+SCRIPT
+    chmod +x "$TEST_TMPDIR/claude-stub"
+    export CLAUDE_CODE_BIN="$TEST_TMPDIR/claude-stub"
+    state="$dir/.cs/local/state"
+    ( unset CS_TRANSCRIPTS_DIR CLAUDE_SECURESTORAGE_CONFIG_DIR; export CLAUDE_CONFIG_DIR="$cfg"; "$CS_BIN" rot-nested </dev/null >/dev/null 2>&1 ) || true
+    first=$(awk '/^claude_session_id:/ { print $2; exit }' "$state")
+    output=$( (unset CS_TRANSCRIPTS_DIR; export CLAUDE_CONFIG_DIR="$inherited" CLAUDE_SECURESTORAGE_CONFIG_DIR="$cfg"; _launch_at_default_thresholds rot-nested n) ) || true
+    fresh=$(awk '/^claude_session_id:/ { print $2; exit }' "$state")
+    [ -n "$first" ] && [ "$fresh" != "$first" ] \
+        || { echo "  FAIL: n inside the encrypted session should start a fresh conversation (first '$first', now '$fresh')"; return 1; }
+    assert_eq "STUB_CFG: $cfg" "$(grep '^STUB_CFG:' <<< "$output")" \
+        "the fresh conversation runs on the shell's config dir" || return 1
+    printf '70\n' > "$dir/.cs/local/context-pct"
+    output=$( (unset CS_TRANSCRIPTS_DIR; export CLAUDE_CONFIG_DIR="$inherited" CLAUDE_SECURESTORAGE_CONFIG_DIR="$cfg"; _launch_at_default_thresholds rot-nested y) ) || true
+    assert_output_not_contains "$output" "repaired orphan" "the conversation the last open started is where this open looks" || return 1
+    assert_eq "$fresh" "$(awk '/^claude_session_id:/ { print $2; exit }' "$state")" \
+        "the session stays bound to the conversation the last open started" || return 1
+    assert_eq "◱ 70% context used" "$(grep -F 'context used' <<< "$output" | sed 's/.*▌ //')" \
+        "the card shows that conversation's reading" || return 1
+    assert_output_contains "$output" "--resume $fresh" "y resumes it" || return 1
+    assert_eq "STUB_CFG: $cfg" "$(grep '^STUB_CFG:' <<< "$output")" \
+        "the resumed conversation runs on the shell's config dir" || return 1
+}
+
+# The card's figure wears the status line's inks: bold amber from warn, and
+# from crit the bar's inverted capsule, bold white on the crit red with a space
+# each side, and at crit the warning in the crit ink above a [y/N] whose N is
+# bold. Only a pty gets colour, and the theme is pinned because the inks
+# differ by theme. The pty answers the ask by itself, with the Enter _pty_run
+# types on Linux or the ^D script(1) sends at the end of a null stdin on macOS,
+# and either takes the default, so each launch runs on past the card.
+_pty_launch() {  # theme, session
+    ( export CS_TERM_THEME="$1" CS_NERD_FONTS=0
+      unset NO_COLOR CS_STATUSLINE_CTX_WARN CS_STATUSLINE_CTX_CRIT
+      _pty_run "$CS_BIN" "$2" 2>&1 ) | tr -d '\r'
+}
+
+test_card_paints_the_context_figure_in_the_status_lines_inks() {
+    _rot_session "rot-ink"
+    local out
+    # The warn edge is inclusive, as on the bar: 40 is already amber.
+    _stamp_context rot-ink 40
+    out=$(_pty_launch light rot-ink) || true
+    grep -qF "$(printf '\033[1m\033[38;2;180;83;9m40%%\033[0m')" <<< "$out" \
+        || { echo "  FAIL: at the warn edge, 40, on light the figure is bold amber 180;83;9"; return 1; }
+    _stamp_context rot-ink 50
+    out=$(_pty_launch light rot-ink) || true
+    grep -qF "$(printf '\033[1m\033[38;2;180;83;9m50%%\033[0m')" <<< "$out" \
+        || { echo "  FAIL: at warn on light the figure is bold amber 180;83;9"; return 1; }
+    out=$(_pty_launch dark rot-ink) || true
+    grep -qF "$(printf '\033[1m\033[38;2;251;191;36m50%%\033[0m')" <<< "$out" \
+        || { echo "  FAIL: at warn on dark the figure is bold amber 251;191;36"; return 1; }
+    _stamp_context rot-ink 70
+    out=$(_pty_launch light rot-ink) || true
+    grep -qF "$(printf '\033[1m\033[48;2;215;0;21;38;2;255;255;255m 70%% \033[0m')" <<< "$out" \
+        || { echo "  FAIL: at crit on light the figure is bold white on 215;0;21 with a space each side"; return 1; }
+    grep -qF "$(printf '\033[1m\033[38;2;215;0;21m%s\033[0m' "$(_crit_warning 70)")" <<< "$out" \
+        || { echo "  FAIL: at crit on light the warning is bold in the crit ink 215;0;21"; return 1; }
+    grep -qF "$(printf '[y/\033[1mN\033[0m] ')" <<< "$out" \
+        || { echo "  FAIL: at crit the N of [y/N] is bold"; return 1; }
+    _stamp_context rot-ink 70
+    out=$(_pty_launch dark rot-ink) || true
+    grep -qF "$(printf '\033[1m\033[48;2;255;69;58;38;2;255;255;255m 70%% \033[0m')" <<< "$out" \
+        || { echo "  FAIL: at crit on dark the figure is bold white on 255;69;58 with a space each side"; return 1; }
+    grep -qF "$(printf '\033[1m\033[38;2;255;69;58m%s\033[0m' "$(_crit_warning 70)")" <<< "$out" \
+        || { echo "  FAIL: at crit on dark the warning is bold in the crit ink 255;69;58"; return 1; }
 }
 
 test_rotate_answer_consumes_pending_handoff() {
@@ -1224,6 +1621,18 @@ run_test test_resume_prompt_ignores_a_junk_context_stamp
 run_test test_resume_prompt_ignores_an_out_of_range_context_stamp
 run_test test_resume_prompt_reads_a_zero_padded_context_stamp
 run_test test_esc_at_continue_prompt_cancels_launch
+run_test test_card_paints_the_context_figure_in_the_status_lines_inks
+run_test test_enter_at_crit_context_starts_a_fresh_conversation
+run_test test_y_at_crit_context_resumes
+run_test test_enter_at_crit_context_disarms_an_orphaned_marker
+run_test test_crit_context_starts_at_the_status_lines_default_threshold
+run_test test_crit_context_follows_the_status_line_knob
+run_test test_handoff_menu_at_crit_context_defaults_to_the_bound_conversations_handoff
+run_test test_handoff_menu_at_crit_context_leaves_another_conversations_handoff_waiting
+run_test test_spawned_launch_at_crit_context_still_resumes
+run_test test_reading_is_not_shown_for_a_conversation_that_has_not_replied
+run_test test_reading_follows_a_user_claude_config_dir
+run_test test_a_launch_inside_an_encrypted_session_opens_on_the_shells_config_dir
 # r is only offered alongside a pending handoff. Pressed without one it falls
 # through to the resume default, which is a decline like any other.
 test_r_without_a_pending_handoff_disarms_the_marker() {
@@ -2133,8 +2542,8 @@ _warning_text() {  # reading, nudge threshold
 test_nudge_fires_once_at_threshold() {
     _rot_hook_session "rot-nudge"
     local out
-    out=$(_stop_with_ctx 65 "$UUID_A") || return 1
-    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" \
+    out=$(_stop_with_ctx 60 "$UUID_A") || return 1
+    assert_eq "$(_nudge_text 60)" "$(stop_notice_text "$out")" \
         "the nudge names the reading and the rotate skill, as additionalContext" || return 1
     assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/rotate-nudged" | tr -d '[:space:]')" \
         "cursor records the nudged conversation" || return 1
@@ -2153,8 +2562,8 @@ test_nudge_rearms_for_new_conversation() {
 test_nudge_silent_below_threshold_and_without_signal() {
     _rot_hook_session "rot-nudge-quiet"
     local out
-    out=$(_stop_with_ctx 64 "$UUID_A") || return 1
-    assert_eq "$(_warning_text 64 65)" "$(stop_notice_text "$out")" "64 warns and does not nudge at the default threshold" || return 1
+    out=$(_stop_with_ctx 59 "$UUID_A") || return 1
+    assert_eq "$(_warning_text 59 60)" "$(stop_notice_text "$out")" "59 warns and does not nudge at the default threshold" || return 1
     out=$(_stop_with_ctx "" "$UUID_A") || return 1
     assert_eq "" "$out" "missing context-pct must never nudge" || return 1
     out=$(_stop_with_ctx "hot" "$UUID_A") || return 1
@@ -2178,22 +2587,22 @@ test_nudge_threshold_override() {
     # below 80, including the 80 this branch replaced.
     _rot_hook_session "rot-nudge-env2"
     export CS_ROTATE_NUDGE_CTX=banana
-    out=$(_stop_with_ctx 65 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
-    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "non-numeric override falls back to 65" || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    out=$(_stop_with_ctx 60 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    assert_eq "$(_nudge_text 60)" "$(stop_notice_text "$out")" "non-numeric override falls back to 60" || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     _rot_hook_session "rot-nudge-env3"
-    out=$(_stop_with_ctx 64 "$UUID_A") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    out=$(_stop_with_ctx 59 "$UUID_A") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     unset CS_ROTATE_NUDGE_CTX
     if grep -q "rotate skill" <<< "$out"; then
-        echo "  FAIL: 64 under the 65 fallback must not nudge"
+        echo "  FAIL: 59 under the 60 fallback must not nudge"
         return 1
     fi
     # Twenty digits wrap past 64 bits to a huge positive number, which would
     # silence the nudge for good; the override must fall back instead.
     _rot_hook_session "rot-nudge-env4"
     export CS_ROTATE_NUDGE_CTX=99999999999999999999
-    out=$(_stop_with_ctx 65 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
+    out=$(_stop_with_ctx 60 "$UUID_B") || { unset CS_ROTATE_NUDGE_CTX; return 1; }
     unset CS_ROTATE_NUDGE_CTX
-    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "a 64-bit-overflowing override falls back to 65" || return 1
+    assert_eq "$(_nudge_text 60)" "$(stop_notice_text "$out")" "a 64-bit-overflowing override falls back to 60" || return 1
 }
 
 # The two Stop hooks run side by side: stop-blocks.sh drains, and
@@ -2461,7 +2870,7 @@ test_ctx_warning_fires_once_in_band() {
     _rot_hook_session "rot-warn"
     local out
     out=$(_stop_with_ctx 40 "$UUID_A") || return 1
-    assert_eq "$(_warning_text 40 65)" "$(stop_notice_text "$out")" \
+    assert_eq "$(_warning_text 40 60)" "$(stop_notice_text "$out")" \
         "the warning names the reading and promises the nudge at its real threshold, as additionalContext" || return 1
     assert_eq "$UUID_A" "$(cat "$CLAUDE_SESSION_META_DIR/local/ctx-warned" | tr -d '[:space:]')" \
         "cursor records the warned conversation" || return 1
@@ -2471,10 +2880,10 @@ test_ctx_warning_fires_once_in_band() {
 
 test_ctx_warning_rearms_for_new_conversation() {
     _rot_hook_session "rot-warn-rearm"
-    _stop_with_ctx 60 "$UUID_A" >/dev/null || return 1
+    _stop_with_ctx 55 "$UUID_A" >/dev/null || return 1
     local out
-    out=$(_stop_with_ctx 60 "$UUID_B") || return 1
-    assert_eq "$(_warning_text 60 65)" "$(stop_notice_text "$out")" "new conversation UUID re-arms the warning" || return 1
+    out=$(_stop_with_ctx 55 "$UUID_B") || return 1
+    assert_eq "$(_warning_text 55 60)" "$(stop_notice_text "$out")" "new conversation UUID re-arms the warning" || return 1
 }
 
 test_ctx_warning_silent_below_band() {
@@ -2501,19 +2910,19 @@ test_ctx_warning_threshold_override() {
     assert_eq "" "$out" "45 under a 50 override must not warn" || { unset CS_CTX_WARN_CTX; return 1; }
     out=$(_stop_with_ctx 50 "$UUID_A") || { unset CS_CTX_WARN_CTX; return 1; }
     unset CS_CTX_WARN_CTX
-    assert_eq "$(_warning_text 50 65)" "$(stop_notice_text "$out")" "50 at a 50 override warns" || return 1
+    assert_eq "$(_warning_text 50 60)" "$(stop_notice_text "$out")" "50 at a 50 override warns" || return 1
     _rot_hook_session "rot-warn-env2"
     export CS_CTX_WARN_CTX=banana
     out=$(_stop_with_ctx 40 "$UUID_B") || { unset CS_CTX_WARN_CTX; return 1; }
     unset CS_CTX_WARN_CTX
-    assert_eq "$(_warning_text 40 65)" "$(stop_notice_text "$out")" "non-numeric override falls back to 40" || return 1
+    assert_eq "$(_warning_text 40 60)" "$(stop_notice_text "$out")" "non-numeric override falls back to 40" || return 1
 }
 
 test_ctx_warning_escalates_to_nudge_same_conversation() {
     _rot_hook_session "rot-warn-escalate"
     local out
-    out=$(_stop_with_ctx 60 "$UUID_A") || return 1
-    assert_eq "$(_warning_text 60 65)" "$(stop_notice_text "$out")" "warning fires first at 60" || return 1
+    out=$(_stop_with_ctx 55 "$UUID_A") || return 1
+    assert_eq "$(_warning_text 55 60)" "$(stop_notice_text "$out")" "warning fires first at 55" || return 1
     out=$(_stop_with_ctx 80 "$UUID_A") || return 1
     assert_eq "$(_nudge_text 80)" "$(stop_notice_text "$out")" "the 80 reading belongs to the nudge alone" || return 1
 }
@@ -2521,12 +2930,12 @@ test_ctx_warning_escalates_to_nudge_same_conversation() {
 test_ctx_warning_band_edges() {
     _rot_hook_session "rot-warn-edges"
     local out
-    out=$(_stop_with_ctx 64 "$UUID_A") || return 1
-    assert_eq "$(_warning_text 64 65)" "$(stop_notice_text "$out")" "64 is inside the band" || return 1
-    _rot_hook_session "rot-warn-edge65"
-    out=$(_stop_with_ctx 65 "$UUID_B") || return 1
-    assert_eq "$(_nudge_text 65)" "$(stop_notice_text "$out")" "the nudge owns exactly 65 under defaults" || return 1
-    out=$(_stop_with_ctx 65 "$UUID_B") || return 1
+    out=$(_stop_with_ctx 59 "$UUID_A") || return 1
+    assert_eq "$(_warning_text 59 60)" "$(stop_notice_text "$out")" "59 is inside the band" || return 1
+    _rot_hook_session "rot-warn-edge60"
+    out=$(_stop_with_ctx 60 "$UUID_B") || return 1
+    assert_eq "$(_nudge_text 60)" "$(stop_notice_text "$out")" "the nudge owns exactly 60 under defaults" || return 1
+    out=$(_stop_with_ctx 60 "$UUID_B") || return 1
     assert_eq "" "$out" "exactly the nudge threshold is outside the band even when the nudge is spent" || return 1
 }
 
@@ -2538,10 +2947,10 @@ test_ctx_warning_band_edges() {
 # may cancel another's.
 test_ctx_warning_survives_an_interleaved_teammate() {
     _rot_hook_session "rot-warn-teammate"
-    _stop_with_ctx 60 "$UUID_A" >/dev/null || return 1
-    _stop_with_ctx 60 "$UUID_B" >/dev/null || return 1
+    _stop_with_ctx 55 "$UUID_A" >/dev/null || return 1
+    _stop_with_ctx 55 "$UUID_B" >/dev/null || return 1
     local out
-    out=$(_stop_with_ctx 60 "$UUID_A") || return 1
+    out=$(_stop_with_ctx 55 "$UUID_A") || return 1
     assert_eq "" "$out" "a teammate's warning must not re-arm the lead's" || return 1
     out=$(_stop_with_ctx 85 "$UUID_A") || return 1
     assert_eq "$(_nudge_text 85)" "$(stop_notice_text "$out")" "the nudge still fires once for A" || return 1
@@ -2564,7 +2973,7 @@ _stop_with_ctx_as_teammate() {  # ctx-pct, session_id
 test_ctx_tiers_are_silent_for_a_teammate() {
     _rot_hook_session "rot-ctx-teammate"
     local out
-    out=$(_stop_with_ctx_as_teammate 64 "$UUID_B") || return 1
+    out=$(_stop_with_ctx_as_teammate 59 "$UUID_B") || return 1
     assert_eq "" "$out" "a teammate must not be warned with the lead's reading" || return 1
     if grep -qx "$UUID_B" "$CLAUDE_SESSION_META_DIR/local/ctx-warned" 2>/dev/null; then
         echo "  FAIL: a teammate must not spend a warning cursor on the lead's reading"
@@ -2573,8 +2982,8 @@ test_ctx_tiers_are_silent_for_a_teammate() {
     out=$(_stop_with_ctx_as_teammate 85 "$UUID_B") || return 1
     assert_eq "" "$out" "a teammate must not be nudged to rotate on the lead's reading" || return 1
     # The lead, same directory, same reading: the notice is its.
-    out=$(_stop_with_ctx 64 "$UUID_A") || return 1
-    assert_eq "$(_warning_text 64 65)" "$(stop_notice_text "$out")" "the lead is still warned" || return 1
+    out=$(_stop_with_ctx 59 "$UUID_A") || return 1
+    assert_eq "$(_warning_text 59 60)" "$(stop_notice_text "$out")" "the lead is still warned" || return 1
 }
 
 # Forced rotation ships on. A machine that has not been told so gets one
@@ -2751,9 +3160,9 @@ test_ctx_warning_is_repeated_once_when_the_transcript_does_not_record_it() {
     local t="$TEST_TMPDIR/transcript.jsonl" out
     : > "$t"
     out=$(_stop_with_ctx_and_transcript 40 "$UUID_A" "$t") || return 1
-    assert_eq "$(_warning_text 40 65)" "$(stop_notice_text "$out")" "the first warning goes out" || return 1
+    assert_eq "$(_warning_text 40 60)" "$(stop_notice_text "$out")" "the first warning goes out" || return 1
     out=$(_stop_with_ctx_and_transcript 45 "$UUID_A" "$t") || return 1
-    assert_eq "$(_warning_text 45 65)" "$(stop_notice_text "$out")" "an unrecorded warning is repeated once" || return 1
+    assert_eq "$(_warning_text 45 60)" "$(stop_notice_text "$out")" "an unrecorded warning is repeated once" || return 1
     assert_eq "$UUID_A
 $UUID_A again" "$(cat "$CLAUDE_SESSION_META_DIR/local/ctx-warned")" "the cursor records the repeat" || return 1
     out=$(_stop_with_ctx_and_transcript 50 "$UUID_A" "$t") || return 1

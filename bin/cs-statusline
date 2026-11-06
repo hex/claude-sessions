@@ -25,7 +25,7 @@ _CS_CONFIG_SPEC=(
     'CS_STATUSLINE_COLS|Status line|Width in columns|text|cols|-|measured|now|applies at the next repaint|A fixed width for the status line; unset, it fits the terminal.'
     'CS_STATUSLINE_FRAME|Status line|Frame columns|text|num|-|4|now|applies at the next repaint|Columns the prompt frame takes from the measured width, so the line is not cut short.'
     'CS_STATUSLINE_CTX_WARN|Status line|Context warn %|text|num|-|40|now|applies at the next repaint|Context use at which the gauge turns to its warning colour.'
-    'CS_STATUSLINE_CTX_CRIT|Status line|Context critical %|text|num|-|65|now|applies at the next repaint|Context use at which the gauge turns to its critical colour.'
+    'CS_STATUSLINE_CTX_CRIT|Status line|Context critical %|text|num|-|60|now|applies at the next repaint|Context use at which the gauge turns to its critical colour.'
     'CS_USAGE_NO_REFRESH|Status line|Usage refresh|flagoff|flag|-|off|now|applies at the next repaint|Fetches your Fable usage for the status line; off, it shows only what is already cached.'
     'CS_SUBAGENT_STATUSLINE_DISABLE|Status line|Subagent rows|flagoff|flag|-|off|now|applies at the next repaint|Styles the rows Claude Code shows for running subagents to match the status line.'
     'CS_SCOPE_DISABLE|Prompts|Scope grounding|flagoff|flag|-|off|now|applies at your next prompt|Adds a short summary of the relevant code to each prompt that asks for code work.'
@@ -37,7 +37,7 @@ _CS_CONFIG_SPEC=(
     'CS_NARRATIVE_PROMPT_DISABLE|Prompts|Narrative line|flagoff|flag|-|off|now|applies at your next prompt|Asks Claude, on each prompt, to note a finding in its narrative before it answers.'
     'CS_CTX_WARN_CTX|Rotation|Context warning %|text|num|-|40|now|applies when the next turn ends|Context use at which Claude tells you, once, that the conversation is filling up.'
     'CS_ROTATE_BUTTON_CTX|Rotation|Rotate button from %|text|num|-|the warn %|now|applies by your next prompt|Context use from which the band above the prompt shows the rotate key, Ctrl+X 1.'
-    'CS_ROTATE_NUDGE_CTX|Rotation|Rotation nudge %|text|num|-|65|now|applies when the next turn ends|Context use at which Claude suggests, once, writing a handoff and going on after /clear.'
+    'CS_ROTATE_NUDGE_CTX|Rotation|Rotation nudge %|text|num|-|60|now|applies when the next turn ends|Context use at which Claude suggests, once, writing a handoff and going on after /clear.'
     'CS_ROTATE_FORCE_CTX|Rotation|Rotate on its own past %|text|force|-|80|now|applies by your next prompt|Context use past which cs rotates by itself after a 20 second countdown you can stop.'
     'CS_NO_ROTATION_WAKE|Rotation|Wake after /clear|flagoff|flag|-|off|/clear|applies at the next /clear or launch|After /clear on a handoff, the fresh conversation starts its next step without you typing.'
     'CS_ROTATION_KICK_DELAY|Rotation|Wake delay (s)|text|secs|-|2|now|applies at the next rotation|Seconds between tries to wake the fresh conversation after /clear; 0 tries once.'
@@ -2531,7 +2531,7 @@ _seg_ctx() {
     [ -n "$v" ] || return 0
     local warn crit
     _num_or "${CS_STATUSLINE_CTX_WARN:-}" 40; warn="$_NUM"
-    _num_or "${CS_STATUSLINE_CTX_CRIT:-}" 65; crit="$_NUM"
+    _num_or "${CS_STATUSLINE_CTX_CRIT:-}" 60; crit="$_NUM"
     _thresh_color "$v" "$warn" "$crit"
     [ "$_COLOR" = "crit" ] && _invert ctx
     _ctx_pie "$v" "$warn" "$crit"

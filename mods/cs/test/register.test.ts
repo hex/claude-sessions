@@ -24,7 +24,11 @@ let percent: number | undefined
 let filled: any[]
 let ran: any[]
 let written: Record<string, string>
+// Directories `$.fs.exists` finds and `$.fs.stat` answers, beside the files.
 let existing: Set<string>
+// Symbolic links whose target is gone: `$.fs.exists` misses one, as it follows
+// the link, and `$.fs.stat` answers the link itself.
+let danglingLinks: Set<string>
 let files: Record<string, string>
 let sessionId: string
 let envVars: Record<string, string | undefined>
@@ -141,6 +145,8 @@ const $ = {
     },
     stat: async (path: string, options?: { resolve?: boolean }) => {
       if (path in files) return { kind: 'file', size: files[path].length, mtimeMs: mtimes[path] ?? 0, isLink: false }
+      if (danglingLinks.has(path)) return { kind: 'other', size: 0, mtimeMs: 0, isLink: true }
+      if (existing.has(path) && !(path in realPaths)) return { kind: 'directory', size: 0, mtimeMs: 0, isLink: false }
       if (!(path in realPaths)) throw new Error(`ENOENT ${path}`)
       return { kind: 'directory', size: 0, mtimeMs: 0, isLink: false, ...(options?.resolve ? { realPath: realPaths[path] } : {}) }
     },
@@ -167,7 +173,7 @@ const findButton = (tree: any) => buttons(tree)[0]
 
 beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
-  percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local'])
+  percent = undefined; filled = []; ran = []; written = {}; existing = new Set(['/work/.cs/local']); danglingLinks = new Set()
   timers = []; invalidated = []; toasts = []; logs = []; asks = []; answer = WRAP_YES; modeAnswer = QUEUE_HERE; panes = []
   runs = []; runResult = { exitCode: 0, stdout: '', stderr: '' }; nextRuns = []; submitted = []; commands = []
   settingsRuns = []; settingsResult = { exitCode: 0, stdout: '', stderr: '' }
@@ -2348,6 +2354,47 @@ test('CS_TRANSCRIPTS_DIR and a session\'s own claude-config move the transcript;
   files['/home/.claude/projects/-Volumes-data-work-dir/uuid-lead.jsonl'] = `${LINEAR.slice(0, 4).join('\n')}\n`
   await turnComplete()
   expect(rail(await band())).toHaveLength(2)
+})
+
+test('a CLAUDE_CONFIG_DIR the person exported holds the transcript, after CS_TRANSCRIPTS_DIR and the session\'s own claude-config', async () => {
+  envVars.CLAUDE_CONFIG_DIR = '/cfg'
+  files['/cfg/projects/-work/uuid-lead.jsonl'] = `${LINEAR.join('\n')}\n`
+  await turnComplete()
+  expect(rail(await band())).toHaveLength(4)
+  envVars.CS_TRANSCRIPTS_DIR = '/elsewhere'
+  files['/elsewhere/-work/uuid-lead.jsonl'] = `${LINEAR.slice(0, 6).join('\n')}\n`
+  await turnComplete()
+  expect(rail(await band())).toHaveLength(3)
+  existing.add('/work/.cs/claude-config')
+  files['/work/.cs/claude-config/projects/-work/uuid-lead.jsonl'] = `${LINEAR.slice(0, 4).join('\n')}\n`
+  await turnComplete()
+  expect(rail(await band())).toHaveLength(2)
+})
+
+test('this claude\'s CLAUDE_CONFIG_DIR holds its transcript even when it names another session\'s .cs/claude-config; neither ~/.claude nor CLAUDE_SECURESTORAGE_CONFIG_DIR stands in', async () => {
+  envVars.CLAUDE_CONFIG_DIR = '/other/.cs/claude-config'
+  files['/other/.cs/claude-config/projects/-work/uuid-lead.jsonl'] = `${LINEAR.join('\n')}\n`
+  files[TRANSCRIPT] = `${LINEAR.slice(0, 6).join('\n')}\n`
+  await turnComplete()
+  expect(rail(await band())).toHaveLength(4)
+  envVars.CLAUDE_SECURESTORAGE_CONFIG_DIR = '/shell'
+  files['/shell/projects/-work/uuid-lead.jsonl'] = `${LINEAR.slice(0, 4).join('\n')}\n`
+  await turnComplete()
+  expect(rail(await band())).toHaveLength(4)
+})
+
+test('a session\'s own claude-config whose link dangles, its vault locked, still names the transcript\'s dir; the shell\'s never stands in', async () => {
+  danglingLinks.add('/work/.cs/claude-config')
+  envVars.CLAUDE_CONFIG_DIR = '/work/.cs/claude-config'
+  transcript(LINEAR)
+  await turnComplete()
+  expect(rail(await band())).toHaveLength(0)
+  expect(reads).not.toContain(TRANSCRIPT)
+  danglingLinks.delete('/work/.cs/claude-config')
+  existing.add('/work/.cs/claude-config')
+  files['/work/.cs/claude-config/projects/-work/uuid-lead.jsonl'] = `${LINEAR.slice(0, 6).join('\n')}\n`
+  await turnComplete()
+  expect(rail(await band())).toHaveLength(3)
 })
 
 test('past the width budget the oldest prompts collapse into one dim …N run at the left', async () => {

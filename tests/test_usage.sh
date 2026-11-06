@@ -636,7 +636,41 @@ EOF
         "a locked session should show no transcripts" || return 1
 }
 
+# One transcript of the session in each config dir cs could read it from, each
+# named by its own conversation id.
+_seed_usage_transcript() {  # project dir, conversation id
+    mkdir -p "$1"
+    cat > "$1/$2.jsonl" << EOF
+{"type":"assistant","requestId":"r-$2","timestamp":"$(_iso_mins_ago 5)","message":{"model":"m","usage":{"input_tokens":7000,"cache_creation_input_tokens":0,"output_tokens":700}}}
+EOF
+}
+
+# Claude Code keeps a session's transcripts under the CLAUDE_CONFIG_DIR the
+# user exported. One that names some session's .cs/claude-config was
+# inherited from a claude running in that session and says nothing about this
+# one: the shell's own config dir stands in, the one the launch kept in
+# CLAUDE_SECURESTORAGE_CONFIG_DIR, or ~/.claude when that is empty.
+test_usage_reads_the_users_claude_config_dir_but_not_an_inherited_sessions() {
+    local sdir="$CS_SESSIONS_ROOT/cfg_sess" enc output
+    local user_cfg="$TEST_TMPDIR/user-config" inherited="$TEST_TMPDIR/other-session/.cs/claude-config"
+    mkdir -p "$sdir/.cs/local"
+    enc=$(_encode_cwd_for_claude_test "$sdir")
+    _seed_usage_transcript "$user_cfg/projects/$enc" aaaa1111-2222-4333-8444-555566667777
+    _seed_usage_transcript "$inherited/projects/$enc" bbbb1111-2222-4333-8444-555566667777
+    _seed_usage_transcript "$HOME/.claude/projects/$enc" cccc1111-2222-4333-8444-555566667777
+    output=$( (unset CS_TRANSCRIPTS_DIR CLAUDE_SECURESTORAGE_CONFIG_DIR; CLAUDE_CONFIG_DIR="$user_cfg" "$CS_BIN" -usage cfg_sess) 2>&1) || true
+    assert_output_contains "$output" "aaaa1111" "the user's CLAUDE_CONFIG_DIR is read" || return 1
+    assert_output_not_contains "$output" "cccc1111" "the default config dir is not, beside a user's CLAUDE_CONFIG_DIR" || return 1
+    output=$( (unset CS_TRANSCRIPTS_DIR; CLAUDE_CONFIG_DIR="$inherited" CLAUDE_SECURESTORAGE_CONFIG_DIR="$user_cfg" "$CS_BIN" -usage cfg_sess) 2>&1) || true
+    assert_output_contains "$output" "aaaa1111" "under an inherited session config the shell's own config dir is read" || return 1
+    assert_output_not_contains "$output" "bbbb1111" "the other session's config dir is not" || return 1
+    output=$( (unset CS_TRANSCRIPTS_DIR; CLAUDE_CONFIG_DIR="$inherited" CLAUDE_SECURESTORAGE_CONFIG_DIR="" "$CS_BIN" -usage cfg_sess) 2>&1) || true
+    assert_output_contains "$output" "cccc1111" "with no shell config dir recorded, ~/.claude is read" || return 1
+    assert_output_not_contains "$output" "bbbb1111" "and still not the other session's" || return 1
+}
+
 run_test test_usage_reads_an_encrypted_session_from_its_config
 run_test test_usage_finds_nothing_for_a_locked_encrypted_session
+run_test test_usage_reads_the_users_claude_config_dir_but_not_an_inherited_sessions
 
 report_results

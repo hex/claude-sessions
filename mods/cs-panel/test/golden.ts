@@ -7,7 +7,7 @@ CS_STATUSLINE_BAND	Status line	Band colour	text	-	session	now	applies at the nex
 CS_STATUSLINE_COLS	Status line	Width in columns	text	-	measured	now	applies at the next repaint	-	default	-	A fixed width for the status line; unset, it fits the terminal.
 CS_STATUSLINE_FRAME	Status line	Frame columns	text	-	4	now	applies at the next repaint	6	shell	-	Columns the prompt frame takes from the measured width, so the line is not cut short.
 CS_STATUSLINE_CTX_WARN	Status line	Context warn %	text	-	40	now	applies at the next repaint	50	session	-	Context use at which the gauge turns to its warning colour.
-CS_STATUSLINE_CTX_CRIT	Status line	Context critical %	text	-	65	now	applies at the next repaint	-	default	-	Context use at which the gauge turns to its critical colour.
+CS_STATUSLINE_CTX_CRIT	Status line	Context critical %	text	-	60	now	applies at the next repaint	-	default	-	Context use at which the gauge turns to its critical colour.
 CS_USAGE_NO_REFRESH	Status line	Usage refresh	flagoff	-	off	now	applies at the next repaint	-	default	-	Fetches your Fable usage for the status line; off, it shows only what is already cached.
 CS_SUBAGENT_STATUSLINE_DISABLE	Status line	Subagent rows	flagoff	-	off	now	applies at the next repaint	-	default	-	Styles the rows Claude Code shows for running subagents to match the status line.
 CS_SCOPE_DISABLE	Prompts	Scope grounding	flagoff	-	off	now	applies at your next prompt	1	session	-	Adds a short summary of the relevant code to each prompt that asks for code work.
@@ -19,7 +19,7 @@ CS_CLARIFY_DISABLE	Prompts	Clarifying questions	flagoff	-	off	now	applies at you
 CS_NARRATIVE_PROMPT_DISABLE	Prompts	Narrative line	flagoff	-	off	now	applies at your next prompt	-	default	-	Asks Claude, on each prompt, to note a finding in its narrative before it answers.
 CS_CTX_WARN_CTX	Rotation	Context warning %	text	-	40	now	applies when the next turn ends	-	default	-	Context use at which Claude tells you, once, that the conversation is filling up.
 CS_ROTATE_BUTTON_CTX	Rotation	Rotate button from %	text	-	the warn %	now	applies by your next prompt	-	default	-	Context use from which the band above the prompt shows the rotate key, Ctrl+X 1.
-CS_ROTATE_NUDGE_CTX	Rotation	Rotation nudge %	text	-	65	now	applies when the next turn ends	-	default	-	Context use at which Claude suggests, once, writing a handoff and going on after /clear.
+CS_ROTATE_NUDGE_CTX	Rotation	Rotation nudge %	text	-	60	now	applies when the next turn ends	-	default	-	Context use at which Claude suggests, once, writing a handoff and going on after /clear.
 CS_ROTATE_FORCE_CTX	Rotation	Rotate on its own past %	text	-	80	now	applies by your next prompt	-	default	session line 4: CS_ROTATE_FORCE_CTX=101: not off, 0 or a percentage from 1 to 100	Context use past which cs rotates by itself after a 20 second countdown you can stop.
 CS_NO_ROTATION_WAKE	Rotation	Wake after /clear	flagoff	-	off	/clear	applies at the next /clear or launch	-	default	-	After /clear on a handoff, the fresh conversation starts its next step without you typing.
 CS_ROTATION_KICK_DELAY	Rotation	Wake delay (s)	text	-	2	now	applies at the next rotation	-	default	-	Seconds between tries to wake the fresh conversation after /clear; 0 tries once.

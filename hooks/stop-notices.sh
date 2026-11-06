@@ -211,7 +211,7 @@ _cursor() {  # file, uuid
 # CTX_TEXT is the notice, CTX_CURSOR its cursor file, CTX_MARK the text the
 # transcript records when it was delivered.
 CTX_TEXT=""; CTX_CURSOR=""; CTX_MARK=""
-NUDGE_CTX=$(_num_or "${CS_ROTATE_NUDGE_CTX:-}" 65)
+NUDGE_CTX=$(_num_or "${CS_ROTATE_NUDGE_CTX:-}" 60)
 NUDGE_PCT=$(cat "$LOCAL/context-pct" 2>/dev/null | tr -d '[:space:]' || true)
 case "$NUDGE_PCT" in ''|*[!0-9]*) NUDGE_PCT="";; esac
 # The file holds the LEAD's reading only: the status line writes it for the

@@ -311,6 +311,29 @@ test_resume_of_a_relocated_conversation_runs_claude_in_place_of_cs() {
         "claude replaces cs" || return 1
 }
 
+# The launch card reads the context figure of the conversation the resume
+# continues, found where the resume finds it: once `claude --worktree` has
+# exited, in the parent repo's project dir. At 70% the ask is at crit.
+test_card_shows_the_reading_of_a_relocated_conversation() {
+    local repo="$TEST_TMPDIR/repo" wt out
+    _make_repo "$repo" moved-wt
+    wt="$repo/.claude/worktrees/moved-wt"
+    _seed_relocated_conversation "$repo" "$wt" "$UUID_A" "Port the sync engine to the worktree branch"
+    # The conversation replied, which is what makes the reading its own.
+    printf '{"type":"assistant","sessionId":"%s","message":{"role":"assistant","content":"On it."}}\n' "$UUID_A" \
+        >> "$(_wt_project_dir "$repo")/$UUID_A.jsonl"
+    (cd "$repo" && "$CS_BIN" -adopt --worktrees >/dev/null 2>&1) || { echo "  FAIL: adopt should succeed"; return 1; }
+    printf '70\n' > "$wt/.cs/local/context-pct"
+    _launch_recording_stub
+    out=$( (unset CLAUDE_CONFIG_DIR; CS_NERD_FONTS=0 CS_STATUSLINE_CTX_WARN='' CS_STATUSLINE_CTX_CRIT='' \
+        "$CS_BIN" repo.moved-wt <<< "y") 2>&1) || true
+    assert_eq "◱ 70% context used" "$(grep -F 'context used' <<< "$out" | sed 's/.*▌ //')" \
+        "the card shows the relocated conversation's reading" || return 1
+    assert_eq "1" "$(grep -cxF 'Continue previous conversation? [y/N] ' <<< "$out")" "the ask is at crit" || return 1
+    assert_output_contains "$(sed -n 's/^args=//p' "$TEST_TMPDIR/claude-launch")" "--resume $UUID_A" \
+        "y resumes the relocated conversation" || return 1
+}
+
 # The parent's project dir also holds the parent's own conversations. One that
 # stepped into the worktree carries the worktree's record but began on the
 # parent, so it is not the worktree's conversation: cs stays claude's parent.
@@ -724,6 +747,7 @@ run_test test_dry_run_writes_nothing
 run_test test_rerun_prunes_a_link_whose_worktree_is_gone
 run_test test_same_worktree_name_under_two_repos_opens_the_right_one
 run_test test_resume_of_a_relocated_conversation_runs_claude_in_place_of_cs
+run_test test_card_shows_the_reading_of_a_relocated_conversation
 run_test test_resume_of_a_parent_conversation_under_the_worktree_id_keeps_cs_as_the_parent
 run_test test_resume_of_an_older_relocated_conversation_runs_claude_in_place_of_cs
 run_test test_open_keeps_a_relocated_conversation_beside_a_newer_local_one

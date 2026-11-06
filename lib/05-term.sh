@@ -20,6 +20,7 @@ setup_palette() {
     if [[ -n "${NO_COLOR:-}" ]] || [[ ! -t 1 ]]; then
         RED=''; GREEN=''; YELLOW=''; ORANGE=''; GOLD=''; RUST=''
         COMMENT=''; WHITE=''; DIM=''; BOLD=''; NC=''
+        AMBER=''; CRIT=''; CRIT_FILL=''
         return
     fi
     BOLD='\033[1m'
@@ -44,6 +45,22 @@ setup_palette() {
         COMMENT='\033[38;2;161;136;127m'  # #a1887f - warm taupe
         WHITE='\033[38;2;245;230;211m'    # #f5e6d3 - warm cream
         DIM='\033[2m'
+    fi
+    # The status line's context inks, so the launch card and the resume ask
+    # warn in the colours the bar uses: amber, the crit red, and the bar's
+    # inverted crit capsule, white on the crit red on either theme. KEEP IN
+    # SYNC with the amber), crit) and critink) arms of _sgr in
+    # bin/cs-statusline. The bar's amber also follows a measured background;
+    # these follow CS_TERM_THEME, like the rest of this palette.
+    # shellcheck disable=SC2034  # read by the launch card and the resume ask (lib/75-launch.sh)
+    if [ "${CS_TERM_THEME:-dark}" = "light" ]; then
+        AMBER='\033[38;2;180;83;9m'
+        CRIT='\033[38;2;215;0;21m'
+        CRIT_FILL='\033[48;2;215;0;21;38;2;255;255;255m'
+    else
+        AMBER='\033[38;2;251;191;36m'
+        CRIT='\033[38;2;255;69;58m'
+        CRIT_FILL='\033[48;2;255;69;58;38;2;255;255;255m'
     fi
 }
 setup_palette

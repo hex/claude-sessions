@@ -139,13 +139,17 @@ EXPECT
     local esc; esc=$(printf '\033')
     sed "s/${esc}\[[0-9;:]*m//g" "$out" > "$out.plain"
     out="$out.plain"
-    # A sample renders, and it renders BEFORE the question.
+    # A sample renders, and it renders BEFORE the question. The sample is the
+    # line with the context capsule's reading, a number and its %, not any
+    # line naming ctx: the spawn line carries the checkout's path, which may
+    # hold the word. The rate-limit capsule is its weekly reading on that same
+    # line, never a bare wk anywhere in the transcript.
     local sample_line prompt_line
-    sample_line=$(grep -n 'ctx' "$out" | head -1 | cut -d: -f1)
+    sample_line=$(grep -n 'ctx [0-9][0-9]*%' "$out" | head -1 | cut -d: -f1)
     prompt_line=$(grep -n 'as the Claude Code status line' "$out" | head -1 | cut -d: -f1)
     [ -n "$sample_line" ] || { echo "  FAIL: no status line sample rendered"; return 1; }
     [ -n "$prompt_line" ] || { echo "  FAIL: no prompt"; return 1; }
-    grep -n 'wk' "$out" >/dev/null 2>&1 \
+    sed -n "${sample_line}p" "$out" | grep -q 'wk [0-9][0-9]*%' \
         || { echo "  FAIL: no rate-limit capsule in the sample"; return 1; }
     [ "$sample_line" -lt "$prompt_line" ] \
         || { echo "  FAIL: the sample must render before the question"; return 1; }
