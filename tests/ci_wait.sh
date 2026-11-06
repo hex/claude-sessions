@@ -36,6 +36,29 @@ _gh() {
     fi
 }
 
+_report_skips() {
+    _gh run view "$run_id" --log
+    jq -Rn '
+        reduce inputs as $line ({};
+            ($line | capture("^(?<job>[^\\t]+)\\t[^\\t]*\\t[^ ]+ (?<text>.*)$") // null) as $entry |
+            if $entry == null then .
+            elif $entry.text == "skipped tests:" then
+                .[$entry.job] = {job:$entry.job, lines:[], active:true}
+            elif .[$entry.job].active then
+                if $entry.text == "" then .[$entry.job].active = false
+                else .[$entry.job].lines += [$entry.text]
+                end
+            else .
+            end
+        ) | [.[] | del(.active)]
+    ' "$scratch/response" > "$scratch/skips"
+    jq -r '
+        if length == 0 then "skipped tests: none"
+        else .[] | "skipped tests (\(.job)):", .lines[]
+        end
+    ' "$scratch/skips"
+}
+
 last_wait=''
 reruns=0
 rerun_attempt=0
@@ -73,6 +96,7 @@ while :; do
     fi
     jq -r '.jobs[] | [.conclusion, (.steps | length), .name] | @tsv' "$scratch/response"
     if jq -e '(.jobs | length > 0) and all(.jobs[]; .conclusion == "success")' "$scratch/response" > /dev/null; then
+        _report_skips
         exit 0
     fi
     if jq -e '

@@ -44,8 +44,9 @@ _ci_run_json() { # status attempt jobs
         '{status:$status,attempt:$attempt,headSha:"abc123",jobs:$jobs}')"
 }
 
-_ci_success() { # attempt
+_ci_success() { # attempt log
     _ci_run_json completed "$1" '[{"name":"bash","status":"completed","conclusion":"success","steps":[{}],"databaseId":101}]'
+    _ci_reply "${2:-}"
 }
 
 _ci_wait() {
@@ -67,10 +68,10 @@ test_pending_jobs_wait_until_every_conclusion_exists() {
     _ci_success 1
     _ci_wait 123
     assert_eq 0 "$CI_RC" 'completed success exits 0' || return 1
-    assert_eq $'waiting: 1 of 1 jobs pending (attempt 1)\nsuccess\t1\tbash' "$CI_OUT" 'waiting line prints only on change' || return 1
+    assert_eq $'waiting: 1 of 1 jobs pending (attempt 1)\nsuccess\t1\tbash\nskipped tests: none' "$CI_OUT" 'waiting line prints only on change' || return 1
     assert_eq '' "$CI_ERR" 'success has no error output' || return 1
-    assert_eq 3 "$(cat "$TEST_TMPDIR/count")" 'three reads before success' || return 1
-    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]'
+    assert_eq 4 "$(cat "$TEST_TMPDIR/count")" 'three status reads and one log read' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
 }
 
 test_failure_and_skipped_dependent_stop() {
@@ -130,9 +131,9 @@ test_zero_step_runner_cancellations_rerun() {
     _ci_success 6
     _ci_wait 123
     assert_eq 0 "$CI_RC" 'successful rerun exits 0' || return 1
-    assert_eq $'cancelled\t0\trust (macos-latest)\ncancelled\t0\tbash (macos-latest, 2/2)\nsuccess\t5\tjob-0\nsuccess\t5\tjob-1\nsuccess\t5\tjob-2\nsuccess\t5\tjob-3\nsuccess\t5\tjob-4\nsuccess\t5\tjob-5\ninfrastructure: rerunning failed jobs (1 of 3)\nsuccess\t1\tbash' "$CI_OUT" 'runner cancellations and one rerun' || return 1
+    assert_eq $'cancelled\t0\trust (macos-latest)\ncancelled\t0\tbash (macos-latest, 2/2)\nsuccess\t5\tjob-0\nsuccess\t5\tjob-1\nsuccess\t5\tjob-2\nsuccess\t5\tjob-3\nsuccess\t5\tjob-4\nsuccess\t5\tjob-5\ninfrastructure: rerunning failed jobs (1 of 3)\nsuccess\t1\tbash\nskipped tests: none' "$CI_OUT" 'runner cancellations and one rerun' || return 1
     assert_eq '' "$CI_ERR" 'rerun has no error output' || return 1
-    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]\n["run","view","123","--json","status,attempt,headSha,jobs"]'
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
 }
 
 test_cancelled_build_and_skipped_release_rerun_after_stale_read() {
@@ -143,9 +144,9 @@ test_cancelled_build_and_skipped_release_rerun_after_stale_read() {
     _ci_success 2
     _ci_wait 123
     assert_eq 0 "$CI_RC" 'dependent skip reruns with its build' || return 1
-    assert_eq $'cancelled\t0\tbuild (darwin-arm64, macos-latest, aarch64-apple-darwin)\nskipped\t0\trelease\nsuccess\t1\tlinux\ninfrastructure: rerunning failed jobs (1 of 3)\nsuccess\t1\tbash' "$CI_OUT" 'stale attempt has no second verdict' || return 1
+    assert_eq $'cancelled\t0\tbuild (darwin-arm64, macos-latest, aarch64-apple-darwin)\nskipped\t0\trelease\nsuccess\t1\tlinux\ninfrastructure: rerunning failed jobs (1 of 3)\nsuccess\t1\tbash\nskipped tests: none' "$CI_OUT" 'stale attempt has no second verdict' || return 1
     assert_eq '' "$CI_ERR" 'stale read has no error output' || return 1
-    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]'
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
 }
 
 test_persistent_cancellations_exhaust_the_rerun_limit() {
@@ -196,6 +197,48 @@ test_invalid_rerun_limits_print_usage() {
     _ci_calls ''
 }
 
+test_skip_blocks_preserve_job_names_and_reasons() {
+    _ci_fixture || return $?
+    _ci_run_json completed 2 '[{"name":"bash (ubuntu-latest, 1/2)","status":"completed","conclusion":"success","steps":[{}],"databaseId":101},{"name":"bash (ubuntu-latest, 2/2)","status":"completed","conclusion":"success","steps":[{}],"databaseId":102}]'
+    _ci_reply $'bash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2359658Z skipped tests:\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2359658Z skipped tests:\nbash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2363989Z   test_queue.sh: test_queue_write\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2363989Z   test_local_state.sh: test_atomic_write_keeps_the_mode_with_gnu_stat_on_a_mac (gstat not on PATH)\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2364988Z   test_mod_mermaid.sh: test_mod_unit_tests_pass_under_the_engine_test_kit (claude not on PATH)\nbash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z \nbash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z ====\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z \nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z ===='
+    _ci_wait 123
+    assert_eq 0 "$CI_RC" 'skip reports do not change success' || return 1
+    assert_eq $'success\t1\tbash (ubuntu-latest, 1/2)\nsuccess\t1\tbash (ubuntu-latest, 2/2)\nskipped tests (bash (ubuntu-latest, 1/2)):\n  test_queue.sh: test_queue_write\nskipped tests (bash (ubuntu-latest, 2/2)):\n  test_local_state.sh: test_atomic_write_keeps_the_mode_with_gnu_stat_on_a_mac (gstat not on PATH)\n  test_mod_mermaid.sh: test_mod_unit_tests_pass_under_the_engine_test_kit (claude not on PATH)' "$CI_OUT" 'exact per-job skip blocks' || return 1
+    assert_eq '' "$CI_ERR" 'log parsing has no error output' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_log_without_a_skip_block_reports_none() {
+    _ci_fixture || return $?
+    _ci_success 1 $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z OK: all suites passed\n'
+    _ci_wait 123
+    assert_eq 0 "$CI_RC" 'no skips exits 0' || return 1
+    assert_eq $'success\t1\tbash\nskipped tests: none' "$CI_OUT" 'explicit no-skips line' || return 1
+    assert_eq '' "$CI_ERR" 'no error output' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_only_the_last_skip_block_in_each_job_is_reported() {
+    _ci_fixture || return $?
+    _ci_success 1 $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   test_fixture.sh: test_example\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   test_real.sh: test_actual\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z ===='
+    _ci_wait 123
+    assert_eq 0 "$CI_RC" 'last block exits 0' || return 1
+    assert_eq $'success\t1\tbash\nskipped tests (bash):\n  test_real.sh: test_actual' "$CI_OUT" 'suite output is not the final skip list' || return 1
+    assert_eq '' "$CI_ERR" 'no error output' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_failed_log_fetch_reports_stderr() {
+    _ci_fixture || return $?
+    _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"success","steps":[],"databaseId":101}]'
+    _ci_reply '' 'logs unavailable' 1
+    _ci_wait 123
+    assert_eq 4 "$CI_RC" 'missing logs exit 4' || return 1
+    assert_eq $'success\t0\tbash' "$CI_OUT" 'no skip verdict without logs' || return 1
+    assert_eq 'ci_wait: gh run view 123 --log failed: "logs unavailable"' "$CI_ERR" 'log call error' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
 run_test test_pending_jobs_wait_until_every_conclusion_exists
 run_test test_failure_and_skipped_dependent_stop
 run_test test_cancellation_after_steps_is_a_failure
@@ -207,4 +250,8 @@ run_test test_persistent_cancellations_exhaust_the_rerun_limit
 run_test test_skipped_job_without_a_cancelled_job_fails
 run_test test_failed_rerun_reports_stderr
 run_test test_invalid_rerun_limits_print_usage
+run_test test_skip_blocks_preserve_job_names_and_reasons
+run_test test_log_without_a_skip_block_reports_none
+run_test test_only_the_last_skip_block_in_each_job_is_reported
+run_test test_failed_log_fetch_reports_stderr
 report_results
