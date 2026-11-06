@@ -52,21 +52,40 @@ _gh() {
 }
 
 _report_skips() {
+    local missing_job
+    jq '[.jobs[].name]' "$scratch/response" > "$scratch/jobs"
     _gh run view "$run_id" --log
     jq -Rn '
         reduce inputs as $line ({};
-            ($line | capture("^(?<job>[^\\t]+)\\t[^\\t]*\\t[^ ]+ (?<text>.*)$") // null) as $entry |
+            ($line | sub("\r$"; "") |
+                capture("^(?<job>[^\\t]+)\\t[^\\t]*\\t[0-9]{4}-[0-9]{2}-[0-9]{2}T[^ ]+ (?<text>.*)$") // null) as $entry |
             if $entry == null then .
-            elif $entry.text == "skipped tests:" then
-                .[$entry.job] = {job:$entry.job, lines:[], active:true}
-            elif .[$entry.job].active then
-                if $entry.text == "" then .[$entry.job].active = false
-                else .[$entry.job].lines += [$entry.text]
+            else
+                .[$entry.job] //= {job:$entry.job, phase:"outside", candidate:[], lines:null} |
+                if $entry.text == "skipped tests:" then
+                    .[$entry.job].phase = "lines" | .[$entry.job].candidate = []
+                elif .[$entry.job].phase == "lines" then
+                    if $entry.text == "" then .[$entry.job].phase = "rule"
+                    else .[$entry.job].candidate += [$entry.text]
+                    end
+                elif .[$entry.job].phase == "rule" then
+                    if $entry.text == "================================================================" then
+                        .[$entry.job].lines = .[$entry.job].candidate
+                    else . end |
+                    .[$entry.job].phase = "outside"
+                else .
                 end
-            else .
             end
-        ) | [.[] | del(.active)]
-    ' "$scratch/response" > "$scratch/skips"
+        )
+    ' "$scratch/response" > "$scratch/job-logs"
+    missing_job=$(jq -r --slurpfile jobs "$scratch/jobs" '
+        [$jobs[0][] as $job | select(.[$job] == null) | $job][0] // empty
+    ' "$scratch/job-logs")
+    if [ -n "$missing_job" ]; then
+        printf 'ci_wait: log has no lines for job %s\n' "$missing_job" >&2
+        exit 4
+    fi
+    jq '[.[] | select(.lines != null) | {job, lines}]' "$scratch/job-logs" > "$scratch/skips"
     jq -r '
         if length == 0 then "skipped tests: none"
         else .[] | "skipped tests (\(.job)):", .lines[]

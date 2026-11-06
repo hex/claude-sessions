@@ -48,7 +48,7 @@ _ci_run_json() { # status attempt jobs
 
 _ci_success() { # attempt log
     _ci_run_json completed "$1" '[{"name":"bash","status":"completed","conclusion":"success","steps":[{}],"databaseId":101}]'
-    _ci_reply "${2:-}"
+    _ci_reply "${2-$'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z job finished\n'}"
 }
 
 _ci_wait() {
@@ -206,7 +206,7 @@ test_invalid_rerun_limits_print_usage() {
 test_skip_blocks_preserve_job_names_and_reasons() {
     _ci_fixture || return $?
     _ci_run_json completed 2 '[{"name":"bash (ubuntu-latest, 1/2)","status":"completed","conclusion":"success","steps":[{}],"databaseId":101},{"name":"bash (ubuntu-latest, 2/2)","status":"completed","conclusion":"success","steps":[{}],"databaseId":102}]'
-    _ci_reply $'bash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2359658Z skipped tests:\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2359658Z skipped tests:\nbash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2363989Z   test_queue.sh: test_queue_write\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2363989Z   test_local_state.sh: test_atomic_write_keeps_the_mode_with_gnu_stat_on_a_mac (gstat not on PATH)\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2364988Z   test_mod_mermaid.sh: test_mod_unit_tests_pass_under_the_engine_test_kit (claude not on PATH)\nbash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z \nbash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z ====\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z \nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z ===='
+    _ci_reply $'bash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2359658Z skipped tests:\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2359658Z skipped tests:\nbash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2363989Z   test_queue.sh: test_queue_write\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2363989Z   test_local_state.sh: test_atomic_write_keeps_the_mode_with_gnu_stat_on_a_mac (gstat not on PATH)\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:20.2364988Z   test_mod_mermaid.sh: test_mod_unit_tests_pass_under_the_engine_test_kit (claude not on PATH)\nbash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z \nbash (ubuntu-latest, 1/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z ================================================================\nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z \nbash (ubuntu-latest, 2/2)\tUNKNOWN STEP\t2026-11-06T08:22:21Z ================================================================'
     _ci_wait 123
     assert_eq 0 "$CI_RC" 'skip reports do not change success' || return 1
     assert_eq $'success\t1\tbash (ubuntu-latest, 1/2)\nsuccess\t1\tbash (ubuntu-latest, 2/2)\nskipped tests (bash (ubuntu-latest, 1/2)):\n  test_queue.sh: test_queue_write\nskipped tests (bash (ubuntu-latest, 2/2)):\n  test_local_state.sh: test_atomic_write_keeps_the_mode_with_gnu_stat_on_a_mac (gstat not on PATH)\n  test_mod_mermaid.sh: test_mod_unit_tests_pass_under_the_engine_test_kit (claude not on PATH)' "$CI_OUT" 'exact per-job skip blocks' || return 1
@@ -226,7 +226,7 @@ test_log_without_a_skip_block_reports_none() {
 
 test_only_the_last_skip_block_in_each_job_is_reported() {
     _ci_fixture || return $?
-    _ci_success 1 $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   test_fixture.sh: test_example\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   test_real.sh: test_actual\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z ===='
+    _ci_success 1 $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   test_fixture.sh: test_example\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   test_real.sh: test_actual\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z ================================================================'
     _ci_wait 123
     assert_eq 0 "$CI_RC" 'last block exits 0' || return 1
     assert_eq $'success\t1\tbash\nskipped tests (bash):\n  test_real.sh: test_actual' "$CI_OUT" 'suite output is not the final skip list' || return 1
@@ -265,7 +265,7 @@ _ci_git_range() {
 }
 
 _ci_skip_log() { # suite test
-    printf 'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   %s: %s (tool not on PATH)\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \n' "$1" "$2"
+    printf 'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   %s: %s (tool not on PATH)\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z ================================================================\n' "$1" "$2"
 }
 
 test_skipped_added_registration_stops_the_release() {
@@ -388,6 +388,59 @@ test_invalid_attempt_numbers_are_rejected() {
     _ci_calls '["run","view","123","--json","status,attempt,headSha,jobs"]'
 }
 
+test_empty_or_garbled_logs_fail_closed() {
+    _ci_fixture || return $?
+    _ci_git_range
+    local log
+    for log in '' 'not a GitHub job log'; do
+        _ci_success 1 "$log"
+        _ci_wait 123 --since base
+        assert_eq 4 "$CI_RC" 'empty or garbled logs exit 4' || return 1
+        assert_eq $'success\t1\tbash' "$CI_OUT" 'no skip verdict without job logs' || return 1
+        assert_eq 'ci_wait: log has no lines for job bash' "$CI_ERR" 'missing job named' || return 1
+    done
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_crlf_logs_preserve_the_skip_verdict() {
+    _ci_fixture || return $?
+    _ci_git_range
+    local log
+    log=$(_ci_skip_log test_checks.sh test_new)
+    _ci_success 1 "$log"
+    _ci_wait 123 --since base
+    assert_eq 5 "$CI_RC" 'LF skip exits 5' || return 1
+    local expected=$'success\t1\tbash\nskipped tests (bash):\n  test_checks.sh: test_new (tool not on PATH)\nskipped tests added since base:\n  test_checks.sh: test_new (bash)'
+    assert_eq "$expected" "$CI_OUT" 'LF skip output' || return 1
+    _ci_success 1 "$(printf '%s\n' "$log" | awk '{printf "%s\r\n", $0}')"
+    _ci_wait 123 --since base
+    assert_eq 5 "$CI_RC" 'CRLF skip exits 5' || return 1
+    assert_eq "$expected" "$CI_OUT" 'CRLF skip output' || return 1
+    assert_eq '' "$CI_ERR" 'CRLF parsing emits no errors' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_each_completed_job_needs_log_lines() {
+    _ci_fixture || return $?
+    _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"success","steps":[{}],"databaseId":101},{"name":"rust","status":"completed","conclusion":"success","steps":[{}],"databaseId":102}]'
+    _ci_reply $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z done\n'
+    _ci_wait 123
+    assert_eq 4 "$CI_RC" 'missing job log exits 4' || return 1
+    assert_eq $'success\t1\tbash\nsuccess\t1\trust' "$CI_OUT" 'job table without skip verdict' || return 1
+    assert_eq 'ci_wait: log has no lines for job rust' "$CI_ERR" 'missing rust log named' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_stray_skip_text_without_the_verdict_rule_is_ignored() {
+    _ci_fixture || return $?
+    _ci_success 1 $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   test_fixture.sh: test_example\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z more suite output\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z ================================================================'
+    _ci_wait 123
+    assert_eq 0 "$CI_RC" 'stray header does not change verdict' || return 1
+    assert_eq $'success\t1\tbash\nskipped tests: none' "$CI_OUT" 'only a block followed immediately by the rule counts' || return 1
+    assert_eq '' "$CI_ERR" 'valid log has no command error' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
 run_test test_pending_jobs_wait_until_every_conclusion_exists
 run_test test_failure_and_skipped_dependent_stop
 run_test test_cancellation_after_steps_is_a_failure
@@ -412,4 +465,8 @@ run_test test_invalid_attempt_numbers_are_rejected
 run_test test_range_verdict_is_independent_of_working_directory
 run_test test_renamed_suites_count_as_added_regardless_of_diff_config
 run_test test_moved_and_removed_registrations_are_not_added
+run_test test_empty_or_garbled_logs_fail_closed
+run_test test_crlf_logs_preserve_the_skip_verdict
+run_test test_each_completed_job_needs_log_lines
+run_test test_stray_skip_text_without_the_verdict_rule_is_ignored
 report_results
