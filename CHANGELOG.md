@@ -6,6 +6,9 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Added
+- `cs <name> --resume` opens the session with the resume prompt's `y` already given, for a launcher that cannot press a key, such as a Resume button in a sidebar. It resumes the recorded conversation at any context reading and starts fresh when none is recorded. A pending handoff stays pending and an armed marker is disarmed, as `y` does, and with `-finish` the merge's `/finish` still runs. It refuses `--remote`, since a served session never asks.
+
 ### Changed
 - `cs <name>`'s resume prompt shows how full the conversation it would resume got. The launch card gives the last context reading the status line recorded, in the status line's colours: bold amber from `CS_STATUSLINE_CTX_WARN` (40), white on red from `CS_STATUSLINE_CTX_CRIT`. At the crit mark the prompt defaults to a fresh conversation. A bold red line above it says `The last context reading in this session was 72%, so a fresh conversation is the default. Press y to resume.` and the plain prompt reads `[y/N]`. When the conversation to resume wrote the pending handoff and `-finish` armed no merge, the default is `r`, so Enter starts the fresh conversation from that handoff. A handoff from another checkout, or one an older conversation wrote, keeps `n` as the default. The card shows no figure for a conversation left before its first reply, since the reading beside it belongs to its predecessor.
 - `CS_STATUSLINE_CTX_CRIT` and `CS_ROTATE_NUDGE_CTX` default to 60 instead of 65, so the red context figure, Claude's rotation suggestion and the resume prompt's fresh default start at the same reading.
