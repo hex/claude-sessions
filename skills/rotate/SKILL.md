@@ -311,7 +311,9 @@ vault is locked: tell the user to mount it and stop.
    exception is critical context with this conversation's own handoff
    pending and no merge armed. There Enter and every key the menu does not
    offer (`x`, a space, `q`, `1`) take the default, which starts a fresh
-   conversation from the handoff and arms the marker for it. Nothing
+   conversation from the handoff and arms the marker for it. Escape, which
+   an arrow key also sends first, cancels the launch at any context and
+   leaves the marker untouched. Nothing
    re-arms a disarmed marker, so a later `/clear` then opens
    a bare conversation with this handoff left `unconsumed`. The
    launch prompt recovers either state — it scans the store and offers an
