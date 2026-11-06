@@ -55,8 +55,16 @@ _ci_success() { # attempt log
 
 _ci_wait() {
     CI_RC=0
-    (cd "$CI_REPO" && PATH="$TEST_TMPDIR/fakebin:$PATH" CI_FIXTURE="$TEST_TMPDIR" CI_WAIT_INTERVAL="$CI_INTERVAL" TMPDIR="$CI_TMPDIR" \
-        bash "$CI_WAIT" "$@") > "$TEST_TMPDIR/stdout" 2> "$TEST_TMPDIR/stderr" || CI_RC=$?
+    (
+        cd "$CI_REPO" || exit 4
+        if [ "${CI_INTERVAL+x}" = x ]; then
+            export CI_WAIT_INTERVAL="$CI_INTERVAL"
+        else
+            unset CI_WAIT_INTERVAL
+        fi
+        PATH="$TEST_TMPDIR/fakebin:$PATH" CI_FIXTURE="$TEST_TMPDIR" TMPDIR="$CI_TMPDIR" \
+            bash "$CI_WAIT" "$@"
+    ) > "$TEST_TMPDIR/stdout" 2> "$TEST_TMPDIR/stderr" || CI_RC=$?
     CI_OUT=$(cat "$TEST_TMPDIR/stdout")
     CI_ERR=$(cat "$TEST_TMPDIR/stderr")
 }
@@ -309,8 +317,8 @@ _ci_git_range() {
     git -C "$CI_REPO" commit -qm 'Register a later check'
 }
 
-_ci_skip_log() { # suite test
-    printf 'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   %s: %s (tool not on PATH)\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z ================================================================\n' "$1" "$2"
+_ci_skip_log() { # suite test reason
+    printf 'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z skipped tests:\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z   %s: %s%s\nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z \nbash\tUNKNOWN STEP\t2026-11-06T08:22:20Z ================================================================\n' "$1" "$2" "${3- (tool not on PATH)}"
 }
 
 test_skipped_added_registration_stops_the_release() {
@@ -486,6 +494,89 @@ test_stray_skip_text_without_the_verdict_rule_is_ignored() {
     _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
 }
 
+test_empty_since_revision_prints_usage_without_gh() {
+    _ci_fixture || return $?
+    _ci_success 1
+    _ci_wait 123 --since ''
+    assert_eq 2 "$CI_RC" 'empty since revision exits 2' || return 1
+    assert_eq '' "$CI_OUT" 'empty revision has no verdict' || return 1
+    assert_eq 'usage: bash tests/ci_wait.sh <run-id> [--max-reruns N] [--since <rev>]' "$CI_ERR" 'empty revision prints usage' || return 1
+    _ci_calls ''
+}
+
+test_missing_since_revision_prints_usage_without_gh() {
+    _ci_fixture || return $?
+    _ci_wait 123 --since
+    assert_eq 2 "$CI_RC" 'missing since revision exits 2' || return 1
+    assert_eq '' "$CI_OUT" 'missing revision has no verdict' || return 1
+    assert_eq 'usage: bash tests/ci_wait.sh <run-id> [--max-reruns N] [--since <rev>]' "$CI_ERR" 'missing revision prints usage' || return 1
+    _ci_calls ''
+}
+
+test_zero_step_failure_prevents_a_cancellation_rerun() {
+    _ci_fixture || return $?
+    _ci_run_json completed 1 '[{"name":"build","conclusion":"failure","steps":[]},{"name":"runner","conclusion":"cancelled","steps":[]}]'
+    _ci_reply ''
+    _ci_success 2
+    _ci_wait 123
+    assert_eq 1 "$CI_RC" 'zero-step failure exits 1 without rerunning' || return 1
+    assert_eq $'failure\t0\tbuild\ncancelled\t0\trunner' "$CI_OUT" 'zero-step failure table' || return 1
+    assert_eq '' "$CI_ERR" 'job failure has no command error' || return 1
+    _ci_calls '["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
+test_added_skip_without_a_reason_stops_the_release() {
+    _ci_fixture || return $?
+    _ci_git_range
+    _ci_success 1 "$(_ci_skip_log test_checks.sh test_new '')"
+    _ci_wait 123 --since base
+    assert_eq 5 "$CI_RC" 'added skip without a reason exits 5' || return 1
+    assert_eq $'success\t1\tbash\nskipped tests (bash):\n  test_checks.sh: test_new\nskipped tests added since base:\n  test_checks.sh: test_new (bash)' "$CI_OUT" 'reason-free skip names suite, check and job' || return 1
+    assert_eq '' "$CI_ERR" 'reason-free skip has no command error' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
+test_completed_run_without_jobs_is_not_successful() {
+    _ci_fixture || return $?
+    _ci_run_json completed 1 '[]'
+    _ci_reply ''
+    _ci_wait 123
+    assert_eq 1 "$CI_RC" 'completed run without jobs exits 1' || return 1
+    assert_eq '' "$CI_OUT" 'empty job list has no success verdict' || return 1
+    assert_eq '' "$CI_ERR" 'empty job list has no command error' || return 1
+    _ci_calls '["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
+test_job_without_steps_is_invalid() {
+    _ci_fixture || return $?
+    _ci_run_json completed 1 '[{"name":"bash","conclusion":"success"}]'
+    _ci_reply $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z job finished\n'
+    _ci_wait 123
+    assert_eq 4 "$CI_RC" 'missing steps key exits 4' || return 1
+    assert_eq '' "$CI_OUT" 'invalid job has no verdict' || return 1
+    assert_eq 'ci_wait: invalid run JSON from gh run view 123: ""' "$CI_ERR" 'invalid job diagnostic' || return 1
+    _ci_calls '["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
+test_default_poll_interval_is_thirty_seconds() {
+    _ci_fixture || return $?
+    unset CI_INTERVAL
+    cat > "$TEST_TMPDIR/fakebin/sleep" <<'SLEEP'
+#!/usr/bin/env bash
+set -euo pipefail
+jq -cn --args '$ARGS.positional' -- "$@" >> "$CI_FIXTURE/sleeps"
+SLEEP
+    chmod +x "$TEST_TMPDIR/fakebin/sleep"
+    _ci_run_json in_progress 1 '[{"name":"bash","conclusion":"","steps":[]}]'
+    _ci_success 1
+    _ci_wait 123
+    assert_eq 0 "$CI_RC" 'default-interval wait succeeds' || return 1
+    assert_eq '["30"]' "$(cat "$TEST_TMPDIR/sleeps")" 'default sleep receives exactly 30 seconds' || return 1
+    assert_eq $'waiting: 1 of 1 jobs pending (attempt 1)\nsuccess\t1\tbash\nskipped tests: none' "$CI_OUT" 'default interval prints the wait and verdict' || return 1
+    assert_eq '' "$CI_ERR" 'default interval has no command error' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]'
+}
+
 run_test test_pending_jobs_wait_until_every_conclusion_exists
 run_test test_failure_and_skipped_dependent_stop
 run_test test_cancellation_after_steps_is_a_failure
@@ -517,4 +608,11 @@ run_test test_empty_or_garbled_logs_fail_closed
 run_test test_crlf_logs_preserve_the_skip_verdict
 run_test test_each_completed_job_needs_log_lines
 run_test test_stray_skip_text_without_the_verdict_rule_is_ignored
+run_test test_empty_since_revision_prints_usage_without_gh
+run_test test_missing_since_revision_prints_usage_without_gh
+run_test test_zero_step_failure_prevents_a_cancellation_rerun
+run_test test_added_skip_without_a_reason_stops_the_release
+run_test test_completed_run_without_jobs_is_not_successful
+run_test test_job_without_steps_is_invalid
+run_test test_default_poll_interval_is_thirty_seconds
 report_results
