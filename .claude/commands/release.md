@@ -80,7 +80,7 @@ carry between Bash tool calls:
 
 ```bash
 CONTENT_SHA='<full SHA selected above>'
-RUN_ID=$(gh run list --workflow=test.yml --branch main --commit "$CONTENT_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty') && PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
+RUN_ID=$(gh run list --workflow=test.yml --branch main --commit "$CONTENT_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty') || { echo 'ci_wait: gh run list failed' >&2; exit 4; }; [ -n "$RUN_ID" ] || { echo "ci_wait: no run yet for $CONTENT_SHA; list again in a minute" >&2; exit 4; }; PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
 ```
 
 If `PREV_TAG` is empty, confirm the first-release comparison revision before
@@ -93,7 +93,7 @@ same tag selection command.
 | 1 | Stop, fix the failure in a new commit, and re-verify. |
 | 2 | Correct the arguments shown by the usage line, including an unresolvable `--since` revision. |
 | 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
-| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, wait one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
+| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, including `ci_wait: gh run list failed`, wait one minute and repeat the lookup. `ci_wait: no run yet for <commit or tag>; list again in a minute` means GitHub has not created the run; repeat the lookup after one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
 | 5 | A check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the session narrative (`.cs/memory/narrative.<actor>.md`) and in one line of the release notes, then continue. Fix any other skip before tagging. |
 
 Read the printed skip list for checks the release range depends on, including
@@ -401,7 +401,7 @@ do not carry between Bash tool calls:
 
 ```bash
 SHA='<full release SHA from Step 8>'
-RUN_ID=$(gh run list --workflow=test.yml --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty') && PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
+RUN_ID=$(gh run list --workflow=test.yml --commit "$SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty') || { echo 'ci_wait: gh run list failed' >&2; exit 4; }; [ -n "$RUN_ID" ] || { echo "ci_wait: no run yet for $SHA; list again in a minute" >&2; exit 4; }; PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"
 ```
 
 Judge by the per-job conclusions, never by
@@ -416,7 +416,7 @@ also cancelled or skipped with zero steps.
 | 1 | Stop and fix the failure in a new commit. |
 | 2 | Correct the arguments shown by the usage line, including an unresolvable `--since` revision. |
 | 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
-| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, wait one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
+| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, including `ci_wait: gh run list failed`, wait one minute and repeat the lookup. `ci_wait: no run yet for <commit or tag>; list again in a minute` means GitHub has not created the run; repeat the lookup after one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
 | 5 | A check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the session narrative (`.cs/memory/narrative.<actor>.md`) and in one line of the release notes, then continue. Fix any other skip before tagging. |
 
 Read the printed skip list for checks the release range depends on, including
@@ -464,7 +464,7 @@ Resolve `RUN_ID` in this Bash call because variables do not carry between calls.
 Do not pass `--since`; `release.yml` runs no test suites.
 
 ```bash
-RUN_ID=$(gh run list --workflow=release.yml --branch vX.Y.Z --limit 1 --json databaseId --jq '.[0].databaseId // empty') && bash tests/ci_wait.sh "$RUN_ID"
+RUN_ID=$(gh run list --workflow=release.yml --branch vX.Y.Z --limit 1 --json databaseId --jq '.[0].databaseId // empty') || { echo 'ci_wait: gh run list failed' >&2; exit 4; }; [ -n "$RUN_ID" ] || { echo 'ci_wait: no run yet for vX.Y.Z; list again in a minute' >&2; exit 4; }; bash tests/ci_wait.sh "$RUN_ID"
 ```
 
 | Exit | Action before signing |
@@ -473,7 +473,7 @@ RUN_ID=$(gh run list --workflow=release.yml --branch vX.Y.Z --limit 1 --json dat
 | 1 | Step 9 has already published the release. Stop and report the failure before signing; never re-tag. |
 | 2 | Correct the arguments shown by the usage line. An unresolvable `--since` revision also returns 2, though this step passes no `--since`. |
 | 3 | Check `https://www.githubstatus.com/api/v2/incidents/unresolved.json` and hold the release. The script used all infrastructure reruns. |
-| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, wait one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
+| 4 | Read the error. For a missing `headSha`, run `git fetch` first. For a gh error, including `ci_wait: gh run list failed`, wait one minute and repeat the lookup. `ci_wait: no run yet for <commit or tag>; list again in a minute` means GitHub has not created the run; repeat the lookup after one minute. After `attempt never rose past <a> after the rerun`, read `gh run view <id> --json attempt,status` first. If the attempt has risen, run the script again on that run id. If it has not, treat the first request as lost. Running again requests one more rerun and restarts the rerun counter. |
 | 5 | This step cannot return 5 because it passes no `--since`. In a `--since` gate, 5 means a check added in the range did not run. Stop and investigate each named skip. If CI skips it by design, such as a mermaid test needing a tool `test.yml` never installs, record it in the session narrative (`.cs/memory/narrative.<actor>.md`) and in one line of the release notes, then continue. Fix any other skip before tagging. |
 
 Download the assets, verify every manifest digest, and compare the installer

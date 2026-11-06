@@ -515,14 +515,45 @@ test_release_verifies_ci_workflow() {
 }
 
 test_release_uses_ci_wait_for_each_workflow_gate() {
-    local calls
+    local calls step line runner mode rc expected_error
+    local runners=(bash)
     calls=$(awk '
         /^### / { step = $2 }
-        /(^| && )bash tests\/ci_wait.sh / && (step == "0b." || step == "8c." || step == "10.") {
+        /(^| && |; )bash tests\/ci_wait.sh / && (step == "0b." || step == "8c." || step == "10.") {
             print step "\t" $0
         }
     ' "$RELEASE_MD")
-    assert_eq $'0b.\tRUN_ID=$(gh run list --workflow=test.yml --branch main --commit "$CONTENT_SHA" --limit 1 --json databaseId --jq \'.[0].databaseId // empty\') && PREV_TAG=$(git tag --list \'v*\' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n8c.\tRUN_ID=$(gh run list --workflow=test.yml --commit "$SHA" --limit 1 --json databaseId --jq \'.[0].databaseId // empty\') && PREV_TAG=$(git tag --list \'v*\' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n10.\tRUN_ID=$(gh run list --workflow=release.yml --branch vX.Y.Z --limit 1 --json databaseId --jq \'.[0].databaseId // empty\') && bash tests/ci_wait.sh "$RUN_ID"' "$calls" \
+    mkdir -p "$TEST_TMPDIR/lookup-bin"
+    cat > "$TEST_TMPDIR/lookup-bin/gh" <<'GH'
+#!/bin/sh
+if [ "$LOOKUP_MODE" = failed ]; then
+    printf '%s\n' 'HTTP 502: Bad Gateway' >&2
+    exit 1
+fi
+GH
+    chmod +x "$TEST_TMPDIR/lookup-bin/gh"
+    if command -v zsh >/dev/null 2>&1; then runners+=(zsh); fi
+    while IFS=$'\t' read -r step line; do
+        for runner in "${runners[@]}"; do
+            for mode in failed empty; do
+                rc=0
+                PATH="$TEST_TMPDIR/lookup-bin:$PATH" LOOKUP_MODE="$mode" \
+                    CONTENT_SHA=commit-to-release SHA=commit-to-release \
+                    "$runner" -c "$line" > "$TEST_TMPDIR/lookup.out" 2> "$TEST_TMPDIR/lookup.err" || rc=$?
+                assert_eq 4 "$rc" "$step $runner $mode lookup exits 4" || return 1
+                if [ "$mode" = failed ]; then
+                    expected_error=$'HTTP 502: Bad Gateway\nci_wait: gh run list failed'
+                elif [ "$step" = '10.' ]; then
+                    expected_error='ci_wait: no run yet for vX.Y.Z; list again in a minute'
+                else
+                    expected_error='ci_wait: no run yet for commit-to-release; list again in a minute'
+                fi
+                assert_eq "$expected_error" "$(cat "$TEST_TMPDIR/lookup.err")" "$step $runner $mode lookup diagnostic" || return 1
+                assert_eq '' "$(cat "$TEST_TMPDIR/lookup.out")" "$step $runner $mode lookup has no verdict" || return 1
+            done
+        done
+    done <<< "$calls"
+    assert_eq $'0b.\tRUN_ID=$(gh run list --workflow=test.yml --branch main --commit "$CONTENT_SHA" --limit 1 --json databaseId --jq \'.[0].databaseId // empty\') || { echo \'ci_wait: gh run list failed\' >&2; exit 4; }; [ -n "$RUN_ID" ] || { echo "ci_wait: no run yet for $CONTENT_SHA; list again in a minute" >&2; exit 4; }; PREV_TAG=$(git tag --list \'v*\' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n8c.\tRUN_ID=$(gh run list --workflow=test.yml --commit "$SHA" --limit 1 --json databaseId --jq \'.[0].databaseId // empty\') || { echo \'ci_wait: gh run list failed\' >&2; exit 4; }; [ -n "$RUN_ID" ] || { echo "ci_wait: no run yet for $SHA; list again in a minute" >&2; exit 4; }; PREV_TAG=$(git tag --list \'v*\' --sort=-version:refname | head -1) && bash tests/ci_wait.sh "$RUN_ID" --since "$PREV_TAG"\n10.\tRUN_ID=$(gh run list --workflow=release.yml --branch vX.Y.Z --limit 1 --json databaseId --jq \'.[0].databaseId // empty\') || { echo \'ci_wait: gh run list failed\' >&2; exit 4; }; [ -n "$RUN_ID" ] || { echo \'ci_wait: no run yet for vX.Y.Z; list again in a minute\' >&2; exit 4; }; bash tests/ci_wait.sh "$RUN_ID"' "$calls" \
         'release gates must resolve the run id in the helper command' || return 1
 }
 
