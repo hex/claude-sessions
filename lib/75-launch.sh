@@ -261,7 +261,7 @@ launch_claude_code() {
     unset CS_SPAWN_TOKEN
 
     # Acquire session lock before anything else
-    acquire_session_lock "$session_dir/.cs" "$force" "$session_name" "${remote_mode:+remote}"
+    acquire_session_lock "$session_dir/.cs" "$force" "$session_name" "${remote_mode:+remote}" "$resume_flag"
     # A force chosen at the collision menu is equivalent to --force for the
     # rest of the launch.
     [ "${CS_COLLISION_FORCE:-}" = "1" ] && force="true"

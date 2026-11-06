@@ -19,6 +19,22 @@
     {
       "id": "cs.wrap-snags",
       "text": "run /wrap when a session winds down: before it saves memory and the summary, it lists where the session struggled and files one task per fix for you to pick from, applying none"
+    },
+    {
+      "id": "cs.resume-flag",
+      "text": "a launcher that cannot press a key can open a session with cs <name> --resume: it resumes the recorded conversation without asking, or starts fresh when the session has none"
+    },
+    {
+      "id": "cs.resume-context",
+      "text": "reopening a session with cs <name> shows how full its last conversation got; from the status line's red mark, 60% by default, Enter starts a fresh conversation and y still resumes"
+    },
+    {
+      "id": "cs.rotate-nudge",
+      "text": "from 60% context Claude suggests a rotation and writes a handoff with /rotate after its answer; run /clear and a fresh conversation picks the work up from it"
+    },
+    {
+      "id": "cs.mermaid-draw",
+      "text": "ask Claude to show you how a flow works and the reply draws it as a flowchart; /config's cs: Draw mermaid diagrams turns the drawing off"
     }
   ]
 }

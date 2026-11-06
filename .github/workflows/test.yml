@@ -37,10 +37,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       # tests/test_suite_guards.sh checks every release tag against its
-      # CHANGELOG.md heading, so the checkout fetches the tags too.
+      # CHANGELOG.md heading, so the checkout fetches the whole history and
+      # with it every tag: at the default depth of 1, fetch-tags brings only
+      # the tags on the checked-out commit.
       - uses: actions/checkout@v5
         with:
-          fetch-tags: true
+          fetch-depth: 0
 
       # Bare runners have no global git identity; cs creates commits when it
       # initializes a session, so the session-lifecycle suites need one.

@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-VERSION="2026.11.3"
+VERSION="2026.11.4"
 # A relative CS_SESSIONS_ROOT names a directory under the one cs started in.
 # cs moves into a session before it launches claude, and claude's hooks, the
 # status line and cs-secrets read the variable from wherever they run, so it is
@@ -563,6 +563,7 @@ CS_KNOWN_SHA256=(
     0974dd01895f06c0bd3f8dbb90d89cce9bb8143ef8bc68b90c262e8aac633692
     098ea3d3b5965806d5a4b57e5163496fffe0ed32a6e7d3041de38650ef597905
     09c0b31012936f2f8b08829549b33c35ae8bb76bbbfa3d16cb99306f9e5a87b7
+    0a7693d12a8eaf4852f68b8022494f2fb44507352324c18ba21e28a702c990cf
     0a9ec3757fa5a7e88aa3a6b900e647d0c32f8c494277985704ca4314fd406fb1
     0b396877264f71e1fe8df9f5593d67551d883891218dab902354768c2e2cacc1
     0b823b29bcb59ec3afa7ac718ed6f8aa283c0e07ed665d0792dbad989606cc28
@@ -593,6 +594,7 @@ CS_KNOWN_SHA256=(
     12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5
     12dca7f6d02f19f75865fa2f6e91384a5c8e727b0962e269a6adbb491a95971f
     12f70805836b5a2f74001196f27c3725a915d4526a931af3f1efdac39238b34e
+    12fe62d3e76ace5f5fa96cab0abf9c8822159640d0ac8b7d23df77d7f981d168
     138cb03c6210ee1837d6599af471e8a3a179564aeea2c093f0856de524ca08b8
     13910fa0d6ece796a56ece9b9b21a43a41acc4a81c70ce45bd9bd5d4ce80d82b
     13f387cb787f4b66110cad8aca438be122dec035a88dbcfc13e6ae533c596216
@@ -730,6 +732,7 @@ CS_KNOWN_SHA256=(
     3802bae45a3ab2f19670dc050dca4b27a2e45bc3f207229e826521e38beb9c0d
     38552b36244dbfce8e579f9f53f86ff66f5e7661414b73498db2a20446efd7a7
     38d26f03a61dd4e8e73cc4c04bbf48f7fcef394fd6cc994760120d9ec3b5a84a
+    397f71caaa863ec6c1659a24a88f2faa1e824a05ce2a6c386e15586e535ae7de
     399c7df8140efa2a67824693fa2e90c720ff98e00a72575243223c7857692add
     39e94a5b98088ed150d91f50de425cf9ab5d32c6af34833207bb19cd2e52a066
     3a2bd4a3d88bdb4c72b4a85d24120742fdb7fd81a16c610262d529bebe851d94
@@ -749,6 +752,7 @@ CS_KNOWN_SHA256=(
     3d8e2904d6cf437db11191200f442ecc30711aec490924205e57cfd5cc0c4257
     3da261996d10561cae6a12e7a7cdf44ab4cb8a5c6d96b5d7c6de9ea9462f9fed
     3dc17bb99560802f3257932ce64b7c6186f160e53ba884dec52394ca83890f80
+    3df2e20f640de9b099a8c5c6801a06260d3916a2b94e55c2519e47ba47b1ee4e
     3e7a61a2fdfd10fbbd9ffe90b283ea62b2c2775c1eea0052697f31a8a74742e1
     3ed00e68ac1111cf0db71f672e97f68b89cf98725e617ba7ba4915bcd866ddd1
     3eeac7bb07e1ce70889cdb5dc1cbdfd16115390ffecc414a699ce99166dd40b1
@@ -851,6 +855,7 @@ CS_KNOWN_SHA256=(
     5e0ef916d9cc2cb171f104edcb0f4ab7767b13e2d867dd236e74e68798f70fb3
     5e275bba3498c648c648132d31efb4481335a2ee5c3cdf38d0af40ada01d680f
     5e3e0f38ff158b53194f7ae4c7fe41461752e2ff62082c6d08bb8578cf5b5a68
+    5e3fb3a9b5ba649d0c5b02db87a27bacd73afef1bd1033ddf9ab5da5612f92cf
     5ec4bee955576fe7aa105abcffbf1126e97eee129267edb42d672741e1908f60
     5f34183b1082edef2ebd27176f1474cac88647b5d8578fccbb548fc262c0694f
     5f626af7bd4cf3f0d988e7b2f40c76c706f490fcc9416428c0d90c63fc4f0a7b
@@ -885,6 +890,7 @@ CS_KNOWN_SHA256=(
     6909b481962cddcd80bf35f3c2424bedf5861549f7fd490b9791e352ac7c640f
     69348c57a7230066d20af9cad4b97d89caa431f4fa9e94a31fd07456bd1aa756
     69a2fb0a617f7c32f7fde9235bb55050b9b9d39a8b2ba27af3e8094b7090404f
+    69b235a1793eacf9a06df13ad9a4125e9d5258fb903d7746ed0739013bb47e72
     6a319959fb9c6e2817b9557a3a8d04d935de737e6f56036b0f2b8c96ea619d91
     6a47be149bfd8aab500ed071860ff9fa923ec0e764b82b0f56c2e08a9683c50c
     6aa489261b3448946752ce20431ce39d5be316f3f03124e976608aedb7fa51d8
@@ -1056,6 +1062,7 @@ CS_KNOWN_SHA256=(
     961e4c844acd86f0ab2224dc4f3c127b43bc8cd80f3985fa73850e30d9286aab
     96607e33613b509f43149af0cbd96cbf5d708216ca0658832fcf5667b9678a50
     966440e05707a828f0d84999d9a1865fe3f175add63058ec0d356d19ccc7be9a
+    96cc4d5a8511904fe972fb1b47c35c970d6367485828c6cad0b89926528d7917
     9775221ab90f92f35063ce76bafd073666db4a56f91ebb5abcd662e03be5ea11
     9783681f6400ac60d9b6cfb70405fbb40e9fff2a5021aa63dbeb42b262688a44
     986a751ca603299289428c398266babd67cf173f001861a6f7aad5528ccc5c01
@@ -1116,6 +1123,8 @@ CS_KNOWN_SHA256=(
     a6fc8ed09021cb0709789037eadc2b15db9558502273a66cc548f67b37f3497a
     a7ca7145e6f4fc1a7163dd5dc2f0ee59046e11d687cbe8e8a6a6b56eae9d0cb1
     a80f6b1cb709a8805f77c61ec31e107ddeb38af5c07888faf13c720635043c9d
+    a8a14c22510b49f89557b401730875996064682af719a85322215b61d046b054
+    a8abe8e196ab085c28a30db08b3a52781d14c14ed1134cea5464a75ef03486b6
     a8dd51579409ffdab6852f5995188114f50d3268294df4e290b5857eca08fda5
     a96c77d8f13d893e46116b7d61e517f72bba7f8e10b790517934004be21ae43a
     a99cfc8ef3f705c55287512c8f86d27b89c85e45b6f254a5158f6f8ea46c93c0
@@ -1200,6 +1209,7 @@ CS_KNOWN_SHA256=(
     c14f4a99d73b5c0c22fd95fc70bb4cf3204cb8f4a9a91b4d9c0987eab5a32e1c
     c1ce68d61570ce34feb49b7956aeb2f0258c62fb288d160ee9ac89c6185b5abb
     c207c0bac0f5d4870a72e192862117af59f7cdbbb012d36e237b3106e0cec9db
+    c24183ee25fdd41cada613b2829b2a2ae86e3ee7837392aa1cfb41d4c7952a37
     c256ccde30abcb1fa303c031107de458e3c93698127cf2ca7c5efee62ec6a80e
     c265f33ee7863e4d5ce2691c62f7eda90c6f7b6b315f7a864781ff9ceee40d3c
     c2af6154d1152c7ea99ae879bf09dc33f6fe05e4690675f2f54df73110eb77d1
@@ -1370,6 +1380,7 @@ CS_KNOWN_SHA256=(
     fba40610714fd7201f496d3e1d7a7a6553b06c0da937710f6da3fcf8f4409054
     fbafc4d45025e225947bc1ef8215cbaabbffe92aeebb729487b9a1504d911708
     fbb3ca4863c2032e0e2bbe9a409cb0a515f2b5d308519f2b5e2111423331764b
+    fc0c2b4db8af8da64c52cd4f65b52785ed0a1b2113f5fea196f69d84f83ae5f3
     fc0f047f5cec5ba2ff999c7c16275df474ea7c364ba5fee76306da11d8addbff
     fc2a73985eab32b26946f2501cfc6d124d280fcdc6097dca768f880adedcfaf3
     fce7a2abdb941a6291d1f2d01b042cc5a9b4b97fbdc9d559e80ee84884d8106f
@@ -3586,7 +3597,7 @@ _lock_menu_row() {  # action color label consequence
 }
 
 _lock_collision_menu() {
-    local session_name="$1" lock_pid="$2"
+    local session_name="$1" lock_pid="$2" resume="${3:-}"
     local choice="" feature="" offers_worktree=1
     # Worktrees can't nest: a worktree session offers only force/cancel.
     case "$session_name" in
@@ -3655,7 +3666,12 @@ _lock_collision_menu() {
 
     case "$action" in
         force) return 0 ;;                              # force a second launch here
-        open:*) exec "$0" "${action#open:}" ;;          # resume an existing feature
+        open:*)                                         # resume an existing feature
+            if [ -n "$resume" ]; then
+                exec "$0" "${action#open:}" --resume
+            fi
+            exec "$0" "${action#open:}"
+            ;;
         tui) _vault_leave; exec "$0" -tui ;;            # pick a different session
         new)
             printf '    %bFeature name%b  %b›%b ' "$WHITE" "$NC" "$GOLD" "$NC"
@@ -3769,6 +3785,10 @@ acquire_session_lock() {
     local force="${2:-}"
     local session_name="$3"
     local remote="${4:-}"
+    # Set for `cs <name> --resume`: the menu's feature open and the hint below
+    # carry it, so the open they lead to answers the resume prompt as this one
+    # would have.
+    local resume="${5:-}"
     local lock_file="$meta_dir/session.lock" mutex="$meta_dir/session.mutex.lock"
     local lock_pid taken=0
 
@@ -3788,7 +3808,7 @@ acquire_session_lock() {
     if [ "$force" = "true" ]; then
         warn "Overriding active session lock (PID $lock_pid)"
     elif cs_interactive; then
-        _lock_collision_menu "$session_name" "$lock_pid"
+        _lock_collision_menu "$session_name" "$lock_pid" "$resume"
         # The menu returns only when the user chose force. Record the
         # choice so the rest of the launch (live-duplicate UUID guard
         # included) honors it exactly like an explicit --force.
@@ -3796,7 +3816,7 @@ acquire_session_lock() {
         warn "Overriding active session lock (PID $lock_pid)"
     else
         echo -e "${RED}Error: Session is live (PID $lock_pid)${NC}" >&2
-        echo -e "${DIM}Use --force to override: cs $session_name --force${NC}" >&2
+        echo -e "${DIM}Use --force to override: cs $session_name --force${resume:+ --resume}${NC}" >&2
         exit 1
     fi
     # The replacement is written under the mutex again: a SessionEnd
@@ -15480,7 +15500,7 @@ launch_claude_code() {
     unset CS_SPAWN_TOKEN
 
     # Acquire session lock before anything else
-    acquire_session_lock "$session_dir/.cs" "$force" "$session_name" "${remote_mode:+remote}"
+    acquire_session_lock "$session_dir/.cs" "$force" "$session_name" "${remote_mode:+remote}" "$resume_flag"
     # A force chosen at the collision menu is equivalent to --force for the
     # rest of the launch.
     [ "${CS_COLLISION_FORCE:-}" = "1" ] && force="true"

@@ -151,7 +151,7 @@ removes anything, except the prompt hook's launch mark in `scope-prompt.trace`.
 | `remote.pid` | The pid of the `claude remote-control` server `cs <name> --remote` runs for this session. `cs` writes its own pid here and then becomes the server, so the session lock names the same pid; a background process `cs` starts first removes this file and releases the lock once the server exits. `cs -live`, `cs -doctor`, `cs -rm`, the session manager and the hooks count the session as served only while this pid runs `remote-control --name <name>`. While it does, `cs -rm` and the picker's delete refuse the session even with `--force` or `[F]`, the end of the lead conversation the server started leaves `.cs/session.lock` to the server, and that lead sets no tmux or tab title. `cs -doctor` removes with a warning a file whose pid no longer does: one that background process never got to, as after a restart, where the pid may belong to another program by now. While the server runs, `cs` refuses every other open of the session. Stop the server with Ctrl-C or by closing its window, never with SIGKILL: the session it started keeps running then. |
 | `lead-pid` | The lead's claim on its launch: `<launch pid> <claude pid> <conversation id>`, written by the SessionStart hook of the claude `cs` launched, on every source. The hooks read it to tell that claude from a `claude -p` or a mod process it started when the two pids differ (the resume arm, a `CLAUDE_CODE_BIN` that forks claude). Every launch removes it before claude starts. The lead's SessionEnd, other than at a `/clear` or `/resume`, marks it ended (`<launch pid> <claude pid> <conversation id> ended`) and leaves it, so a claude that another SessionEnd hook starts stays a guest, while the lead still runs and after it exits. Claimers take turns on `lead-pid.mutex.lock` beside it. See [hooks.md](hooks.md#how-a-hook-finds-its-session-cs-resolvesh). |
 | `presence` | This session's advertised status (`cs -status`): a single line read by `cs -live`. Falls back to the README objective when unset. |
-| `pending-handoff` | Basename of the `.cs/handoffs/` file to rotate into — armed by the `rotate` skill (for `/clear`) or by the `r` answer at the resume prompt. Consumed and cleared by the next SessionStart whose source is `startup` or `clear`; left armed on any other source; disarmed by any other resume-prompt answer. |
+| `pending-handoff` | Basename of the `.cs/handoffs/` file to rotate into. Armed by the `rotate` skill (for `/clear`), or at the resume prompt by `r` and, at critical context when the recorded conversation wrote the handoff and `-finish` armed no merge, by Enter or any key the prompt does not offer. Consumed and cleared by the next SessionStart whose source is `startup` or `clear`; left armed on any other source; disarmed by every other resume-prompt answer and by `cs <name> --resume`; left untouched by Escape, which cancels the launch. |
 | `narrative-cursor.<session_id>` | One per conversation, one line `<offset> <epoch>`: how far into the conversation's transcript `stop-notices.sh` has counted work for the narrative reminder, and when it set that. Written under `stop-notices.mutex.lock` after a reminder and whenever the actor's narrative was written since the epoch. |
 | `rotate-nudged` | Conversation UUIDs `stop-notices.sh` has nudged to rotate, one per line, written under `stop-notices.mutex.lock` after the notice is printed; a `<uuid> again` line records the one repeat the hook sends when the transcript does not record the first, written before the repeat is printed. Keeps the 60%-context nudge to at most twice per conversation. |
 | `cs.heartbeat` | UTC timestamp of the last session start at which the cs mod ran — `cs -doctor` reports the mod from this file, never from the plugin directory being present. |
@@ -266,9 +266,10 @@ for the password.
 If a move fails partway, it stops, lists what moved and what did not, and
 leaves the volume mounted so you can finish by hand; until you unmount it,
 `cs -rm` and the picker's delete refuse to remove the session. When it finishes, it lists
-the copies it cannot reach: the session's transcripts in `~/.claude/projects/`,
-its lines in `~/.claude/history.jsonl`, its entries in `~/.claude.json` and that
-file's backups, `.cs/summary.md` and `.cs/brief.md`, git history, and backups.
+the copies it cannot reach: the session's transcripts in `projects/` and its
+lines in `history.jsonl` under your Claude Code config dir (`$CLAUDE_CONFIG_DIR`,
+else `~/.claude`), its entries in `.claude.json` (inside `$CLAUDE_CONFIG_DIR`
+when you set it, else `~/.claude.json`) and that file's backups, `.cs/summary.md` and `.cs/brief.md`, git history, and backups.
 
 ### Setting it up by hand
 
@@ -338,7 +339,8 @@ The mounted volume stays out of git and out of the session's removal:
 
 Link all four names. With only some of them, the rest leaks: `.cs/private`
 without `.cs/claude-config`, for example, keeps the handoffs in the vault, but
-Claude Code's transcript in `~/.claude/projects` records the start-of-session
+Claude Code's transcript in your config dir's `projects/` (`$CLAUDE_CONFIG_DIR`,
+else `~/.claude`) records the start-of-session
 context that names the handoff file and quotes the conversation.
 
 Not covered: copies that backups and filesystem snapshots already made,

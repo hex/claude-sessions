@@ -106,6 +106,13 @@ export CS_SECRETS_BACKEND="keychain"
 # claude, or start exactly one claude: see hooks.md on how a hook knows the lead
 export CLAUDE_CODE_BIN="claude"
 
+# Claude Code's own config dir (unset: ~/.claude). cs reads a conversation's
+# transcript from $CLAUDE_CONFIG_DIR/projects, the cs band reads the same
+# dir, and the installer binds the rotate and wrap keys in its
+# keybindings.json. An encrypted session runs claude on its own
+# .cs/claude-config instead (see session-layout.md).
+export CLAUDE_CONFIG_DIR="$HOME/.config/claude"
+
 # Nerd Font icons in cs banners and session listings (lock, host);
 # the status line uses standard Unicode and is unaffected by this
 export CS_NERD_FONTS="1"

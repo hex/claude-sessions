@@ -832,6 +832,44 @@ test_collision_menu_opens_existing_feature() {
     assert_output_not_contains "$output" "Cancelled" "opening a feature must not cancel" || return 1
 }
 
+# `cs <base> --resume` answers the resume prompt ahead of time. On a live base
+# the collision menu re-execs cs for the feature the user picks, and that open
+# must answer the same way: without the flag the feature's prompt asks, and its
+# read hits the end of stdin, which cancels the launch.
+test_collision_menu_open_feature_keeps_resume_flag() {
+    create_lock_test_session "test-session"
+    "$CS_BIN" "test-session@fix-auth" < /dev/null > /dev/null 2>&1 || true
+    local id
+    id=$(awk '/^claude_session_id:/ { print $2; exit }' "$CS_SESSIONS_ROOT/test-session@fix-auth/.cs/local/state")
+    [ -n "$id" ] || { echo "  FAIL: the feature's first launch recorded no conversation"; return 1; }
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    output=$(printf '1' | CS_ASSUME_TTY=1 "$CS_BIN" test-session --resume 2>&1) || status=$?
+    assert_output_not_contains "$output" "Continue previous conversation?" \
+        "the redirected open must not ask" || return 1
+    assert_output_contains "$output" "--resume $id" \
+        "the redirected open resumes the feature's recorded conversation" || return 1
+}
+
+# Off a terminal the live-session error names the command that would open it,
+# and that command must keep --resume, or a launcher that retries it with
+# --force stops on the prompt it asked cs to skip.
+test_live_session_hint_keeps_resume_flag() {
+    create_lock_test_session "test-session"
+    sleep 300 &
+    local live_pid=$!
+    echo "$live_pid" > "$CS_SESSIONS_ROOT/test-session/.cs/session.lock"
+
+    local output status=0
+    output=$("$CS_BIN" test-session --resume < /dev/null 2>&1) || status=$?
+    assert_eq "1" "$status" "a live session refuses the open" || return 1
+    assert_output_contains "$output" "Use --force to override: cs test-session --force --resume" \
+        "the hint keeps --resume" || return 1
+}
+
 # A spawn's token proves ITS window to ITS session only. The collision menu
 # re-execs cs for a feature of the session; carried in the environment, the
 # token would let a seed staged for that feature (with the published token
@@ -1348,6 +1386,8 @@ run_test test_collision_menu_finds_the_picker_beside_cs
 run_test test_collision_menu_lists_existing_features
 run_test test_collision_menu_caps_features_so_every_row_stays_reachable
 run_test test_collision_menu_opens_existing_feature
+run_test test_collision_menu_open_feature_keeps_resume_flag
+run_test test_live_session_hint_keeps_resume_flag
 run_test test_collision_menu_redirect_carries_no_spawn_token
 run_test test_collision_menu_force_proceeds
 run_test test_collision_menu_force_bypasses_live_duplicate_guard

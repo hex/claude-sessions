@@ -12,7 +12,7 @@ _lock_menu_row() {  # action color label consequence
 }
 
 _lock_collision_menu() {
-    local session_name="$1" lock_pid="$2"
+    local session_name="$1" lock_pid="$2" resume="${3:-}"
     local choice="" feature="" offers_worktree=1
     # Worktrees can't nest: a worktree session offers only force/cancel.
     case "$session_name" in
@@ -81,7 +81,12 @@ _lock_collision_menu() {
 
     case "$action" in
         force) return 0 ;;                              # force a second launch here
-        open:*) exec "$0" "${action#open:}" ;;          # resume an existing feature
+        open:*)                                         # resume an existing feature
+            if [ -n "$resume" ]; then
+                exec "$0" "${action#open:}" --resume
+            fi
+            exec "$0" "${action#open:}"
+            ;;
         tui) _vault_leave; exec "$0" -tui ;;            # pick a different session
         new)
             printf '    %bFeature name%b  %b›%b ' "$WHITE" "$NC" "$GOLD" "$NC"
@@ -195,6 +200,10 @@ acquire_session_lock() {
     local force="${2:-}"
     local session_name="$3"
     local remote="${4:-}"
+    # Set for `cs <name> --resume`: the menu's feature open and the hint below
+    # carry it, so the open they lead to answers the resume prompt as this one
+    # would have.
+    local resume="${5:-}"
     local lock_file="$meta_dir/session.lock" mutex="$meta_dir/session.mutex.lock"
     local lock_pid taken=0
 
@@ -214,7 +223,7 @@ acquire_session_lock() {
     if [ "$force" = "true" ]; then
         warn "Overriding active session lock (PID $lock_pid)"
     elif cs_interactive; then
-        _lock_collision_menu "$session_name" "$lock_pid"
+        _lock_collision_menu "$session_name" "$lock_pid" "$resume"
         # The menu returns only when the user chose force. Record the
         # choice so the rest of the launch (live-duplicate UUID guard
         # included) honors it exactly like an explicit --force.
@@ -222,7 +231,7 @@ acquire_session_lock() {
         warn "Overriding active session lock (PID $lock_pid)"
     else
         echo -e "${RED}Error: Session is live (PID $lock_pid)${NC}" >&2
-        echo -e "${DIM}Use --force to override: cs $session_name --force${NC}" >&2
+        echo -e "${DIM}Use --force to override: cs $session_name --force${resume:+ --resume}${NC}" >&2
         exit 1
     fi
     # The replacement is written under the mutex again: a SessionEnd

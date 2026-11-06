@@ -55,6 +55,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 - `cs <name>` creates or resumes a session. Names such as `cs homeassistant`, `cs router-config`, and `cs research-llms` work for home automation, network setup, and research.
 - `cs .` requires the exact root of a known session, adopted project, or feature worktree. It refuses subdirectories and unrelated directories with adoption guidance.
 - cs resumes the [recorded conversation](session-layout.md#machine-local-files-cslocal-gitignored) with `claude --resume`, rather than `--continue`. Launches pass `--name` and a per-session `/color`.
+- `cs <name> --resume` and `cs . --resume` resume the recorded conversation without asking, at any context reading, or start fresh when the session has none recorded. A pending handoff stays pending, and with `-finish` the merge's `/finish` still runs. They refuse `--remote`. See [launch answers](#conversation-rotation-and-wrap).
 - The duplicate-conversation guard recognizes identifiers after `--session-id`, `--resume`, `-r`, and `--parent-session-id`. A leftover shell child carrying the identifier does not block a launch. `--force` overrides that guard and the ordinary process lock.
 - See [session commit rules](hooks.md#stop-noticessh-stop-async) for the initial commit and [autosave](hooks.md#autosave-commitssh-posttooluse-on-writeedit) for later crash recovery.
 - See [session resolution](hooks.md#how-a-hook-finds-its-session-cs-resolvesh) for desktop and IDE hooks, their contribution without rebinding the launched conversation, and the plain-terminal `claude` exception.
@@ -143,7 +144,6 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 | `cs myproj@perf` | Opens another independent feature. |
 | `cs <base> -features [--porcelain]` | Lists each feature's branch, commits ahead and readiness: `ready`, `no commits`, `merged`, `retire staged`, `uncommitted changes`, `N files untracked`, `base session is live` or `worktree session is live`, `base has uncommitted changes`, or `base vault is locked`. `--porcelain` prints one tab-separated record per feature with the raw state key. |
 | `cs <base> -finish <feature>` | Opens the base with `/finish <feature>`. |
-| `cs <name> --resume` | Resumes without asking, or starts fresh with no recorded conversation. Refuses `--remote`. |
 | `cs -rm myproj@fix-auth` | Abandons the feature. |
 
 - A live base offers existing features, a new feature, a forced launch, the picker, or cancellation.
