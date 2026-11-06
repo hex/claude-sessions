@@ -16200,7 +16200,7 @@ EOF
         # context reading: the fresh default at crit is the attended ask's.
         # Unbound, the default is fresh, and a pending handoff waits for an
         # attended open.
-        if [ -n "$spawn_kick" ]; then
+        if [ -n "$spawn_kick" ] || [ -n "$resume_flag" ]; then
             response=""
             [ -n "$claude_session_id" ] || response="n"
         elif [ -z "$claude_session_id" ] && [ -z "$pending_handoff" ]; then
