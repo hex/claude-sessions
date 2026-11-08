@@ -4,6 +4,14 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Added
+- `cs -doctor` reports two leftovers of a `/finish` a signal ended, which nothing named before: a `.retire-<base>@<task>.<pid>` directory at the sessions root, holding a worktree's `.cs` set aside for the record fuse, once its pid is gone, with the move or fuse to do by hand; and a `finish-progress.json` whose `step` is no outcome (`landed`, `refused`, `retired`) and whose pid is gone, with the `/finish` to run again. Both rows report and delete nothing; a live pid is a run in progress.
+
+### Fixes
+- SessionStart removes the `pending-handoff` marker only once the handoff's `status:` flip to `consumed` is written. When the handoff store refused the write, the marker went anyway, so the handoff stayed `unconsumed` and offered at launch while `/clear` no longer continued from it, and nothing said so. Now the marker stays armed, the rotation still loads, the preamble carries a WARNING naming the handoff, and the next `startup` or `clear` retries the same flip.
+
 ## 2026.11.4
 
 ### Added

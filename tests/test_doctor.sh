@@ -1526,6 +1526,73 @@ test_doctor_warns_on_a_claimed_seed_whose_open_is_gone() {
         "doctor should leave a live open's claim alone" || return 1
 }
 
+# A /finish retire killed between setting the worktree's .cs aside and the
+# record fuse leaves $SESSIONS_ROOT/.retire-<worktree>.<pid>; nothing else
+# names it.
+test_doctor_warns_on_a_retire_aside_whose_run_is_gone() {
+    local dead
+    sh -c 'exit 0' & dead=$!
+    wait "$dead"
+    mkdir -p "$CS_SESSIONS_ROOT/.retire-test-session@feat.$dead/cs"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Retire leftovers: $CS_SESSIONS_ROOT/.retire-test-session@feat.$dead holds the session records of test-session@feat, set aside by a /finish retire (pid $dead) that is no longer running" \
+        "doctor should name the aside directory a killed retire left" || return 1
+    assert_output_contains "$output" "fuse what is missing into $CLAUDE_SESSION_META_DIR by hand, then delete that directory" \
+        "the row carries the retire's own remedy" || return 1
+    assert_dir "$CS_SESSIONS_ROOT/.retire-test-session@feat.$dead" \
+        "doctor reports and never deletes" || return 1
+    assert_output_contains "$output" "Complete with [1-9][0-9]* warning(s)\." "the warning is counted" || return 1
+}
+
+test_doctor_leaves_a_retire_aside_alone_while_its_run_lives() {
+    mkdir -p "$CS_SESSIONS_ROOT/.retire-test-session@feat.$$/cs"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "Retire leftovers" \
+        "a live retire's aside is a retire in progress" || return 1
+}
+
+# A /finish killed mid-run leaves finish-progress.json at a step that is no
+# outcome; the cs mod treats it as over, and nothing else says so.
+test_doctor_warns_on_a_finish_record_whose_run_is_gone() {
+    local dead
+    sh -c 'exit 0' & dead=$!
+    wait "$dead"
+    local f="$CLAUDE_SESSION_META_DIR/local/finish-progress.json"
+    printf '{"id":"%s-1","pid":%s,"task":"feat","sha":"abc1234","step":"merging","ts":1}\n' "$dead" "$dead" > "$f"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Finish progress: $f records /finish feat at step 'merging' from pid $dead, which is no longer running; that run ended without landing, refusing or retiring" \
+        "doctor should name the record a killed /finish left" || return 1
+    assert_output_contains "$output" "Run /finish feat again" "the row says how to finish the work" || return 1
+    assert_file_exists "$f" "doctor reports and never deletes" || return 1
+    assert_output_contains "$output" "Complete with [1-9][0-9]* warning(s)\." "the warning is counted" || return 1
+}
+
+test_doctor_leaves_a_finish_record_at_an_outcome_alone() {
+    local dead step
+    sh -c 'exit 0' & dead=$!
+    wait "$dead"
+    local f="$CLAUDE_SESSION_META_DIR/local/finish-progress.json"
+    local output
+    for step in landed refused retired; do
+        printf '{"id":"%s-1","pid":%s,"task":"feat","sha":"abc1234","step":"%s","ts":1}\n' "$dead" "$dead" "$step" > "$f"
+        output=$("$CS_BIN" -doctor 2>&1) || true
+        assert_output_not_contains "$output" "Finish progress" \
+            "a record at '$step' is a finished run, dead pid or not" || return 1
+    done
+}
+
+test_doctor_leaves_a_finish_record_alone_while_its_run_lives() {
+    local f="$CLAUDE_SESSION_META_DIR/local/finish-progress.json"
+    printf '{"id":"%s-1","pid":%s,"task":"feat","sha":"abc1234","step":"gate","ts":1}\n' "$$" "$$" > "$f"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "Finish progress" \
+        "a live pid is a /finish in progress" || return 1
+}
+
 test_doctor_warns_on_orphaned_spawn_seed() {
     mkdir -p "$CS_SESSIONS_ROOT/.spawn"
     printf 'boss\ndo work\n' > "$CS_SESSIONS_ROOT/.spawn/ghost.seed"
@@ -1682,6 +1749,11 @@ run_test test_doctor_completes_after_spawn_warning
 run_test test_doctor_warns_on_abandoned_spawn_staging
 run_test test_doctor_warns_on_a_claimed_seed_whose_open_is_gone
 run_test test_doctor_warns_on_orphaned_spawn_seed
+run_test test_doctor_warns_on_a_retire_aside_whose_run_is_gone
+run_test test_doctor_leaves_a_retire_aside_alone_while_its_run_lives
+run_test test_doctor_warns_on_a_finish_record_whose_run_is_gone
+run_test test_doctor_leaves_a_finish_record_at_an_outcome_alone
+run_test test_doctor_leaves_a_finish_record_alone_while_its_run_lives
 run_test test_doctor_spawn_ok_when_seeds_clean
 run_test test_doctor_warns_on_dangling_spawned_by
 run_test test_doctor_spawned_by_ok_when_spawner_exists
