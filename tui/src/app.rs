@@ -6350,6 +6350,63 @@ mod tests {
         );
     }
 
+    /// A revealed value belongs to the popup that revealed it. Two exits from
+    /// the popup are not Esc or q: a delete whose helper cannot be spawned,
+    /// and dismissing the output of a delete that emptied the list. After
+    /// either, opening the popup again inside the five-second reveal must not
+    /// draw the value. The stand-in `cs` keeps no state, so it lists the key
+    /// again on the second open.
+    #[cfg(unix)]
+    #[test]
+    fn a_revealed_secret_is_not_drawn_when_the_popup_opens_again() {
+        use std::os::unix::fs::PermissionsExt;
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join(format!("cs-tui-reveal-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let stub = tmp.join("cs-stub");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\ncase \"$3\" in\n    list) printf 'Secrets for session: beta\\n  - API_KEY\\n' ;;\n    get) printf 'sk-peeked-42\\n' ;;\n    delete) printf 'Removed API_KEY\\n' ;;\nesac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let rows = |app: &mut App| -> String {
+            let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+            terminal.draw(|frame| crate::ui::render(app, frame)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            (0..buf.area.height)
+                .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect::<String>() + "\n")
+                .collect()
+        };
+        for exit in ["unspawnable delete", "last key deleted"] {
+            std::env::set_var("CS_BIN", &stub);
+            let mut app = App::new(sample_sessions());
+            app.mode = Mode::SessionMenu;
+            app.handle_key(KeyEvent::from(KeyCode::Char('s')));
+            app.handle_key(KeyEvent::from(KeyCode::Char('v')));
+            assert!(rows(&mut app).contains("sk-peeked-42"), "{exit}: the reveal is drawn while the popup is open");
+
+            if exit == "unspawnable delete" {
+                std::env::set_var("CS_BIN", "/nonexistent/cs");
+                app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+                std::env::set_var("CS_BIN", &stub);
+            } else {
+                app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+                app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+            }
+            assert_eq!(app.mode, Mode::Normal, "{exit}: the popup closed");
+
+            app.mode = Mode::SessionMenu;
+            app.handle_key(KeyEvent::from(KeyCode::Char('s')));
+            let screen = rows(&mut app);
+            assert!(screen.contains("API_KEY"), "{exit}: the popup opened again:\n{screen}");
+            assert!(!screen.contains("sk-peeked-42"), "{exit}: the value from the closed popup is drawn:\n{screen}");
+            assert_eq!(app.peek_remaining(), 0, "{exit}: no reveal is counting down");
+        }
+        std::env::remove_var("CS_BIN");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
     #[test]
     fn time_section_classifies_ages() {
         use std::time::{Duration, SystemTime};
