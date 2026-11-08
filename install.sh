@@ -1514,7 +1514,7 @@ CS_PAYLOAD_SHA256=(
     "68c76099cba2c4cff85321b35745bf148df18f6cc538743a31a424d250ef478d  hooks/scope-prompt.sh"
     "9e06eaa16960dff49881234c8a479c2f8d2dd8d672283056e1591c4528e755ab  commands/checkpoint.md"
     "054454213cef99daeec0a56bc2b39496b7044e46795b0fca29be59101941e18a  commands/wrap.md"
-    "2520a6d54d75e3e9f1768160826a8b9f21e38e2234538cc62e3ec6337008fc28  skills/store-secret/SKILL.md"
+    "1635cf38bf0af9c16c631e850e3f1a0095ee77c97122d2930cfd9cf3fd617547  skills/store-secret/SKILL.md"
     "eaf2ade4ce76f74b8d6ab979f536007606e77308a0c33dfedf28d31befd1eaec  skills/prose-hygiene/SKILL.md"
     "fc0c2b4db8af8da64c52cd4f65b52785ed0a1b2113f5fea196f69d84f83ae5f3  skills/rotate/SKILL.md"
     "0d88656291eb6078b08187204807c72bd926b93c360041767cdbc26e64567353  skills/finish/SKILL.md"
