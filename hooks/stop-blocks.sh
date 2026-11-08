@@ -551,6 +551,14 @@ QCURRENT_FILE="$QDIR/queue.current"
 # every block below is the lead's, and a teammate's hook writing the shared
 # file would overwrite the lead's verdict. The file is overwritten per Stop,
 # never appended.
+#
+# The reader is hooks/stop-notices.sh:_verdict. It sees one of: no file, a
+# line keyed to another Stop, pending, approve or block. No file or another
+# Stop's key waits a 2 s grace and then lets the notices go ahead; pending
+# waits up to CS_STOP_VERDICT_WAIT and then goes ahead; block silences them. A
+# writer killed by SIGKILL never runs the EXIT trap, so pending stays and the
+# reader fails open. A failed write (the `|| true` below) leaves the previous
+# Stop's line, which the reader takes for another Stop's key.
 STOP_VERDICT=approve
 _verdict_post() {  # word
     cs_write_atomic "$LOCAL/stop-verdict" printf '%s %s %s\n' "$STOP_KEY" "$1" "$(date +%s)" || true

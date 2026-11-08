@@ -168,7 +168,7 @@ removes anything, except the prompt hook's launch mark in `scope-prompt.trace`.
 | `vault-waiter.pid` | The background waiter the SessionEnd hook leaves to unmount the vault once the lead conversation's Claude Code exits. An open that finds the vault mounted with nothing alive behind it stops this waiter first. |
 | `vault-detach.pid` | The `hdiutil detach` that waiter started, so a reopen can stop an unmount in flight. |
 | `queue/` | The walk-away task queue (`cs -queue`): one file per task, staged in `queue.tmp/` and renamed into place so the drain never reads a torn entry. The drain pops the lexically first file by moving it aside — atomic against a second drain. |
-| `queue.state` | Drain state machine for the queue: `idle`, `armed`, or `draining`. |
+| `queue.state` | Drain state machine for the queue: `idle`, `armed`, or `draining`. [Queue states and transitions](#queue-states-and-transitions) lists what writes and reads it. |
 | `queue.mode` | How a started run hands over its tasks: `subagents` or `workflow`; absent runs them in the conversation. Written by `cs -queue start`, removed when the run finishes or the queue is cleared. A run the failures breaker stops keeps it until the next `cs -queue start`. |
 | `queue.done` | Log of completed queued tasks, appended as each is drained. |
 | `queue.current` | Name of the queue file the drain last handed out. Only that task is logged done when its turn ends, and a draining queue with no such record parks instead of guessing. Removed when the run finishes, parks, or the queue is cleared. |
@@ -196,6 +196,39 @@ removes anything, except the prompt hook's launch mark in `scope-prompt.trace`.
 | `spawned-by` | Spawner session name for a `cs -spawn`ed worker; deleted after the drain-finished notify (one-shot). A brief-only spawn writes it with no queue to drain, so it stays until a later queue in that session drains, and that drain reports to the spawner. |
 | `inherited-topics/` | In a feature of a session whose `.gitignore` lists `.cs`: one file per memory topic the feature copied from its base, named like the topic and holding the copy's `<checksum> <bytes>`. `/finish` reads it to tell a topic the base deleted from one the feature wrote, and stops when it cannot read a file here. |
 | `inherited/` | In the same features: one file per other record the feature copied from its base (the README, plans, the summary and the rest), at `inherited/<path>` and holding the copy's `<checksum> <bytes>`. `/finish` reads it to tell a copy the feature edited from one it left alone. |
+
+### Queue states and transitions
+
+The queue files and `failures` live in the session's cs-files directory: `.cs/private/` in an encrypted session, `.cs/local/` otherwise. `spawned-by`, `context-pct` and `limits` are always in `.cs/local/`. An absent `queue.state` reads as `idle`.
+
+The `Stop` rows run only on the lead's `Stop`, and only while `queue/` holds at least one task. A teammate's `Stop`, or a `Stop` on an empty queue, writes nothing and leaves `queue.state` unchanged, `armed` included. A `Stop` on an `idle` queue that holds tasks also writes nothing. Each pop moves the task that `queue.current` names to `queue.popping.<pid>`, reads it, and removes it.
+
+| Trigger | Writer | State | Writes | Removes | Answer |
+|---------|--------|-------|--------|---------|--------|
+| `cs -queue start`, with or without `subagents` or `workflow`. The cs mod's band runs the same command when you press Start (`offerToStart` in `mods/cs/hooks/register.tsx`). | `lib/55-queue.sh:_queue_start` | any to `armed` | `queue.mode` when you give a mode, then `queue.state`. | `queue.mode` when you give no mode. | |
+| The open of a `cs -spawn`ed session whose seed holds tasks. | `lib/75-launch.sh:launch_claude_code`, through `_queue_set_state` | any to `armed` | `spawned-by` when the seed names a spawner, one file per task in `queue/`, then `queue.state`. | Nothing. `queue.mode` keeps whatever it held. | |
+| `cs -queue clear`. | `lib/55-queue.sh:_queue_clear` | any to absent | Nothing. | `queue/`, `queue.tmp/`, `queue.state`, `queue.mode`, `queue.failed` and `queue.current`. `queue.done`, `failures` and `spawned-by` stay. | |
+| The lead's `Stop` while `armed`. | `hooks/stop-blocks.sh`, the armed branch (`_qcurrent_write`, `_qstate_write`) | `armed` to `draining` | `queue.current` (the first task's file name), then `queue.state`, then a `drain_started` line in `notifications.jsonl`. | `failures` and `queue.failed`. | Blocks with the first task. |
+| The lead's `Stop` while `draining`, when `queue.current` is missing or empty, or names `.`, `..` or a path with a `/`. | `hooks/stop-blocks.sh`, the draining branch (`_qstate_write`) | `draining` to `idle` | `queue.state`. | `queue.current`. `queue.mode`, `queue.failed`, `failures` and `spawned-by` stay. | Approves with a `systemMessage`. Logs nothing done, adds no inbox line and sends the spawner no mail. |
+| The lead's `Stop` while `draining`, when `failures` is at or above `CS_QUEUE_MAX_FAILURES`, the final message carries a `cs-task-failed` line, or `queue.failed` exists. A failure report wins over every other breaker. | `hooks/stop-blocks.sh`, the draining branch (`_qstate_write`, then `_qpark`) | `draining` to `idle` | `queue.failed` when the final message carries the line, then `queue.state`, then a `breaker_tripped` line. | `failures`, `queue.failed` and `queue.current`. The task stays first in `queue/`. `queue.mode` and `spawned-by` stay. | Blocks with the debrief and mails the spawner. |
+| The lead's `Stop` while `draining`, when `context-pct` is at or above `CS_QUEUE_MAX_CTX`, or the five-hour reading in `limits` is at or above `CS_QUEUE_MAX_5H`, and tasks remain after the pop. | `hooks/stop-blocks.sh`, the draining branch (`_qstate_write`, the pop, then `_qpark`) | `draining` to `idle` | `queue.state` before the pop, then a `queue.done` line, a `task_done` line and a `breaker_tripped` line. | The finished task's file, `failures`, `queue.failed` and `queue.current`. `queue.mode` and `spawned-by` stay. | Blocks with the debrief and mails the spawner. |
+| The lead's `Stop` while `draining`, with no breaker tripped, when tasks remain after the pop. | `hooks/stop-blocks.sh`, the draining branch (the pop, then `_qcurrent_write`) | stays `draining` | A `queue.done` line, a `task_done` line, then `queue.current` (the next task's file name). | The finished task's file and `failures`. | Blocks with the next task. |
+| The lead's `Stop` while `draining`, when the pop empties the queue, with or without a context or five-hour trip. | `hooks/stop-blocks.sh`, the draining branch | `draining` to `idle` | A `queue.done` line, a `task_done` line, `queue.state`, then a `drain_finished` line. | The last task's file, `queue.mode`, `queue.current`, `spawned-by` after the mail to the spawner, and `failures`. | Blocks and asks for a summary. A trip on the last task adds no `breaker_tripped` line. |
+| The lead's `Stop` while `draining`, when the pop's `mv` fails because a second drain moved the task first. | `hooks/stop-blocks.sh`, the draining branch (`_qstate_write`) | `draining` to `idle` | `queue.state`. | `queue.current`. `queue.mode` and `failures` stay. | No answer from the drain. The `Stop` goes on to the mail wake. Adds no inbox line and sends the spawner no mail. |
+| A failed tool call, in any state. | `hooks/tool-failure-logger.sh` | unchanged | `failures`, its count plus one. | Nothing. | |
+
+When `queue.current` names a task that is no longer in `queue/`, the pop logs nothing and the `Stop` goes on as if the pop had worked. A `cs -queue start` while `draining` writes `armed`, so the next `Stop` hands out the first task again and logs nothing done for the task in progress.
+
+When `_qstate_write` cannot write `idle`, it removes `queue.state` instead, which reads as `idle`. When it can do neither, or when any other `queue.state` or `queue.current` write fails, the `Stop` approves with a `cs task queue: could not write <path>` message and exits. A park writes `idle` before the pop, so a failed write there leaves `draining` with the task still queued, and the next `Stop` runs the same checks on the same task. The armed branch writes `queue.current` before `queue.state`, so a failed state write leaves `armed` with `queue.current` naming the first task. An advance writes `queue.current` after the pop, so a failed write leaves it naming the finished task, and the next `Stop` logs nothing and hands out the first task.
+
+Four files read `queue.state`, and each one reads it only while the queue holds a task:
+
+- `hooks/stop-blocks.sh` removes all whitespace (`tr -d '[:space:]'`). The drain hands out a task only for `armed` or `draining`. The mail wake, on `Stop` and on `FileChanged`, stands down for the same two words.
+- `hooks/stop-notices.sh` removes all whitespace and stands its notices down for `armed` or `draining`.
+- The cs mod's `queueRunning` (`mods/cs/hooks/register.tsx`) trims the line and counts `armed` or `draining` as running. It reads `.cs/private/queue.state` first, and `.cs/local/queue.state` only when it cannot read the first.
+- cs-tui's `queue_active` (`tui/src/session.rs`) trims the line and is true only for `draining`, so cs-tui shows an `armed` queue as not running.
+
+Every reader treats an unknown word, an absent file and an unreadable file as a queue that is not running. The drain then hands out nothing, the mail wake and the notices go ahead, and the band offers its start key.
 
 ## Encrypted sessions
 

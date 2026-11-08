@@ -501,6 +501,12 @@ fi
 # earlier Stop's line is never this one's; its epoch is for a reader. Lead
 # only: every block the sync hook answers with is the lead's, and only the
 # lead's sync hook writes the file.
+#
+# The writer is hooks/stop-blocks.sh:_verdict_post, called with pending and
+# then from its EXIT trap. The states this reader tells apart: no file, a line
+# keyed to another Stop or carrying an unknown word (both print nothing),
+# pending, approve and block. A writer killed by SIGKILL leaves pending, and
+# the wait below then fails open.
 _verdict() {  # prints pending, approve or block for this Stop; nothing otherwise
     local k w t
     [ -f "$LOCAL/stop-verdict" ] || return 0
