@@ -43,13 +43,17 @@ _append_attribute_line() {  # file line
 
 # A clone delivers symlinks like any other file, and cs writes through them
 # at open: `.cs/README.md -> ~/.zshrc` would take the README's frontmatter.
-# Refuse any link under .cs, or at a root file cs rewrites, whose writes land
-# outside the session. A link to a directory inside the session is followed
-# and that directory scanned too: .cs/memory -> ../payload makes payload's
+# Refuse links under .cs, or at a root file cs rewrites, whose writes land
+# outside the session. Untracked .cs/local also holds tools' own files.
+# Under .cs/local, direct entries and links inside cs's directories are checked.
+# Deeper links in other folders belong to tools.
+# A link to a directory inside the session is followed and that directory
+# scanned too: .cs/memory -> ../payload makes payload's
 # links cs's write targets. A hand-made vault's mount is the user's and is not
 # walked; cs_write_atomic still refuses a write leading out of it.
 _refuse_links_out_of_session() {  # dir
     local dir="$1" dir_p p link real cur todo out seen="" prune="" cfg=""
+    local initial_scan=1 local_entry local_path owned_dir local_owned
     dir_p=$(cd -P -- "$dir" 2>/dev/null && pwd -P) || return 0
     # cs links the shell's settings, skills and the rest into an encrypted
     # session's config dir by design; that dir is skipped only while
@@ -80,8 +84,25 @@ _refuse_links_out_of_session() {  # dir
         case "$cur" in "$prune"|"$prune"/*) [ -n "$prune" ] && continue ;; esac
         case "$cur" in "$cfg"|"$cfg"/*) [ -n "$cfg" ] && continue ;; esac
         case "$seen" in *$'\n'"$cur"$'\n'*) continue ;; esac
-        seen="$seen"$'\n'"$cur"$'\n'
+        # An alias back to .cs must scan it strictly, including tool paths.
+        [ "$initial_scan" = 1 ] || seen="$seen"$'\n'"$cur"$'\n'
         while IFS= read -r -d '' p; do
+            if [ "$initial_scan" = 1 ]; then
+                case "$p" in "$dir_p/.cs/local/"*/*)
+                    local_entry=${p#"$dir_p/.cs/local/"}
+                    local_entry=${local_entry%%/*}
+                    local_path="$dir_p/.cs/local/$local_entry"
+                    local_owned=0
+                    for owned_dir in mail queue queue.tmp task-archive context-date rotation-kick retire-staged retire-runs inherited inherited-topics; do
+                        # Case aliases reach cs's directories under the filesystem's own rules.
+                        if [ "$local_path" -ef "$dir_p/.cs/local/$owned_dir" ]; then
+                            local_owned=1
+                            break
+                        fi
+                    done
+                    [ "$local_owned" = 1 ] || continue
+                esac
+            fi
             link=$p real=""
             if [ -d "$p" ]; then
                 # The x keeps a trailing newline that $(...) would strip (Codex r3 #1).
@@ -101,6 +122,7 @@ _refuse_links_out_of_session() {  # dir
             [ -n "$real" ] || continue
             todo="$todo${todo:+$'\n'}$real"
         done < <(find "$cur" \( -path "${prune:-/nonexistent}" -o -path "${cfg:-/nonexistent}" \) -prune -o -type l -print0 2>/dev/null)
+        initial_scan=0
     done
 }
 

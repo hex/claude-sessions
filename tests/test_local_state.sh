@@ -1842,6 +1842,120 @@ test_atomic_write_ignores_a_pre_open_committed_in_a_cs_submodule() {
     assert_file_not_exists "$vault/private/queue.state" "nothing was written through the link" || return 1
 }
 
+test_open_allows_a_tool_owned_local_link() {
+    local dir outside="$TEST_TMPDIR/SingletonSocket" out rc=0
+    dir=$(create_test_session_with_git tool-links)
+    mkdir -p "$dir/.cs/local/tool/profile"
+    printf 'TOOL-OWNED\n' > "$outside"
+    ln -s "$outside" "$dir/.cs/local/tool/profile/SingletonSocket"
+
+    out=$("$CS_BIN" tool-links <<< "" 2>&1) || rc=$?
+
+    assert_eq "0" "$rc" "a tool-owned local link allows the session to open: $out" || return 1
+    assert_eq "$outside" "$(readlink "$dir/.cs/local/tool/profile/SingletonSocket")" "the tool link stays in place" || return 1
+    assert_eq "TOOL-OWNED" "$(cat "$outside")" "the tool's target stays untouched" || return 1
+}
+
+test_open_refuses_cs_owned_local_links() {
+    local dir outside="$TEST_TMPDIR/outside" rel out rc
+    dir=$(create_test_session_with_git owned-links)
+    printf 'USER-OWNED\n' > "$outside"
+    for rel in newname session.log context-date/conversation mail/new/message.json state.mutex.lock; do
+        mkdir -p "$(dirname "$dir/.cs/local/$rel")"
+        ln -s "$outside" "$dir/.cs/local/$rel"
+        rc=0
+
+        out=$("$CS_BIN" owned-links <<< "" 2>&1) || rc=$?
+
+        assert_eq "1" "$rc" "the cs-owned local path $rel refuses the open" || return 1
+        assert_eq "Error: .cs/local/$rel is a symlink to $outside, outside the session, and cs writes through it. Replace it with a real file or directory, or cs -rm the session." \
+            "$out" "the refusal keeps its exact message for $rel" || return 1
+        assert_eq "USER-OWNED" "$(cat "$outside")" "the target of $rel stays untouched" || return 1
+        rm "$dir/.cs/local/$rel"
+    done
+}
+
+test_open_refuses_links_reached_through_cs_owned_aliases() {
+    local dir outside="$TEST_TMPDIR/outside" alias rel out rc
+    printf 'USER-OWNED\n' > "$outside"
+    for alias in mail memory cycle; do
+        dir=$(create_test_session_with_git "alias-$alias")
+        case "$alias" in
+            mail)
+                rel=.cs/local/tool/mail/new/message.json
+                mkdir -p "$dir/.cs/local/tool/mail/new"
+                ln -s tool/mail "$dir/.cs/local/mail" ;;
+            memory)
+                rel=.cs/local/tool/memory/note.md
+                mkdir -p "$dir/.cs/local/tool/memory"
+                rmdir "$dir/.cs/memory"
+                ln -s local/tool/memory "$dir/.cs/memory" ;;
+            cycle)
+                rel=.cs/local/tool/profile/SingletonSocket
+                mkdir -p "$dir/.cs/local/tool/profile"
+                rmdir "$dir/.cs/memory"
+                ln -s . "$dir/.cs/memory" ;;
+        esac
+        ln -s "$outside" "$dir/$rel"
+        rc=0
+
+        out=$("$CS_BIN" "alias-$alias" <<< "" 2>&1) || rc=$?
+
+        assert_eq "1" "$rc" "the $alias alias makes its target a cs path" || return 1
+        assert_eq "Error: $rel is a symlink to $outside, outside the session, and cs writes through it. Replace it with a real file or directory, or cs -rm the session." \
+            "$out" "the $alias refusal names the physical link" || return 1
+        assert_eq "USER-OWNED" "$(cat "$outside")" "the $alias target stays untouched" || return 1
+    done
+}
+
+test_open_refuses_case_aliases_of_cs_owned_local_paths() {
+    local dir outside kind rel out rc owned shown
+    dir=$(create_test_session_with_git case-links)
+    for kind in file directory dangling unicode-file unicode-directory; do
+        outside="$TEST_TMPDIR/outside-$kind"
+        case "$kind" in
+            file|directory|unicode-file|unicode-directory) printf 'USER-OWNED\n' > "$outside" ;;
+        esac
+        case "$kind" in
+            file|dangling) rel=SESSION.LOG; owned=session.log ;;
+            directory)
+                mkdir -p "$dir/.cs/local/MAIL/new"
+                rel=MAIL/new/message.json; owned=mail/new/message.json ;;
+            unicode-file) rel=ſeſſion.log; owned=session.log ;;
+            unicode-directory)
+                mkdir -p "$dir/.cs/local/rotation-KicK"
+                rel=rotation-KicK/rotation.kick; owned=rotation-kick/rotation.kick ;;
+        esac
+        case "$kind" in
+            unicode-file) shown=__e____ion.log ;;
+            unicode-directory) shown=rotation-___ic___/rotation.kick ;;
+            *) shown=$rel ;;
+        esac
+        ln -s "$outside" "$dir/.cs/local/$rel"
+        rc=0
+
+        out=$("$CS_BIN" case-links <<< "" 2>&1) || rc=$?
+
+        if [[ "$rel" == */* ]] && [ ! -L "$dir/.cs/local/$owned" ]; then
+            assert_eq "0" "$rc" "a distinct $kind spelling belongs to the tool" || return 1
+        else
+            assert_eq "1" "$rc" "the $kind case alias refuses the open" || return 1
+            assert_eq "Error: .cs/local/$shown is a symlink to $outside, outside the session, and cs writes through it. Replace it with a real file or directory, or cs -rm the session." \
+                "$out" "the refusal names the $kind case alias" || return 1
+        fi
+        if [ "$kind" = dangling ]; then
+            assert_not_exists "$outside" "the dangling target stays absent" || return 1
+        else
+            assert_eq "USER-OWNED" "$(cat "$outside")" "the case alias target stays untouched" || return 1
+        fi
+        rm "$dir/.cs/local/$rel"
+    done
+}
+
+run_test test_open_refuses_case_aliases_of_cs_owned_local_paths
+run_test test_open_allows_a_tool_owned_local_link
+run_test test_open_refuses_cs_owned_local_links
+run_test test_open_refuses_links_reached_through_cs_owned_aliases
 run_test test_new_session_records_state_in_local_not_readme
 run_test test_resume_leaves_readme_untouched
 run_test test_migration_leaves_a_body_line_that_looks_like_a_field
