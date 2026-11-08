@@ -1550,7 +1550,7 @@ CS_PAYLOAD_SHA256=(
     "8aaadea0975e0ccbeadb995515245a9b3a2651f84626c9ba6806a57da3b5ac53  mods/cs-panel/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
     "6909b481962cddcd80bf35f3c2424bedf5861549f7fd490b9791e352ac7c640f  mods/cs-panel/hooks/register.tsx"
-    "336f7d477e1a0bb204b2eac4c460b5e67dc6486e7b6c161f23733b3e8eefb9a6  mods/cs-panel/hooks/settings.ts"
+    "0fd3e92677d367a1a78108acbbe6edea55272646583ccbb9f4ad94d868df58ab  mods/cs-panel/hooks/settings.ts"
     "cc34939c470679a8a9aec93d11a96806c4fdd83a55224cd530c587d9b8b398f1  mods/cs-panel/hooks/draw.tsx"
     "3542f04b3400bf34cda2ea3ceaabe135ee36c3c7e4c82bf745f0637ff57c2ebe  mods/cs-filter-chat/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-filter-chat/hooks/hooks.json"
