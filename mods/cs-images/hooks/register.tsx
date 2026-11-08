@@ -22,6 +22,7 @@ const allPixels = new Map<string, Promise<Pixels | string>>()
 
 // untried: no Image has been asked about yet. asking: one Image is mounted and being asked about.
 let terminalDrawsPixels: 'untried' | 'asking' | 'yes' | 'no' = 'untried'
+let sipsAvailable = false
 
 async function gridOf($: EngineInterface, path: string, room: number, cellHeightRatio: number): Promise<Grid | string> {
   const size = await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', path], { timeoutMs: SIPS_TIMEOUT_MS })
@@ -112,8 +113,21 @@ export const register: Register = (on, options) => {
   const cellHeightRatio = cellHeightRatioFor(requestedRatio)
   let ratioLogged = false
 
+  on('session.start', async ($, e, next) => {
+    try {
+      sipsAvailable = (await $.process.run(['sips', '--version'], { timeoutMs: SIPS_TIMEOUT_MS })).exitCode === 0
+    } catch {
+      sipsAvailable = false
+    }
+    if (sipsAvailable) {
+      const cleaned = await $.process.run(['find', '/tmp', '-maxdepth', '1', '-name', 'cs-images-*', '-mmin', '+60', '-delete'])
+      if (cleaned.exitCode !== 0) throw new Error(`cs-images cannot remove stale temp files: ${cleaned.stderr.trim() || cleaned.stdout.trim()}`)
+    }
+    return next(e)
+  })
+
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
-    if (e.surface !== 'terminal' || !hasImageLine(e.props.text)) return next(e)
+    if (!sipsAvailable || e.surface !== 'terminal' || !hasImageLine(e.props.text)) return next(e)
     if (requestedRatio !== cellHeightRatio && !ratioLogged) {
       ratioLogged = true
       await $.ui.log(`cellHeightRatio ${String(requestedRatio)} is not a finite number from 1 to 5; using 2`, { to: 'debug' })
