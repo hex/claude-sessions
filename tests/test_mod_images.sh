@@ -40,6 +40,7 @@ test_show_image_skill_names_itself_and_its_triggers() {
     assert_file_contains "$skill" 'png, jpg, jpeg, gif, heic, webp, tiff, bmp' "supported formats" || return 1
     assert_file_contains "$skill" '^- A flow, a structure or states: write a mermaid diagram' "diagrams come first for flows" || return 1
     assert_file_contains "$skill" 'make one image with one provider' "generation stays to one image" || return 1
+    assert_file_contains "$skill" 'Before drawing a generated image, open the file the tool reports and compare it with your own explanation and diagram' "a generated image is checked before it is shown" || return 1
     assert_file_contains "$skill" 'Never put secrets, credentials, client data or private file contents' "the image description leaves the machine" || return 1
 }
 
