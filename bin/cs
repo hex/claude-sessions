@@ -8207,7 +8207,7 @@ _append_attribute_line() {  # file line
 # walked; cs_write_atomic still refuses a write leading out of it.
 _refuse_links_out_of_session() {  # dir
     local dir="$1" dir_p p link real cur todo out seen="" prune="" cfg=""
-    local initial_scan=1 local_entry folded_entry local_path folded_path
+    local initial_scan=1 local_entry local_path owned_dir local_owned
     dir_p=$(cd -P -- "$dir" 2>/dev/null && pwd -P) || return 0
     # cs links the shell's settings, skills and the rest into an encrypted
     # session's config dir by design; that dir is skipped only while
@@ -8242,45 +8242,19 @@ _refuse_links_out_of_session() {  # dir
         [ "$initial_scan" = 1 ] || seen="$seen"$'\n'"$cur"$'\n'
         while IFS= read -r -d '' p; do
             if [ "$initial_scan" = 1 ]; then
-                case "$p" in "$dir_p/.cs/local/"*)
+                case "$p" in "$dir_p/.cs/local/"*/*)
                     local_entry=${p#"$dir_p/.cs/local/"}
                     local_entry=${local_entry%%/*}
-                    case "$local_entry" in *[!abcdefghijklmnopqrstuvwxyz0123456789._-]*)
-                        # The x preserves trailing newlines in the entry name.
-                        folded_entry=$(perl -MEncode=decode,encode,FB_CROAK,LEAVE_SRC -e '
-                            use feature "fc";
-                            my $name = eval { decode("UTF-8", $ARGV[0], FB_CROAK | LEAVE_SRC) };
-                            print defined($name) ? encode("UTF-8", fc($name)) : $ARGV[0];
-                            print "x";
-                        ' -- "$local_entry") || error "could not check case aliases for .cs/local/$(_cs_plain_name "$local_entry" 160)."
-                        folded_entry=${folded_entry%x}
-                        local_path="$dir_p/.cs/local/$local_entry"
-                        folded_path="$dir_p/.cs/local/$folded_entry"
-                        # Case aliases reach cs's paths, even when the link dangles.
-                        if [ "$local_path" -ef "$folded_path" ] || {
-                            [ -L "$local_path" ] && [ -L "$folded_path" ] &&
-                                [ "$(readlink "$local_path")" = "$(readlink "$folded_path")" ]
-                        }; then
-                            local_entry=$folded_entry
+                    local_path="$dir_p/.cs/local/$local_entry"
+                    local_owned=0
+                    for owned_dir in mail queue queue.tmp task-archive context-date rotation-kick retire-staged retire-runs inherited inherited-topics; do
+                        # Case aliases reach cs's directories under the filesystem's own rules.
+                        if [ "$local_path" -ef "$dir_p/.cs/local/$owned_dir" ]; then
+                            local_owned=1
+                            break
                         fi
-                    esac
-                    case "$local_entry" in
-                        state|identity|config|disabled|pre-open|session.log|migrated|presence|\
-                        remote.pid|lead-pid|spawned-by|watermark|attention|context-pct|context-pct.tmp|\
-                        context-pct.at|context-pct.heartbeat.at|limits|limits.tmp|limits.at|\
-                        rotate-nudged|ctx-warned|narrative-cursor.*|.advisor-nudge-cooldown|\
-                        stop-verdict|stop-notices.mutex.lock|scope-prompt.trace|rewrite.trace|\
-                        memory-index.snapshot|memory-archive.snapshot|pending-handoff|finish-progress.json|\
-                        task-archive|vault|vault-holders|vault-waiter.pid|vault-detach.pid|\
-                        cs.heartbeat|wrapped|cs.forced|cs.pressed|cs-update.heartbeat|cs-update.done|\
-                        queue.state|queue.mode|queue.done|queue.current|queue.failed|queue.accepted|\
-                        queue.accept.mutex.lock|queue.migrating|queue.popping.*|\
-                        notifications.jsonl|notifications.seen|failures|\
-                        state.mutex.lock|config.mutex.lock|lead-pid.mutex.lock|vault-holders.mutex.lock|\
-                        mail|queue|queue.tmp|context-date|rotation-kick|retire-staged|retire-runs|\
-                        inherited|inherited-topics) ;;
-                        *) continue ;;
-                    esac
+                    done
+                    [ "$local_owned" = 1 ] || continue
                 esac
             fi
             link=$p real=""

@@ -1860,7 +1860,7 @@ test_open_refuses_cs_owned_local_links() {
     local dir outside="$TEST_TMPDIR/outside" rel out rc
     dir=$(create_test_session_with_git owned-links)
     printf 'USER-OWNED\n' > "$outside"
-    for rel in session.log context-date/conversation mail/new/message.json state.mutex.lock; do
+    for rel in newname session.log context-date/conversation mail/new/message.json state.mutex.lock; do
         mkdir -p "$(dirname "$dir/.cs/local/$rel")"
         ln -s "$outside" "$dir/.cs/local/$rel"
         rc=0
@@ -1932,15 +1932,11 @@ test_open_refuses_case_aliases_of_cs_owned_local_paths() {
             *) shown=$rel ;;
         esac
         ln -s "$outside" "$dir/.cs/local/$rel"
-        if [ "$kind" = file ] && [ ! -L "$dir/.cs/local/session.log" ]; then
-            echo "    SKIP (this filesystem treats case variants as different paths)"
-            return 77
-        fi
         rc=0
 
         out=$("$CS_BIN" case-links <<< "" 2>&1) || rc=$?
 
-        if [ ! -L "$dir/.cs/local/$owned" ]; then
+        if [[ "$rel" == */* ]] && [ ! -L "$dir/.cs/local/$owned" ]; then
             assert_eq "0" "$rc" "a distinct $kind spelling belongs to the tool" || return 1
         else
             assert_eq "1" "$rc" "the $kind case alias refuses the open" || return 1
