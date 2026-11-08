@@ -142,9 +142,10 @@ export const register: Register = (on, options) => {
     const { Box, Text, Raster, Image } = $.ui.resolve(e)
     const room = Math.min(60, Math.max(8, (e.viewport?.columns ?? 80) - 6))
     const parts = replyParts(e.props.text)
+    const firstText = parts.findIndex(part => part.kind === 'text')
     const drawn = await Promise.all(parts.map(async (part, index) => {
       if (part.kind === 'text') {
-        return next({ ...e, props: { ...e.props, text: part.body, isFirstOfReply: e.props.isFirstOfReply && index === 0 } })
+        return next({ ...e, props: { ...e.props, text: part.body, isFirstOfReply: e.props.isFirstOfReply && index === firstText } })
       }
       const changedAt = await $.fs.stat(part.path).then(stat => stat?.mtimeMs ?? 0, () => 0)
       const id = `${part.path}@${room}@${changedAt}@${cellHeightRatio}`

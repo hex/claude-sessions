@@ -129,6 +129,20 @@ test('widths 120 and 121 share one displayed-size read above the 60-column cap',
   expect(w.sizeReads).toBe(1)
 })
 
+test('the first prose part keeps the reply bullet after an opening picture', async ($, on) => {
+  pictureWorld(on)
+  const prose: Array<{ text: string; isFirstOfReply: boolean }> = []
+  on('ui.render', { component: 'AssistantMessage' }, ($, e) => {
+    prose.push({ text: e.props.text, isFirstOfReply: e.props.isFirstOfReply })
+    const { Text } = $.ui.resolve(e)
+    return <Text>{e.props.text}</Text>
+  })
+  await startSession($, on)
+  const ui = await $.ui.mount({ plugin: 'cs-images', component: 'AssistantMessage', surface: 'terminal', viewport: { columns: 14, rows: 40 }, props: { text: '![owl](/tmp/bullet.png)\nFirst prose.\n![owl](/tmp/bullet-again.png)\nMore prose.', isFirstOfReply: true } })
+  expect(prose).toEqual([{ text: 'First prose.', isFirstOfReply: true }, { text: 'More prose.', isFirstOfReply: false }])
+  await ui.unmount()
+})
+
 test('a successful sips probe redraws a reply rendered while the probe was pending', async ($, on) => {
   const options: { sips?: 'nonzero'; probe?: Promise<void> } = { sips: 'nonzero' }
   const { w, clock } = pictureWorld(on, options)
