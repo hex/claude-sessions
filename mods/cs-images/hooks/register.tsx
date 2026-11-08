@@ -114,6 +114,7 @@ export const register: Register = (on, options) => {
   let ratioLogged = false
 
   on('session.start', async ($, e, next) => {
+    terminalDrawsPixels = 'untried'
     try {
       sipsAvailable = (await $.process.run(['sips', '--version'], { timeoutMs: SIPS_TIMEOUT_MS })).exitCode === 0
     } catch {
