@@ -132,7 +132,7 @@ export const register: Register = (on, options) => {
       const directory = await $.env.get('TMPDIR') || '/tmp/'
       temporaryDirectory = directory.endsWith('/') ? directory : `${directory}/`
       const cleaned = await $.process.run(['find', temporaryDirectory, '-maxdepth', '1', '-type', 'f', '-name', 'cs-images-tmp-*', '-mmin', '+60', '-delete'])
-      if (cleaned.exitCode !== 0) throw new Error(`cs-images cannot remove stale temp files: ${cleaned.stderr.trim() || cleaned.stdout.trim()}`)
+      if (cleaned.exitCode !== 0) await $.ui.log(`temp sweep exited ${cleaned.exitCode}: ${JSON.stringify(cleaned.stderr.trim())}`, { to: 'debug' })
       sipsAvailable = true
       $.ui.invalidate('ui.render')
     }

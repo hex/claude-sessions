@@ -87,7 +87,7 @@ test('a picture whose decode was aborted is decoded again rather than reported',
   expect(converts).toBe(4)
 })
 
-function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fails' | 'oversized'; answers?: Array<{ deny?: string }>; rotated?: boolean; tmpdir?: string; probe?: Promise<void>; width?: number; height?: number; directoryReady?: Promise<void> } = {}) {
+function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fails' | 'oversized'; answers?: Array<{ deny?: string }>; rotated?: boolean; tmpdir?: string; probe?: Promise<void>; width?: number; height?: number; directoryReady?: Promise<void>; sweep?: { exitCode: number; stderr: string } } = {}) {
   const w = { logs: [] as string[], runs: [] as string[][], blits: [] as string[], invalidations: [] as string[], sizeReads: 0, mtimeMs: 1 }
   const clock = mock.clock(on)
   let directoryStarted = () => {}
@@ -118,6 +118,7 @@ function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fai
   })
   on('process.run', async (_$, e) => {
     w.runs.push([...e.argv])
+    if (e.argv[0] === 'find' && options.sweep !== undefined) return { value: { ...options.sweep, stdout: '', isStdoutTruncated: false, isStderrTruncated: false } }
     if (e.argv.includes('--version')) {
       await options.probe
       if (options.sips === 'throws') throw new Error('sips is absent')
@@ -342,6 +343,17 @@ test('session start probes sips once and removes only stale cs-images temp files
   expect((await ui.find({ type: 'Image' }))?.props.rows).toBe(4)
   await ui.redraw()
   expect(w.runs.filter(argv => argv.includes('--version'))).toEqual([['sips', '--version']])
+  await ui.unmount()
+})
+
+test('a failed temp sweep logs its exit and stderr and leaves drawing on', async ($, on) => {
+  const { w } = pictureWorld(on, { sweep: { exitCode: 1, stderr: 'Permission denied' } })
+  engineReply(on)
+  await startSession($, on)
+  expect(w.logs).toEqual(['temp sweep exited 1: "Permission denied"'])
+  const ui = await mountPicture($, '/tmp/failed-sweep.png')
+  expect((await ui.find({ type: 'Image' }))?.props.rows).toBe(4)
+  expect(w.logs).toEqual(['temp sweep exited 1: "Permission denied"'])
   await ui.unmount()
 })
 
