@@ -16,7 +16,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Fixes
 - cs opens a session where a tool keeps its own files under `.cs/local`, such as a Chrome profile. Chrome's `SingletonSocket` link to its temp folder stopped the open with a refusal naming a symlink outside the session. The open's link check now covers every entry directly in `.cs/local` and cs's own folders there, and leaves links deeper inside other folders alone.
-- A secret revealed with `v` in cs-tui's secrets popup is no longer drawn again after the popup closes, whichever way it closes. A delete that could not start, or that removed the last secret, used to bring the popup back with the value still showing.
+- A secret revealed in cs-tui's secrets popup is no longer drawn again after the popup closes, whichever way it closes. A delete that could not start, or that removed the last secret, used to bring the popup back with the value still showing.
 
 ## 2026.11.4
 
