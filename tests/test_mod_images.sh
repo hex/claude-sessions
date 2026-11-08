@@ -35,9 +35,12 @@ test_show_image_skill_names_itself_and_its_triggers() {
     local skill="$MOD/skills/show-image/SKILL.md"
     assert_file_exists "$skill" "show-image skill exists" || return 1
     assert_eq 'name: show-image' "$(sed -n '2p' "$skill")" "frontmatter name" || return 1
-    assert_eq 'description: This skill should be used when the user asks to see, show or display an image, screenshot, photo or chart that is a file on disk.' "$(sed -n '3p' "$skill")" "frontmatter trigger" || return 1
+    assert_eq 'description: This skill should be used when the user asks to see, show or display an image, screenshot, photo or chart that is a file on disk, or asks for an explanation in pictures, such as "show me in pictures", "explain it visually" or "draw me a picture".' "$(sed -n '3p' "$skill")" "frontmatter trigger" || return 1
     assert_file_contains "$skill" '^!\[short name\](/absolute/path.png)$' "standalone image example" || return 1
     assert_file_contains "$skill" 'png, jpg, jpeg, gif, heic, webp, tiff, bmp' "supported formats" || return 1
+    assert_file_contains "$skill" '^- A flow, a structure or states: write a mermaid diagram' "diagrams come first for flows" || return 1
+    assert_file_contains "$skill" 'make one image with one provider' "generation stays to one image" || return 1
+    assert_file_contains "$skill" 'Never put secrets, credentials, client data or private file contents' "the image description leaves the machine" || return 1
 }
 
 test_mod_tests_pass_under_the_engine_test_kit() {
