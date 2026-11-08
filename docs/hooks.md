@@ -1208,10 +1208,11 @@ only `![short name](/absolute/path.png)`, outside a code block. The path must
 be absolute and have no spaces. It accepts `png`, `jpg`, `jpeg`, `gif`, `heic`,
 `webp`, `tiff` and `bmp` files. Prose around a picture stays with the engine's renderer.
 
-Real pixels work in kitty and Ghostty, or iTerm2 3.5 and later. With iTerm2,
-the engine draws `png` and `rgba` bytes under fullscreen rendering. Inside
-tmux, those iTerm2 bytes need `allow-passthrough` and `focus-events` on.
-These iTerm2 restrictions do not apply to kitty or Ghostty.
+Real pixels work in kitty and Ghostty, or iTerm2 3.5 and later. Inside tmux,
+every terminal needs tmux 3.3 or later with `allow-passthrough` and
+`focus-events` on. iTerm2 draws `png` and `rgba` bytes and also needs Claude
+Code's fullscreen display. Inside tmux, iTerm2 requires `allow-passthrough`
+set to `on` rather than `all`, and a tmux window no bigger than the terminal.
 
 Everywhere else, pictures draw as coloured block glyphs. Under blocks they
 are previews, small text is not readable, and transparent areas draw black.
@@ -1235,7 +1236,8 @@ At `session.start`, the mod checks `sips --version` once. If it throws or
 exits nonzero, image lines stay text. With `sips` present, startup removes
 only regular `cs-images-tmp-*` files older than 60 minutes from the per-user
 `TMPDIR`, or `/tmp/` when unset. The directory argument ends in a slash so
-the sweep follows macOS's `/tmp` symlink. Conversion uses `sips` through
+the sweep follows macOS's `/tmp` symlink. A failed sweep writes its exit
+code and stderr to the debug log and leaves drawing on. Conversion uses `sips` through
 process argv, with no shell, and writes its temporary files in that same
 directory. An unscaled bitmap normalizes photo orientation. `sips` queries
 its displayed size before either drawing path resizes it. The mod reads

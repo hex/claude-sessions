@@ -677,10 +677,12 @@ numbers from 1 to 5. Any other value uses 2 and writes one debug line naming
 the value. Nothing reports a terminal's cell shape to a mod. A line height
 of 1.5 needs a ratio of 3.
 
-Real pixels work in kitty and Ghostty, or iTerm2 3.5 and later. With iTerm2,
-the engine draws `png` and `rgba` bytes under fullscreen rendering. Inside
-tmux, those iTerm2 bytes need `allow-passthrough` and `focus-events` on.
-These iTerm2 restrictions do not apply to kitty or Ghostty. Everywhere else,
+Real pixels work in kitty and Ghostty, or iTerm2 3.5 and later. Inside tmux,
+every terminal needs tmux 3.3 or later with `allow-passthrough` and
+`focus-events` on. iTerm2 draws `png` and `rgba` bytes and also needs Claude
+Code's fullscreen display. Inside tmux, iTerm2 requires `allow-passthrough`
+set to `on` rather than `all`, and a tmux window no bigger than the terminal.
+Everywhere else,
 the picture is block glyphs, and transparent areas draw black. The first
 picture of a session can show blank for a moment while the mod finds out.
 Without `sips`, image lines stay text. See [the images mod](hooks.md#cs-images)
