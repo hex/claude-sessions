@@ -1208,17 +1208,14 @@ only `![short name](/absolute/path.png)`, outside a code block. The path must
 be absolute and have no spaces. It accepts `png`, `jpg`, `jpeg`, `gif`, `heic`,
 `webp`, `tiff` and `bmp` files. Prose around a picture stays with the engine's renderer.
 
-Real pixels need all these:
-
-- A terminal Claude Code can draw images in: kitty, Ghostty, or iTerm2 3.5
-  and later.
-- Claude Code's fullscreen display.
-- Inside tmux, tmux 3.3 or later with `allow-passthrough on` (not `all`) and
-  `focus-events on`, a tmux window no bigger than the terminal, and no
-  `tmux -CC`.
+Real pixels work in kitty and Ghostty, or iTerm2 3.5 and later. With iTerm2,
+the engine draws `png` and `rgba` bytes under fullscreen rendering. Inside
+tmux, those iTerm2 bytes need `allow-passthrough` and `focus-events` on.
+These iTerm2 restrictions do not apply to kitty or Ghostty.
 
 Everywhere else, pictures draw as coloured block glyphs. Under blocks they
-are previews, and small text is not readable. The first picture of a
+are previews, small text is not readable, and transparent areas draw black.
+The first picture of a
 session draws as an `Image`, then the mod asks `$.ui.blit` whether the
 terminal shows it. That picture can show blank for a moment while the mod
 finds out. A refusal switches drawing to a `Raster` of fitted
@@ -1236,9 +1233,16 @@ proportions at that ratio.
 
 At `session.start`, the mod checks `sips --version` once. If it throws or
 exits nonzero, image lines stay text. With `sips` present, startup removes
-only `/tmp/cs-images-*` files older than 60 minutes. Conversion uses `sips`
-through process argv, with no shell. The mod caches decoded pictures by path,
-available width, modification time and cell ratio.
+only regular `cs-images-tmp-*` files older than 60 minutes from the per-user
+`TMPDIR`, or `/tmp/` when unset. The directory argument ends in a slash so
+the sweep follows macOS's `/tmp` symlink. Conversion uses `sips` through
+process argv, with no shell, and writes its temporary files in that same
+directory. An unscaled bitmap normalizes photo orientation. `sips` queries
+its displayed size before either drawing path resizes it. The mod reads
+only resized bytes, within the engine's 4 MiB file-read limit.
+The mod caches decoded pictures by path, drawing width capped at 60 columns,
+modification time and cell ratio. A successful startup probe invalidates
+rendering so an image line drawn before the probe completes gets another try.
 
 The bundled `skills/show-image/SKILL.md` gives the model the syntax when
 asked to see, show or display an image, screenshot, photo or chart on disk.
