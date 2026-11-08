@@ -294,6 +294,11 @@ CS_MOD_FILES=(
     cs-mermaid/hooks/register.tsx
     cs-mermaid/hooks/text.ts
     cs-mermaid/skills/show-me/SKILL.md
+    cs-images/.claude-plugin/plugin.json
+    cs-images/hooks/hooks.json
+    cs-images/hooks/picture.ts
+    cs-images/hooks/register.tsx
+    cs-images/skills/show-image/SKILL.md
     cs-panel/.claude-plugin/plugin.json
     cs-panel/hooks/hooks.json
     cs-panel/hooks/register.tsx
@@ -1489,7 +1494,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "900197085997ec1cffa3450332c3ab818d0dca5ec90fdba327baa258107f6dfc  bin/cs"
+    "17b6519cca86de77bcc4537e2f5d209965e59f415c1b533a4357c9be5c959a4d  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "a7607b72af1958bbad2d20dfdb1264b6f8ca5a1a046da3c093699d943ffb3e83  bin/cs-statusline"
     "324691a50519294a125520ee96e279bb02a08b1a4c2e4804cf9347c617521044  bin/cs-subagent-statusline"
@@ -1537,10 +1542,15 @@ CS_PAYLOAD_SHA256=(
     "69b235a1793eacf9a06df13ad9a4125e9d5258fb903d7746ed0739013bb47e72  mods/cs-mermaid/hooks/register.tsx"
     "5e3fb3a9b5ba649d0c5b02db87a27bacd73afef1bd1033ddf9ab5da5612f92cf  mods/cs-mermaid/hooks/text.ts"
     "c591644117d9a870c4631ecb40c7fc47f7cbab7b74849feb07b318784ba85367  mods/cs-mermaid/skills/show-me/SKILL.md"
+    "92e19eac45e426f101b07cdb0c2f2e1facd9f2581400e48c0be4e3052744a565  mods/cs-images/.claude-plugin/plugin.json"
+    "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-images/hooks/hooks.json"
+    "9a704f710da04aa9330b9d4a81a2709eaa096d1e243448c8c9e3d73bea44754d  mods/cs-images/hooks/picture.ts"
+    "ac9a4c08e13b107f20a5c5a396e6d7aa05e2808d7e183703d4d9d8253e730ced  mods/cs-images/hooks/register.tsx"
+    "c40e4ca71e3ba0ddd721edaacd97730c818cf44f56c9a814133be1d4200ba36c  mods/cs-images/skills/show-image/SKILL.md"
     "8aaadea0975e0ccbeadb995515245a9b3a2651f84626c9ba6806a57da3b5ac53  mods/cs-panel/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
     "6909b481962cddcd80bf35f3c2424bedf5861549f7fd490b9791e352ac7c640f  mods/cs-panel/hooks/register.tsx"
-    "336f7d477e1a0bb204b2eac4c460b5e67dc6486e7b6c161f23733b3e8eefb9a6  mods/cs-panel/hooks/settings.ts"
+    "0fd3e92677d367a1a78108acbbe6edea55272646583ccbb9f4ad94d868df58ab  mods/cs-panel/hooks/settings.ts"
     "cc34939c470679a8a9aec93d11a96806c4fdd83a55224cd530c587d9b8b398f1  mods/cs-panel/hooks/draw.tsx"
     "3542f04b3400bf34cda2ea3ceaabe135ee36c3c7e4c82bf745f0637ff57c2ebe  mods/cs-filter-chat/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-filter-chat/hooks/hooks.json"

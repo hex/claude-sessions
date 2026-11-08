@@ -1200,6 +1200,72 @@ instruction and tombstone, and `tests/test_migrate_claude_md.sh` covers migratio
 After changing `mods/cs-mermaid/hooks/`, run `./build.sh` to refresh the payload
 hashes in `install.sh`.
 
+## cs-images
+
+`mods/cs-images/` is a Claude Code function-hooks plugin, deployed and gated
+like the `cs` mod. It draws a picture wherever a reply has a line holding
+only `![short name](/absolute/path.png)`, outside a code block. The path must
+be absolute and have no spaces. It accepts `png`, `jpg`, `jpeg`, `gif`, `heic`,
+`webp`, `tiff` and `bmp` files. Prose around a picture stays with the engine's renderer.
+
+Real pixels work in kitty and Ghostty, or iTerm2 3.5 and later. Inside tmux,
+every terminal needs tmux 3.3 or later with `allow-passthrough` and
+`focus-events` on. iTerm2 draws `png` and `rgba` bytes and also needs Claude
+Code's fullscreen display. Inside tmux, iTerm2 requires `allow-passthrough`
+set to `on` rather than `all`, and a tmux window no bigger than the terminal.
+
+Everywhere else, pictures draw as coloured block glyphs. Under blocks they
+are previews, small text is not readable, and transparent areas draw black.
+The first picture of a
+session draws as an `Image`, then the mod asks `$.ui.blit` whether the
+terminal shows it. That picture can show blank for a moment while the mod
+finds out. A refusal switches drawing to a `Raster` of fitted
+block glyphs, with 8 by 8 samples per cell. A transient refusal such as
+`not mounted` asks again. A failed `png` conversion or a `png` over 2 MiB also
+uses blocks, without asking the terminal.
+
+The `/config` row `cs-images.drawImages` is on by default; off, the image
+line stays text. `cs-images.cellHeightRatio`, 2 by default, sets the
+terminal cell's height divided by its width. Values outside the finite
+range 1 to 5 use 2 and produce one debug line naming the value. Nothing
+reports a terminal's cell shape to a mod. A line height of 1.5 needs a
+ratio of 3. The picture fits within 60 columns and 30 rows, keeping its
+proportions at that ratio.
+
+At `session.start`, the mod checks `sips --version` once. If it throws or
+exits nonzero, image lines stay text. With `sips` present, startup removes
+only regular `cs-images-tmp-*` files older than 60 minutes from the per-user
+`TMPDIR`, or `/tmp/` when unset. The directory argument ends in a slash so
+the sweep follows macOS's `/tmp` symlink. A failed sweep writes its exit
+code and stderr to the debug log and leaves drawing on. Conversion uses `sips` through
+process argv, with no shell, and writes its temporary files in that same
+directory. An unscaled bitmap normalizes photo orientation. `sips` queries
+its displayed size before either drawing path resizes it. The mod reads
+only resized bytes, within the engine's 4 MiB file-read limit.
+The mod caches decoded pictures by path, drawing width capped at 60 columns,
+modification time and cell ratio. A successful startup probe invalidates
+rendering so an image line drawn before the probe completes gets another try.
+
+The bundled `skills/show-image/SKILL.md` gives the model the syntax when
+asked to see, show or display an image, screenshot, photo or chart on disk,
+or to explain something in pictures. For an explanation it draws a mermaid
+diagram and, beside it, a file on disk that shows the point or else one
+generated image where the session has an image tool; a generated image costs what that tool's provider charges and
+its description leaves the machine, so the skill keeps private content out
+of it. It needs no `prompt.compose` hook, which organizations can refuse. The
+engine lists it as `/cs-images:show-image`. Turning drawing off leaves the
+skill in place.
+
+`install.sh` deploys five files under `~/.claude/skills/cs-images/`:
+`.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/picture.ts`,
+`hooks/register.tsx` and `skills/show-image/SKILL.md`. Tests stay under
+`mods/cs-images/test/`. The mod writes no heartbeat.
+
+`tests/test_mod_images.sh` checks the manifest, both configuration rows,
+installer paths and skill frontmatter. With `claude` available, it runs the
+engine kit and plugin validation. After changing the mod's shipped files,
+run `./build.sh` to refresh `install.sh`'s payload hashes.
+
 ## cs-panel (not a hook script — a Claude Code mod)
 
 `mods/cs-panel/` is a Claude Code function-hooks plugin, deployed and gated like
@@ -1209,8 +1275,8 @@ pane sits inline above the prompt on the main screen (tmux) and docks beside the
 transcript, 60 columns wide, in fullscreen from 110 columns.
 
 The rows come from two places. `Mods` lists the `/config` rows of `cs`,
-`cs-update`, `cs-mermaid` and `cs-filter-chat` (`$.config.list()`, those four
-plugins by name, so another `cs-*` plugin's rows are not drawn). The four mods
+`cs-update`, `cs-mermaid`, `cs-images` and `cs-filter-chat` (`$.config.list()`, those five
+plugins by name, so another `cs-*` plugin's rows are not drawn). The five mods
 title each row `cs: ` and its label, so `/config` marks the row as cs's; under
 `Mods` the mark says nothing and the pane draws the label without it. Under
 them, cs's own settings come in

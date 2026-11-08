@@ -22,6 +22,10 @@ const MOD_ROWS: ConfigRow[] = [
   { key: 'cs-mermaid.drawDiagrams', label: 'cs: Draw mermaid diagrams', kind: 'boolean', value: true, provider: { plugin: 'cs-mermaid', tier: 'user' }, isLocked: false },
 ]
 const LOCKED: ConfigRow[] = MOD_ROWS.map(r => r.key === 'cs-mermaid.drawDiagrams' ? { ...r, isLocked: true } : r)
+const IMAGE_ROWS: ConfigRow[] = [
+  { key: 'cs-images.drawImages', label: 'cs: Draw images in replies', kind: 'boolean', value: true, provider: { plugin: 'cs-images', tier: 'user' }, isLocked: false },
+  { key: 'cs-images.cellHeightRatio', label: 'cs: Image cell height, in widths', kind: 'number', value: 2, provider: { plugin: 'cs-images', tier: 'user' }, isLocked: false },
+]
 
 function settingsOf(stdout: string): Setting[] {
   const parsed = parseSettings(stdout)
@@ -100,11 +104,12 @@ test('one line outside the record refuses the whole answer, naming that line; an
   expect(parseSettings('')).toEqual({ unreadable: '' })
 })
 
-test('the mod rows are the rows of cs, cs-update, cs-mermaid and cs-filter-chat only: an engine row and another cs-* plugin\'s row are left out', () => {
+test('the mod rows are the rows of cs, cs-update, cs-mermaid, cs-images and cs-filter-chat only: an engine row and another cs-* plugin\'s row are left out', () => {
   const youInk: ConfigRow = { key: 'cs-filter-chat.youInk', label: "cs: Filter chat: your lines' colour", kind: 'choice', value: 'remember', options: ['remember', 'planMode', 'success', 'merged', 'error', 'text'], provider: { plugin: 'cs-filter-chat', tier: 'user' }, isLocked: false }
-  expect(modRowsOf([...MOD_ROWS, youInk]).map(m => [m.key, m.plugin, m.label, m.kind, m.options])).toEqual([
+  expect(modRowsOf([...MOD_ROWS, ...IMAGE_ROWS, youInk]).map(m => [m.key, m.plugin, m.label, m.kind, m.options])).toEqual([
     ['cs.bandPrompts', 'cs', 'Band: prompt bars', 'boolean', []], ['cs.bandPrompt', 'cs', 'Band: named prompt', 'choice', ['latest', 'read']], ['cs.bandBars', 'cs', 'Band: most bars', 'number', []],
     ['cs-update.showReleaseNotes', 'cs-update', 'Release notes pane', 'boolean', []], ['cs-mermaid.drawDiagrams', 'cs-mermaid', 'Draw mermaid diagrams', 'boolean', []],
+    ['cs-images.drawImages', 'cs-images', 'Draw images in replies', 'boolean', []], ['cs-images.cellHeightRatio', 'cs-images', 'Image cell height, in widths', 'number', []],
     ['cs-filter-chat.youInk', 'cs-filter-chat', "Filter chat: your lines' colour", 'choice', ['remember', 'planMode', 'success', 'merged', 'error', 'text']],
   ])
 })
@@ -616,15 +621,16 @@ test('a drawing that moves the element the ring was put on sends the ring back t
 })
 
 test('the filter keeps the rows whose label, key or group holds the text in any case, each under its group, and drops a group left empty', () => {
-  const lines = viewOf().lines ?? []
+  const lines = viewOf({ rows: [...MOD_ROWS, ...IMAGE_ROWS] }).lines ?? []
   const shown = (text: string) => filterLines(lines, text).map(l => l.kind === 'group' ? l.title : l.row.id)
   expect(shown('scope')).toEqual(['Prompts', 'cs:CS_SCOPE_DISABLE', 'cs:CS_SCOPE_TRACE_DISABLE', 'cs:CS_SCOPE_BUDGET_MS'])
   expect(shown('REWRITER')).toEqual(['Rewriter (ctrl+g)', 'cs:CS_REWRITE_PROVIDER', 'cs:CS_REWRITE_MODEL', 'cs:CS_REWRITE_TIMEOUT', 'cs:CS_REWRITE_PROGRESS', 'cs:CS_REWRITE_DISABLE'])
   expect(shown('nerd_fonts')).toEqual(['Terminal', 'cs:CS_NERD_FONTS'])
   expect(shown('mods')).toEqual(['Mods', 'mod:cs.bandPrompts', 'mod:cs.bandPrompt', 'mod:cs.bandBars', 'mod:cs-update.showReleaseNotes', 'mod:cs-mermaid.drawDiagrams',
+    'mod:cs-images.drawImages', 'mod:cs-images.cellHeightRatio',
     'Launch', 'cs:CS_NO_FUNCTION_HOOKS'])
   expect(shown('zzz')).toEqual([])
-  expect(shown('').length).toBe(58)
+  expect(shown('').length).toBe(60)
   expect(shown('  ')).toEqual(shown(''))
 })
 

@@ -205,6 +205,11 @@ CS_MOD_FILES=(
     cs-mermaid/hooks/register.tsx
     cs-mermaid/hooks/text.ts
     cs-mermaid/skills/show-me/SKILL.md
+    cs-images/.claude-plugin/plugin.json
+    cs-images/hooks/hooks.json
+    cs-images/hooks/picture.ts
+    cs-images/hooks/register.tsx
+    cs-images/skills/show-image/SKILL.md
     cs-panel/.claude-plugin/plugin.json
     cs-panel/hooks/hooks.json
     cs-panel/hooks/register.tsx
@@ -13400,7 +13405,7 @@ _doctor_check_session_id_match() {
     fi
 }
 
-# A mod (cs, cs-update; cs-mermaid, cs-panel and cs-filter-chat write no heartbeat) is a Claude Code function-hooks plugin the
+# A mod (cs, cs-update; cs-mermaid, cs-images, cs-panel and cs-filter-chat write no heartbeat) is a Claude Code function-hooks plugin the
 # installer deploys under ~/.claude/skills. Absent, it is not news. Present, the
 # row reads the heartbeat the mod writes when Claude Code loads it, never the
 # directory: the loader sits behind CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, which a

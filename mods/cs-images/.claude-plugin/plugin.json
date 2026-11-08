@@ -1,0 +1,22 @@
+{
+  "name": "cs-images",
+  "version": "0.1.0",
+  "description": "Draws pictures from absolute file paths inside replies, as pixels or coloured blocks.",
+  "author": { "name": "cs" },
+  "userConfig": {
+    "drawImages": {
+      "type": "boolean",
+      "title": "cs: Draw images in replies",
+      "description": "Draw standalone image lines in replies. Off, the lines stay text.",
+      "required": false,
+      "default": true
+    },
+    "cellHeightRatio": {
+      "type": "number",
+      "title": "cs: Image cell height, in widths",
+      "description": "Terminal cell height divided by its width, from 1 to 5. Other values use 2.",
+      "required": false,
+      "default": 2
+    }
+  }
+}
