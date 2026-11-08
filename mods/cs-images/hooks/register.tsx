@@ -128,6 +128,7 @@ export const register: Register = (on, options) => {
       temporaryDirectory = directory.endsWith('/') ? directory : `${directory}/`
       const cleaned = await $.process.run(['find', temporaryDirectory, '-maxdepth', '1', '-type', 'f', '-name', 'cs-images-tmp-*', '-mmin', '+60', '-delete'])
       if (cleaned.exitCode !== 0) throw new Error(`cs-images cannot remove stale temp files: ${cleaned.stderr.trim() || cleaned.stdout.trim()}`)
+      $.ui.invalidate('ui.render')
     }
     return next(e)
   })

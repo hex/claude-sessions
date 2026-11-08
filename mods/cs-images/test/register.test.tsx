@@ -82,8 +82,8 @@ test('a picture whose decode was aborted is decoded again rather than reported',
   expect(converts).toBe(4)
 })
 
-function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fails' | 'oversized'; answers?: Array<{ deny?: string }>; rotated?: boolean; tmpdir?: string } = {}) {
-  const w = { logs: [] as string[], runs: [] as string[][], blits: [] as string[] }
+function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fails' | 'oversized'; answers?: Array<{ deny?: string }>; rotated?: boolean; tmpdir?: string; probe?: Promise<void> } = {}) {
+  const w = { logs: [] as string[], runs: [] as string[][], blits: [] as string[], invalidations: [] as string[] }
   const clock = mock.clock(on)
   mock.env(on, options.tmpdir === undefined ? {} : { TMPDIR: options.tmpdir })
   on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }))
@@ -99,9 +99,10 @@ function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fai
     return { value: { base64: options.rotated && from === '/tmp/rotated.jpg'
       ? solidBmpBase64(rows, -columns) : solidBmpBase64(columns, -rows) } }
   })
-  on('process.run', (_$, e) => {
+  on('process.run', async (_$, e) => {
     w.runs.push([...e.argv])
     if (e.argv.includes('--version')) {
+      await options.probe
       if (options.sips === 'throws') throw new Error('sips is absent')
       if (options.sips === 'nonzero') return { value: { exitCode: 127, stdout: '', stderr: 'sips not found', isStdoutTruncated: false, isStderrTruncated: false } }
     }
@@ -110,8 +111,31 @@ function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fai
   })
   on('ui.log', (_$, e) => { w.logs.push(e.text); return { value: undefined } })
   on('ui.blit', (_$, e) => { w.blits.push(e.key); return { value: options.answers?.[w.blits.length - 1] ?? {} } })
+  on('ui.invalidate', (_$, e, next) => { w.invalidations.push(e.event); return next(e) })
   return { w, clock }
 }
+
+test('a successful sips probe redraws a reply rendered while the probe was pending', async ($, on) => {
+  const options: { sips?: 'nonzero'; probe?: Promise<void> } = { sips: 'nonzero' }
+  const { w, clock } = pictureWorld(on, options)
+  on('ui.render', { component: 'AssistantMessage' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>{e.props.text}</Text>
+  })
+  await startSession($, on)
+  delete options.sips
+  let release = () => {}
+  options.probe = new Promise<void>(resolve => { release = resolve })
+  const starting = $.session.start({ cwd: '/work', surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await mountPicture($, '/tmp/pending-probe.png')
+  expect((await ui.find({ type: 'Text' }))?.text).toBe('![owl](/tmp/pending-probe.png)')
+  release()
+  await starting
+  expect(w.invalidations).toEqual(['ui.render'])
+  expect((await ui.find({ type: 'Image' }))?.props.rows).toBe(4)
+  await ui.unmount()
+})
 
 for (const pixels of [true, false]) {
   test(`a rotated photo keeps displayed proportions as ${pixels ? 'pixels' : 'cells'}`, async ($, on) => {
