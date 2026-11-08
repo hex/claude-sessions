@@ -41,9 +41,12 @@ If empty, inform the user that secrets storage requires a cs session and skip st
    - Run `cs -secrets list` first. `set` replaces an existing value silently
      (no diff, no prompt), so if the name you chose already exists, pick a more
      specific name or confirm with the user before overwriting.
-   - Remove scratch files an interrupted earlier run left behind:
+   - Remove scratch files an interrupted earlier run left behind. Only files
+     older than 60 minutes go: every cs session shares `$TMPDIR`, so a newer
+     file may be another session's store in progress, and a store takes
+     seconds:
      ```bash
-     find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name 'cs-secret.*' -user "$(id -u)" -delete
+     find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name 'cs-secret.*' -user "$(id -u)" -mmin +60 -delete
      ```
    - Then, for each secret in turn, three calls:
      1. Create a fresh scratch file. It prints a new path each time:
