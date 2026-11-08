@@ -1546,7 +1546,7 @@ CS_PAYLOAD_SHA256=(
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-images/hooks/hooks.json"
     "9a704f710da04aa9330b9d4a81a2709eaa096d1e243448c8c9e3d73bea44754d  mods/cs-images/hooks/picture.ts"
     "3bdabd9dd414f55d5be62518f420612019359bee9c8a831ff9222dc5260a9885  mods/cs-images/hooks/register.tsx"
-    "d145155d93b73639b91acfaa123fe7c16c7a67712e4452786ac75251300748dd  mods/cs-images/skills/show-image/SKILL.md"
+    "a2c4e5eb2f877fd4a7961eb6777b950549f8b75ef8424186ed247fd1cc9bd334  mods/cs-images/skills/show-image/SKILL.md"
     "8aaadea0975e0ccbeadb995515245a9b3a2651f84626c9ba6806a57da3b5ac53  mods/cs-panel/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-panel/hooks/hooks.json"
     "6909b481962cddcd80bf35f3c2424bedf5861549f7fd490b9791e352ac7c640f  mods/cs-panel/hooks/register.tsx"

@@ -18,7 +18,7 @@ cs-images draws real pixels where the terminal allows them and coloured blocks e
 Use the first of these that fits, one picture for each point, with a few lines of prose beside it:
 
 - A file on disk already shows it: draw that file with the line above.
-- A flow, a structure or states: write a mermaid diagram in a ` ```mermaid ` fence.
-- Anything a diagram cannot show, such as how a thing looks or how parts sit together: if a tool that generates images is available, make one image with one provider, then draw the absolute path the tool reports with the line above. If that path holds a space, copy the file to a path without one first.
+- A flow, a structure or states: write a mermaid diagram in a ` ```mermaid ` fence that starts with `graph TD` or `graph LR`. cs-mermaid draws only `graph` and `flowchart`, so draw states and structure as boxes and arrows too, never `stateDiagram` or `classDiagram`.
+- Anything a diagram cannot show, such as how a thing looks or how parts sit together: if a tool that generates images is available, make one image with one provider. Name that provider in the tool's provider list, because the tool may default to every provider, and give it an absolute output path under `/tmp/` with no spaces or brackets, such as `/tmp/cs-images-picture-espresso-flow`. Then draw the absolute file path the tool reports with the line above. A relative path is not drawn.
 
 If no such tool is available, draw a diagram and say you have no image tool. Never put secrets, credentials, client data or private file contents in an image description, because the description goes to an outside service; draw a diagram for those.
