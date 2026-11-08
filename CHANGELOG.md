@@ -9,10 +9,13 @@ All notable changes to cs are documented here. Release notes are also available 
 ### Added
 - The `cs-images` mod draws a picture inside a reply. A reply line that holds only `![name](/absolute/path.png)` becomes the picture: real pixels where Claude Code can draw images, and coloured block glyphs everywhere else, including under `tmux -CC`. Real pixels need kitty, Ghostty or iTerm2 3.5 or later; inside tmux they need tmux 3.3 or later with `allow-passthrough` and `focus-events` on. iTerm2 also needs Claude Code's fullscreen display, `allow-passthrough` set to `on` rather than `all`, and a tmux window no bigger than the terminal. It decodes with macOS `sips`; without it the line stays text. Photos taken on their side draw upright.
 - Two `cs-images` settings, in `/cs` and `/config`: `Draw images in replies`, and `Image cell height, in widths`, how tall a terminal cell is against its width. Claude Code gives a mod no way to read that shape, so it defaults to 2; iTerm2 with 1.5 line spacing needs 3, or pictures come out too tall.
-- A `show-image` skill ships with the mod. Ask for an image on disk and Claude writes the line that draws it. Ask to see something in pictures and Claude gives a mermaid diagram and one image beside it: a file on disk that shows the point, or else one image from one provider of an image tool you have installed. A generated image costs what that provider charges, and its description leaves your machine, so the skill keeps secrets and private content out of it.
+- A `show-image` skill ships with the mod. Ask for an image on disk and Claude writes the line that draws it. Ask to see something in pictures and Claude gives a mermaid diagram and one image beside it: a file on disk that shows the point, or else one image from one provider of an image tool you have installed. A generated image costs what that provider charges, and its description leaves your machine, so the skill keeps secrets and private content out of it. Before Claude draws a generated image, `show-image` has it open the image and compare it with its own explanation and diagram, then say what is wrong next to it or leave it out. An image model can draw a pipe or a signal going the wrong way. Claude presents the image as how the thing looks, and the diagram as how it works.
 
 ### Changed
 - `tests/lint_shell.sh` runs its shellcheck fan-out under `nice -n 10`, so a lint run on every core yields to whoever is typing.
+
+### Fixes
+- cs opens a session where a tool keeps its own files under `.cs/local`, such as a Chrome profile. Chrome's `SingletonSocket` link to its temp folder stopped the open with a refusal naming a symlink outside the session. The open's link check now covers every entry directly in `.cs/local` and cs's own folders there, and leaves links deeper inside other folders alone.
 
 ## 2026.11.4
 
