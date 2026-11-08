@@ -2,7 +2,7 @@
 // ABOUTME: Uses exact expected picture shapes and packed colour values.
 import { expect, test } from 'claude-code/testing'
 
-import { bestGlyphCells, cellHeightRatioFor, gridFor, pixelAnswer, replyParts } from '../hooks/picture'
+import { bestGlyphCells, cellHeightRatioFor, gridFor, pixelAnswer, replyParts, topDownRgbFromBmp } from '../hooks/picture'
 
 test('a line inside a code fence stays text', () => {
   const reply = 'Write it like this:\n```\n![owl](/tmp/owl.png)\n```\nDone.'
@@ -67,4 +67,19 @@ test('a blit answer says whether this terminal draws pixels', () => {
   expect(pixelAnswer({ deny: 'tmux holds images back', fix: 'tmux-passthrough' })).toBe('refused')
   expect(pixelAnswer({ deny: 'the terminal has not yet said whether it reads files on this machine; asked now, blit again' })).toBe('ask-again')
   expect(pixelAnswer({ deny: 'nothing of this plugin is mounted there' })).toBe('ask-again')
+})
+
+test('BMP rows decode top first with red and blue in their RGB channels', () => {
+  for (const height of [2, -2]) {
+    const bmp = new Uint8Array(70)
+    const header = new DataView(bmp.buffer)
+    header.setUint32(10, 54, true)
+    header.setInt32(18, 2, true)
+    header.setInt32(22, height, true)
+    header.setUint16(28, 24, true)
+    const red = [0, 0, 255, 0, 0, 255, 0, 0]
+    const blue = [255, 0, 0, 255, 0, 0, 0, 0]
+    bmp.set(height > 0 ? [...blue, ...red] : [...red, ...blue], 54)
+    expect([...topDownRgbFromBmp(bmp, 2, 2)]).toEqual([255, 0, 0, 255, 0, 0, 0, 0, 255, 0, 0, 255])
+  }
 })

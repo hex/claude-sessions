@@ -25,42 +25,45 @@ let terminalDrawsPixels: 'untried' | 'asking' | 'yes' | 'no' = 'untried'
 let sipsAvailable = false
 let temporaryDirectory = '/tmp/'
 
-function gridOf(base64: string, room: number, cellHeightRatio: number): Grid {
-  const bmp = Uint8Array.fromBase64(base64)
-  const header = new DataView(bmp.buffer, bmp.byteOffset, bmp.byteLength)
-  const pixelWidth = header.getInt32(18, true)
-  const pixelHeight = Math.abs(header.getInt32(22, true))
-  if (!(pixelWidth > 0) || !(pixelHeight > 0)) throw new Error(`unexpected BMP size: ${pixelWidth}x${pixelHeight}`)
+async function gridOf($: EngineInterface, path: string, room: number, cellHeightRatio: number): Promise<Grid | string> {
+  const size = await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', path], { timeoutMs: SIPS_TIMEOUT_MS })
+  const pixelWidth = Number(/pixelWidth: (\d+)/.exec(size.stdout)?.[1])
+  const pixelHeight = Number(/pixelHeight: (\d+)/.exec(size.stdout)?.[1])
+  if (size.exitCode !== 0 || !(pixelWidth > 0) || !(pixelHeight > 0)) return `sips cannot read it: ${size.stderr.trim() || size.stdout.trim()}`
   return { ...gridFor(pixelWidth, pixelHeight, room, cellHeightRatio), longestEdge: Math.max(pixelWidth, pixelHeight) }
 }
 
-async function converted<T>($: EngineInterface, path: string, format: 'bmp' | 'png', resize: string[], use: (out: string, base64: string) => Promise<T>): Promise<T | { failure: string }> {
+async function converted<T>($: EngineInterface, path: string, format: 'bmp' | 'png', resize: string[], use: (out: string) => Promise<T>): Promise<T | { failure: string }> {
   const out = `${temporaryDirectory}cs-images-tmp-${crypto.randomUUID()}.${format}`
   try {
     const made = await $.process.run(['sips', '-s', 'format', format, ...resize, path, '--out', out], { timeoutMs: SIPS_TIMEOUT_MS })
     if (made.exitCode !== 0) return { failure: `sips cannot convert it: ${made.stderr.trim() || made.stdout.trim()}` }
-    const { base64 } = await $.fs.read(out, { as: 'bytes' })
-    return await use(out, base64)
+    return await use(out)
   } finally {
     await $.process.run(['rm', '-f', out])
   }
 }
 
 async function decodeCells($: EngineInterface, path: string, room: number, cellHeightRatio: number): Promise<Cells | string> {
-  const picture = await converted($, path, 'bmp', [], async (upright, base64) => {
-    const { columns, rows } = gridOf(base64, room, cellHeightRatio)
-    return converted($, upright, 'bmp', ['-z', String(rows * SAMPLES_PER_CELL_SIDE), String(columns * SAMPLES_PER_CELL_SIDE)], async (_out, resized) => {
+  const picture = await converted($, path, 'bmp', [], async upright => {
+    const grid = await gridOf($, upright, room, cellHeightRatio)
+    if (typeof grid === 'string') return grid
+    const { columns, rows } = grid
+    return converted($, upright, 'bmp', ['-z', String(rows * SAMPLES_PER_CELL_SIDE), String(columns * SAMPLES_PER_CELL_SIDE)], async out => {
+      const { base64: resized } = await $.fs.read(out, { as: 'bytes' })
       const samples = topDownRgbFromBmp(Uint8Array.fromBase64(resized), columns * SAMPLES_PER_CELL_SIDE, rows * SAMPLES_PER_CELL_SIDE)
       return { columns, rows, cells: bestGlyphCells(samples, columns, rows) }
     })
   })
-  return 'failure' in picture ? picture.failure : picture
+  return typeof picture === 'string' ? picture : 'failure' in picture ? picture.failure : picture
 }
 
 async function decodePixels($: EngineInterface, path: string, room: number, cellHeightRatio: number): Promise<Pixels | string> {
-  const picture = await converted($, path, 'bmp', [], async (upright, base64) => {
-    const grid = gridOf(base64, room, cellHeightRatio)
-    return converted($, upright, 'png', grid.longestEdge > LONGEST_PNG_EDGE ? ['-Z', String(LONGEST_PNG_EDGE)] : [], async (_out, png) => {
+  const picture = await converted($, path, 'bmp', [], async upright => {
+    const grid = await gridOf($, upright, room, cellHeightRatio)
+    if (typeof grid === 'string') return grid
+    return converted($, upright, 'png', grid.longestEdge > LONGEST_PNG_EDGE ? ['-Z', String(LONGEST_PNG_EDGE)] : [], async out => {
+      const { base64: png } = await $.fs.read(out, { as: 'bytes' })
       if ((png.length * 3) / 4 > MOST_PNG_BYTES) return 'the picture is too large to send as pixels'
       return { columns: grid.columns, rows: grid.rows, png }
     })
@@ -118,16 +121,19 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     terminalDrawsPixels = 'untried'
+    sipsAvailable = false
+    let present = false
     try {
-      sipsAvailable = (await $.process.run(['sips', '--version'], { timeoutMs: SIPS_TIMEOUT_MS })).exitCode === 0
+      present = (await $.process.run(['sips', '--version'], { timeoutMs: SIPS_TIMEOUT_MS })).exitCode === 0
     } catch {
-      sipsAvailable = false
+      present = false
     }
-    if (sipsAvailable) {
+    if (present) {
       const directory = await $.env.get('TMPDIR') || '/tmp/'
       temporaryDirectory = directory.endsWith('/') ? directory : `${directory}/`
       const cleaned = await $.process.run(['find', temporaryDirectory, '-maxdepth', '1', '-type', 'f', '-name', 'cs-images-tmp-*', '-mmin', '+60', '-delete'])
       if (cleaned.exitCode !== 0) throw new Error(`cs-images cannot remove stale temp files: ${cleaned.stderr.trim() || cleaned.stdout.trim()}`)
+      sipsAvailable = true
       $.ui.invalidate('ui.render')
     }
     return next(e)
