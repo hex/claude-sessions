@@ -561,8 +561,12 @@ QCURRENT_FILE="$QDIR/queue.current"
 # Stop's key waits a 2 s grace and then lets the notices go ahead; pending
 # waits up to CS_STOP_VERDICT_WAIT and then goes ahead; block silences them. A
 # writer killed by SIGKILL never runs the EXIT trap, so pending stays and the
-# reader fails open. A failed write (the `|| true` below) leaves the previous
-# Stop's line, which the reader takes for another Stop's key.
+# reader fails open. A failed write (the `|| true` below) leaves the line
+# already in the file. If only the EXIT trap's write failed, that line is this
+# Stop's pending, so the reader waits out CS_STOP_VERDICT_WAIT (7 s by default)
+# and then the notices go ahead, beside a block if this Stop answered with one.
+# If the pending write failed too, that line is the previous Stop's, which the
+# reader takes for another Stop's key.
 STOP_VERDICT=approve
 _verdict_post() {  # word
     cs_write_atomic "$LOCAL/stop-verdict" printf '%s %s %s\n' "$STOP_KEY" "$1" "$(date +%s)" || true
