@@ -9,11 +9,38 @@ test('a line inside a code fence stays text', () => {
   expect(replyParts(reply)).toEqual([{ kind: 'text', body: reply }])
 })
 
+test('a fence closes only on its own mark, at least as long, with no trailing text', () => {
+  const cases = [
+    { open: '````', close: '```', closes: false },
+    { open: '```', close: '~~~', closes: false },
+    { open: '```', close: '``` trailing', closes: false },
+    { open: '```', close: '```', closes: true },
+    { open: '````', close: '`````', closes: true },
+    { open: '~~~', close: '~~~~', closes: true },
+    { open: '```', close: '```   ', closes: true },
+  ]
+  for (const entry of cases) {
+    const quoted = `${entry.open}\n![inside](/tmp/inside.png)\n${entry.close}`
+    const line = '![outside](/tmp/outside.png)'
+    const reply = `${quoted}\n${line}`
+    expect(replyParts(reply)).toEqual(entry.closes
+      ? [{ kind: 'text', body: quoted }, { kind: 'image', alt: 'outside', path: '/tmp/outside.png', line }]
+      : [{ kind: 'text', body: reply }])
+  }
+})
+
 test('only an absolute path to a picture file is drawn', () => {
   for (const line of ['![a](pics/owl.png)', '![a](https://example.com/owl.png)', '![a](/tmp/notes.txt)', '![a](/tmp/script.sh)', 'See ![a](/tmp/owl.png) here']) {
     expect(replyParts(line)).toEqual([{ kind: 'text', body: line }])
   }
   expect(replyParts('![a](/tmp/Owl.HEIC)')).toEqual([{ kind: 'image', alt: 'a', path: '/tmp/Owl.HEIC', line: '![a](/tmp/Owl.HEIC)' }])
+})
+
+test('an image line accepts trailing spaces but refuses trailing prose', () => {
+  const padded = '![padded](/tmp/padded.png)   '
+  expect(replyParts(padded)).toEqual([{ kind: 'image', alt: 'padded', path: '/tmp/padded.png', line: padded }])
+  const prose = '![padded](/tmp/padded.png) trailing prose'
+  expect(replyParts(prose)).toEqual([{ kind: 'text', body: prose }])
 })
 
 test('the grid keeps the picture\'s proportions in cells three times as tall as wide', () => {
@@ -81,5 +108,28 @@ test('BMP rows decode top first with red and blue in their RGB channels', () => 
     const blue = [255, 0, 0, 255, 0, 0, 0, 0]
     bmp.set(height > 0 ? [...blue, ...red] : [...red, ...blue], 54)
     expect([...topDownRgbFromBmp(bmp, 2, 2)]).toEqual([255, 0, 0, 255, 0, 0, 0, 0, 255, 0, 0, 255])
+  }
+})
+
+test('a BMP with a different size or bit depth reports the exact mismatch', () => {
+  const cases = [
+    { width: 3, height: 2, bits: 24, message: 'unexpected BMP: 3x2, 24 bits, wanted 2x2' },
+    { width: 2, height: -3, bits: 24, message: 'unexpected BMP: 2x-3, 24 bits, wanted 2x2' },
+    { width: 2, height: 2, bits: 16, message: 'unexpected BMP: 2x2, 16 bits, wanted 2x2' },
+  ]
+  for (const entry of cases) {
+    const bmp = new Uint8Array(70)
+    const header = new DataView(bmp.buffer)
+    header.setUint32(10, 54, true)
+    header.setInt32(18, entry.width, true)
+    header.setInt32(22, entry.height, true)
+    header.setUint16(28, entry.bits, true)
+    let message: string | undefined
+    try {
+      topDownRgbFromBmp(bmp, 2, 2)
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error)
+    }
+    expect(message).toBe(entry.message)
   }
 })

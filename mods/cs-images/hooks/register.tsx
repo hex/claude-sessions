@@ -84,7 +84,7 @@ function remembered<T>(known: Map<string, Promise<T>>, most: number, id: string,
 
 // The engine aborts a dispatch's $ calls when it abandons that dispatch, and a later drawing can
 // be waiting on the same decode, so a rejected decode is forgotten and this dispatch starts its own.
-async function settled<T>(load: () => Promise<T | string>, signal: AbortSignal): Promise<T | string> {
+export async function settled<T>(load: () => Promise<T | string>, signal: AbortSignal): Promise<T | string> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await load()

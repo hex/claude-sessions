@@ -87,7 +87,7 @@ test('a picture whose decode was aborted is decoded again rather than reported',
   expect(converts).toBe(4)
 })
 
-function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fails' | 'oversized'; answers?: Array<{ deny?: string }>; rotated?: boolean; tmpdir?: string; probe?: Promise<void>; width?: number; height?: number; directoryReady?: Promise<void>; sweep?: { exitCode: number; stderr: string } } = {}) {
+function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fails' | 'oversized'; answers?: Array<{ deny?: string }>; rotated?: boolean; tmpdir?: string; probe?: Promise<void>; width?: number; height?: number; directoryReady?: Promise<void>; sweep?: { exitCode: number; stderr: string }; statError?: string } = {}) {
   const w = { logs: [] as string[], runs: [] as string[][], blits: [] as string[], invalidations: [] as string[], sizeReads: 0, mtimeMs: 1 }
   const clock = mock.clock(on)
   let directoryStarted = () => {}
@@ -98,7 +98,10 @@ function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fai
     await options.directoryReady
     return { value: options.tmpdir }
   })
-  on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: w.mtimeMs, isLink: false } }))
+  on('fs.stat', () => {
+    if (options.statError !== undefined) throw new Error(options.statError)
+    return { value: { kind: 'file', size: 1, mtimeMs: w.mtimeMs, isLink: false } }
+  })
   on('fs.read', (_$, e) => {
     if (!e.path.endsWith('.bmp')) return { value: { base64: options.png === 'oversized' ? 'A'.repeat(2796204)
       : 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aRZkAAAAASUVORK5CYII=' } }
@@ -151,6 +154,36 @@ test('widths 120 and 121 share one displayed-size read above the 60-column cap',
   expect(w.sizeReads).toBe(1)
 })
 
+test('different drawing widths below the cap decode separately', async ($, on) => {
+  const { w } = pictureWorld(on)
+  await startSession($, on)
+  const drawn: unknown[] = []
+  for (const columns of [26, 36]) {
+    const ui = await $.ui.mount({ plugin: 'cs-images', component: 'AssistantMessage', surface: 'terminal', viewport: { columns, rows: 40 }, props: { text: '![owl](/tmp/below-cap.png)', isFirstOfReply: true } })
+    drawn.push((await ui.find({ type: 'Image' }))?.props.columns)
+    await ui.unmount()
+  }
+  expect(drawn).toEqual([20, 30])
+  expect(w.sizeReads).toBe(2)
+})
+
+test('a rejected file stat still draws the picture', async ($, on) => {
+  pictureWorld(on, { statError: 'stat permission denied' })
+  engineReply(on)
+  await startSession($, on)
+  const ui = await mountPicture($, '/tmp/stat-rejected.png')
+  expect((await ui.find({ type: 'Image' }))?.props.rows).toBe(4)
+  await ui.unmount()
+})
+
+test('images keep their alt text and use one space for an empty alt', async ($, on) => {
+  pictureWorld(on)
+  await startSession($, on)
+  const ui = await $.ui.mount({ plugin: 'cs-images', component: 'AssistantMessage', surface: 'terminal', viewport: { columns: 14, rows: 40 }, props: { text: '![night owl](/tmp/named-alt.png)\n![](/tmp/empty-alt.png)', isFirstOfReply: true } })
+  expect((await ui.findAll({ type: 'Image' })).map(image => image.props.alt)).toEqual(['night owl', ' '])
+  await ui.unmount()
+})
+
 test('the first prose part keeps the reply bullet after an opening picture', async ($, on) => {
   pictureWorld(on)
   const prose: Array<{ text: string; isFirstOfReply: boolean }> = []
@@ -182,11 +215,17 @@ test('a successful sips probe redraws a reply rendered while the probe was pendi
 
 for (const pixels of [true, false]) {
   test(`a rotated photo keeps displayed proportions as ${pixels ? 'pixels' : 'cells'}`, async ($, on) => {
-    pictureWorld(on, { rotated: true, ...(pixels ? {} : { png: 'fails' }) })
+    const { w } = pictureWorld(on, { rotated: true, ...(pixels ? {} : { png: 'fails' }) })
     await startSession($, on)
     const ui = await $.ui.mount({ plugin: 'cs-images', component: 'AssistantMessage', surface: 'terminal', viewport: { columns: 80, rows: 40 }, props: { text: '![photo](/tmp/rotated.jpg)', isFirstOfReply: true } })
     const picture = await ui.find({ type: pixels ? 'Image' : 'Raster' })
     expect({ columns: picture?.props.columns, rows: picture?.props.rows }).toEqual({ columns: 45, rows: 30 })
+    if (pixels) {
+      const upright = w.runs.find(argv => argv.includes('bmp') && !argv.includes('-z'))
+      const png = w.runs.find(argv => argv.includes('png'))
+      if (upright === undefined || png === undefined) throw new Error('missing upright bitmap or png conversion')
+      expect(png[png.indexOf('--out') - 1]).toBe(upright[upright.indexOf('--out') + 1])
+    }
     await ui.unmount()
   })
 }
