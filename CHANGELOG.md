@@ -4,6 +4,16 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Added
+- The `cs-images` mod draws a picture inside a reply. A reply line that holds only `![name](/absolute/path.png)` becomes the picture: real pixels where Claude Code can draw images, and coloured block glyphs everywhere else, including under `tmux -CC`. Real pixels need kitty, Ghostty or iTerm2 3.5 or later; inside tmux they need tmux 3.3 or later with `allow-passthrough` and `focus-events` on. iTerm2 also needs Claude Code's fullscreen display, `allow-passthrough` set to `on` rather than `all`, and a tmux window no bigger than the terminal. It decodes with macOS `sips`; without it the line stays text. Photos taken on their side draw upright.
+- Two `cs-images` settings, in `/cs` and `/config`: `Draw images in replies`, and `Image cell height, in widths`, how tall a terminal cell is against its width. Claude Code gives a mod no way to read that shape, so it defaults to 2; iTerm2 with 1.5 line spacing needs 3, or pictures come out too tall.
+- A `show-image` skill ships with the mod. Ask for an image on disk and Claude writes the line that draws it. Ask to see something in pictures and Claude gives a mermaid diagram and one image beside it: a file on disk that shows the point, or else one image from one provider of an image tool you have installed. A generated image costs what that provider charges, and its description leaves your machine, so the skill keeps secrets and private content out of it.
+
+### Changed
+- `tests/lint_shell.sh` runs its shellcheck fan-out under `nice -n 10`, so a lint run on every core yields to whoever is typing.
+
 ## 2026.11.4
 
 ### Added
