@@ -1248,9 +1248,9 @@ rendering so an image line drawn before the probe completes gets another try.
 
 The bundled `skills/show-image/SKILL.md` gives the model the syntax when
 asked to see, show or display an image, screenshot, photo or chart on disk,
-or to explain something in pictures. For an explanation it picks a file on
-disk, then a mermaid diagram, then one generated image where the session
-has an image tool; a generated image costs what that tool's provider charges and
+or to explain something in pictures. For an explanation it draws a mermaid
+diagram and, beside it, a file on disk that shows the point or else one
+generated image where the session has an image tool; a generated image costs what that tool's provider charges and
 its description leaves the machine, so the skill keeps private content out
 of it. It needs no `prompt.compose` hook, which organizations can refuse. The
 engine lists it as `/cs-images:show-image`. Turning drawing off leaves the
