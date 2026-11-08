@@ -870,9 +870,14 @@ fi
 # Consume the rotation resolved above: flip the handoff's frontmatter to
 # consumed, record the consumer, and drop the marker. Only the first status
 # line (the frontmatter's) flips; a body quoting it flush-left stays intact.
+# The marker goes only once the flip landed: a handoff still unconsumed with
+# no marker would be offered at the next launch but never auto-loaded by
+# /clear, and nobody would be told. Kept, the next start retries the same
+# handoff, and the preamble below names the failure.
+ROTATION_FLIP_FAILED=""
 if [ -n "$ROTATION_HANDOFF" ]; then
     HANDOFF_FILE="$HANDOFF_DIR/$ROTATION_HANDOFF"
-    cs_write_atomic "$HANDOFF_FILE" awk -v uuid="$SESSION_ID" '
+    if cs_write_atomic "$HANDOFF_FILE" awk -v uuid="$SESSION_ID" '
         !flipped && $0 == "status: unconsumed" {
             print "status: consumed"
             print "consumed_by: " uuid
@@ -880,8 +885,11 @@ if [ -n "$ROTATION_HANDOFF" ]; then
             next
         }
         { print }
-    ' "$HANDOFF_FILE" 2>/dev/null || true
-    rm -f "$PENDING_MARKER" 2>/dev/null || true
+    ' "$HANDOFF_FILE" 2>/dev/null; then
+        rm -f "$PENDING_MARKER" 2>/dev/null || true
+    else
+        ROTATION_FLIP_FAILED=1
+    fi
 fi
 
 # The clean-break notice belongs only where the conversation genuinely starts
@@ -1024,6 +1032,11 @@ This fresh conversation continues rotated work. Read $HANDOFF_REL/$ROTATION_HAND
 Nothing has run yet. $ROTATION_START A BARE NUDGE — \"go\", \"continue\", \"ok\" — means begin: reconcile your native task list, which carried over from the previous conversation, with the handoff (mark what it says is done, add any next-step step that is missing, one task per step), then execute the next step and report what you did, without re-summarising it or asking which part to start with. A first message carrying its own content takes precedence over the handoff; answer that instead. Ask first only where you normally would: the handoff is missing, unreadable, or genuinely ambiguous, or its next step is destructive or irreversible.
 
 Once that next step is done, append a \`## Successor report\` section to the end of $HANDOFF_REL/$ROTATION_HANDOFF_SHOWN: each thing you had to look up again, re-derive, or found wrong in the handoff, with how you found out, or \`none\`. Append only; never rewrite what the previous conversation wrote."
+    if [ -n "$ROTATION_FLIP_FAILED" ]; then
+        CONTEXT="${CONTEXT}
+
+WARNING: cs could not mark $HANDOFF_REL/$ROTATION_HANDOFF_SHOWN consumed (the write into $HANDOFF_REL/ failed), so its frontmatter still says \`status: unconsumed\` and the marker .cs/${PENDING_MARKER#"$META_DIR"/} stays armed: the next startup or /clear of this session will load this same handoff again. Tell the user before anything else. Once the directory can be written, that start flips it itself; to stop the retry instead, set its \`status:\` to \`consumed\` and remove the marker by hand."
+    fi
 elif [ -n "$FRESH_NOTICE" ]; then
     CONTEXT="${CONTEXT}
 
