@@ -1122,7 +1122,7 @@ fn render_confirm_delete(app: &App, confirm: &DeleteConfirm, name: &str, frame: 
     let p = app.theme;
     let remaining = app.delete_countdown_remaining();
 
-    let adopted =app.sessions.iter().any(|s| s.name == name && s.is_adopted);
+    let adopted = app.sessions.iter().any(|s| s.name == name && s.is_adopted);
     let (question, note) = if adopted {
         (format!("Remove adopted session '{}'?", name), "(removes symlink only, project preserved)")
     } else {
