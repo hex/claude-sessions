@@ -1921,8 +1921,10 @@ fn render_notes_pane(app: &App, frame: &mut Frame, area: Rect) {
         .selected_session()
         .map(|s| crate::session::read_queue(&s.name))
         .unwrap_or_default();
-    // While the drain is live, the first queued line is the task Claude is
-    // working right now; it gets the teal working marker below.
+    // While the drain is live, the first queued line gets the teal working
+    // marker below. The task Claude is working is the one queue.current names,
+    // which is the first line unless that task was removed or a task that sorts
+    // ahead of it was queued since.
     let drain_active = !tasks.is_empty()
         && app
             .selected_session()
