@@ -33,12 +33,13 @@ done < <(git ls-files -z '*.sh')
 # own file, so findings from runs at once never share a write. shellcheck exits
 # 1 when it has findings and 2 or more when it could not run (a missing file,
 # an unreadable one), so only the latter is a broken lint; a run that hits it
-# records the file and its exit for the check below.
+# records the file and its exit for the check below. Under nice, so a fan-out
+# across every processor yields to whoever is typing.
 out=$(mktemp -d "${TMPDIR:-/tmp}/lint_shell.XXXXXX")
 trap 'rm -rf "$out"' EXIT
 jobs=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)
 case "$jobs" in '' | *[!0-9]* | 0) jobs=2 ;; esac
-printf '%s\0' "${files[@]}" | xargs -0 -n 1 -P "$jobs" sh -c '
+printf '%s\0' "${files[@]}" | nice -n 10 xargs -0 -n 1 -P "$jobs" sh -c '
     o=$(mktemp "$1/run.XXXXXX") || exit 255
     rc=0
     shellcheck -S warning -f gcc "$2" > "$o" || rc=$?

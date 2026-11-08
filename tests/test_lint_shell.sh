@@ -105,6 +105,26 @@ test_a_shellcheck_that_cannot_run_is_an_error() {
         "the error must name the file and the exit" || return 1
 }
 
+# The fan-out takes every processor, so it must yield to whoever is typing.
+# Compared with the caller, because run_all already runs this suite under nice.
+test_shellcheck_runs_below_the_caller_priority() {
+    require_tool shellcheck || return $?
+    _lint_repo 1
+    local fake="$TEST_TMPDIR/fakebin" seen="$TEST_TMPDIR/nice"
+    mkdir -p "$fake"
+    printf '#!/bin/sh\nps -o nice= -p $$ | tr -d " " >> "%s"\nexec "%s" "$@"\n' "$seen" "$(command -v shellcheck)" > "$fake/shellcheck"
+    chmod +x "$fake/shellcheck"
+    local caller out rc=0
+    caller=$(ps -o nice= -p $$ | tr -d ' ')
+    out=$( cd "$REPO" && PATH="$fake:$PATH" bash tests/lint_shell.sh 2>&1 ) || rc=$?
+    assert_eq 0 "$rc" "the lint must pass here: $out" || return 1
+    assert_eq 6 "$(wc -l < "$seen" | tr -d ' ')" "the four binaries, one.sh and lint_shell.sh must each reach the fake" || return 1
+    local level
+    while IFS= read -r level; do
+        [ "$level" -gt "$caller" ] || { echo "shellcheck ran at nice $level, the caller is at $caller"; return 1; }
+    done < "$seen"
+}
+
 # A number past bash's integer range makes both comparisons error out and
 # fall through to the pass line, so it is refused like any other bad value.
 test_a_baseline_that_is_not_a_number_is_an_error() {
@@ -128,5 +148,6 @@ run_test test_an_error_level_finding_fails
 run_test test_warnings_from_every_file_count
 run_test test_a_shellcheck_that_cannot_run_is_an_error
 run_test test_a_baseline_that_is_not_a_number_is_an_error
+run_test test_shellcheck_runs_below_the_caller_priority
 
 report_results
