@@ -25,6 +25,7 @@ test('with drawImages off, an image line stays with the engine', { options: { dr
 })
 
 test('a picture sips cannot read says why and keeps the line', async ($, on) => {
+  mock.env(on, {})
   on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }))
   on('process.run', (_$, e) => ({ value: { exitCode: e.argv.includes('--version') || e.argv[0] === 'find' ? 0 : 1, stdout: '', stderr: 'no such format', isStdoutTruncated: false, isStderrTruncated: false } }))
   await startSession($, on)
@@ -54,6 +55,7 @@ function solidBmpBase64(width = 64, height = 8): string {
 }
 
 test('a picture whose decode was aborted is decoded again rather than reported', async ($, on) => {
+  mock.env(on, {})
   let converts = 0
   on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 2, isLink: false } }))
   on('fs.read', () => ({ value: { base64: solidBmpBase64() } }))
@@ -80,9 +82,10 @@ test('a picture whose decode was aborted is decoded again rather than reported',
   expect(converts).toBe(4)
 })
 
-function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fails' | 'oversized'; answers?: Array<{ deny?: string }>; rotated?: boolean } = {}) {
+function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fails' | 'oversized'; answers?: Array<{ deny?: string }>; rotated?: boolean; tmpdir?: string } = {}) {
   const w = { logs: [] as string[], runs: [] as string[][], blits: [] as string[] }
   const clock = mock.clock(on)
+  mock.env(on, options.tmpdir === undefined ? {} : { TMPDIR: options.tmpdir })
   on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }))
   on('fs.read', (_$, e) => {
     if (!e.path.endsWith('.bmp')) return { value: { base64: options.png === 'oversized' ? 'A'.repeat(2796204)
@@ -154,12 +157,24 @@ test('session start probes sips once and removes only stale cs-images temp files
   await startSession($, on)
   expect(w.runs).toEqual([
     ['sips', '--version'],
-    ['find', '/tmp', '-maxdepth', '1', '-name', 'cs-images-*', '-mmin', '+60', '-delete'],
+    ['find', '/tmp/', '-maxdepth', '1', '-type', 'f', '-name', 'cs-images-tmp-*', '-mmin', '+60', '-delete'],
   ])
   const ui = await mountPicture($, '/tmp/present.png')
   expect((await ui.find({ type: 'Image' }))?.props.rows).toBe(4)
   await ui.redraw()
   expect(w.runs.filter(argv => argv.includes('--version'))).toEqual([['sips', '--version']])
+  await ui.unmount()
+})
+
+test('conversion and stale-file cleanup use the per-user temp directory', async ($, on) => {
+  const { w } = pictureWorld(on, { tmpdir: '/private/tmp/image user' })
+  await startSession($, on)
+  const ui = await mountPicture($, '/tmp/private.png')
+  expect(w.runs.filter(argv => argv[0] === 'find')).toEqual([
+    ['find', '/private/tmp/image user/', '-maxdepth', '1', '-type', 'f', '-name', 'cs-images-tmp-*', '-mmin', '+60', '-delete'],
+  ])
+  const files = w.runs.filter(argv => argv.includes('--out')).map(argv => argv[argv.indexOf('--out') + 1]?.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/, '<uuid>'))
+  expect(files).toEqual(['/private/tmp/image user/cs-images-tmp-<uuid>.bmp', '/private/tmp/image user/cs-images-tmp-<uuid>.png'])
   await ui.unmount()
 })
 

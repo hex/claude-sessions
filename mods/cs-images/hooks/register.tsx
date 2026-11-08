@@ -23,6 +23,7 @@ const allPixels = new Map<string, Promise<Pixels | string>>()
 // untried: no Image has been asked about yet. asking: one Image is mounted and being asked about.
 let terminalDrawsPixels: 'untried' | 'asking' | 'yes' | 'no' = 'untried'
 let sipsAvailable = false
+let temporaryDirectory = '/tmp/'
 
 function gridOf(base64: string, room: number, cellHeightRatio: number): Grid {
   const bmp = Uint8Array.fromBase64(base64)
@@ -34,7 +35,7 @@ function gridOf(base64: string, room: number, cellHeightRatio: number): Grid {
 }
 
 async function converted<T>($: EngineInterface, path: string, format: 'bmp' | 'png', resize: string[], use: (out: string, base64: string) => Promise<T>): Promise<T | { failure: string }> {
-  const out = `/tmp/cs-images-${crypto.randomUUID()}.${format}`
+  const out = `${temporaryDirectory}cs-images-tmp-${crypto.randomUUID()}.${format}`
   try {
     const made = await $.process.run(['sips', '-s', 'format', format, ...resize, path, '--out', out], { timeoutMs: SIPS_TIMEOUT_MS })
     if (made.exitCode !== 0) return { failure: `sips cannot convert it: ${made.stderr.trim() || made.stdout.trim()}` }
@@ -123,7 +124,9 @@ export const register: Register = (on, options) => {
       sipsAvailable = false
     }
     if (sipsAvailable) {
-      const cleaned = await $.process.run(['find', '/tmp', '-maxdepth', '1', '-name', 'cs-images-*', '-mmin', '+60', '-delete'])
+      const directory = await $.env.get('TMPDIR') || '/tmp/'
+      temporaryDirectory = directory.endsWith('/') ? directory : `${directory}/`
+      const cleaned = await $.process.run(['find', temporaryDirectory, '-maxdepth', '1', '-type', 'f', '-name', 'cs-images-tmp-*', '-mmin', '+60', '-delete'])
       if (cleaned.exitCode !== 0) throw new Error(`cs-images cannot remove stale temp files: ${cleaned.stderr.trim() || cleaned.stdout.trim()}`)
     }
     return next(e)
