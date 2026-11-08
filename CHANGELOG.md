@@ -4,6 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Fixes
+- The `store-secret` skill writes each secret to its own `mktemp` file under `$TMPDIR` and stores and deletes it in one command, so the plaintext file goes even when the store fails. It wrote every value to one fixed `.secret` file and deleted it as a separate step: an interrupt between the two left the file on disk, and with two or more secrets a failed write could store the previous value under the next name. Each run first removes any `cs-secret.*` file an earlier run left in `$TMPDIR`.
+
 ## 2026.11.4
 
 ### Added
