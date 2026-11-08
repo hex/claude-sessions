@@ -44,9 +44,11 @@ _append_attribute_line() {  # file line
 # A clone delivers symlinks like any other file, and cs writes through them
 # at open: `.cs/README.md -> ~/.zshrc` would take the README's frontmatter.
 # Refuse links under .cs, or at a root file cs rewrites, whose writes land
-# outside the session. Untracked .cs/local also holds tools' own files, so
-# only cs's paths there are checked. A link to a directory inside the session
-# is followed and that directory scanned too: .cs/memory -> ../payload makes payload's
+# outside the session. Untracked .cs/local also holds tools' own files.
+# Under .cs/local, direct entries and links inside cs's directories are checked.
+# Deeper links in other folders belong to tools.
+# A link to a directory inside the session is followed and that directory
+# scanned too: .cs/memory -> ../payload makes payload's
 # links cs's write targets. A hand-made vault's mount is the user's and is not
 # walked; cs_write_atomic still refuses a write leading out of it.
 _refuse_links_out_of_session() {  # dir
