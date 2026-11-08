@@ -870,6 +870,23 @@ impl App {
         self.selected_session().map(|s| s.name.clone())
     }
 
+    /// Hand keyboard input back to the session list, with the notes pane's
+    /// input line ready for the next Tab.
+    pub fn leave_notes(&mut self) {
+        self.notes_focus = NotesFocus::Input;
+        self.focus = Focus::List;
+    }
+
+    /// The renderer drew the table alone, so a focused notes pane is not on
+    /// screen. Keys return to the list, and the typed text stays in the input
+    /// for when the pane fits again.
+    pub fn notes_pane_hidden(&mut self) {
+        if self.focus == Focus::Notes {
+            self.leave_notes();
+            self.set_status("The queue pane needs a taller or wider window", StatusLevel::Info);
+        }
+    }
+
     /// Ask the worker for the selected session's preview, unless it is already
     /// cached or already queued. Never touches the filesystem on this thread.
     pub fn request_preview(&mut self) {
@@ -1297,8 +1314,7 @@ impl App {
         match key.code {
             KeyCode::Esc => {
                 self.queue_input.clear();
-                self.notes_focus = NotesFocus::Input;
-                self.focus = Focus::List;
+                self.leave_notes();
             }
             KeyCode::Enter => {
                 return self.submit_notes_input();
@@ -1368,8 +1384,7 @@ impl App {
                 }
             }
             KeyCode::Esc => {
-                self.notes_focus = NotesFocus::Input;
-                self.focus = Focus::List;
+                self.leave_notes();
             }
             _ => {}
         }
@@ -6786,6 +6801,10 @@ mod tests {
             assert!(
                 !screen.contains("type a task"),
                 "{way_in}: the footer offers no notes keys while the pane is hidden:\n{screen}"
+            );
+            assert!(
+                screen.contains("The queue pane needs a taller or wider window"),
+                "{way_in}: the footer says why Tab showed nothing:\n{screen}"
             );
             app.handle_key(KeyEvent::from(KeyCode::Char('j')));
             assert_eq!(app.table_state.selected(), Some(1), "{way_in}: j moves the visible list");

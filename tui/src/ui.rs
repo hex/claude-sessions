@@ -274,6 +274,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
                 render_notes_pane(app, frame, rows[2]);
             }
             PaneLayout::TableOnly => {
+                app.notes_pane_hidden();
                 render_table(app, frame, chunks[1], false);
             }
         }
