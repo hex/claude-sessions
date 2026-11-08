@@ -128,6 +128,7 @@ opt out.
 
 An [encrypted session](#encrypted-sessions) keeps the content files among these
 in `.cs/private/` instead.
+Tools may keep their own files in `.cs/local`, and the open's link check covers only the paths cs writes.
 
 Git must track no file in either directory. A session's `.gitignore` lists
 `.cs/local/` and `.cs/private/` (the directory; git still takes the link an encrypted
