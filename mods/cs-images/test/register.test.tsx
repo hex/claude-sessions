@@ -83,7 +83,7 @@ test('a picture whose decode was aborted is decoded again rather than reported',
 })
 
 function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fails' | 'oversized'; answers?: Array<{ deny?: string }>; rotated?: boolean; tmpdir?: string; probe?: Promise<void> } = {}) {
-  const w = { logs: [] as string[], runs: [] as string[][], blits: [] as string[], invalidations: [] as string[] }
+  const w = { logs: [] as string[], runs: [] as string[][], blits: [] as string[], invalidations: [] as string[], sizeReads: 0 }
   const clock = mock.clock(on)
   mock.env(on, options.tmpdir === undefined ? {} : { TMPDIR: options.tmpdir })
   on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }))
@@ -93,7 +93,10 @@ function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fai
     const conversion = w.runs.find(argv => argv[argv.indexOf('--out') + 1] === e.path)
     if (conversion === undefined) throw new Error(`no conversion wrote ${e.path}`)
     const z = conversion.indexOf('-z')
-    if (z < 0) return { value: { base64: options.rotated ? solidBmpBase64(480, -640) : solidBmpBase64(512, 512) } }
+    if (z < 0) {
+      w.sizeReads++
+      return { value: { base64: options.rotated ? solidBmpBase64(480, -640) : solidBmpBase64(512, 512) } }
+    }
     const rows = Number(conversion[z + 1]), columns = Number(conversion[z + 2])
     const from = conversion[conversion.indexOf('--out') - 1]
     return { value: { base64: options.rotated && from === '/tmp/rotated.jpg'
@@ -114,6 +117,17 @@ function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fai
   on('ui.invalidate', (_$, e, next) => { w.invalidations.push(e.event); return next(e) })
   return { w, clock }
 }
+
+test('widths 120 and 121 share one displayed-size read above the 60-column cap', async ($, on) => {
+  const { w } = pictureWorld(on)
+  await startSession($, on)
+  for (const columns of [120, 121]) {
+    const ui = await $.ui.mount({ plugin: 'cs-images', component: 'AssistantMessage', surface: 'terminal', viewport: { columns, rows: 40 }, props: { text: '![owl](/tmp/capped.png)', isFirstOfReply: true } })
+    expect((await ui.find({ type: 'Image' }))?.props.columns).toBe(60)
+    await ui.unmount()
+  }
+  expect(w.sizeReads).toBe(1)
+})
 
 test('a successful sips probe redraws a reply rendered while the probe was pending', async ($, on) => {
   const options: { sips?: 'nonzero'; probe?: Promise<void> } = { sips: 'nonzero' }

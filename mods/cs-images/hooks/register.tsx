@@ -140,7 +140,7 @@ export const register: Register = (on, options) => {
       await $.ui.log(`cellHeightRatio ${String(requestedRatio)} is not a finite number from 1 to 5; using 2`, { to: 'debug' })
     }
     const { Box, Text, Raster, Image } = $.ui.resolve(e)
-    const room = Math.max(8, (e.viewport?.columns ?? 80) - 6)
+    const room = Math.min(60, Math.max(8, (e.viewport?.columns ?? 80) - 6))
     const parts = replyParts(e.props.text)
     const drawn = await Promise.all(parts.map(async (part, index) => {
       if (part.kind === 'text') {
