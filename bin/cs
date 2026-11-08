@@ -8199,13 +8199,15 @@ _append_attribute_line() {  # file line
 
 # A clone delivers symlinks like any other file, and cs writes through them
 # at open: `.cs/README.md -> ~/.zshrc` would take the README's frontmatter.
-# Refuse any link under .cs, or at a root file cs rewrites, whose writes land
-# outside the session. A link to a directory inside the session is followed
-# and that directory scanned too: .cs/memory -> ../payload makes payload's
+# Refuse links under .cs, or at a root file cs rewrites, whose writes land
+# outside the session. Untracked .cs/local also holds tools' own files, so
+# only cs's paths there are checked. A link to a directory inside the session
+# is followed and that directory scanned too: .cs/memory -> ../payload makes payload's
 # links cs's write targets. A hand-made vault's mount is the user's and is not
 # walked; cs_write_atomic still refuses a write leading out of it.
 _refuse_links_out_of_session() {  # dir
     local dir="$1" dir_p p link real cur todo out seen="" prune="" cfg=""
+    local initial_scan=1 local_entry folded_entry local_path folded_path
     dir_p=$(cd -P -- "$dir" 2>/dev/null && pwd -P) || return 0
     # cs links the shell's settings, skills and the rest into an encrypted
     # session's config dir by design; that dir is skipped only while
@@ -8236,8 +8238,51 @@ _refuse_links_out_of_session() {  # dir
         case "$cur" in "$prune"|"$prune"/*) [ -n "$prune" ] && continue ;; esac
         case "$cur" in "$cfg"|"$cfg"/*) [ -n "$cfg" ] && continue ;; esac
         case "$seen" in *$'\n'"$cur"$'\n'*) continue ;; esac
-        seen="$seen"$'\n'"$cur"$'\n'
+        # An alias back to .cs must scan it strictly, including tool paths.
+        [ "$initial_scan" = 1 ] || seen="$seen"$'\n'"$cur"$'\n'
         while IFS= read -r -d '' p; do
+            if [ "$initial_scan" = 1 ]; then
+                case "$p" in "$dir_p/.cs/local/"*)
+                    local_entry=${p#"$dir_p/.cs/local/"}
+                    local_entry=${local_entry%%/*}
+                    case "$local_entry" in *[!abcdefghijklmnopqrstuvwxyz0123456789._-]*)
+                        # The x preserves trailing newlines in the entry name.
+                        folded_entry=$(perl -MEncode=decode,encode,FB_CROAK,LEAVE_SRC -e '
+                            use feature "fc";
+                            my $name = eval { decode("UTF-8", $ARGV[0], FB_CROAK | LEAVE_SRC) };
+                            print defined($name) ? encode("UTF-8", fc($name)) : $ARGV[0];
+                            print "x";
+                        ' -- "$local_entry") || error "could not check case aliases for .cs/local/$(_cs_plain_name "$local_entry" 160)."
+                        folded_entry=${folded_entry%x}
+                        local_path="$dir_p/.cs/local/$local_entry"
+                        folded_path="$dir_p/.cs/local/$folded_entry"
+                        # Case aliases reach cs's paths, even when the link dangles.
+                        if [ "$local_path" -ef "$folded_path" ] || {
+                            [ -L "$local_path" ] && [ -L "$folded_path" ] &&
+                                [ "$(readlink "$local_path")" = "$(readlink "$folded_path")" ]
+                        }; then
+                            local_entry=$folded_entry
+                        fi
+                    esac
+                    case "$local_entry" in
+                        state|identity|config|disabled|pre-open|session.log|migrated|presence|\
+                        remote.pid|lead-pid|spawned-by|watermark|attention|context-pct|context-pct.tmp|\
+                        context-pct.at|context-pct.heartbeat.at|limits|limits.tmp|limits.at|\
+                        rotate-nudged|ctx-warned|narrative-cursor.*|.advisor-nudge-cooldown|\
+                        stop-verdict|stop-notices.mutex.lock|scope-prompt.trace|rewrite.trace|\
+                        memory-index.snapshot|memory-archive.snapshot|pending-handoff|finish-progress.json|\
+                        task-archive|vault|vault-holders|vault-waiter.pid|vault-detach.pid|\
+                        cs.heartbeat|wrapped|cs.forced|cs.pressed|cs-update.heartbeat|cs-update.done|\
+                        queue.state|queue.mode|queue.done|queue.current|queue.failed|queue.accepted|\
+                        queue.accept.mutex.lock|queue.migrating|queue.popping.*|\
+                        notifications.jsonl|notifications.seen|failures|\
+                        state.mutex.lock|config.mutex.lock|lead-pid.mutex.lock|vault-holders.mutex.lock|\
+                        mail|queue|queue.tmp|context-date|rotation-kick|retire-staged|retire-runs|\
+                        inherited|inherited-topics) ;;
+                        *) continue ;;
+                    esac
+                esac
+            fi
             link=$p real=""
             if [ -d "$p" ]; then
                 # The x keeps a trailing newline that $(...) would strip (Codex r3 #1).
@@ -8257,6 +8302,7 @@ _refuse_links_out_of_session() {  # dir
             [ -n "$real" ] || continue
             todo="$todo${todo:+$'\n'}$real"
         done < <(find "$cur" \( -path "${prune:-/nonexistent}" -o -path "${cfg:-/nonexistent}" \) -prune -o -type l -print0 2>/dev/null)
+        initial_scan=0
     done
 }
 
