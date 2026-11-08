@@ -6759,6 +6759,44 @@ mod tests {
         assert_eq!(app.focus, Focus::List);
     }
 
+    /// Render through the real UI at `w`x`h` and return the rows as text.
+    fn rows_at(app: &mut App, w: u16, h: u16) -> String {
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+        terminal.draw(|frame| crate::ui::render(app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect::<String>() + "\n")
+            .collect()
+    }
+
+    /// 100x24 leaves a 100x21 content area: under PREVIEW_MIN_WIDTH and one
+    /// row short of STACK_MIN_HEIGHT once the masthead and footer are taken,
+    /// so the renderer draws the table alone whatever `show_preview` says.
+    #[test]
+    fn keys_go_to_the_list_when_the_window_cannot_show_the_notes_pane() {
+        for way_in in ["tab in a small window", "window shrinks after tab"] {
+            let mut app = App::new(sample_sessions());
+            app.table_state.select(Some(0));
+            if way_in == "window shrinks after tab" {
+                rows_at(&mut app, 140, 30);
+            }
+            app.handle_key(KeyEvent::from(KeyCode::Tab));
+            let screen = rows_at(&mut app, 100, 24);
+            assert!(!screen.contains("\u{256d} queue "), "{way_in}: no notes pane is drawn:\n{screen}");
+            assert!(
+                !screen.contains("type a task"),
+                "{way_in}: the footer offers no notes keys while the pane is hidden:\n{screen}"
+            );
+            app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+            assert_eq!(app.table_state.selected(), Some(1), "{way_in}: j moves the visible list");
+            assert_eq!(app.queue_input.text(), "", "{way_in}: nothing is typed into a hidden input");
+            assert!(
+                matches!(app.handle_key(KeyEvent::from(KeyCode::Char('q'))), Action::Quit),
+                "{way_in}: q quits"
+            );
+        }
+    }
+
     #[test]
     fn notes_enter_appends_to_queue_file_and_clears_input() {
         let tmp = std::env::temp_dir().join(format!("cs-tui-notes-{}", std::process::id()));
