@@ -1200,6 +1200,62 @@ instruction and tombstone, and `tests/test_migrate_claude_md.sh` covers migratio
 After changing `mods/cs-mermaid/hooks/`, run `./build.sh` to refresh the payload
 hashes in `install.sh`.
 
+## cs-images
+
+`mods/cs-images/` is a Claude Code function-hooks plugin, deployed and gated
+like the `cs` mod. It draws a picture wherever a reply has a line holding
+only `![short name](/absolute/path.png)`, outside a code block. The path must
+be absolute and have no spaces. It accepts `png`, `jpg`, `jpeg`, `gif`, `heic`,
+`webp`, `tiff` and `bmp` files. Prose around a picture stays with the engine's renderer.
+
+Real pixels need all these:
+
+- A terminal Claude Code can draw images in: kitty, Ghostty, or iTerm2 3.5
+  and later.
+- Claude Code's fullscreen display.
+- Inside tmux, tmux 3.3 or later with `allow-passthrough on` (not `all`) and
+  `focus-events on`, a tmux window no bigger than the terminal, and no
+  `tmux -CC`.
+
+Everywhere else, pictures draw as coloured block glyphs. Under blocks they
+are previews, and small text is not readable. The first picture of a
+session draws as an `Image`, then the mod asks `$.ui.blit` whether the
+terminal shows it. That picture can show blank for a moment while the mod
+finds out. A refusal switches drawing to a `Raster` of fitted
+block glyphs, with 8 by 8 samples per cell. A transient refusal such as
+`not mounted` asks again. A failed `png` conversion or a `png` over 2 MiB also
+uses blocks, without asking the terminal.
+
+The `/config` row `cs-images.drawImages` is on by default; off, the image
+line stays text. `cs-images.cellHeightRatio`, 2 by default, sets the
+terminal cell's height divided by its width. Values outside the finite
+range 1 to 5 use 2 and produce one debug line naming the value. Nothing
+reports a terminal's cell shape to a mod. A line height of 1.5 needs a
+ratio of 3. The picture fits within 60 columns and 30 rows, keeping its
+proportions at that ratio.
+
+At `session.start`, the mod checks `sips --version` once. If it throws or
+exits nonzero, image lines stay text. With `sips` present, startup removes
+only `/tmp/cs-images-*` files older than 60 minutes. Conversion uses `sips`
+through process argv, with no shell. The mod caches decoded pictures by path,
+available width, modification time and cell ratio.
+
+The bundled `skills/show-image/SKILL.md` gives the model the syntax when
+asked to see, show or display an image, screenshot, photo or chart on disk.
+It needs no `prompt.compose` hook, which organizations can refuse. The
+engine lists it as `/cs-images:show-image`. Turning drawing off leaves the
+skill in place.
+
+`install.sh` deploys five files under `~/.claude/skills/cs-images/`:
+`.claude-plugin/plugin.json`, `hooks/hooks.json`, `hooks/picture.ts`,
+`hooks/register.tsx` and `skills/show-image/SKILL.md`. Tests stay under
+`mods/cs-images/test/`. The mod writes no heartbeat.
+
+`tests/test_mod_images.sh` checks the manifest, both configuration rows,
+installer paths and skill frontmatter. With `claude` available, it runs the
+engine kit and plugin validation. After changing the mod's shipped files,
+run `./build.sh` to refresh `install.sh`'s payload hashes.
+
 ## cs-panel (not a hook script — a Claude Code mod)
 
 `mods/cs-panel/` is a Claude Code function-hooks plugin, deployed and gated like
@@ -1209,8 +1265,8 @@ pane sits inline above the prompt on the main screen (tmux) and docks beside the
 transcript, 60 columns wide, in fullscreen from 110 columns.
 
 The rows come from two places. `Mods` lists the `/config` rows of `cs`,
-`cs-update`, `cs-mermaid` and `cs-filter-chat` (`$.config.list()`, those four
-plugins by name, so another `cs-*` plugin's rows are not drawn). The four mods
+`cs-update`, `cs-mermaid`, `cs-images` and `cs-filter-chat` (`$.config.list()`, those five
+plugins by name, so another `cs-*` plugin's rows are not drawn). The five mods
 title each row `cs: ` and its label, so `/config` marks the row as cs's; under
 `Mods` the mark says nothing and the pane draws the label without it. Under
 them, cs's own settings come in
