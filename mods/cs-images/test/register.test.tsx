@@ -37,12 +37,12 @@ test('a picture sips cannot read says why and keeps the line', async ($, on) => 
   })
 
   const row = await ui.find({ type: 'Text', text: /cannot draw/ })
-  expect(row?.text).toBe('cs-images cannot draw ![owl](/tmp/owl.png): sips cannot read it: no such format')
+  expect(row?.text).toBe('cs-images cannot draw ![owl](/tmp/owl.png): sips cannot convert it: no such format')
 })
 
 // A picture of 8 columns and 1 row needs 64x8 samples: a 24-bit BMP with its 54-byte header.
 function solidBmpBase64(width = 64, height = 8): string {
-  const size = 54 + width * height * 3
+  const size = 54 + Math.ceil(width * 3 / 4) * 4 * Math.abs(height)
   const bmp = new Uint8Array(size)
   const view = new DataView(bmp.buffer)
   view.setUint32(10, 54, true)
@@ -77,16 +77,25 @@ test('a picture whose decode was aborted is decoded again rather than reported',
 
   expect(await ui.find({ type: 'Text', text: /cannot draw/ })).toBeUndefined()
   expect((await ui.find({ type: 'Raster' }))?.props.columns).toBe(8)
-  expect(converts).toBe(2)
+  expect(converts).toBe(4)
 })
 
-function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fails' | 'oversized'; answers?: Array<{ deny?: string }> } = {}) {
+function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fails' | 'oversized'; answers?: Array<{ deny?: string }>; rotated?: boolean } = {}) {
   const w = { logs: [] as string[], runs: [] as string[][], blits: [] as string[] }
   const clock = mock.clock(on)
   on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }))
-  on('fs.read', (_$, e) => ({ value: { base64: e.path.endsWith('.bmp') ? solidBmpBase64(64, 32)
-    : options.png === 'oversized' ? 'A'.repeat(2796204)
-    : 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aRZkAAAAASUVORK5CYII=' } }))
+  on('fs.read', (_$, e) => {
+    if (!e.path.endsWith('.bmp')) return { value: { base64: options.png === 'oversized' ? 'A'.repeat(2796204)
+      : 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aRZkAAAAASUVORK5CYII=' } }
+    const conversion = w.runs.find(argv => argv[argv.indexOf('--out') + 1] === e.path)
+    if (conversion === undefined) throw new Error(`no conversion wrote ${e.path}`)
+    const z = conversion.indexOf('-z')
+    if (z < 0) return { value: { base64: options.rotated ? solidBmpBase64(480, -640) : solidBmpBase64(512, 512) } }
+    const rows = Number(conversion[z + 1]), columns = Number(conversion[z + 2])
+    const from = conversion[conversion.indexOf('--out') - 1]
+    return { value: { base64: options.rotated && from === '/tmp/rotated.jpg'
+      ? solidBmpBase64(rows, -columns) : solidBmpBase64(columns, -rows) } }
+  })
   on('process.run', (_$, e) => {
     w.runs.push([...e.argv])
     if (e.argv.includes('--version')) {
@@ -94,11 +103,22 @@ function pictureWorld(on: On, options: { sips?: 'nonzero' | 'throws'; png?: 'fai
       if (options.sips === 'nonzero') return { value: { exitCode: 127, stdout: '', stderr: 'sips not found', isStdoutTruncated: false, isStderrTruncated: false } }
     }
     if (e.argv.includes('png') && options.png === 'fails') return { value: { exitCode: 1, stdout: '', stderr: 'png conversion failed', isStdoutTruncated: false, isStderrTruncated: false } }
-    return { value: { exitCode: 0, stdout: e.argv.includes('-g') ? 'pixelWidth: 512\npixelHeight: 512\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return { value: { exitCode: 0, stdout: e.argv.includes('-g') ? options.rotated ? 'pixelWidth: 640\npixelHeight: 480\n' : 'pixelWidth: 512\npixelHeight: 512\n' : '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   on('ui.log', (_$, e) => { w.logs.push(e.text); return { value: undefined } })
   on('ui.blit', (_$, e) => { w.blits.push(e.key); return { value: options.answers?.[w.blits.length - 1] ?? {} } })
   return { w, clock }
+}
+
+for (const pixels of [true, false]) {
+  test(`a rotated photo keeps displayed proportions as ${pixels ? 'pixels' : 'cells'}`, async ($, on) => {
+    pictureWorld(on, { rotated: true, ...(pixels ? {} : { png: 'fails' }) })
+    await startSession($, on)
+    const ui = await $.ui.mount({ plugin: 'cs-images', component: 'AssistantMessage', surface: 'terminal', viewport: { columns: 80, rows: 40 }, props: { text: '![photo](/tmp/rotated.jpg)', isFirstOfReply: true } })
+    const picture = await ui.find({ type: pixels ? 'Image' : 'Raster' })
+    expect({ columns: picture?.props.columns, rows: picture?.props.rows }).toEqual({ columns: 45, rows: 30 })
+    await ui.unmount()
+  })
 }
 
 for (const ratio of [0, 9]) {
@@ -207,8 +227,8 @@ for (const png of ['fails', 'oversized'] as const) {
     await clock.settle()
     expect(w.blits).toEqual([])
     expect(w.runs.filter(argv => argv.includes('png')).length).toBe(1)
-    expect(w.runs.filter(argv => argv.includes('bmp')).length).toBe(1)
-    expect(w.runs.filter(argv => argv[0] === 'rm').length).toBe(2)
+    expect(w.runs.filter(argv => argv.includes('bmp')).length).toBe(3)
+    expect(w.runs.filter(argv => argv[0] === 'rm').length).toBe(4)
     await ui.unmount()
   })
 }

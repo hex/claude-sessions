@@ -24,45 +24,47 @@ const allPixels = new Map<string, Promise<Pixels | string>>()
 let terminalDrawsPixels: 'untried' | 'asking' | 'yes' | 'no' = 'untried'
 let sipsAvailable = false
 
-async function gridOf($: EngineInterface, path: string, room: number, cellHeightRatio: number): Promise<Grid | string> {
-  const size = await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', path], { timeoutMs: SIPS_TIMEOUT_MS })
-  const pixelWidth = Number(/pixelWidth: (\d+)/.exec(size.stdout)?.[1])
-  const pixelHeight = Number(/pixelHeight: (\d+)/.exec(size.stdout)?.[1])
-  if (size.exitCode !== 0 || !(pixelWidth > 0) || !(pixelHeight > 0)) {
-    return `sips cannot read it: ${size.stderr.trim() || size.stdout.trim()}`
-  }
+function gridOf(base64: string, room: number, cellHeightRatio: number): Grid {
+  const bmp = Uint8Array.fromBase64(base64)
+  const header = new DataView(bmp.buffer, bmp.byteOffset, bmp.byteLength)
+  const pixelWidth = header.getInt32(18, true)
+  const pixelHeight = Math.abs(header.getInt32(22, true))
+  if (!(pixelWidth > 0) || !(pixelHeight > 0)) throw new Error(`unexpected BMP size: ${pixelWidth}x${pixelHeight}`)
   return { ...gridFor(pixelWidth, pixelHeight, room, cellHeightRatio), longestEdge: Math.max(pixelWidth, pixelHeight) }
 }
 
-async function converted($: EngineInterface, path: string, format: 'bmp' | 'png', resize: string[]): Promise<{ base64: string } | { failure: string }> {
+async function converted<T>($: EngineInterface, path: string, format: 'bmp' | 'png', resize: string[], use: (out: string, base64: string) => Promise<T>): Promise<T | { failure: string }> {
   const out = `/tmp/cs-images-${crypto.randomUUID()}.${format}`
   try {
     const made = await $.process.run(['sips', '-s', 'format', format, ...resize, path, '--out', out], { timeoutMs: SIPS_TIMEOUT_MS })
     if (made.exitCode !== 0) return { failure: `sips cannot convert it: ${made.stderr.trim() || made.stdout.trim()}` }
     const { base64 } = await $.fs.read(out, { as: 'bytes' })
-    return { base64 }
+    return await use(out, base64)
   } finally {
     await $.process.run(['rm', '-f', out])
   }
 }
 
 async function decodeCells($: EngineInterface, path: string, room: number, cellHeightRatio: number): Promise<Cells | string> {
-  const grid = await gridOf($, path, room, cellHeightRatio)
-  if (typeof grid === 'string') return grid
-  const { columns, rows } = grid
-  const bmp = await converted($, path, 'bmp', ['-z', String(rows * SAMPLES_PER_CELL_SIDE), String(columns * SAMPLES_PER_CELL_SIDE)])
-  if ('failure' in bmp) return bmp.failure
-  const samples = topDownRgbFromBmp(Uint8Array.fromBase64(bmp.base64), columns * SAMPLES_PER_CELL_SIDE, rows * SAMPLES_PER_CELL_SIDE)
-  return { columns, rows, cells: bestGlyphCells(samples, columns, rows) }
+  const picture = await converted($, path, 'bmp', [], async (upright, base64) => {
+    const { columns, rows } = gridOf(base64, room, cellHeightRatio)
+    return converted($, upright, 'bmp', ['-z', String(rows * SAMPLES_PER_CELL_SIDE), String(columns * SAMPLES_PER_CELL_SIDE)], async (_out, resized) => {
+      const samples = topDownRgbFromBmp(Uint8Array.fromBase64(resized), columns * SAMPLES_PER_CELL_SIDE, rows * SAMPLES_PER_CELL_SIDE)
+      return { columns, rows, cells: bestGlyphCells(samples, columns, rows) }
+    })
+  })
+  return 'failure' in picture ? picture.failure : picture
 }
 
 async function decodePixels($: EngineInterface, path: string, room: number, cellHeightRatio: number): Promise<Pixels | string> {
-  const grid = await gridOf($, path, room, cellHeightRatio)
-  if (typeof grid === 'string') return grid
-  const png = await converted($, path, 'png', grid.longestEdge > LONGEST_PNG_EDGE ? ['-Z', String(LONGEST_PNG_EDGE)] : [])
-  if ('failure' in png) return png.failure
-  if ((png.base64.length * 3) / 4 > MOST_PNG_BYTES) return 'the picture is too large to send as pixels'
-  return { columns: grid.columns, rows: grid.rows, png: png.base64 }
+  const picture = await converted($, path, 'bmp', [], async (upright, base64) => {
+    const grid = gridOf(base64, room, cellHeightRatio)
+    return converted($, upright, 'png', grid.longestEdge > LONGEST_PNG_EDGE ? ['-Z', String(LONGEST_PNG_EDGE)] : [], async (_out, png) => {
+      if ((png.length * 3) / 4 > MOST_PNG_BYTES) return 'the picture is too large to send as pixels'
+      return { columns: grid.columns, rows: grid.rows, png }
+    })
+  })
+  return typeof picture === 'string' ? picture : 'failure' in picture ? picture.failure : picture
 }
 
 function remembered<T>(known: Map<string, Promise<T>>, most: number, id: string, load: () => Promise<T>): Promise<T> {
