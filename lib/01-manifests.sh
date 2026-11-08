@@ -166,6 +166,11 @@ CS_MOD_FILES=(
     cs-mermaid/hooks/register.tsx
     cs-mermaid/hooks/text.ts
     cs-mermaid/skills/show-me/SKILL.md
+    cs-images/.claude-plugin/plugin.json
+    cs-images/hooks/hooks.json
+    cs-images/hooks/picture.ts
+    cs-images/hooks/register.tsx
+    cs-images/skills/show-image/SKILL.md
     cs-panel/.claude-plugin/plugin.json
     cs-panel/hooks/hooks.json
     cs-panel/hooks/register.tsx
