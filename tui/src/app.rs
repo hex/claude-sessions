@@ -267,11 +267,38 @@ pub enum Mode {
     ConfirmRotate,
     Rename,
     CreateSession,
-    Secrets,
-    CommandOutput(String),
+    /// The secrets popup. A revealed value lives only here, so every way out
+    /// of the popup drops it.
+    Secrets { list: SecretsList, revealed: Option<Reveal> },
+    /// A helper's printed output; dismissing it goes to `then`.
+    CommandOutput { text: String, then: ReturnTo },
     Changelog,
     Legend,
     Merge,
+}
+
+/// The secrets popup's key names and the highlighted one.
+#[derive(Debug, PartialEq)]
+pub struct SecretsList {
+    pub names: Vec<String>,
+    pub selected: usize,
+}
+
+/// A secret's value drawn beside `key`; expires PEEK_DURATION_SECS after `at`.
+#[derive(Debug, PartialEq)]
+pub struct Reveal {
+    pub key: String,
+    pub value: String,
+    pub at: std::time::Instant,
+}
+
+/// Where dismissing a command's output goes. Back to the secrets popup
+/// carries its list but no reveal: the value is never drawn again without
+/// another `v`.
+#[derive(Debug, PartialEq)]
+pub enum ReturnTo {
+    Normal,
+    Secrets(SecretsList),
 }
 
 /// One feature worktree's merge readiness, as reported by
@@ -448,9 +475,6 @@ pub struct App {
     pub rename_input: TextInput,
     pub create_input: TextInput,
     pub queue_input: TextInput,
-    pub secrets_names: Vec<String>,
-    pub secrets_selected: usize,
-    pub return_to_secrets: bool,
     pub menu_selected: usize,
     pub status_message: Option<StatusMessage>,
     pub row_flashes: HashMap<String, (FlashKind, std::time::Instant)>,
@@ -480,8 +504,6 @@ pub struct App {
     /// Worktree rows (`base@task`) currently attached under their base in
     /// `filtered`; the renderer shows these as indented `@task` children.
     pub attached_worktrees: HashSet<usize>,
-    /// Revealed secret: (key_name, value, reveal_time). Auto-expires after PEEK_DURATION_SECS.
-    pub revealed_secret: Option<(String, String, std::time::Instant)>,
     /// Section labels for time-based grouping (parallel to `filtered`).
     /// Each entry is Some("label") if this row starts a new time section, None otherwise.
     pub section_labels: Vec<Option<&'static str>>,
@@ -629,9 +651,6 @@ impl App {
             rename_input: TextInput::new(),
             create_input: TextInput::new(),
             queue_input: TextInput::new(),
-            secrets_names: Vec::new(),
-            secrets_selected: 0,
-            return_to_secrets: false,
             menu_selected: 0,
             status_message: None,
             row_flashes: HashMap::new(),
@@ -643,7 +662,6 @@ impl App {
             lock_marker: session::lock_marker(),
             fuzzy_indices: HashMap::new(),
             attached_worktrees: HashSet::new(),
-            revealed_secret: None,
             section_labels: Vec::new(),
             nav_repeat: ('\0', 0, std::time::Instant::now()),
             marked_sessions: std::collections::HashSet::new(),
@@ -732,21 +750,27 @@ impl App {
 
     /// Expire the revealed secret after PEEK_DURATION_SECS.
     pub fn expire_peek(&mut self) -> bool {
-        if let Some((_, _, ref at)) = self.revealed_secret {
-            if at.elapsed().as_secs() >= PEEK_DURATION_SECS {
-                self.revealed_secret = None;
+        if let Mode::Secrets { revealed, .. } = &mut self.mode {
+            if revealed.as_ref().is_some_and(|r| r.at.elapsed().as_secs() >= PEEK_DURATION_SECS) {
+                *revealed = None;
                 return true;
             }
         }
         false
     }
 
+    /// The secret value the open secrets popup shows, if any.
+    pub fn revealed(&self) -> Option<&Reveal> {
+        match &self.mode {
+            Mode::Secrets { revealed, .. } => revealed.as_ref(),
+            _ => None,
+        }
+    }
+
     /// Seconds remaining on the peek reveal countdown.
     pub fn peek_remaining(&self) -> u64 {
-        match self.revealed_secret {
-            Some((_, _, ref at)) => {
-                PEEK_DURATION_SECS.saturating_sub(at.elapsed().as_secs())
-            }
+        match self.revealed() {
+            Some(r) => PEEK_DURATION_SECS.saturating_sub(r.at.elapsed().as_secs()),
             None => 0,
         }
     }
@@ -759,7 +783,7 @@ impl App {
     pub fn has_timed_state(&self) -> bool {
         self.status_message.is_some()
             || !self.row_flashes.is_empty()
-            || self.revealed_secret.is_some()
+            || self.revealed().is_some()
             || self.delete_countdown_start.is_some()
             || !self.preview_pending.is_empty()
     }
@@ -1058,21 +1082,19 @@ impl App {
             Mode::ConfirmRotate => self.handle_confirm_rotate(key),
             Mode::Rename => self.handle_rename(key),
             Mode::CreateSession => self.handle_create_session(key),
-            Mode::Secrets => self.handle_secrets(key),
+            Mode::Secrets { .. } => self.handle_secrets(key),
             Mode::Changelog => self.handle_changelog(key),
             Mode::Legend => self.handle_legend(key),
             Mode::Merge => self.handle_merge(key),
-            Mode::CommandOutput(_) => {
-                if self.return_to_secrets {
-                    self.return_to_secrets = false;
-                    if self.secrets_names.is_empty() {
-                        self.mode = Mode::Normal;
+            Mode::CommandOutput { .. } => {
+                if let Mode::CommandOutput { then: ReturnTo::Secrets(list), .. } =
+                    std::mem::replace(&mut self.mode, Mode::Normal)
+                {
+                    if list.names.is_empty() {
                         self.set_status("No secrets remaining", StatusLevel::Info);
                     } else {
-                        self.mode = Mode::Secrets;
+                        self.mode = Mode::Secrets { list, revealed: None };
                     }
-                } else {
-                    self.mode = Mode::Normal;
                 }
                 Action::None
             }
@@ -1965,46 +1987,58 @@ impl App {
         }
     }
 
+    /// Taken out of the mode and put back only while the popup stays open, so
+    /// any key that leaves it leaves its reveal behind.
     fn handle_secrets(&mut self, key: KeyEvent) -> Action {
+        let Mode::Secrets { mut list, mut revealed } = std::mem::replace(&mut self.mode, Mode::Normal) else {
+            unreachable!("handle_secrets dispatched outside Mode::Secrets");
+        };
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                self.revealed_secret = None;
-                self.mode = Mode::Normal;
-            }
+            KeyCode::Esc | KeyCode::Char('q') => return Action::None,
             KeyCode::Down | KeyCode::Char('j') => {
-                if !self.secrets_names.is_empty()
-                    && self.secrets_selected < self.secrets_names.len() - 1
-                {
-                    self.secrets_selected += 1;
+                if list.selected + 1 < list.names.len() {
+                    list.selected += 1;
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if self.secrets_selected > 0 {
-                    self.secrets_selected -= 1;
+                if list.selected > 0 {
+                    list.selected -= 1;
                 }
             }
             KeyCode::Char('v') | KeyCode::Enter => {
-                if let Some(key_name) = self.secrets_names.get(self.secrets_selected).cloned() {
-                    self.peek_secret(&key_name);
+                if let Some(key_name) = list.names.get(list.selected) {
+                    if let Some(reveal) = self.peek_secret(key_name) {
+                        revealed = Some(reveal);
+                    }
                 }
             }
             KeyCode::Char('d') => {
-                if let Some(key_name) = self.secrets_names.get(self.secrets_selected).cloned() {
-                    // Only mirror a deletion the helper actually made: a denied
-                    // keychain prompt exits non-zero, and dropping the row
-                    // anyway claims a deletion that did not happen.
-                    if self.run_secrets_subcommand("delete", &key_name) {
-                        self.secrets_names.remove(self.secrets_selected);
-                        if self.secrets_selected >= self.secrets_names.len()
-                            && !self.secrets_names.is_empty()
-                        {
-                            self.secrets_selected = self.secrets_names.len() - 1;
+                if let Some(key_name) = list.names.get(list.selected).cloned() {
+                    match self.run_secrets_subcommand("delete", &key_name) {
+                        Some(Ok((deleted, text))) => {
+                            // Only mirror a deletion the helper actually made: a denied
+                            // keychain prompt exits non-zero, and dropping the row
+                            // anyway claims a deletion that did not happen.
+                            if deleted {
+                                list.names.remove(list.selected);
+                                if list.selected >= list.names.len() && !list.names.is_empty() {
+                                    list.selected = list.names.len() - 1;
+                                }
+                            }
+                            self.mode = Mode::CommandOutput { text, then: ReturnTo::Secrets(list) };
+                            return Action::None;
                         }
+                        Some(Err(e)) => {
+                            self.set_status(format!("Secrets failed: {}", e), StatusLevel::Error);
+                            return Action::None;
+                        }
+                        None => {}
                     }
                 }
             }
             _ => {}
         }
+        self.mode = Mode::Secrets { list, revealed };
         Action::None
     }
 
@@ -2362,9 +2396,10 @@ impl App {
             match output {
                 Ok(out) if out.status.success() => {
                     let text = String::from_utf8_lossy(&out.stdout).to_string();
-                    self.secrets_names = Self::parse_secrets_list(&text);
-                    self.secrets_selected = 0;
-                    self.mode = Mode::Secrets;
+                    self.mode = Mode::Secrets {
+                        list: SecretsList { names: Self::parse_secrets_list(&text), selected: 0 },
+                        revealed: None,
+                    };
                 }
                 Ok(out) => {
                     let err = String::from_utf8_lossy(&out.stderr);
@@ -2392,38 +2427,27 @@ impl App {
             .collect()
     }
 
-    /// Run `cs <session> -secrets <subcommand> <key>` and show what it printed.
-    /// Returns whether the helper ran AND exited zero, so a caller mirroring the
-    /// store in memory mirrors only the changes the helper actually made.
-    fn run_secrets_subcommand(&mut self, subcommand: &str, key: &str) -> bool {
-        let mut succeeded = false;
-        if let Some(session) = self.selected_session() {
-            let name = session.name.clone();
-            let output = std::process::Command::new(cs_bin())
-                .args([&name, "-secrets", subcommand, key])
-                .output();
-            match output {
-                Ok(out) => {
-                    succeeded = out.status.success();
-                    let text = String::from_utf8_lossy(&out.stdout).to_string()
-                        + &String::from_utf8_lossy(&out.stderr).to_string();
-                    self.return_to_secrets = true;
-                    self.mode = Mode::CommandOutput(text);
-                }
-                Err(e) => {
-                    self.set_status(format!("Secrets failed: {}", e), StatusLevel::Error);
-                    self.mode = Mode::Normal;
-                }
-            }
-        }
-        succeeded
+    /// Run `cs <session> -secrets <subcommand> <key>` for the selected session:
+    /// None without one, else whether the helper ran AND exited zero, so a
+    /// caller mirroring the store in memory mirrors only the changes the helper
+    /// actually made, and what it printed on both streams.
+    fn run_secrets_subcommand(&self, subcommand: &str, key: &str) -> Option<std::io::Result<(bool, String)>> {
+        let name = self.selected_session()?.name.clone();
+        let output = std::process::Command::new(cs_bin())
+            .args([&name, "-secrets", subcommand, key])
+            .output();
+        Some(output.map(|out| {
+            let text = String::from_utf8_lossy(&out.stdout).to_string()
+                + &String::from_utf8_lossy(&out.stderr).to_string();
+            (out.status.success(), text)
+        }))
     }
 
     /// Archive the selected session's oldest narrative sections through
     /// `cs <name> -narrative rotate`. Both streams land in the output popup:
     /// a narrative under budget rotates nothing and says so, and that sentence
-    /// is the whole answer as often as a rotation is. Unlike the secrets
-    /// helper this never sets `return_to_secrets`, so dismissing the output
+    /// is the whole answer as often as a rotation is. Unlike a secrets
+    /// delete's output this one goes to `ReturnTo::Normal`, so dismissing it
     /// returns to the list.
     fn rotate_narrative(&mut self) {
         let name = match self.selected_session_name() {
@@ -2458,7 +2482,7 @@ impl App {
                 self.preview_pending.remove(&name);
                 let text = String::from_utf8_lossy(&out.stdout).to_string()
                     + &String::from_utf8_lossy(&out.stderr);
-                self.mode = Mode::CommandOutput(text);
+                self.mode = Mode::CommandOutput { text, then: ReturnTo::Normal };
             }
             Err(e) => {
                 self.set_status(format!("Rotate failed: {}", e), StatusLevel::Error);
@@ -2467,27 +2491,25 @@ impl App {
         }
     }
 
-    fn peek_secret(&mut self, key_name: &str) {
-        if let Some(session) = self.selected_session() {
-            let name = session.name.clone();
-            let output = std::process::Command::new(cs_bin())
-                .args([&name, "-secrets", "get", key_name])
-                .output();
-            match output {
-                Ok(out) if out.status.success() => {
-                    let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    self.revealed_secret =
-                        Some((key_name.to_string(), value, std::time::Instant::now()));
-                }
-                Ok(out) => {
-                    let err = String::from_utf8_lossy(&out.stderr);
-                    self.set_status(format!("Peek failed: {}", err.trim()), StatusLevel::Error);
-                }
-                Err(e) => {
-                    self.set_status(format!("Peek failed: {}", e), StatusLevel::Error);
-                }
+    fn peek_secret(&mut self, key_name: &str) -> Option<Reveal> {
+        let name = self.selected_session()?.name.clone();
+        let output = std::process::Command::new(cs_bin())
+            .args([&name, "-secrets", "get", key_name])
+            .output();
+        match output {
+            Ok(out) if out.status.success() => {
+                let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                return Some(Reveal { key: key_name.to_string(), value, at: std::time::Instant::now() });
+            }
+            Ok(out) => {
+                let err = String::from_utf8_lossy(&out.stderr);
+                self.set_status(format!("Peek failed: {}", err.trim()), StatusLevel::Error);
+            }
+            Err(e) => {
+                self.set_status(format!("Peek failed: {}", e), StatusLevel::Error);
             }
         }
+        None
     }
 
     /// The session menu as it should be drawn for the selected row: MENU_ITEMS
@@ -3086,11 +3108,11 @@ mod tests {
         app.row_flashes.clear();
         assert!(!app.has_timed_state());
 
-        app.revealed_secret =
-            Some(("KEY".into(), "value".into(), std::time::Instant::now()));
+        app.mode = revealed_popup("KEY", "value", 0);
         assert!(app.has_timed_state());
-        app.revealed_secret = None;
+        app.mode = secrets_mode(&["KEY"], 0);
         assert!(!app.has_timed_state());
+        app.mode = Mode::Normal;
 
         app.delete_countdown_start = Some(std::time::Instant::now());
         assert!(app.has_timed_state());
@@ -3604,10 +3626,24 @@ mod tests {
         assert_eq!(app.table_state.selected(), Some(0));
     }
 
+    /// The secrets popup open on `names`, `selected` highlighted, nothing revealed.
+    fn secrets_mode(names: &[&str], selected: usize) -> Mode {
+        let names = names.iter().map(|n| n.to_string()).collect();
+        Mode::Secrets { list: SecretsList { names, selected }, revealed: None }
+    }
+
+    /// The open secrets popup's list; panics when the popup is not open.
+    fn secrets_list(app: &App) -> &SecretsList {
+        match &app.mode {
+            Mode::Secrets { list, .. } => list,
+            other => panic!("expected the secrets popup, got {other:?}"),
+        }
+    }
+
     #[test]
     fn secrets_esc_returns_to_normal() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
+        app.mode = secrets_mode(&[], 0);
         app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
     }
@@ -3615,7 +3651,7 @@ mod tests {
     #[test]
     fn secrets_q_returns_to_normal() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
+        app.mode = secrets_mode(&[], 0);
         app.handle_key(KeyEvent::from(KeyCode::Char('q')));
         assert_eq!(app.mode, Mode::Normal);
     }
@@ -3623,47 +3659,40 @@ mod tests {
     #[test]
     fn secrets_navigate_down() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
-        app.secrets_names = vec!["KEY1".into(), "KEY2".into(), "KEY3".into()];
-        app.secrets_selected = 0;
+        app.mode = secrets_mode(&["KEY1", "KEY2", "KEY3"], 0);
         app.handle_key(KeyEvent::from(KeyCode::Char('j')));
-        assert_eq!(app.secrets_selected, 1);
+        assert_eq!(secrets_list(&app).selected, 1);
         app.handle_key(KeyEvent::from(KeyCode::Char('j')));
-        assert_eq!(app.secrets_selected, 2);
+        assert_eq!(secrets_list(&app).selected, 2);
         // Should not go past the end
         app.handle_key(KeyEvent::from(KeyCode::Char('j')));
-        assert_eq!(app.secrets_selected, 2);
+        assert_eq!(secrets_list(&app).selected, 2);
     }
 
     #[test]
     fn secrets_navigate_up() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
-        app.secrets_names = vec!["KEY1".into(), "KEY2".into()];
-        app.secrets_selected = 1;
+        app.mode = secrets_mode(&["KEY1", "KEY2"], 1);
         app.handle_key(KeyEvent::from(KeyCode::Char('k')));
-        assert_eq!(app.secrets_selected, 0);
+        assert_eq!(secrets_list(&app).selected, 0);
         // Should not go below 0
         app.handle_key(KeyEvent::from(KeyCode::Char('k')));
-        assert_eq!(app.secrets_selected, 0);
+        assert_eq!(secrets_list(&app).selected, 0);
     }
 
     #[test]
     fn command_output_returns_to_secrets_when_flagged() {
         let mut app = App::new(sample_sessions());
-        app.secrets_names = vec!["KEY1".into(), "KEY2".into()];
-        app.secrets_selected = 0;
-        app.return_to_secrets = true;
-        app.mode = Mode::CommandOutput("value: 123".into());
+        let list = SecretsList { names: vec!["KEY1".into(), "KEY2".into()], selected: 0 };
+        app.mode = Mode::CommandOutput { text: "value: 123".into(), then: ReturnTo::Secrets(list) };
         app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
-        assert_eq!(app.mode, Mode::Secrets);
-        assert!(!app.return_to_secrets);
+        assert_eq!(app.mode, secrets_mode(&["KEY1", "KEY2"], 0));
     }
 
     #[test]
     fn command_output_returns_to_normal_when_not_flagged() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::CommandOutput("some output".into());
+        app.mode = Mode::CommandOutput { text: "some output".into(), then: ReturnTo::Normal };
         app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
         assert_eq!(app.mode, Mode::Normal);
     }
@@ -6245,52 +6274,54 @@ mod tests {
         assert!(app.fuzzy_indices.is_empty());
     }
 
+    /// The secrets popup listing only `key`, its `value` revealed `age_secs` ago.
+    fn revealed_popup(key: &str, value: &str, age_secs: u64) -> Mode {
+        Mode::Secrets {
+            list: SecretsList { names: vec![key.into()], selected: 0 },
+            revealed: Some(Reveal {
+                key: key.into(),
+                value: value.into(),
+                at: std::time::Instant::now() - std::time::Duration::from_secs(age_secs),
+            }),
+        }
+    }
+
     #[test]
     fn peek_remaining_returns_countdown() {
         let mut app = App::new(sample_sessions());
         // No reveal
         assert_eq!(app.peek_remaining(), 0);
         // Fresh reveal
-        app.revealed_secret = Some(("KEY".into(), "val".into(), std::time::Instant::now()));
+        app.mode = revealed_popup("KEY", "val", 0);
         assert_eq!(app.peek_remaining(), 5);
         // After 3 seconds
-        app.revealed_secret = Some((
-            "KEY".into(),
-            "val".into(),
-            std::time::Instant::now() - std::time::Duration::from_secs(3),
-        ));
+        app.mode = revealed_popup("KEY", "val", 3);
         assert_eq!(app.peek_remaining(), 2);
     }
 
     #[test]
     fn expire_peek_clears_after_timeout() {
         let mut app = App::new(sample_sessions());
-        app.revealed_secret = Some((
-            "KEY".into(),
-            "val".into(),
-            std::time::Instant::now() - std::time::Duration::from_secs(6),
-        ));
+        app.mode = revealed_popup("KEY", "val", 6);
         assert!(app.expire_peek());
-        assert!(app.revealed_secret.is_none());
+        assert!(app.revealed().is_none());
     }
 
     #[test]
     fn expire_peek_keeps_fresh_reveal() {
         let mut app = App::new(sample_sessions());
-        app.revealed_secret = Some(("KEY".into(), "val".into(), std::time::Instant::now()));
+        app.mode = revealed_popup("KEY", "val", 0);
         assert!(!app.expire_peek());
-        assert!(app.revealed_secret.is_some());
+        assert!(app.revealed().is_some());
     }
 
     #[test]
     fn secrets_esc_clears_revealed_secret() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
-        app.secrets_names = vec!["API_KEY".into()];
-        app.revealed_secret = Some(("API_KEY".into(), "sk-abc".into(), std::time::Instant::now()));
+        app.mode = revealed_popup("API_KEY", "sk-abc", 0);
         app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
-        assert!(app.revealed_secret.is_none());
+        assert!(app.revealed().is_none());
     }
 
     /// A delete the helper never performed must leave the list alone: dropping
@@ -6303,20 +6334,13 @@ mod tests {
         let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("CS_BIN", "/nonexistent/cs");
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
-        app.secrets_names = vec!["API_KEY".into(), "DB_PASSWORD".into()];
-        app.secrets_selected = 0;
+        app.mode = secrets_mode(&["API_KEY", "DB_PASSWORD"], 0);
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
         std::env::remove_var("CS_BIN");
         assert_eq!(
             app.mode,
             Mode::Normal,
             "the failed spawn must have been reached and reported"
-        );
-        assert_eq!(
-            app.secrets_names,
-            vec!["API_KEY", "DB_PASSWORD"],
-            "a delete that did not happen must not remove the key from the list"
         );
     }
 
@@ -6333,18 +6357,15 @@ mod tests {
             .expect("a POSIX host has false(1)");
         std::env::set_var("CS_BIN", failing);
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
-        app.secrets_names = vec!["API_KEY".into(), "DB_PASSWORD".into()];
-        app.secrets_selected = 0;
+        app.mode = secrets_mode(&["API_KEY", "DB_PASSWORD"], 0);
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
         std::env::remove_var("CS_BIN");
+        let Mode::CommandOutput { text, then: ReturnTo::Secrets(list) } = &app.mode else {
+            panic!("the helper must have run and its output shown, returning to the popup: {:?}", app.mode);
+        };
+        assert_eq!(text, "", "the helper must have run and its (empty) output shown");
         assert_eq!(
-            app.mode,
-            Mode::CommandOutput(String::new()),
-            "the helper must have run and its (empty) output shown"
-        );
-        assert_eq!(
-            app.secrets_names,
+            list.names,
             vec!["API_KEY", "DB_PASSWORD"],
             "a refused delete must not remove the key from the list"
         );
@@ -7483,7 +7504,7 @@ mod tests {
         std::env::remove_var("CS_BIN");
 
         match &app.mode {
-            Mode::CommandOutput(text) => {
+            Mode::CommandOutput { text, .. } => {
                 assert!(text.contains("nothing to rotate"), "output: {}", text)
             }
             other => panic!("expected the output popup, got {:?}", other),
@@ -7513,7 +7534,7 @@ mod tests {
         std::env::remove_var("CS_BIN");
 
         match &app.mode {
-            Mode::CommandOutput(text) => {
+            Mode::CommandOutput { text, .. } => {
                 assert!(text.contains("Cannot write to archive"), "output: {}", text)
             }
             other => panic!("expected the refusal in the output popup, got {:?}", other),

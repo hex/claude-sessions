@@ -14,7 +14,8 @@ use unicode_width::UnicodeWidthStr;
 use ratatui::layout::Alignment;
 
 use crate::app::{
-    App, FeatureRow, FlashKind, Focus, Mode, NotesFocus, SortColumn, SortDirection, StatusLevel,
+    App, FeatureRow, FlashKind, Focus, Mode, NotesFocus, Reveal, SecretsList, SortColumn, SortDirection,
+    StatusLevel,
 };
 use crate::session::DeleteWarning;
 use crate::theme::{self, Palette};
@@ -292,8 +293,8 @@ pub fn render(app: &mut App, frame: &mut Frame) {
         Mode::ConfirmRotate => render_confirm_rotate(app, frame),
         Mode::Rename => render_rename_dialog(app, frame),
         Mode::CreateSession => render_create_dialog(app, frame),
-        Mode::Secrets => render_secrets_popup(app, frame),
-        Mode::CommandOutput(text) => render_command_output(text, p, frame),
+        Mode::Secrets { list, revealed } => render_secrets_popup(app, list, revealed.as_ref(), frame),
+        Mode::CommandOutput { text, .. } => render_command_output(text, p, frame),
         Mode::Changelog => render_changelog(app, frame),
         Mode::Legend => render_legend(app, frame),
         _ => {}
@@ -964,8 +965,8 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
             Mode::ConfirmForceOpen => "y:force open  n:cancel",
             Mode::ConfirmRotate => "y:rotate  n/Esc:cancel",
             Mode::Rename | Mode::CreateSession => "Enter:confirm  Esc:cancel",
-            Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
-            Mode::CommandOutput(_) => "Press any key to dismiss",
+            Mode::Secrets { .. } => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
+            Mode::CommandOutput { .. } => "Press any key to dismiss",
             Mode::Changelog => "Esc:close",
             Mode::Legend => "Esc:close",
             Mode::Merge => "Enter:finish  j/k:select  r:refresh  Esc:back",
@@ -1407,14 +1408,14 @@ fn render_create_dialog(app: &App, frame: &mut Frame) {
     frame.render_widget(text, popup_area);
 }
 
-fn render_secrets_popup(app: &App, frame: &mut Frame) {
+fn render_secrets_popup(app: &App, list: &SecretsList, revealed: Option<&Reveal>, frame: &mut Frame) {
     let p = app.theme;
     let session_name = app
         .selected_session()
         .map(|s| s.name.as_str())
         .unwrap_or("?");
 
-    let height = (app.secrets_names.len() as u16 + 3).max(5).min(20);
+    let height = (list.names.len() as u16 + 3).max(5).min(20);
     let popup_area = centered_rect(50, height, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
@@ -1423,7 +1424,7 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
         .title(format!(" Secrets - {} ", session_name))
         .title_style(Style::default().fg(p.orange).add_modifier(Modifier::BOLD));
 
-    if app.secrets_names.is_empty() {
+    if list.names.is_empty() {
         let paragraph = Paragraph::new("No secrets stored")
             .style(Style::default().fg(p.comment))
             .block(block);
@@ -1431,17 +1432,13 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
         return;
     }
 
-    let lines: Vec<Line> = app
-        .secrets_names
+    let lines: Vec<Line> = list
+        .names
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            let is_selected = i == app.secrets_selected;
-            let is_revealed = app
-                .revealed_secret
-                .as_ref()
-                .map(|(k, _, _)| k == name)
-                .unwrap_or(false);
+            let is_selected = i == list.selected;
+            let shown = revealed.filter(|r| &r.key == name);
 
             let mut spans = Vec::new();
             if is_selected {
@@ -1458,20 +1455,18 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
                 spans.push(Span::styled(name.as_str(), Style::default().fg(p.comment)));
             }
 
-            if is_revealed {
-                if let Some((_, ref value, _)) = app.revealed_secret {
-                    let remaining = app.peek_remaining();
-                    let display_val = truncate_str(value, 30);
-                    spans.push(Span::styled("  ", Style::default()));
-                    spans.push(Span::styled(
-                        display_val,
-                        Style::default().fg(p.yellow),
-                    ));
-                    spans.push(Span::styled(
-                        format!(" ({}s)", remaining),
-                        Style::default().fg(p.comment),
-                    ));
-                }
+            if let Some(Reveal { value, .. }) = shown {
+                let remaining = app.peek_remaining();
+                let display_val = truncate_str(value, 30);
+                spans.push(Span::styled("  ", Style::default()));
+                spans.push(Span::styled(
+                    display_val,
+                    Style::default().fg(p.yellow),
+                ));
+                spans.push(Span::styled(
+                    format!(" ({}s)", remaining),
+                    Style::default().fg(p.comment),
+                ));
             }
 
             Line::from(spans)
