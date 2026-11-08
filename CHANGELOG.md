@@ -7,7 +7,7 @@ All notable changes to cs are documented here. Release notes are also available 
 ## Unreleased
 
 ### Fixes
-- The `store-secret` skill writes each secret to its own `mktemp` file under `$TMPDIR` and stores and deletes it in one command, so the plaintext file goes even when the store fails. It wrote every value to one fixed `.secret` file and deleted it as a separate step: an interrupt between the two left the file on disk, and with two or more secrets a failed write could store the previous value under the next name. Each run first removes any `cs-secret.*` file an earlier run left in `$TMPDIR`.
+- The `store-secret` skill writes each secret to its own `mktemp` file under `$TMPDIR` and stores and deletes it in one command, so the plaintext file goes even when the store fails. It wrote every value to one fixed `.secret` file and deleted it as a separate step: an interrupt between the two left the file on disk, and with two or more secrets a failed write could store the previous value under the next name. Each run first removes any `cs-secret.*` file older than an hour that an earlier run left in `$TMPDIR`; a newer one may be another session's store in progress. The Secure Secrets Handling section a new session's `CLAUDE.local.md` gets describes the same by-hand path: a fresh `mktemp` file outside the session directory, stored and deleted in one Bash command that keeps the store's exit status. An existing `CLAUDE.local.md` keeps its earlier text.
 
 ## 2026.11.4
 
