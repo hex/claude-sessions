@@ -2,7 +2,7 @@
 // ABOUTME: Uses exact expected picture shapes and packed colour values.
 import { expect, test } from 'claude-code/testing'
 
-import { bestGlyphCells, gridFor, pixelAnswer, replyParts } from '../hooks/picture'
+import { bestGlyphCells, cellHeightRatioFor, gridFor, pixelAnswer, replyParts } from '../hooks/picture'
 
 test('a line inside a code fence stays text', () => {
   const reply = 'Write it like this:\n```\n![owl](/tmp/owl.png)\n```\nDone.'
@@ -17,10 +17,24 @@ test('only an absolute path to a picture file is drawn', () => {
 })
 
 test('the grid keeps the picture\'s proportions in cells three times as tall as wide', () => {
-  expect(gridFor(512, 512, 200)).toEqual({ columns: 60, rows: 20 })
-  expect(gridFor(512, 512, 30)).toEqual({ columns: 30, rows: 10 })
-  expect(gridFor(100, 1000, 200)).toEqual({ columns: 9, rows: 30 })
-  expect(gridFor(2000, 100, 200)).toEqual({ columns: 60, rows: 1 })
+  expect(gridFor(512, 512, 200, 3)).toEqual({ columns: 60, rows: 20 })
+  expect(gridFor(512, 512, 30, 3)).toEqual({ columns: 30, rows: 10 })
+  expect(gridFor(100, 1000, 200, 3)).toEqual({ columns: 9, rows: 30 })
+  expect(gridFor(2000, 100, 200, 3)).toEqual({ columns: 60, rows: 1 })
+})
+
+test('the grid uses the configured cell height ratio', () => {
+  expect(gridFor(512, 512, 200, 2)).toEqual({ columns: 60, rows: 30 })
+  expect(gridFor(512, 512, 200, 3)).toEqual({ columns: 60, rows: 20 })
+  expect(gridFor(100, 1000, 200, 2)).toEqual({ columns: 6, rows: 30 })
+})
+
+test('invalid cell height ratios use 2, including NaN before config serialization', () => {
+  for (const value of [0, 9, NaN, Infinity, -Infinity, '3', null]) {
+    expect(cellHeightRatioFor(value)).toBe(2)
+    expect(gridFor(512, 512, 200, cellHeightRatioFor(value))).toEqual({ columns: 60, rows: 30 })
+  }
+  for (const value of [1, 2, 3, 5]) expect(cellHeightRatioFor(value)).toBe(value)
 })
 
 function cellWords(paint: (x: number, y: number) => number): number[] {

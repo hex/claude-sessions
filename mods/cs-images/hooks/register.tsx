@@ -2,7 +2,7 @@
 // ABOUTME: Tries real pixels once per session and falls back to best-fitting block glyphs, which also work under tmux -CC.
 import type { EngineInterface, Register } from 'claude-code'
 
-import { bestGlyphCells, gridFor, hasImageLine, pixelAnswer, replyParts, SAMPLES_PER_CELL_SIDE, topDownRgbFromBmp } from './picture'
+import { bestGlyphCells, cellHeightRatioFor, gridFor, hasImageLine, pixelAnswer, replyParts, SAMPLES_PER_CELL_SIDE, topDownRgbFromBmp } from './picture'
 
 type Grid = { columns: number; rows: number; longestEdge: number }
 type Cells = { columns: number; rows: number; cells: string }
@@ -23,14 +23,14 @@ const allPixels = new Map<string, Promise<Pixels | string>>()
 // untried: no Image has been asked about yet. asking: one Image is mounted and being asked about.
 let terminalDrawsPixels: 'untried' | 'asking' | 'yes' | 'no' = 'untried'
 
-async function gridOf($: EngineInterface, path: string, room: number): Promise<Grid | string> {
+async function gridOf($: EngineInterface, path: string, room: number, cellHeightRatio: number): Promise<Grid | string> {
   const size = await $.process.run(['sips', '-g', 'pixelWidth', '-g', 'pixelHeight', path], { timeoutMs: SIPS_TIMEOUT_MS })
   const pixelWidth = Number(/pixelWidth: (\d+)/.exec(size.stdout)?.[1])
   const pixelHeight = Number(/pixelHeight: (\d+)/.exec(size.stdout)?.[1])
   if (size.exitCode !== 0 || !(pixelWidth > 0) || !(pixelHeight > 0)) {
     return `sips cannot read it: ${size.stderr.trim() || size.stdout.trim()}`
   }
-  return { ...gridFor(pixelWidth, pixelHeight, room), longestEdge: Math.max(pixelWidth, pixelHeight) }
+  return { ...gridFor(pixelWidth, pixelHeight, room, cellHeightRatio), longestEdge: Math.max(pixelWidth, pixelHeight) }
 }
 
 async function converted($: EngineInterface, path: string, format: 'bmp' | 'png', resize: string[]): Promise<{ base64: string } | { failure: string }> {
@@ -45,8 +45,8 @@ async function converted($: EngineInterface, path: string, format: 'bmp' | 'png'
   }
 }
 
-async function decodeCells($: EngineInterface, path: string, room: number): Promise<Cells | string> {
-  const grid = await gridOf($, path, room)
+async function decodeCells($: EngineInterface, path: string, room: number, cellHeightRatio: number): Promise<Cells | string> {
+  const grid = await gridOf($, path, room, cellHeightRatio)
   if (typeof grid === 'string') return grid
   const { columns, rows } = grid
   const bmp = await converted($, path, 'bmp', ['-z', String(rows * SAMPLES_PER_CELL_SIDE), String(columns * SAMPLES_PER_CELL_SIDE)])
@@ -55,8 +55,8 @@ async function decodeCells($: EngineInterface, path: string, room: number): Prom
   return { columns, rows, cells: bestGlyphCells(samples, columns, rows) }
 }
 
-async function decodePixels($: EngineInterface, path: string, room: number): Promise<Pixels | string> {
-  const grid = await gridOf($, path, room)
+async function decodePixels($: EngineInterface, path: string, room: number, cellHeightRatio: number): Promise<Pixels | string> {
+  const grid = await gridOf($, path, room, cellHeightRatio)
   if (typeof grid === 'string') return grid
   const png = await converted($, path, 'png', grid.longestEdge > LONGEST_PNG_EDGE ? ['-Z', String(LONGEST_PNG_EDGE)] : [])
   if ('failure' in png) return png.failure
@@ -106,9 +106,18 @@ function askTerminal($: EngineInterface, requestId: string, key: string, png: st
   })
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  if (options.drawImages === false) return
+  const requestedRatio = options.cellHeightRatio === undefined ? 2 : options.cellHeightRatio
+  const cellHeightRatio = cellHeightRatioFor(requestedRatio)
+  let ratioLogged = false
+
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     if (e.surface !== 'terminal' || !hasImageLine(e.props.text)) return next(e)
+    if (requestedRatio !== cellHeightRatio && !ratioLogged) {
+      ratioLogged = true
+      await $.ui.log(`cellHeightRatio ${String(requestedRatio)} is not a finite number from 1 to 5; using 2`, { to: 'debug' })
+    }
     const { Box, Text, Raster, Image } = $.ui.resolve(e)
     const room = Math.max(8, (e.viewport?.columns ?? 80) - 6)
     const parts = replyParts(e.props.text)
@@ -117,9 +126,9 @@ export const register: Register = on => {
         return next({ ...e, props: { ...e.props, text: part.body, isFirstOfReply: e.props.isFirstOfReply && index === 0 } })
       }
       const changedAt = await $.fs.stat(part.path).then(stat => stat?.mtimeMs ?? 0, () => 0)
-      const id = `${part.path}@${room}@${changedAt}`
+      const id = `${part.path}@${room}@${changedAt}@${cellHeightRatio}`
       if (terminalDrawsPixels !== 'no') {
-        const pixels = await settled(() => remembered(allPixels, MOST_PIXELS_REMEMBERED, id, () => decodePixels($, part.path, room)), next.signal)
+        const pixels = await settled(() => remembered(allPixels, MOST_PIXELS_REMEMBERED, id, () => decodePixels($, part.path, room, cellHeightRatio)), next.signal)
         if (typeof pixels !== 'string') {
           const key = `picture-${index}`
           if (terminalDrawsPixels === 'untried') {
@@ -129,7 +138,7 @@ export const register: Register = on => {
           return <Image key={key} source={{ png: pixels.png }} columns={pixels.columns} rows={pixels.rows} alt={part.alt || ' '} />
         }
       }
-      const picture = await settled(() => remembered(allCells, MOST_REMEMBERED, id, () => decodeCells($, part.path, room)), next.signal)
+      const picture = await settled(() => remembered(allCells, MOST_REMEMBERED, id, () => decodeCells($, part.path, room, cellHeightRatio)), next.signal)
       return typeof picture === 'string'
         ? <Text>cs-images cannot draw {part.line}: {picture}</Text>
         : <Raster key={`picture-${index}`} columns={picture.columns} rows={picture.rows} cells={picture.cells} />

@@ -170,15 +170,18 @@ export function topDownRgbFromBmp(bmp: Uint8Array, width: number, height: number
   return rgb
 }
 
-// A terminal cell is not square, and nothing reports its shape to a mod. This is the
-// measured ratio of iTerm cells with a 1.5 line height; other setups need their own.
-const CELL_HEIGHT_PER_WIDTH = 3
+export function cellHeightRatioFor(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1 && value <= 5 ? value : 2
+}
+
+// A terminal cell is not square, and nothing reports its shape to a mod. The
+// configured ratio of its height to its width determines the picture's proportions.
 const MOST_COLUMNS = 60
 const MOST_ROWS = 30
 
-export function gridFor(pixelWidth: number, pixelHeight: number, room: number): { columns: number; rows: number } {
+export function gridFor(pixelWidth: number, pixelHeight: number, room: number, cellHeightRatio: number): { columns: number; rows: number } {
   const columns = Math.min(MOST_COLUMNS, room)
-  const rows = Math.max(1, Math.round((columns * pixelHeight) / pixelWidth / CELL_HEIGHT_PER_WIDTH))
+  const rows = Math.max(1, Math.round((columns * pixelHeight) / pixelWidth / cellHeightRatio))
   if (rows <= MOST_ROWS) return { columns, rows }
-  return { columns: Math.max(1, Math.round((MOST_ROWS * CELL_HEIGHT_PER_WIDTH * pixelWidth) / pixelHeight)), rows: MOST_ROWS }
+  return { columns: Math.max(1, Math.round((MOST_ROWS * cellHeightRatio * pixelWidth) / pixelHeight)), rows: MOST_ROWS }
 }
