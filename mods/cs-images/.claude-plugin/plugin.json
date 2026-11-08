@@ -1,0 +1,6 @@
+{
+  "name": "cs-images",
+  "version": "0.1.0",
+  "description": "Draws pictures from absolute file paths inside replies, as pixels or coloured blocks.",
+  "author": { "name": "cs" }
+}
