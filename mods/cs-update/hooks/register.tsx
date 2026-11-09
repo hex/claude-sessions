@@ -14,14 +14,15 @@ export const PANE = 'cs-update'
 export const OPTION = 'showReleaseNotes'
 // Doctor observes the mod RUNNING, not merely installed (see the cs mod).
 export const HEARTBEAT = '.cs/local/cs-update.heartbeat'
-// The finished pane's outcome, written on a clean `cs -update` exit and read
-// back on the reloaded module's next render: installing the update rewrites
-// this mod's own deployed file, Claude Code reloads it and immediately
-// re-renders the open pane, and the reload drops the module state the `done`
-// pane was drawing from before this file existed. `session.start` fires
-// again on the reload (the engine runs it for each fresh load of a plugin),
-// and the types fix no order between it and that re-render, so the restore
-// cannot wait for it.
+// Where the update key's life survives a reload: "running" from the press, the
+// outcome line on a clean `cs -update` exit, empty after a failure. Installing
+// the update rewrites this mod's own deployed file, Claude Code reloads it and
+// immediately re-renders the open pane, and the reload drops the module state
+// the pane was drawing from. `session.start` fires again on the reload (the
+// engine runs it for each fresh load of a plugin), and the types fix no order
+// between it and that re-render, so the restore cannot wait for it. The module
+// that pressed the key can outlive its own reload and finish the run, so the
+// outcome can land after the reloaded module has read the marker.
 export const DONE = '.cs/local/cs-update.done'
 // Where cs writes the id of the conversation it launched; a teammate claude
 // in the same directory has its own id and must not pop its own pane.
@@ -32,6 +33,8 @@ export const NOTES = (home: string, version: string) => `${home}/.cache/cs/updat
 // How long `cs -update` may take: the download, the checksum, the signature.
 export const UPDATE_TIMEOUT_MS = 600000
 const VET_TIMEOUT_MS = 10000
+// How often a reloaded module reads the marker of a run it did not start.
+const RUN_WATCH_MS = 1000
 
 // Every line the mod hands the engine to draw on a surface of the engine's
 // own: its toasts, /cs-update's replies and its slash menu row, so the design
@@ -39,6 +42,11 @@ const VET_TIMEOUT_MS = 10000
 export const TOASTS = {
   declined: (version: string) => `cs ${version} is available · run cs -update to install it, or /cs-update for the notes`,
   notRecorded: (err: string) => `could not record the finished update: ${err}`,
+} as const
+
+export const LOGS = {
+  notMarked: (err: string) => `could not mark the update as running: ${err}`,
+  notCleared: (err: string) => `could not clear the update's running mark: ${err}`,
 } as const
 
 export const REPLIES = {
@@ -79,11 +87,11 @@ export function parseSpan(text: string): Section[] {
 }
 
 // What the pane shows. Module state survives a /clear (as in the cs mod) and is
-// dropped on a reload, which is what "once per load" means. A finished update
-// is the one exception: the DONE marker survives the reload the update itself
-// causes, and the marker is redrawn from disk, by the Pane render the reload
-// triggers and by the reload's session.start, in whichever order the engine
-// runs them, each a no-op once the other has filled this state.
+// dropped on a reload, which is what "once per load" means. An update, running
+// or finished, is the one exception: the DONE marker survives the reload the
+// update itself causes, and the marker is redrawn from disk, by the Pane render
+// the reload triggers and by the reload's session.start, in whichever order the
+// engine runs them, each a no-op once the other has filled this state.
 let version: string | undefined
 let sections: Section[] | undefined
 let accent: string | undefined
@@ -96,11 +104,14 @@ export type Phase = 'idle' | 'running' | 'done' | 'failed'
 let phase: Phase = 'idle'
 let outcome = ''
 let registered = false
+// A timer is armed to read the marker of a run this module did not start.
+let watching = false
 
 export function register(on: On, options: PluginOptions) {
   version = undefined; sections = undefined; accent = undefined; shown = false
   phase = 'idle'; outcome = ''
   registered = false
+  watching = false
   const wanted = options[OPTION] !== false
 
   on('session.start', async ($, e, next) => {
@@ -116,7 +127,7 @@ export function register(on: On, options: PluginOptions) {
     // gets its pane back; the one an installed update causes finds the DONE
     // marker instead.
     if (!shown && await isLead($, e.cwd)) {
-      if (!(await restoreDone($, e.cwd)) && wanted) {
+      if (!(await restoreMarker($, e.cwd)) && wanted) {
         const pending = await $.env.get('CS_UPDATE_AVAILABLE')
         // The launch's own question was answered no for this version: one
         // line says it is still there, and the pane waits for /cs-update.
@@ -140,10 +151,10 @@ export function register(on: On, options: PluginOptions) {
     // sessions root does not name gets no pane back.
     if (version === undefined) {
       const cwd = await $.session.cwd()
-      if (!(await isLead($, cwd)) || !(await restoreDone($, cwd))) return next(e)
+      if (!(await isLead($, cwd)) || !(await restoreMarker($, cwd))) return next(e)
     }
     const el = await $.ui.resolve(e)
-    // Every path here has set it: the launch's openPane, or restoreDone's.
+    // Every path here has set it: the launch's openPane, or restoreMarker's.
     if (version === undefined) throw new Error('cs-update: the pane drew with no pending version')
     return drawPane({ version, sections, accent, phase, outcome }, el, () => runUpdate($))
   })
@@ -163,8 +174,8 @@ export function register(on: On, options: PluginOptions) {
     // After a reload (which drops the module state) a pane dismissed before
     // the update installed leaves nothing open for the render path to
     // restore, so the command asks the marker itself before it offers an
-    // install that already finished.
-    if (version === undefined && (await restoreDone($, cwd))) return { text: REPLIES.notesOpen }
+    // install that already finished or is still running.
+    if (version === undefined && (await restoreMarker($, cwd))) return { text: REPLIES.notesOpen }
     shown = true
     await openPane($, cwd, pending)
     return { text: REPLIES.notesOpen }
@@ -263,27 +274,69 @@ async function openPane($: EngineInterface, cwd: string, pending: string) {
   await $.ui.open({ id: PANE, title: `cs ${pending} is available`, focus: true, closeOnEscape: true })
 }
 
-// Restores the finished pane from the DONE marker on a reload, since the
-// reload itself drops the module state the pane was showing. Answers whether
-// it restored anything: false leaves the caller to its own fallback (the
-// launch-pane gate in session.start, or the ordinary render in ui.render). A
-// marker naming a version that is no longer CS_UPDATE_AVAILABLE is stale (a
-// later launch, nothing pending, or something newer) and is cleared rather
-// than redrawn; `$.fs` has no delete, so an empty write is the tombstone and
-// empty text reads as absent.
-async function restoreDone($: EngineInterface, cwd: string): Promise<boolean> {
+// The marker as it reads on disk: `version`, then the outcome line, or
+// `running` and the press's epoch milliseconds.
+type Marker =
+  | { state: 'running'; version: string; startedAt: number }
+  | { state: 'finished'; version: string; outcome: string }
+
+const RUNNING_LINE = 'running'
+
+function parseMarker(text: string): Marker | undefined {
+  const [markerVersion, line, startedAt] = text.split('\n')
+  if (!markerVersion || line === undefined) return undefined
+  if (line === RUNNING_LINE) return { state: 'running', version: markerVersion, startedAt: Number(startedAt) }
+  return { state: 'finished', version: markerVersion, outcome: line }
+}
+
+// No run outlasts UPDATE_TIMEOUT_MS, so an older mark, or one with no readable
+// time, was left by a run that was killed and must not hold the key.
+function runIsStale(marker: Marker): boolean {
+  return marker.state === 'running' && !(Date.now() - marker.startedAt <= UPDATE_TIMEOUT_MS && marker.startedAt > 0)
+}
+
+// Restores the pane from the DONE marker, since a reload drops the module
+// state the pane was showing. Answers whether it restored anything: false
+// leaves the caller to its own fallback (the launch-pane gate in session.start,
+// the ordinary render in ui.render, the press going ahead). A marker naming a
+// version that is no longer CS_UPDATE_AVAILABLE (a later launch, nothing
+// pending, or something newer) and a run past its timeout are stale and are
+// cleared rather than redrawn; `$.fs` has no delete, so an empty write is the
+// tombstone and empty text reads as absent.
+async function restoreMarker($: EngineInterface, cwd: string): Promise<boolean> {
   let text: string
   try { text = await $.fs.read(`${cwd}/${DONE}`) } catch { return false }
-  const [doneVersion, line] = text.split('\n')
-  if (!doneVersion || line === undefined) return false
+  const marker = parseMarker(text)
+  if (marker === undefined) return false
   const pending = await $.env.get('CS_UPDATE_AVAILABLE')
-  if (pending !== doneVersion) {
+  if (pending !== marker.version || runIsStale(marker)) {
     if (await mayWriteControlFiles($, cwd)) await $.fs.write(`${cwd}/${DONE}`, '')
     return false
   }
-  shown = true; phase = 'done'; outcome = line
-  await openPane($, cwd, doneVersion)
+  shown = true
+  if (marker.state === 'finished') {
+    phase = 'done'; outcome = marker.outcome
+  } else {
+    phase = 'running'; outcome = ''
+    watchRun($, cwd)
+  }
+  if (version === undefined) await openPane($, cwd, marker.version)
   return true
+}
+
+// Follows a run this module did not start, once a second, until the marker
+// says it is over: the module that pressed the key writes the outcome, and
+// nothing tells this one when it does. A marker that no longer says running
+// (cleared after a failure, or stale) gives the key back.
+function watchRun($: EngineInterface, cwd: string) {
+  if (watching) return
+  watching = true
+  $.clock.after(RUN_WATCH_MS, async () => {
+    watching = false
+    if (phase !== 'running') return
+    if (!(await restoreMarker($, cwd))) { phase = 'idle'; outcome = '' }
+    $.ui.invalidate('ui.render')
+  })
 }
 
 // Every write this mod makes into .cs/local asks this first: the sessions root
@@ -356,27 +409,37 @@ async function sessionVetted($: EngineInterface, cwd: string): Promise<boolean> 
 // not the launching shell's). The pane keeps the outcome until dismissed, so
 // it is read rather than flashed. The new files take effect on the next
 // launch for the rest of this claude, but Claude Code reloads this mod's own
-// file as soon as the update installs it, which is why a clean exit also
-// writes the DONE marker restoreDone reads back.
+// file as soon as the update installs it, which is why the run marks DONE
+// before it starts and again when it ends: restoreMarker reads it back.
 async function runUpdate($: EngineInterface) {
   // Claimed before the first await: two presses in one tick must not both
   // pass the guard and start two installers.
   if (phase === 'running' || phase === 'done') return
+  const retrying = phase === 'failed'
   phase = 'running'; outcome = ''
   $.ui.invalidate('ui.render')
+  let markedIn: string | undefined
   try {
     const bin = await $.env.get('CS_BIN')
     if (!bin) {
       phase = 'failed'; outcome = 'The launch did not say where cs is; run `cs -update` from a shell.'
       $.ui.invalidate('ui.render'); return
     }
+    const cwd = await $.session.cwd()
+    // An idle pane may be a reloaded module's, drawn before the module that
+    // pressed the key wrote its outcome: the marker decides, not this state.
+    // A failed pane is this module's own run, already over.
+    if (!retrying && (await restoreMarker($, cwd))) {
+      $.ui.invalidate('ui.render'); return
+    }
+    await markRun($, cwd)
+    markedIn = cwd
     const { exitCode, stderr } = await $.process.run([bin, '-update'], { timeoutMs: UPDATE_TIMEOUT_MS })
     if (exitCode === 0) {
       // Version-neutral: cs -update resolves the latest release when it runs,
       // which may be newer than the one this launch saw.
       phase = 'done'; outcome = 'Update finished. Takes effect on your next launch.'
       try {
-        const cwd = await $.session.cwd()
         if (await mayWriteControlFiles($, cwd)) await $.fs.write(`${cwd}/${DONE}`, `${version}\n${outcome}\n`)
       } catch (err) {
         $.ui.toast(TOASTS.notRecorded(String(err instanceof Error ? err.message : err)))
@@ -384,9 +447,30 @@ async function runUpdate($: EngineInterface) {
     } else {
       const tail = stderr.split('\n').filter(l => l.trim() !== '').slice(-5).join('\n')
       phase = 'failed'; outcome = `cs -update exited ${exitCode}.\n${tail}`
+      await clearRunMark($, cwd)
     }
   } catch (err) {
     phase = 'failed'; outcome = `cs -update did not run: ${String(err instanceof Error ? err.message : err)}`
+    if (markedIn !== undefined) await clearRunMark($, markedIn)
   }
   $.ui.invalidate('ui.render')
+}
+
+// A press that cannot be marked still runs: the mark only guards the key
+// across a reload, so its loss is worth a log line, not the update.
+async function markRun($: EngineInterface, cwd: string) {
+  try {
+    if (await mayWriteControlFiles($, cwd)) await $.fs.write(`${cwd}/${DONE}`, `${version}\n${RUNNING_LINE}\n${Date.now()}\n`)
+  } catch (err) {
+    $.ui.log(LOGS.notMarked(String(err instanceof Error ? err.message : err)))
+  }
+}
+
+// A failed run gives the key back to any reloaded module watching the marker.
+async function clearRunMark($: EngineInterface, cwd: string) {
+  try {
+    if (await mayWriteControlFiles($, cwd)) await $.fs.write(`${cwd}/${DONE}`, '')
+  } catch (err) {
+    $.ui.log(LOGS.notCleared(String(err instanceof Error ? err.message : err)))
+  }
 }

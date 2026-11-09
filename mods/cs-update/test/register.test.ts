@@ -718,25 +718,36 @@ test('a press on an idle pane starts no second installer while another run is fr
   expect(timers).toHaveLength(1)
 })
 
+// `cs -update` fails as asked while the -vet-session asks around it pass.
+const updateAnswers = (answer: { exitCode: number; stdout: string; stderr: string } | Error) => {
+  ;($ as any).process.run = async (argv: string[], init: any) => {
+    runs.push({ argv, init })
+    if (argv[1] === '-vet-session') return { exitCode: 0, stdout: '', stderr: '' }
+    if (answer instanceof Error) throw answer
+    return answer
+  }
+}
+
 test('a non-zero exit clears the running marker, so a reload offers the key again', async () => {
   await start()
-  runResult = { exitCode: 1, stdout: '', stderr: 'checksum mismatch\n' }
+  updateAnswers({ exitCode: 1, stdout: '', stderr: 'checksum mismatch\n' })
   await buttons(await draw())[0].props.onPress()
   expect(written['/work/' + DONE]).toBe('')
 })
 
 test('a run that cannot start clears the running marker', async () => {
   await start()
-  runResult = new Error('spawn failed')
+  updateAnswers(new Error('spawn failed'))
   await buttons(await draw())[0].props.onPress()
   expect(written['/work/' + DONE]).toBe('')
+  expect(texts(await draw()).join('\n')).toContain('cs -update did not run: spawn failed')
 })
 
 test('a second press after a failure runs the update again', async () => {
   await start()
-  runResult = { exitCode: 1, stdout: '', stderr: 'nope\n' }
+  updateAnswers({ exitCode: 1, stdout: '', stderr: 'nope\n' })
   await buttons(await draw())[0].props.onPress()
-  runResult = { exitCode: 0, stdout: '', stderr: '' }
+  updateAnswers({ exitCode: 0, stdout: '', stderr: '' })
   await buttons(await draw())[0].props.onPress()
   expect(updateRuns()).toHaveLength(2)
   expect(written['/work/' + DONE]).toBe(finishedMarker)

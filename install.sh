@@ -1534,7 +1534,7 @@ CS_PAYLOAD_SHA256=(
     "397f71caaa863ec6c1659a24a88f2faa1e824a05ce2a6c386e15586e535ae7de  mods/cs/tips.json"
     "2f8d4b45beddd0b27b050f1c2eb08ebb25552b4dea5f33b9398318a2ef636985  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
-    "24a173a7705879c5f7835e7154a6b694a6ba23320e19ffd8fbfa7e15506d2a39  mods/cs-update/hooks/register.tsx"
+    "3a3fa453e86bc3d1c60af35ef54f92ec11e8636a9b4c2bbfc14a7faadb5a4cb8  mods/cs-update/hooks/register.tsx"
     "67c3217e96ce069a27d2f8af84944f1aaf18aeab29f8a570bf0cb0f96fc61519  mods/cs-mermaid/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-mermaid/hooks/hooks.json"
     "17ded962d4bda355fb9f4c6e3707aab94062b42361df695e79a6e1702a8e8cf8  mods/cs-mermaid/hooks/layout.ts"
