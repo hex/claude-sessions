@@ -1874,9 +1874,13 @@ test_a_failed_consumed_flip_keeps_the_marker_and_says_so() {
     assert_output_contains "$out" "could not mark .cs/handoffs/2026-07-16-test.md consumed" \
         "the preamble names the failed flip" || return 1
     # The reason is the store's own first stderr line: mktemp's refusal of
-    # the temp file, worded one way by BSD mktemp and another by GNU.
-    assert_output_contains "$out" "consumed: mktemp: .*\.cs-tmp\.2026-07-16-test\.md\..*Permission denied" \
+    # the temp file. BSD and GNU name the path before "Permission denied";
+    # uutils (Ubuntu 26.04's mktemp) names it after, so each part is checked
+    # on its own.
+    assert_output_contains "$out" "consumed: mktemp: .*Permission denied" \
         "the preamble carries the store's refusal" || return 1
+    assert_output_contains "$out" "consumed: mktemp: .*\.cs-tmp\.2026-07-16-test\.md\." \
+        "the refusal names the store's temp file" || return 1
     assert_output_contains "$out" "will load this same handoff again" \
         "the preamble says the next start retries" || return 1
 }
