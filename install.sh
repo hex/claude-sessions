@@ -1494,7 +1494,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "e4526af5081dd6f231df118802bad32cadacdc74c90d2289cac9250c6af76d1a  bin/cs"
+    "d75c7831bffa3fa4e518eb4bec160a139bd7432573cd206debaa6d1747c0ced5  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "ade5dd7e429d13a6e2918e5580ff29958d5ff8eec1f0a924e28953ec5c1a8597  bin/cs-statusline"
     "324691a50519294a125520ee96e279bb02a08b1a4c2e4804cf9347c617521044  bin/cs-subagent-statusline"
@@ -1510,8 +1510,8 @@ CS_PAYLOAD_SHA256=(
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
     "c262f7728c9ec148401063919e7fa565bf69c9f400c950b17d31fc1c2d1df5ab  hooks/session-start.sh"
     "e1d127ff4b828a434a3ddc4b57e3274f2d3ac94a7675680e44fda6eedf006553  hooks/autosave-commits.sh"
-    "59a45222ec8106787e9e97c7c48acc32b754831ecdc5247fdc40d992f36ee009  hooks/stop-blocks.sh"
-    "c24183ee25fdd41cada613b2829b2a2ae86e3ee7837392aa1cfb41d4c7952a37  hooks/stop-notices.sh"
+    "6521b8a09d5c8045010996b76b4990a83c7135b410c2500ad53adb72f6443e00  hooks/stop-blocks.sh"
+    "73733088a8a86b2f7c3b367e0f6fb699dbf428c3421f7cd6d4daa02eac4b60a2  hooks/stop-notices.sh"
     "a96c77d8f13d893e46116b7d61e517f72bba7f8e10b790517934004be21ae43a  hooks/session-end.sh"
     "81a13835a65f4b4b35bb87493da0df9848de68375ca7ab1525d2d5079cf52bf1  hooks/subagent-context.sh"
     "53b16016dd6d087c3cc3db7e4acf8de6629e149e3b7f326f0731b36809574156  hooks/tool-failure-logger.sh"
