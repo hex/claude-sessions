@@ -43,9 +43,17 @@ test_write_as_me_skill_ranks_supplementary_sources() {
     assert_file_contains "$SKILL" "outranks extrapolation" "a source beats an extrapolated register" || return 1
 }
 
+test_write_as_me_skill_folds_long_dev_artifacts() {
+    assert_file_contains "$SKILL" "^## Long dev artifacts" "names the long dev artifact section" || return 1
+    assert_file_contains "$SKILL" "^<summary>Full description</summary>" "folds the full text under a neutral label" || return 1
+    assert_file_contains "$SKILL" "never a model name" "the folded label never names a model" || return 1
+    assert_file_contains "$SKILL" "Commit messages and review comments stay unfolded" "commits and review comments are not folded" || return 1
+}
+
 run_test test_write_as_me_skill_exists_with_frontmatter
 run_test test_write_as_me_skill_teaches_the_drafting_rules
 run_test test_write_as_me_skill_defines_the_profile_shape
 run_test test_write_as_me_skill_ranks_supplementary_sources
+run_test test_write_as_me_skill_folds_long_dev_artifacts
 
 report_results

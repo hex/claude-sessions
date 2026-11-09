@@ -514,6 +514,13 @@ test_release_verifies_ci_workflow() {
         "release.md must describe the signing key override" || return 1
 }
 
+test_release_notes_fold_the_full_list() {
+    assert_file_contains "$RELEASE_MD" "<summary>Full changelog</summary>" \
+        "release.md must fold the grouped list under a Full changelog summary" || return 1
+    assert_file_contains "$RELEASE_MD" "without the opener and the fold" \
+        "release.md must keep the opener and the fold out of CHANGELOG.md" || return 1
+}
+
 test_release_signing_stops_when_a_check_fails() {
     # The Bash tool runs a command as `eval '...' && pwd`, and a shell ignores
     # set -e on the left of &&. The block has to stop before signing even there.
@@ -677,6 +684,7 @@ run_test test_release_handles_empty_prev_tag
 run_test test_release_approval_has_cancel_and_reapproval_loop
 run_test test_release_guards_stray_files_before_add_all
 run_test test_release_verifies_ci_workflow
+run_test test_release_notes_fold_the_full_list
 run_test test_release_signing_stops_when_a_check_fails
 run_test test_release_uses_ci_wait_for_each_workflow_gate
 run_test test_release_has_code_review_gate
