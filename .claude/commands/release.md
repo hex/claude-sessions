@@ -292,6 +292,18 @@ do not run `git log ""..HEAD`, which errors.
 
 - Group the commits into categories: **Features**, **Fixes**, **Docs**, **Other**
 - Draft release notes in markdown format with a `## What's Changed` heading
+- Open with two or three lines that say what changed for someone who uses cs,
+  then fold the grouped list, with blank lines around it so GitHub renders its
+  Markdown:
+
+  ```
+  <details>
+  <summary>Full changelog</summary>
+
+  The grouped list.
+
+  </details>
+  ```
 - Include a `**Full Changelog**` link: `https://github.com/hex/claude-sessions/compare/vPREVIOUS...vNEW`
 
 Show the draft to the user via **AskUserQuestion** with options:
@@ -306,7 +318,7 @@ Step 8.
 
 ### 7. Update Changelog
 
-CHANGELOG.md exists at the repo root. Now that the release notes are approved (Step 6), insert them as a new `## X.Y.Z` section at the top of the file (after the header, before the previous version's section). Use the version number WITHOUT the `v` prefix to match existing entries. Include all the same content as the GitHub Release notes. If a `## Unreleased` section exists, fold its entries into this new version section rather than leaving a duplicate.
+CHANGELOG.md exists at the repo root. Now that the release notes are approved (Step 6), insert them as a new `## X.Y.Z` section at the top of the file (after the header, before the previous version's section). Use the version number WITHOUT the `v` prefix to match existing entries. Include the grouped list from the GitHub Release notes, without the opener and the fold. If a `## Unreleased` section exists, fold its entries into this new version section rather than leaving a duplicate.
 
 The CHANGELOG entry is committed as part of the release commit in Step 8.
 

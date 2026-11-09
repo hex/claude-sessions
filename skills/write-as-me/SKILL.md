@@ -40,6 +40,28 @@ from a distilled profile document, never from improvisation.
    (re-run the builder, re-distill) AFTER delivering the draft — staleness
    never blocks a draft.
 
+## Long dev artifacts
+
+A PR description or issue reply that runs past one short paragraph opens
+with two or three lines in the user's voice: what changed and why a reader
+should care. Add a screenshot when one shows the change faster than words.
+The full detail follows, folded:
+
+```
+<details>
+<summary>Full description</summary>
+
+The full text, in Markdown.
+
+</details>
+```
+
+GitHub shows the opener and the summary line, and the reader opens the rest
+when they want it. The summary is a neutral label, never a model name. Keep
+the blank lines around the folded text, or GitHub does not render its
+Markdown. Commit messages and review comments stay unfolded: git prints the
+tags as text, and a review comment stays short instead.
+
 ## Distilling the profile
 
 Read the corpus (with offset/limit chunks when it exceeds ~200 KB) and

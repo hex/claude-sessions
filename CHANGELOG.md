@@ -4,6 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
+## Unreleased
+
+### Changed
+- `/write-as-me` drafts a long PR description or issue reply as two or three lines in your voice, then the full detail folded under a `Full description` summary that GitHub shows collapsed. The label never names a model. Commit messages and review comments stay unfolded.
+
 ## 2026.11.5
 
 ### Added
