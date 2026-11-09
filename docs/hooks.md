@@ -899,7 +899,7 @@ the conversation it meets next unjudged.
 The mods hand Claude Code every toast, `$.ui.ask` dialog, `$.ui.log` notice,
 slash-command reply and command registration from tables they export: cs in
 `register.tsx` (`TOASTS`, `ASKS`, `LOGS`, `REPLIES`, `COMMANDS`), cs-update in
-`register.tsx` (`TOASTS`, `REPLIES`, `COMMANDS`),
+`register.tsx` (`TOASTS`, `LOGS`, `REPLIES`, `COMMANDS`),
 cs-panel in `register.tsx`, `draw.tsx` (`WORDS`) and `settings.ts`
 (`LABELS`), cs-filter-chat in
 `words.ts`. `tests/test_mod_tables.sh` fails when a call site writes
@@ -1021,16 +1021,31 @@ deployed file, and Claude Code reloads it as soon as the install lands. `Esc`
 closes the pane at any point.
 
 That reload resets the mod's module state mid-pane, which would otherwise
-blank a pane still showing "Update finished". A clean exit also writes
-`.cs/local/cs-update.done` (version plus the outcome line); the engine
-re-renders the open pane the instant it reloads the module, which can come
-before the reloaded module's `session.start` runs, so the reloaded module reads the marker back and redraws the finished
-pane from its own next render. That redraw asks the lead check first,
-so a directory the sessions root does not name gets no pane back. A pane dismissed before the install landed
+blank a pane showing "Update finished" or offer the key again during a run. The
+update key keeps its state in `.cs/local/cs-update.done`: the press writes
+the version, `running`, the time and the version `~/.claude/hooks/cs/.version`
+names then, and a clean exit replaces those with the version and the outcome
+line. A failed run empties the marker, which gives the key back. The installer
+writes that version stamp before the mod's own files, and the reload those
+files cause can end both the run and the module that pressed the key before
+either writes the outcome. A reloaded module that finds the stamp changed since
+the press draws "Update finished" at once and writes it to the
+marker. Any version counts, since `cs -update` installs the latest release,
+which can be newer than the one the launch saw. A reinstall of the version
+already installed rewrites the stamp with the same text, so if its reload
+cuts the report short the pane stays `updating…` until the ten-minute stale
+rule, though the install finished. The engine re-renders the open pane the instant it reloads the module, which can come
+before the reloaded module's `session.start` runs, so the reloaded module reads the marker back and redraws the
+pane from its own next render, running or finished. That redraw asks the lead check first,
+so a directory the sessions root does not name gets no pane back. While the marker says `running`, a reloaded
+module reads it once a second, since the module that pressed the key can
+outlive the reload and write the outcome after the reloaded module has read
+it. A `running` marker older than the update's ten-minute timeout means
+something ended the run, and reads as stale, so the key comes back. A press on an idle pane reads the marker first and starts no installer when it names a finished or running update. A pane dismissed before the install landed
 leaves nothing open to redraw, so `/cs-update` after the reload reads the
-marker too and shows the finished pane instead of offering the install a
+marker too and shows the running or finished pane instead of offering the install a
 second time. The mod clears the marker (writes it empty, since `$.fs` offers no
-delete) once it names a version that is no longer pending: at the next launch,
+delete) once it names a version that is no longer pending or a run past that timeout: at the next launch,
 at the pane's redraw after a reload, or at a `/cs-update` run while another
 version is pending. A `/cs-update` with nothing pending says so before it reads
 the marker, and leaves it. In a directory the sessions root does not name, or
@@ -1044,7 +1059,20 @@ toast that stands in for it; `/cs-update` still opens the pane with the option o
 
 `install.sh` deploys the mod's three files (`.claude-plugin/plugin.json`,
 `hooks/hooks.json`, `hooks/register.tsx`) under `~/.claude/skills/cs-update/`,
-the same layout as the `cs` mod, and `cs -uninstall` removes the directory. When
+the same layout as the `cs` mod, and `cs -uninstall` removes the directory. It
+places them last, after every other file, the install record, the completions,
+the settings merge and the version stamp. After them come only the report: the
+placed count, the list of files kept because cs did not write them, the
+completion setup hints and the closing line, then the release notes `cs -update`
+prints after the installer. Claude Code reloads a mod soon after its files
+change (0.4 to 0.7 s measured on 2.1.319). A key press older than 10 s no
+longer holds the process it started, and every real update runs longer than
+that, so the reload can stop `cs -update` during the report, which takes about
+0.16 s from the module landing to the installer's exit, before the release
+notes. The install has finished its work by then, and the version stamp is how
+the reloaded pane knows it. A run stopped before the mod's
+files leaves the mod at its previous version, and the record still names it, so
+running `cs -update` again finishes the install. When
 Claude Code loads the plugin, the mod writes `.cs/local/cs-update.heartbeat`
 (one UTC timestamp) when the cwd has `.cs/local`, the sessions root names the directory (as
 for the pane) and `cs -vet-session` passes, and `cs -doctor` reports the

@@ -3439,6 +3439,92 @@ test_install_record_holds_what_a_partial_install_placed() {
     assert_file_contains "$record" "^$zeros  \.claude/skills/rotate/SKILL\.md$" "a file never reached keeps its line" || return 1
 }
 
+# A mv stand-in for the install under test, first on PATH: logs each
+# destination to $CS_TEST_RENAME_LOG, and refuses a destination that ends in
+# $CS_TEST_RENAME_REFUSE, as a run killed at that rename would stop there.
+_write_rename_logging_mv() {  # directory
+    mkdir -p "$1"
+    cat > "$1/mv" <<'SHIM'
+#!/bin/bash
+dest="${*: -1}"
+printf '%s\n' "$dest" >> "$CS_TEST_RENAME_LOG"
+if [ -n "${CS_TEST_RENAME_REFUSE:-}" ]; then
+    case "$dest" in *"$CS_TEST_RENAME_REFUSE") exit 1 ;; esac
+fi
+exec /bin/mv "$@"
+SHIM
+    chmod +x "$1/mv"
+}
+
+# Claude Code reloads the cs-update mod soon after its files change, and the
+# reload can end the `cs -update` that mod started. So those files go last:
+# after the first of them, the only renames left are the rest of them and the
+# record lines that name each one as it lands.
+test_install_places_the_update_mod_after_everything_else() {
+    local home="$TEST_TMPDIR/order-home" shim="$TEST_TMPDIR/order-shim" log="$TEST_TMPDIR/renames.log" first
+    mkdir -p "$home"
+    _write_rename_logging_mv "$shim"
+    HOME="$home" PATH="$shim:$PATH" CS_TEST_RENAME_LOG="$log" bash "$INSTALL_SH" > "$TEST_TMPDIR/order.out" 2>&1 < /dev/null \
+        || { cat "$TEST_TMPDIR/order.out"; echo "  FAIL: the install failed"; return 1; }
+    first=$(grep -n '/\.claude/skills/cs-update/' "$log" | head -1 | cut -d: -f1)
+    [ -n "$first" ] || { echo "  FAIL: no rename placed a cs-update file"; return 1; }
+    assert_eq ".claude/skills/cs-update/.claude-plugin/plugin.json
+.claude/hooks/cs/.installed
+.claude/skills/cs-update/hooks/hooks.json
+.claude/hooks/cs/.installed
+.claude/skills/cs-update/hooks/register.tsx
+.claude/hooks/cs/.installed" "$(tail -n "+$first" "$log" | sed "s|^$home/||")" "only cs-update's files and their record lines come last" || return 1
+    head -n "$((first - 1))" "$log" | grep -qx "$home/.claude/settings.json" \
+        || { echo "  FAIL: settings.json was not written before the mod"; return 1; }
+    head -n "$((first - 1))" "$log" | grep -qx "$home/.claude/hooks/cs/.version" \
+        || { echo "  FAIL: the version stamp was not written before the mod"; return 1; }
+    head -n "$((first - 1))" "$log" | grep -qx "$home/.bash_completion.d/cs.bash" \
+        || { echo "  FAIL: the completions were not written before the mod"; return 1; }
+    assert_file_contains "$home/.claude/hooks/cs/.installed" "  \.claude/skills/cs-update/hooks/register\.tsx$" "the record names the mod's module" || return 1
+}
+
+# A run stopped at the mod's last file has done everything else: settings,
+# stamp and the rest of the payload are the release's, the mod is still the
+# one before it, and the record stays true of what is on disk, so running the
+# install again converges.
+test_install_stopped_at_the_update_mod_leaves_it_recorded_as_it_stands() {
+    local home="$TEST_TMPDIR/stopped-home" shim="$TEST_TMPDIR/stopped-shim" rc=0
+    local record module previous_digest payload_digest version
+    record="$home/.claude/hooks/cs/.installed"
+    module="$home/.claude/skills/cs-update/hooks/register.tsx"
+    version=$(grep -m1 '^VERSION=' "$SCRIPT_DIR/../bin/cs" | cut -d'"' -f2)
+    payload_digest=$(shasum -a 256 "$SCRIPT_DIR/../mods/cs-update/hooks/register.tsx" | awk '{print $1}')
+    mkdir -p "$home"
+    HOME="$home" bash "$INSTALL_SH" > /dev/null 2>&1 < /dev/null || { echo "  FAIL: first install failed"; return 1; }
+    printf 'the module as the release before shipped it\n' > "$module"
+    previous_digest=$(shasum -a 256 "$module" | awk '{print $1}')
+    grep -v 'cs-update/hooks/register\.tsx$' "$record" > "$record.tmp"
+    printf '%s  .claude/skills/cs-update/hooks/register.tsx\n' "$previous_digest" >> "$record.tmp"
+    /bin/mv "$record.tmp" "$record"
+    printf '{}\n' > "$home/.claude/settings.json"
+    printf '2000.1.1\n' > "$home/.claude/hooks/cs/.version"
+    _write_rename_logging_mv "$shim"
+    HOME="$home" PATH="$shim:$PATH" CS_TEST_RENAME_LOG="$TEST_TMPDIR/stopped.log" CS_TEST_RENAME_REFUSE="/cs-update/hooks/register.tsx" \
+        bash "$INSTALL_SH" > "$TEST_TMPDIR/stopped.out" 2>&1 < /dev/null || rc=$?
+    # The previous module is in no release's known hashes, so only the record
+    # makes it cs's when _deploy reaches it, after the record was rewritten.
+    assert_file_not_contains "$TEST_TMPDIR/stopped.out" "Kept .*cs-update/hooks/register\.tsx" "the recorded previous module is cs's to replace" || return 1
+    assert_file_contains "$TEST_TMPDIR/stopped.log" "/\.claude/skills/cs-update/hooks/register\.tsx$" "the install went to replace it" || return 1
+    assert_eq "1" "$rc" "the refused rename stops the install" || { cat "$TEST_TMPDIR/stopped.out"; return 1; }
+    assert_eq "the module as the release before shipped it" "$(cat "$module")" "the module on disk is the previous one" || return 1
+    assert_file_contains "$record" "^$previous_digest  \.claude/skills/cs-update/hooks/register\.tsx$" "the record still names what is on disk" || return 1
+    assert_file_not_contains "$record" "^$payload_digest  \.claude/skills/cs-update/hooks/register\.tsx$" "the record does not claim the release's module" || return 1
+    assert_file_contains "$record" "  \.claude/commands/wrap\.md$" "the rest of the record was written" || return 1
+    assert_eq "true" "$(jq '.hooks | length > 0' "$home/.claude/settings.json")" "settings.json was merged before the mod" || return 1
+    assert_eq "$version" "$(cat "$home/.claude/hooks/cs/.version")" "the version stamp was written before the mod" || return 1
+    HOME="$home" bash "$INSTALL_SH" > "$TEST_TMPDIR/stopped2.out" 2>&1 < /dev/null || { cat "$TEST_TMPDIR/stopped2.out"; echo "  FAIL: the install run again failed"; return 1; }
+    assert_file_not_contains "$TEST_TMPDIR/stopped2.out" "Kept .*cs-update/" "the install run again keeps none of the mod's files" || return 1
+    cmp -s "$SCRIPT_DIR/../mods/cs-update/hooks/register.tsx" "$module" || { echo "  FAIL: the install run again did not place the module"; return 1; }
+    assert_file_contains "$record" "^$payload_digest  \.claude/skills/cs-update/hooks/register\.tsx$" "the install run again records it" || return 1
+    assert_file_not_contains "$record" "^$previous_digest  \.claude/skills/cs-update/hooks/register\.tsx$" "its previous line is gone" || return 1
+    assert_eq "1" "$(grep -c '  \.claude/skills/cs-update/hooks/register\.tsx$' "$record")" "the record names the module once" || return 1
+}
+
 # A release's files under ~/.claude stay cs's when the install record is
 # gone, because the release build (build.sh --add-release-hashes) adds their
 # sha256s to CS_KNOWN_SHA256. A scratch checkout whose every such file
@@ -3897,6 +3983,8 @@ run_test test_install_never_sources_a_kept_deployed_cs_shared
 run_test test_install_replaces_files_cs_wrote_without_a_record
 run_test test_install_follows_its_record
 run_test test_install_record_holds_what_a_partial_install_placed
+run_test test_install_places_the_update_mod_after_everything_else
+run_test test_install_stopped_at_the_update_mod_leaves_it_recorded_as_it_stands
 run_test test_install_replaces_a_releases_files_after_its_record_is_deleted
 run_test test_install_replaces_a_releases_files_after_only_its_record_is_deleted
 run_test test_uninstall_removes_only_files_cs_wrote

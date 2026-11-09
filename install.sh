@@ -1534,7 +1534,7 @@ CS_PAYLOAD_SHA256=(
     "397f71caaa863ec6c1659a24a88f2faa1e824a05ce2a6c386e15586e535ae7de  mods/cs/tips.json"
     "2f8d4b45beddd0b27b050f1c2eb08ebb25552b4dea5f33b9398318a2ef636985  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
-    "24a173a7705879c5f7835e7154a6b694a6ba23320e19ffd8fbfa7e15506d2a39  mods/cs-update/hooks/register.tsx"
+    "f5df22546ae0a51339d71ab7551cccb45c897cfdb5b769f8e3050aa975d9da7a  mods/cs-update/hooks/register.tsx"
     "67c3217e96ce069a27d2f8af84944f1aaf18aeab29f8a570bf0cb0f96fc61519  mods/cs-mermaid/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-mermaid/hooks/hooks.json"
     "17ded962d4bda355fb9f4c6e3707aab94062b42361df695e79a6e1702a8e8cf8  mods/cs-mermaid/hooks/layout.ts"
@@ -2240,28 +2240,35 @@ for skill_file in "${CS_SKILL_FILES[@]}"; do
         _deploy "skills/$skill_file" "$SKILLS_DIR/$skill_file"
     fi
 done
+# The cs-update mod's own files are placed at the end of this script.
 for mod_file in "${CS_MOD_FILES[@]}"; do
+    case "$mod_file" in cs-update/*) continue ;; esac
     if _mod_path_real "$mod_file"; then
         _deploy "mods/$mod_file" "$SKILLS_DIR/$mod_file"
     fi
 done
 
 # Record what this install wrote under ~/.claude, so the next install, update
-# or uninstall knows those files as cs's by their content.
+# or uninstall knows those files as cs's by their content. The cs-update mod's
+# files are not placed yet, and _deploy at the end of this script asks this
+# record whether each one is cs's, so the lines the last install wrote for them
+# are carried over. That carry decides ownership: a module a checkout install
+# wrote is in no release's known hashes, and without its line _deploy would
+# keep it as the user's file and never update the mod. Each carried line stands
+# until _deploy replaces that file. A file _deploy keeps keeps its line, which
+# names content no longer at that path: the file counts as cs's again only if
+# it comes to hold that content.
 _record_tmp="$STAGE_DIR/installed"
 if [ "${#CS_RECORD_LINES[@]}" -gt 0 ]; then
     printf '%s\n' "${CS_RECORD_LINES[@]}" > "$_record_tmp"
 else
     : > "$_record_tmp"
 fi
-_place_file "$_record_tmp" "$(_cs_install_record)" 644
-if [ "$CS_UNCHANGED" -gt 0 ]; then
-    # shellcheck disable=SC2088  # a tilde the user reads, not a path cs opens
-    _done "Placed $CS_PLACED files" "$CS_UNCHANGED unchanged · ~/.local/bin, ~/.claude"
-else
-    # shellcheck disable=SC2088  # a tilde the user reads, not a path cs opens
-    _done "Placed $CS_PLACED files" "~/.local/bin, ~/.claude"
+if [ -f "$(_cs_install_record)" ]; then
+    awk 'index(substr($0, 67), ".claude/skills/cs-update/") == 1' "$(_cs_install_record)" >> "$_record_tmp" \
+        || error "Could not read $(_cs_install_record)"
 fi
+_place_file "$_record_tmp" "$(_cs_install_record)" 644
 if [ -n "$CS_PICKER" ]; then
     _done "Picker cs-tui" "$CS_PICKER"
 fi
@@ -2974,6 +2981,26 @@ fi
 if [ "$CS_VERSION" != "unknown" ]; then
     printf '%s\n' "$CS_VERSION" > "$STAGE_DIR/version" || error "Could not write $STAGE_DIR/version"
     _place_file "$STAGE_DIR/version" "$HOOKS_DIR/.version" 644
+fi
+
+# The cs-update mod's files go last, with only the report below them. The mod's
+# update key runs this installer as a child of the Claude Code process that
+# loaded the mod, which reloads a mod soon after its files change (0.4 to 0.7 s
+# measured on 2.1.319, debounced) and can end that child with a SIGTERM to its
+# process tree as the reload unloads the mod. Everything the install does comes
+# first, so a reload lands on a finished install.
+for mod_file in "${CS_MOD_FILES[@]}"; do
+    case "$mod_file" in cs-update/*) ;; *) continue ;; esac
+    if _mod_path_real "$mod_file"; then
+        _deploy "mods/$mod_file" "$SKILLS_DIR/$mod_file"
+    fi
+done
+if [ "$CS_UNCHANGED" -gt 0 ]; then
+    # shellcheck disable=SC2088  # a tilde the user reads, not a path cs opens
+    _done "Placed $CS_PLACED files" "$CS_UNCHANGED unchanged · ~/.local/bin, ~/.claude"
+else
+    # shellcheck disable=SC2088  # a tilde the user reads, not a path cs opens
+    _done "Placed $CS_PLACED files" "~/.local/bin, ~/.claude"
 fi
 
 if [ "${#CS_KEPT_PATHS[@]}" -gt 0 ]; then
