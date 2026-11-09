@@ -480,11 +480,16 @@ RUN_ID=$(gh run list --workflow=release.yml --branch vX.Y.Z --commit "$SHA" --li
 
 Download the assets, verify every manifest digest, and compare the installer
 with the tagged commit. The only permitted difference is `CS_DEFAULT_REF=main`
-replaced by the release tag. Run the following in one shell so a failed check
-stops before signing:
+replaced by the release tag. Run the following from the repo root, with the
+`SHA` placeholder replaced by the full release commit from Step 8. It runs in
+its own bash so a failed check stops before signing: the Bash tool runs a
+command as `eval '...' && pwd`, and a shell ignores `set -e` on the left of
+`&&`. The script comes in on descriptor 3 so that no command in it can read the
+script's own text from stdin.
 
 ```bash
-set -euo pipefail
+bash -euo pipefail /dev/fd/3 3<<'VERIFY'
+SHA='<full release SHA from Step 8>'
 tag=vX.Y.Z
 git fetch origin "refs/tags/${tag}:refs/tags/${tag}"
 test "$(git rev-parse "$tag^{commit}")" = "$SHA"
@@ -510,6 +515,7 @@ diff -u "$release_dir/expected-install.sh" "$release_dir/install.sh"
 )
 gh release upload "$tag" "$release_dir/SHA256SUMS.sig"
 gh release view "$tag" --json assets --jq '.assets[].name' | grep -qxF SHA256SUMS.sig
+VERIFY
 ```
 
 The release is not done until `SHA256SUMS.sig` is a release asset.
@@ -537,8 +543,9 @@ only the login keys, so a sign without that override fails with
 `No private key found for public key`. The socket exists only while
 Bitwarden desktop is open and unlocked with its SSH agent on; the sign
 runs from the Bash tool and needs no hand-off to the user. The step's
-tag expansions are braced (`${tag}:...`) because the Bash tool runs zsh,
-where `$tag:lib` reads `:l` as a modifier and corrupts the ref.
+tag expansions stay braced (`${tag}:...`) so a line of it can be rerun by
+hand in the Bash tool's zsh, where `$tag:lib` reads `:l` as a modifier and
+corrupts the ref.
 
 `cs -update` and the installer's picker download require
 `ssh-keygen -Y verify` to authenticate `SHA256SUMS.sig` in the release's own
