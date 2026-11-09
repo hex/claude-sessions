@@ -6969,6 +6969,32 @@ mod tests {
         std::fs::remove_dir_all(&tmp).ok();
     }
 
+    /// The pane hides mid-edit, so the edit is cancelled the way Esc cancels
+    /// it. The edited text must not come back as a new task once the pane
+    /// fits again.
+    #[test]
+    fn hiding_the_pane_mid_edit_cancels_the_edit() {
+        let (tmp, _local, _root) = seed_queue("notes-hide-edit", "alpha", &["fix X"]);
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Down)); // list, row 0
+        app.handle_key(KeyEvent::from(KeyCode::Char('e')));
+        assert_eq!(app.notes_focus, NotesFocus::Editing, "editing row 0");
+        assert_eq!(app.queue_input.text(), "fix X", "task text loaded into the input");
+        for c in " and Y".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        rows_at(&mut app, 100, 24); // too small for the pane
+        rows_at(&mut app, 140, 30); // the pane fits again
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.queue_input.text(), "", "the cancelled edit left nothing in the input");
+        let lines = session::read_queue("alpha");
+        assert_eq!(lines, vec!["fix X"], "the edited text is not appended as a new task");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
     #[test]
     fn editing_ignores_up_and_down() {
         let (tmp, _local, _root) = seed_queue("notes-edit-updown", "alpha", &["one", "two", "three"]);
