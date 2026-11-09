@@ -22,6 +22,9 @@ let written: Record<string, string>
 let panes: { op: 'open' | 'close'; args: any }[]
 let toasts: string[]
 let invalidated: string[]
+let logged: string[]
+// Each `$.clock.after` the mod asked for, oldest first, run by hand by tick().
+let timers: { ms: number; fn: () => unknown }[]
 let runs: { argv: string[]; init: any }[]
 let runResult: { exitCode: number; stdout: string; stderr: string } | Error
 let commands: any[]
@@ -60,9 +63,11 @@ const $ = {
     open: async (args: any) => { panes.push({ op: 'open', args }) },
     close: async (args: any) => { panes.push({ op: 'close', args }) },
     toast: (text: string) => { toasts.push(text) },
+    log: (text: string) => { logged.push(text) },
     invalidate: (event: string) => { invalidated.push(event) },
   },
   process: { run: defaultRun as (argv: string[], init: any) => Promise<any> },
+  clock: { after: (ms: number, fn: () => unknown) => { timers.push({ ms, fn }); return { cancel: () => {} } } },
   command: { register: async (spec: any) => { commands.push(spec); return { command: spec.name } } },
 }
 
@@ -107,6 +112,16 @@ function headings(tree: any): any[] {
   return (tree.children ?? []).flatMap(headings)
 }
 const draw = () => hooks['ui.render:Pane']($, { requestId: PANE }, async () => 'other')
+// Markers as another module instance leaves them on disk: a test puts one in
+// `files` for `load()` to find; this module's own writes land in `written`.
+const FINISHED_LINE = 'Update finished. Takes effect on your next launch.'
+const finishedMarker = `2026.99.3\n${FINISHED_LINE}\n`
+const runningMarker = (startedAt: number) => `2026.99.3\nrunning\n${startedAt}\n`
+const TEN_MINUTES = 600000
+// Runs every timer due now; one a callback arms waits for the next tick.
+async function tick() { const due = timers; timers = []; for (const t of due) await t.fn() }
+// Long enough for a held press to reach `$.process.run`, however many awaits lie before it.
+const settle = () => new Promise(r => setTimeout(r, 0))
 
 function load(options: Record<string, unknown> = {}) {
   for (const k of Object.keys(hooks)) delete hooks[k]
@@ -119,7 +134,7 @@ beforeEach(() => {
     '/work/.cs/local/state': 'claude_session_color: red\nclaude_session_id: uuid-lead\n',
     '/home/u/.cache/cs/update-notes-full-2026.99.3': SPAN,
   }
-  written = {}; panes = []; toasts = []; invalidated = []; runs = []; commands = []
+  written = {}; panes = []; toasts = []; invalidated = []; logged = []; timers = []; runs = []; commands = []
   // /work sits under the default sessions root by its own name.
   existing = new Set(['/work/.cs/local'])
   realPaths = { '/work': '/work', '/home/u/.claude-sessions/work': '/work' }
@@ -384,7 +399,7 @@ test('1 runs cs -update once, by the exported path, with a ten-minute timeout, a
   const press = buttons(await draw())[0].props.onPress
   const first = press()
   const second = press()
-  await Promise.resolve()
+  await settle()
   release({ exitCode: 0, stdout: '', stderr: '' })
   await first; await second
   expect(updateRuns()).toHaveLength(1)
@@ -424,7 +439,7 @@ test('while the update runs the pane says so and hides the key', async () => {
     runs.push({ argv, init }); return new Promise(r => { release = r })
   }
   const pressed = buttons(await draw())[0].props.onPress()
-  await Promise.resolve()
+  await settle()
   const words = texts(await draw()).join('\n')
   expect(words).toContain('updating')
   expect(buttons(await draw())).toHaveLength(0)
@@ -574,6 +589,178 @@ test('a failed write to the DONE marker toasts and the pane still shows done', a
   expect(toasts).toEqual(['could not record the finished update: disk full'])
   const words = texts(await draw()).join('\n')
   expect(words).toContain('Update finished. Takes effect on your next launch.')
+})
+
+// A press marks the run on disk before it starts: a reload while cs -update
+// runs drops this module's state, and only the marker tells the reloaded one.
+test('a press writes the running marker before the installer starts', async () => {
+  await start()
+  let markerAtStart: string | undefined
+  ;($ as any).process.run = async (argv: string[]) => {
+    if (argv[1] === '-vet-session') return { exitCode: 0, stdout: '', stderr: '' }
+    markerAtStart = written['/work/' + DONE]
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  const before = Date.now()
+  await buttons(await draw())[0].props.onPress()
+  const [version, state, startedAt, rest] = (markerAtStart as string).split('\n')
+  expect([version, state, rest]).toEqual(['2026.99.3', 'running', ''])
+  expect(Number(startedAt)).toBeGreaterThanOrEqual(before)
+  expect(written['/work/' + DONE]).toBe(finishedMarker)
+})
+
+test('a reload during the run restores the running pane with no key and starts no second installer', async () => {
+  files['/work/' + DONE] = runningMarker(Date.now())
+  load(); await start()
+  expect(opens()).toHaveLength(1)
+  const tree = await draw()
+  expect(texts(tree).join('\n')).toContain('updating… running cs -update 2026.99.3')
+  expect(buttons(tree)).toHaveLength(0)
+  expect(updateRuns()).toHaveLength(0)
+})
+
+test('a Pane render with no session.start yet restores the running pane from the marker', async () => {
+  files['/work/' + DONE] = runningMarker(Date.now())
+  load()
+  const tree = await draw()
+  expect(texts(tree).join('\n')).toContain('updating…')
+  expect(buttons(tree)).toHaveLength(0)
+})
+
+test('/cs-update after a reload during the run shows the running pane instead of offering the key', async () => {
+  files['/work/' + DONE] = runningMarker(Date.now())
+  load()
+  const reply = await hooks['command.run:cs-update']($, {}, async () => undefined)
+  expect(reply).toEqual({ text: REPLIES.notesOpen })
+  const tree = await draw()
+  expect(texts(tree).join('\n')).toContain('updating…')
+  expect(buttons(tree)).toHaveLength(0)
+})
+
+test('the outcome written after the reloaded session.start reaches the pane through the marker watch', async () => {
+  files['/work/' + DONE] = runningMarker(Date.now())
+  load(); await start()
+  expect(buttons(await draw())).toHaveLength(0)
+  await tick()
+  expect(texts(await draw()).join('\n')).toContain('updating…')
+  files['/work/' + DONE] = finishedMarker
+  invalidated = []
+  await tick()
+  expect(invalidated).toContain('ui.render')
+  const tree = await draw()
+  expect(texts(tree).join('\n')).toContain(FINISHED_LINE)
+  expect(buttons(tree)).toHaveLength(0)
+  expect(timers).toHaveLength(0)
+  expect(opens()).toHaveLength(1)
+})
+
+test('a run that clears the marker while watched gives the key back', async () => {
+  files['/work/' + DONE] = runningMarker(Date.now())
+  load(); await start()
+  files['/work/' + DONE] = ''
+  await tick()
+  expect(buttons(await draw()).map(b => b.props.label)).toEqual(['update now'])
+  expect(timers).toHaveLength(0)
+})
+
+test('a running marker older than the update timeout is stale: cleared, and the key is offered', async () => {
+  files['/work/' + DONE] = runningMarker(Date.now() - TEN_MINUTES - 1000)
+  load(); await start()
+  expect(written['/work/' + DONE]).toBe('')
+  expect(buttons(await draw()).map(b => b.props.label)).toEqual(['update now'])
+  expect(timers).toHaveLength(0)
+})
+
+test('a running marker with no readable start time is stale', async () => {
+  files['/work/' + DONE] = '2026.99.3\nrunning\n'
+  load(); await start()
+  expect(written['/work/' + DONE]).toBe('')
+  expect(buttons(await draw()).map(b => b.props.label)).toEqual(['update now'])
+})
+
+test('a running marker that goes stale while watched gives the key back', async () => {
+  const startedAt = Date.now() - TEN_MINUTES + 60000
+  files['/work/' + DONE] = runningMarker(startedAt)
+  load(); await start()
+  expect(buttons(await draw())).toHaveLength(0)
+  const realNow = Date.now
+  Date.now = () => startedAt + TEN_MINUTES + 1000
+  try { await tick() } finally { Date.now = realNow }
+  expect(written['/work/' + DONE]).toBe('')
+  expect(buttons(await draw()).map(b => b.props.label)).toEqual(['update now'])
+})
+
+test('a running marker naming a version no longer pending is cleared, not restored', async () => {
+  files['/work/' + DONE] = `2026.99.1\nrunning\n${Date.now()}\n`
+  load(); await start()
+  expect(written['/work/' + DONE]).toBe('')
+  expect(buttons(await draw()).map(b => b.props.label)).toEqual(['update now'])
+})
+
+test('a press on an idle pane honours a finished marker that landed after session.start', async () => {
+  await start()
+  files['/work/' + DONE] = finishedMarker
+  await buttons(await draw())[0].props.onPress()
+  expect(updateRuns()).toHaveLength(0)
+  const tree = await draw()
+  expect(texts(tree).join('\n')).toContain(FINISHED_LINE)
+  expect(buttons(tree)).toHaveLength(0)
+})
+
+test('a press on an idle pane starts no second installer while another run is fresh', async () => {
+  await start()
+  files['/work/' + DONE] = runningMarker(Date.now())
+  await buttons(await draw())[0].props.onPress()
+  expect(updateRuns()).toHaveLength(0)
+  const tree = await draw()
+  expect(texts(tree).join('\n')).toContain('updating…')
+  expect(buttons(tree)).toHaveLength(0)
+  expect(timers).toHaveLength(1)
+})
+
+test('a non-zero exit clears the running marker, so a reload offers the key again', async () => {
+  await start()
+  runResult = { exitCode: 1, stdout: '', stderr: 'checksum mismatch\n' }
+  await buttons(await draw())[0].props.onPress()
+  expect(written['/work/' + DONE]).toBe('')
+})
+
+test('a run that cannot start clears the running marker', async () => {
+  await start()
+  runResult = new Error('spawn failed')
+  await buttons(await draw())[0].props.onPress()
+  expect(written['/work/' + DONE]).toBe('')
+})
+
+test('a second press after a failure runs the update again', async () => {
+  await start()
+  runResult = { exitCode: 1, stdout: '', stderr: 'nope\n' }
+  await buttons(await draw())[0].props.onPress()
+  runResult = { exitCode: 0, stdout: '', stderr: '' }
+  await buttons(await draw())[0].props.onPress()
+  expect(updateRuns()).toHaveLength(2)
+  expect(written['/work/' + DONE]).toBe(finishedMarker)
+})
+
+test('a running marker that cannot be written is logged and the update still runs', async () => {
+  await start()
+  defaultWrite = async (path: string, text: string) => {
+    if (path === '/work/' + DONE && text.includes('running')) throw new Error('disk full')
+    written[path] = text
+  }
+  await buttons(await draw())[0].props.onPress()
+  expect(updateRuns()).toHaveLength(1)
+  expect(logged).toEqual(['could not mark the update as running: disk full'])
+  expect(toasts).toEqual([])
+  expect(written['/work/' + DONE]).toBe(finishedMarker)
+})
+
+test('while git tracks the control files, a press writes no running marker', async () => {
+  vetRefusing()
+  await start()
+  await buttons(await draw())[0].props.onPress()
+  expect(written['/work/' + DONE]).toBeUndefined()
+  expect(updateRuns()).toHaveLength(1)
 })
 
 // A pane redrawn after a reload asks the lead gate before it restores the
