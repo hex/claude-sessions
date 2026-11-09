@@ -1873,6 +1873,10 @@ test_a_failed_consumed_flip_keeps_the_marker_and_says_so() {
     assert_output_contains "$out" "Conversation Rotation" "the rotation still loads" || return 1
     assert_output_contains "$out" "could not mark .cs/handoffs/2026-07-16-test.md consumed" \
         "the preamble names the failed flip" || return 1
+    # The reason is the store's own first stderr line: mktemp's refusal of
+    # the temp file, worded one way by BSD mktemp and another by GNU.
+    assert_output_contains "$out" "consumed: mktemp: .*\.cs-tmp\.2026-07-16-test\.md\..*Permission denied" \
+        "the preamble carries the store's refusal" || return 1
     assert_output_contains "$out" "will load this same handoff again" \
         "the preamble says the next start retries" || return 1
 }
