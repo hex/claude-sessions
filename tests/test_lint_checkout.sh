@@ -16,13 +16,13 @@ REPO="$SCRIPT_DIR/.."
 # does for a missing tool. A pin or a version this cannot read fails everywhere:
 # a skip there would switch the lint off and say nothing was wrong.
 test_checkout_holds_its_shellcheck_baseline() {
-    require_tool shellcheck || return $?
     local workflow="$REPO/.github/workflows/test.yml" version='[0-9]+\.[0-9]+\.[0-9]+' pinned installed
     grep -q '^ *SHELLCHECK_VERSION:' "$workflow" || { echo "  FAIL: no SHELLCHECK_VERSION line in .github/workflows/test.yml, so the version the baseline was counted at is unknown"; return 1; }
     # paste keeps a duplicated pin on one line, for the message and for the check below.
     pinned=$(sed -n 's/^ *SHELLCHECK_VERSION:[[:space:]]*//p' "$workflow" | sed -e 's/[[:space:]]#.*$//' -e 's/[[:space:]]*$//' | paste -s -d ' ' -)
     [[ $pinned =~ ^v$version$ ]] || { echo "  FAIL: SHELLCHECK_VERSION in .github/workflows/test.yml must be one vN.N.N, found '$pinned'"; return 1; }
     pinned=${pinned#v}
+    require_tool shellcheck || return $?
     installed=$(shellcheck --version | sed -n 's/^version: //p')
     [[ $installed =~ ^$version$ ]] || { echo "  FAIL: no version in the output of shellcheck --version, found '$installed'"; return 1; }
     if [ "$installed" != "$pinned" ]; then
