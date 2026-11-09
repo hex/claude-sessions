@@ -7541,10 +7541,12 @@ by a command, never printed, echoed, piped, or written to a file (that includes
 `store-secret` skill — it carries the full procedure. Replace the literal with
 the reference the file wants — `${API_KEY}` in a config, `$(cs -secrets get
 API_KEY)` in a shell script. Doing it by hand instead, the safe path is exactly
-this: write the value with the **Write** tool to a file OUTSIDE the session
-directory (any Write inside it is snapshotted into the autosave ref and survives
-`rm`), run `cs -secrets set NAME < that-file`, then delete the scratch file
-immediately.
+this: create a fresh scratch file OUTSIDE the session directory with
+`mktemp "${TMPDIR:-/tmp}/cs-secret.XXXXXX"` (any Write inside the session
+directory is snapshotted into the autosave ref and survives `rm`), write the
+value to the path it printed with the **Write** tool, then store it and
+delete the scratch file in ONE Bash command, which keeps the store's exit
+status: `f='<that path>'; cs -secrets set NAME < "$f"; rc=$?; rm -f "$f"; exit $rc`.
 
 EOF
     _emit_memory_note_block

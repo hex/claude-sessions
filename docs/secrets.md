@@ -36,9 +36,10 @@ capture it:
 - "The password is hunter2"
 - "Use this token: ghp_xxxx"
 
-Claude picks an appropriate key name, writes the value to a scratch file and
-redirects that file into `cs -secrets set <name>` on stdin (never on argv), then removes the
-scratch file and confirms what was stored.
+Claude picks an appropriate key name and writes the value to a fresh scratch file
+outside the session directory. One command then redirects that file into
+`cs -secrets set <name>` on stdin (never on argv) and removes it, so an interrupted
+store leaves no scratch file behind. Claude then confirms what it stored.
 
 ## Using cs -secrets
 
