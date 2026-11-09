@@ -294,6 +294,36 @@ EOF
 # The protocol for an encrypted session: migrate_session appends it once
 # .cs/private exists. It overrides the README instructions of the base
 # protocol, which every session gets from _emit_session_claude_md.
+# The Secure Secrets Handling section, heading first and no blank line after.
+# write_session_claude_md emits it into a new session; Phase 18 of migrate
+# (_secrets_section_migrate) writes it over every earlier wording cs shipped.
+_emit_secrets_block() {
+    cat << 'EOF'
+## Secure Secrets Handling
+
+Secrets live in the cs session store, never in a project file. `cs -secrets set`
+and the `store-secret` skill read the value on **stdin** via a file redirect —
+never `echo`/`printf` a secret into a pipe or a Bash heredoc, either of which
+puts the plaintext in the Bash command itself.
+
+Consume a secret inline — `some-command --token "$(cs -secrets get API_KEY)"` —
+so it stays out of the tool result and the transcript. A retrieved value is read
+by a command, never printed, echoed, piped, or written to a file (that includes
+`cs -secrets export` output). `cs -secrets --help` lists the rest of the verbs.
+
+**When you find a credential already in the workspace**, invoke the
+`store-secret` skill — it carries the full procedure. Replace the literal with
+the reference the file wants — `${API_KEY}` in a config, `$(cs -secrets get
+API_KEY)` in a shell script. Doing it by hand instead, the safe path is exactly
+this: create a fresh scratch file OUTSIDE the session directory with
+`mktemp "${TMPDIR:-/tmp}/cs-secret.XXXXXX"` (any Write inside the session
+directory is snapshotted into the autosave ref and survives `rm`), write the
+value to the path it printed with the **Write** tool, then store it and
+delete the scratch file in ONE Bash command, which keeps the store's exit
+status: `f='<that path>'; cs -secrets set NAME < "$f"; rc=$?; rm -f "$f"; exit $rc`.
+EOF
+}
+
 _emit_encrypted_protocol_block() {
     cat << 'EOF'
 <!-- cs:encrypted-protocol -->
@@ -353,30 +383,9 @@ When the session is complete, use the `/wrap` command to distill durable memory 
 
 When a conversation's context grows heavy or a work phase completes, invoke the `rotate` skill: it writes a handoff to .cs/handoffs/ and arms it, so the user can run `/clear` to continue in a fresh conversation without leaving Claude Code (exiting and answering `r` at the next launch does the same). `cs -conversations` shows the session's conversation chain.
 
-## Secure Secrets Handling
-
-Secrets live in the cs session store, never in a project file. `cs -secrets set`
-and the `store-secret` skill read the value on **stdin** via a file redirect —
-never `echo`/`printf` a secret into a pipe or a Bash heredoc, either of which
-puts the plaintext in the Bash command itself.
-
-Consume a secret inline — `some-command --token "$(cs -secrets get API_KEY)"` —
-so it stays out of the tool result and the transcript. A retrieved value is read
-by a command, never printed, echoed, piped, or written to a file (that includes
-`cs -secrets export` output). `cs -secrets --help` lists the rest of the verbs.
-
-**When you find a credential already in the workspace**, invoke the
-`store-secret` skill — it carries the full procedure. Replace the literal with
-the reference the file wants — `${API_KEY}` in a config, `$(cs -secrets get
-API_KEY)` in a shell script. Doing it by hand instead, the safe path is exactly
-this: create a fresh scratch file OUTSIDE the session directory with
-`mktemp "${TMPDIR:-/tmp}/cs-secret.XXXXXX"` (any Write inside the session
-directory is snapshotted into the autosave ref and survives `rm`), write the
-value to the path it printed with the **Write** tool, then store it and
-delete the scratch file in ONE Bash command, which keeps the store's exit
-status: `f='<that path>'; cs -secrets set NAME < "$f"; rc=$?; rm -f "$f"; exit $rc`.
-
 EOF
+    _emit_secrets_block
+    echo
     _emit_memory_note_block
     echo
     _emit_wrap_cues_block
