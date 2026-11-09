@@ -932,6 +932,17 @@ test_run_all_fails_on_a_shellcheck_pin_that_is_not_a_version() {
         "the failure must name the value" || return 1
 }
 
+# CI's bash jobs have no shellcheck at the pin, so a pin read only after the
+# tool check would let a rename in the workflow pass all of them as a skip.
+test_run_all_fails_on_a_malformed_pin_with_no_shellcheck_installed() {
+    make_lint_checkout 1 0.11 || return 1
+    make_path_without_shellcheck || return 1
+    run_gate_over_lint_checkout PATH="$NO_SHELLCHECK_PATH"
+    assert_eq 1 "$GATE_RC" "a malformed pin must fail the gate without shellcheck: $GATE_OUT" || return 1
+    assert_output_contains "$GATE_OUT" "  FAIL: SHELLCHECK_VERSION in .github/workflows/test.yml must be one vN.N.N, found 'v0.11'" \
+        "the failure must name the value" || return 1
+}
+
 test_run_all_fails_when_the_installed_shellcheck_version_is_unreadable() {
     make_lint_checkout 1 0.11.0 || return 1
     local fake="$TEST_TMPDIR/fake-shellcheck-bin"
@@ -979,6 +990,7 @@ run_test test_run_all_fails_when_the_workflow_names_no_shellcheck_pin
 run_test test_run_all_judges_the_lint_at_a_pin_with_a_trailing_comment
 run_test test_run_all_fails_on_a_duplicated_shellcheck_pin
 run_test test_run_all_fails_on_a_shellcheck_pin_that_is_not_a_version
+run_test test_run_all_fails_on_a_malformed_pin_with_no_shellcheck_installed
 run_test test_run_all_fails_when_the_installed_shellcheck_version_is_unreadable
 run_test test_run_all_fails_at_another_version_when_shellcheck_is_declared
 run_test test_run_all_skips_the_lint_when_shellcheck_is_absent
