@@ -555,6 +555,312 @@ test_migrate_handles_a_crlf_protocol_block() {
 run_test test_migrate_rewrites_the_older_protocol_wording
 run_test test_migrate_handles_a_crlf_protocol_block
 
+# Every Secure Secrets Handling section cs has written into a CLAUDE.local.md,
+# heading first, oldest last, separated by a line of @@. The by-hand paths they
+# describe store the value and delete the scratch file as two steps, pipe it,
+# or pass it in argv; the current section stores and deletes in one Bash
+# command from a mktemp file outside the session.
+_secrets_section_vintages() {
+    cat << 'EOF'
+## Secure Secrets Handling
+
+Secrets live in the cs session store, never in a project file. `cs -secrets set`
+and the `store-secret` skill read the value on **stdin** via a file redirect —
+never `echo`/`printf` a secret into a pipe or a Bash heredoc, either of which
+puts the plaintext in the Bash command itself.
+
+Consume a secret inline — `some-command --token "$(cs -secrets get API_KEY)"` —
+so it stays out of the tool result and the transcript. A retrieved value is read
+by a command, never printed, echoed, piped, or written to a file (that includes
+`cs -secrets export` output). `cs -secrets --help` lists the rest of the verbs.
+
+**When you find a credential already in the workspace**, invoke the
+`store-secret` skill — it carries the full procedure. Replace the literal with
+the reference the file wants — `${API_KEY}` in a config, `$(cs -secrets get
+API_KEY)` in a shell script. Doing it by hand instead, the safe path is exactly
+this: write the value with the **Write** tool to a file OUTSIDE the session
+directory (any Write inside it is snapshotted into the autosave ref and survives
+`rm`), run `cs -secrets set NAME < that-file`, then delete the scratch file
+immediately.
+@@
+## Secure Secrets Handling
+
+Secrets live in the cs session store, never in a project file. `cs -secrets set`
+and the `store-secret` skill read the value on **stdin** via a file redirect —
+never `echo`/`printf` a secret into a pipe or a Bash heredoc: the bash-logger
+records the whole Bash command, plaintext and all, in `.cs/local/session.log`.
+
+Consume a secret inline — `some-command --token "$(cs -secrets get API_KEY)"` —
+so it stays out of the tool result and the transcript. A retrieved value is read
+by a command, never printed, echoed, piped, or written to a file (that includes
+`cs -secrets export` output). `cs -secrets --help` lists the rest of the verbs.
+
+**When you find a credential already in the workspace**, invoke the
+`store-secret` skill — it carries the full procedure. Replace the literal with
+the reference the file wants — `${API_KEY}` in a config, `$(cs -secrets get
+API_KEY)` in a shell script. Doing it by hand instead, the safe path is exactly
+this: write the value with the **Write** tool to a file OUTSIDE the session
+directory (any Write inside it is snapshotted into the autosave ref and survives
+`rm`), run `cs -secrets set NAME < that-file`, then delete the scratch file
+immediately.
+@@
+## Secure Secrets Handling
+
+Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
+encrypted file) instead of writing it into project files. The `store-secret`
+skill and `cs -secrets set` read the value from stdin so it never lands in a
+file or the command log.
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+Never print or echo a retrieved secret, and don't paste `cs -secrets export` output into a file — consume the value inline, e.g. `some-command --token "$(cs -secrets get API_KEY)"`, so the plaintext stays out of the tool result and the session transcript.
+
+**If you detect sensitive data** in the workspace (embedded credentials, a
+committed token, etc.), invoke the `store-secret` skill and replace the literal
+with a reference appropriate to the file — an env-var placeholder like
+`${API_KEY}` in configs, or `$(cs -secrets get API_KEY)` in shell scripts —
+noting that the value now lives in `cs -secrets`. The skill writes the value to
+a scratch file with the Write tool (which the bash-logger does not capture),
+feeds it in via a stdin redirect so the plaintext never reaches argv or the
+command log (`cs -secrets set <name> < scratch-file`), and deletes the scratch
+file afterward. If the skill is unavailable and you do this by hand, you MUST
+delete the scratch file immediately after, and never `echo`/`printf` a secret
+into a pipe — the bash-logger records the whole Bash command (secret and all)
+in `.cs/local/session.log`.
+@@
+## Secure Secrets Handling
+
+Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
+encrypted file) instead of writing it into project files. The `store-secret`
+skill and `cs -secrets set` read the value from stdin so it never lands in a
+file or the command log.
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as CS_SECRET_<NAME> environment variables
+```
+Never print or echo a retrieved secret, and don't paste `cs -secrets export` output into a file — consume the value inline, e.g. `some-command --token "$(cs -secrets get API_KEY)"`, so the plaintext stays out of the tool result and the session transcript.
+
+**If you detect sensitive data** in the workspace (embedded credentials, a
+committed token, etc.), invoke the `store-secret` skill and replace the literal
+with a reference appropriate to the file — an env-var placeholder like
+`${API_KEY}` in configs, or `$(cs -secrets get API_KEY)` in shell scripts —
+noting that the value now lives in `cs -secrets`. The skill writes the value to
+a scratch file with the Write tool (which the bash-logger does not capture),
+feeds it in via a stdin redirect so the plaintext never reaches argv or the
+command log (`cs -secrets set <name> < scratch-file`), and deletes the scratch
+file afterward. If the skill is unavailable and you do this by hand, you MUST
+delete the scratch file immediately after, and never `echo`/`printf` a secret
+into a pipe — the bash-logger records the whole Bash command (secret and all)
+in `.cs/local/session.log`.
+@@
+## Secure Secrets Handling
+
+Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
+encrypted file) instead of writing it into project files. The `store-secret`
+skill and `cs -secrets set` read the value from stdin so it never lands in a
+file or the command log.
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+
+**If you detect sensitive data** in the workspace (embedded credentials, a
+committed token, etc.), store it with the `store-secret` skill and replace it
+with a reference. The skill writes the value to a scratch file with the Write
+tool (which the bash-logger does not capture) and feeds it in via a stdin
+redirect, so the plaintext never reaches argv or the command log:
+```bash
+cs -secrets set <name> < /path/to/scratch-file   # value on stdin, not in argv
+```
+Never `echo`/`printf` a secret into a pipe — the bash-logger records the whole
+Bash command (secret and all) in `.cs/local/session.log`.
+@@
+## Secure Secrets Handling
+
+Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
+encrypted file) instead of writing it into project files. The `store-secret`
+skill and `cs -secrets set` read the value from stdin so it never lands in a
+file or the command log.
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+
+**If you detect sensitive data** in the workspace (embedded credentials, a
+committed token, etc.), store it and replace it with a reference. Pass the value
+on stdin so it never hits argv or the command log:
+```bash
+printf '%s' "the-secret-value" | cs -secrets set <name>
+```
+@@
+## Secure Secrets Handling
+
+Sensitive data is automatically detected and stored securely (macOS Keychain or encrypted file):
+
+**Auto-detected patterns:**
+- Files: .env, filenames containing key, secret, password, token, credential, auth
+- Content: Variables like API_KEY, SECRET_TOKEN, PASSWORD, etc.
+
+**What happens:**
+1. Sensitive values are extracted and stored securely
+2. The artifact file contains redacted placeholders
+3. MANIFEST.json lists which secrets exist (not the values)
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+
+**If you detect sensitive data** that wasn't auto-captured (unusual patterns, embedded credentials, etc.), use cs -secrets directly:
+```bash
+cs -secrets set <name> <value>     # Store manually
+```
+@@
+## Secure Secrets Handling
+
+Sensitive data is automatically detected and stored securely (macOS Keychain, Windows Credential Manager, or encrypted file):
+
+**Auto-detected patterns:**
+- Files: .env, filenames containing key, secret, password, token, credential, auth
+- Content: Variables like API_KEY, SECRET_TOKEN, PASSWORD, etc.
+
+**What happens:**
+1. Sensitive values are extracted and stored securely
+2. The artifact file contains redacted placeholders
+3. MANIFEST.json lists which secrets exist (not the values)
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+
+**If you detect sensitive data** that wasn't auto-captured (unusual patterns, embedded credentials, etc.), use cs -secrets directly:
+```bash
+cs -secrets set <name> <value>     # Store manually
+```
+EOF
+}
+
+# The one Secure Secrets Handling section of a file: its heading through the
+# line before the next heading or sentinel, trailing blank lines dropped.
+_secrets_section_of() {  # file
+    awk '
+        /^## Secure Secrets Handling$/ { f = 1 }
+        f && (/^## / || /^<!-- /) && !/^## Secure Secrets Handling$/ { f = 0 }
+        f { lines[++n] = $0 }
+        END { while (n > 0 && lines[n] ~ /^[[:space:]]*$/) n--; for (i = 1; i <= n; i++) print lines[i] }
+    ' "$1"
+}
+
+# A CLAUDE.local.md carrying the n-th vintage between a user block and the
+# memory note, as an older session's file lies on disk. The other cs sections
+# are tombstones, so no other phase appends to the file and a whole-file
+# comparison across a resume measures this rewrite alone.
+_write_secrets_fixture() {  # file, n
+    {
+        printf '<!-- cs:session-protocol -->\n# Session Documentation Protocol\n\nUSER-KEEP above the section\n\n'
+        _secrets_section_vintages | awk -v want="$2" 'BEGIN { n = 1 } /^@@$/ { n++; next } n == want { print }'
+        printf '\n<!-- cs:memory-note -->\nnote body\n<!-- cs:wrap-cues -->\n<!-- cs:session-commits -->\n<!-- cs:mermaid-diagrams -->\n'
+    } > "$1"
+}
+
+# A resume rewrites each section cs wrote to the section a new session gets
+# today, and nothing around it. The expected text comes from the create path,
+# not from this file.
+test_migrate_rewrites_every_secrets_section_cs_wrote() {
+    local dir fresh want n total
+    "$CS_BIN" "freshsecrets" < /dev/null > /dev/null 2>&1 || true
+    fresh="$CS_SESSIONS_ROOT/freshsecrets/CLAUDE.local.md"
+    want=$(_secrets_section_of "$fresh")
+    assert_output_contains "$want" 'rc=\$?; rm -f "\$f"; exit \$rc' "the fresh section stores and deletes in one command" || return 1
+    total=$(_secrets_section_vintages | grep -c '^@@$')
+    total=$((total + 1))
+    n=1
+    while [ "$n" -le "$total" ]; do
+        dir=$(create_test_session "secrets$n")
+        _write_secrets_fixture "$dir/CLAUDE.local.md" "$n"
+        CS_ACTOR=alice "$CS_BIN" "secrets$n" < /dev/null > /dev/null 2>&1 || true
+        assert_eq "$want" "$(_secrets_section_of "$dir/CLAUDE.local.md")" "vintage $n is rewritten to the current section" || return 1
+        assert_eq "1" "$(grep -c '^## Secure Secrets Handling$' "$dir/CLAUDE.local.md")" "vintage $n keeps one section" || return 1
+        assert_file_contains "$dir/CLAUDE.local.md" "USER-KEEP above the section" "vintage $n: the block before stays" || return 1
+        assert_file_contains "$dir/CLAUDE.local.md" "^note body$" "vintage $n: the block after stays" || return 1
+        n=$((n + 1))
+    done
+}
+
+# A section the user edited, by one word anywhere in it, is theirs: the whole
+# section stays byte for byte, the by-hand sentence included.
+test_migrate_leaves_an_edited_secrets_section_alone() {
+    local dir before
+    dir=$(create_test_session "editedsecrets")
+    _write_secrets_fixture "$dir/CLAUDE.local.md" 1
+    sed 's/^Consume a secret inline/Consume every secret inline/' "$dir/CLAUDE.local.md" > "$dir/CLAUDE.local.md.edited"
+    mv "$dir/CLAUDE.local.md.edited" "$dir/CLAUDE.local.md"
+    assert_file_contains "$dir/CLAUDE.local.md" "^Consume every secret inline" "the fixture carries the edit" || return 1
+    before=$(cat "$dir/CLAUDE.local.md")
+    CS_ACTOR=alice "$CS_BIN" "editedsecrets" < /dev/null > /dev/null 2>&1 || true
+    assert_eq "$before" "$(cat "$dir/CLAUDE.local.md")" "an edited section is left byte for byte" || return 1
+}
+
+# The second resume finds the current section and writes nothing: the file's
+# modification time stays where it was, so a stamp that keys on it stays fresh.
+# The stamp the first resume wrote is removed in between, or the second resume
+# would skip the phase for that reason alone.
+test_migrate_secrets_rewrite_is_a_no_op_the_second_time() {
+    local dir once
+    dir=$(create_test_session "twicesecrets")
+    _write_secrets_fixture "$dir/CLAUDE.local.md" 1
+    CS_ACTOR=alice "$CS_BIN" "twicesecrets" < /dev/null > /dev/null 2>&1 || true
+    once=$(cat "$dir/CLAUDE.local.md")
+    rm -f "$dir/.cs/local/migrated"
+    touch -t 202401010000 "$dir/CLAUDE.local.md"
+    touch -t 202401010001 "$dir/.cs/README.md"
+    CS_ACTOR=alice "$CS_BIN" "twicesecrets" < /dev/null > /dev/null 2>&1 || true
+    assert_eq "$once" "$(cat "$dir/CLAUDE.local.md")" "the second resume leaves the file byte-identical" || return 1
+    if [ "$dir/CLAUDE.local.md" -nt "$dir/.cs/README.md" ]; then
+        echo "  FAIL: the second resume rewrote CLAUDE.local.md (its mtime moved)"; return 1
+    fi
+}
+
+# A CLAUDE.local.md with no Secure Secrets Handling section gets none from the
+# rewrite and stays as it was.
+test_migrate_leaves_a_file_without_a_secrets_section_alone() {
+    local dir before
+    dir=$(create_test_session "nosecrets")
+    printf '<!-- cs:session-protocol -->\n# Session Documentation Protocol\n\nUSER-KEEP\n\n<!-- cs:memory-note -->\nnote body\n<!-- cs:wrap-cues -->\n<!-- cs:session-commits -->\n<!-- cs:mermaid-diagrams -->\n' > "$dir/CLAUDE.local.md"
+    before=$(cat "$dir/CLAUDE.local.md")
+    CS_ACTOR=alice "$CS_BIN" "nosecrets" < /dev/null > /dev/null 2>&1 || true
+    assert_eq "$before" "$(cat "$dir/CLAUDE.local.md")" "a file without the section is untouched" || return 1
+}
+
+run_test test_migrate_rewrites_every_secrets_section_cs_wrote
+run_test test_migrate_leaves_an_edited_secrets_section_alone
+run_test test_migrate_secrets_rewrite_is_a_no_op_the_second_time
+run_test test_migrate_leaves_a_file_without_a_secrets_section_alone
+
 # An encrypted session (.cs/private present) keeps its objective, outcome and
 # session log in the vault, so its protocol gains a block that says so and
 # overrides the plaintext-README instructions above it. Locked sessions are

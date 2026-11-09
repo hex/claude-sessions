@@ -277,12 +277,30 @@ _queue_clear() {  # qdir
 # Arms the queue and records how its tasks run: in the conversation (no mode
 # file), each in a subagent, or each as a workflow. The Stop hook reads the
 # mode when it hands over a task, and forgets it when the run ends.
+#
+# A drain in a running session is refused before anything is written: the Stop
+# hook's armed branch replaces queue.current without reading it, so re-arming
+# mid-drain would hand out the first task again, log nothing done for the one
+# in progress, and lose a cs-task-failed line from that turn. A draining state
+# with no live lock holder is left by a crash or a close, with no turn in
+# progress to run twice, so it re-arms like any other state. The read and the
+# writes are not one step: a drain that ends in between costs one more start,
+# never a task.
 _queue_start() {  # qdir, [mode]
-    local qdir="$1" mode="${2:-}"
+    local qdir="$1" mode="${2:-}" state pid
     case "$mode" in
-        '') cs_mkdir_inside "$qdir"; rm -f "$qdir/queue.mode" ;;
-        subagents|workflow) cs_mkdir_inside "$qdir"; cs_write_atomic "$qdir/queue.mode" printf '%s\n' "$mode" ;;
+        ''|subagents|workflow) ;;
         *) error "cs -queue start takes subagents or workflow, not '$mode'" ;;
+    esac
+    state=$(cat "$qdir/queue.state" 2>/dev/null | tr -d '[:space:]' || true)
+    if [ "$state" = draining ]; then
+        pid=$(live_lock_pid "$CLAUDE_SESSION_META_DIR")
+        [ -z "$pid" ] || error "the queue is draining in the running session (pid $pid); the next Stop hands out the next task by itself. To stop the run, cs -queue clear removes the queued tasks with it."
+    fi
+    cs_mkdir_inside "$qdir"
+    case "$mode" in
+        '') rm -f "$qdir/queue.mode" ;;
+        *) cs_write_atomic "$qdir/queue.mode" printf '%s\n' "$mode" ;;
     esac
     _queue_set_state "$qdir" armed
 }

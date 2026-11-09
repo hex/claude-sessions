@@ -401,9 +401,10 @@ if [ "$HOOK_EVENT" = "FileChanged" ] && [ "${FC_PATH%/*.kick}" != "$FC_PATH" ]; 
     [ ! -f "$_kick_dir/delivered" ] || exit 0
     # No queue gate here, deliberately — the opposite of the mail wake.
     #
-    # Nothing resets queue.state on a /clear: only bin/cs writes it, so a drain
-    # that was armed or interrupted beforehand leaves a STALE armed/draining
-    # state that survives into the fresh conversation. And two seconds after a
+    # Nothing resets queue.state on a /clear: only bin/cs and this hook's drain
+    # write it, and a /clear runs neither, so a drain that was armed or
+    # interrupted beforehand leaves a STALE armed/draining state that survives
+    # into the fresh conversation. And two seconds after a
     # /clear no drain turn can be in flight, so the reason the mail wake
     # yields — a rewake between drain turns shifts the pop one turn late — does
     # not apply.
@@ -460,7 +461,8 @@ if [ "$HOOK_EVENT" = "FileChanged" ]; then
     [ -n "$MAILDIR" ] && [ -n "$_fc_name" ] && [ -f "$MAILDIR/new/$_fc_name" ] || exit 0
     _mail_is_lead || exit 0
     # The Stop path gets the queue rule free from its position below the drain,
-    # which exits in every armed or draining branch. This one has to ask: a
+    # which exits in every armed or draining branch except a lost pop, and that
+    # one records idle before it falls through. This one has to ask: a
     # rewake at priority "next" lands between drain turns, shifting the pop one
     # turn late and mis-attributing a tool failure to the current task's
     # breaker. An empty queue is never gating, whatever queue.state records.
@@ -517,8 +519,10 @@ fi
 # --- Task queue drain (walk-away mode) ---------------------------------------
 # Hands the agent its next queued task when armed or draining. An idle queue,
 # tasks or not, is left to the person: the cs mod's band offers its start.
-# Wins over the mail wake (returns early), and stop-notices.sh stands down
-# for the same armed or draining queue. Queue text is arbitrary -> jq emit.
+# Wins over the mail wake (every armed or draining branch exits, except a lost
+# pop, which records idle before it falls through), and stop-notices.sh
+# stands down for the same armed or draining queue. Queue text is arbitrary ->
+# jq emit.
 QDIR="$CS_FILES"
 # A queue a link carries out of the session is not this session's: the drain
 # would move and delete the files there before any checked write.
@@ -551,6 +555,18 @@ QCURRENT_FILE="$QDIR/queue.current"
 # every block below is the lead's, and a teammate's hook writing the shared
 # file would overwrite the lead's verdict. The file is overwritten per Stop,
 # never appended.
+#
+# The reader is hooks/stop-notices.sh:_verdict. It sees one of: no file, a
+# line keyed to another Stop, pending, approve or block. No file or another
+# Stop's key waits a 2 s grace and then lets the notices go ahead; pending
+# waits up to CS_STOP_VERDICT_WAIT and then goes ahead; block silences them. A
+# writer killed by SIGKILL never runs the EXIT trap, so pending stays and the
+# reader fails open. A failed write (the `|| true` below) leaves the line
+# already in the file. If only the EXIT trap's write failed, that line is this
+# Stop's pending, so the reader waits out CS_STOP_VERDICT_WAIT (7 s by default)
+# and then the notices go ahead, beside a block if this Stop answered with one.
+# If the pending write failed too, that line is the previous Stop's, which the
+# reader takes for another Stop's key.
 STOP_VERDICT=approve
 _verdict_post() {  # word
     cs_write_atomic "$LOCAL/stop-verdict" printf '%s %s %s\n' "$STOP_KEY" "$1" "$(date +%s)" || true
@@ -980,8 +996,9 @@ fi
 
 # --- Mail wake (Stop) ---------------------------------------------------------
 # The turn-end half. Reached only when the queue is not active: every armed or
-# draining branch above exits, so an empty queue never gates here whatever
-# queue.state records — the rule the FileChanged branch has to ask for outright.
+# draining branch above exits, except a lost pop, which records idle before it
+# falls through. So an empty queue never gates here whatever queue.state
+# records — the rule the FileChanged branch has to ask for outright.
 # A non-lead leaves the flags clear, so it neither wakes nor records: the lead's
 # wake for the same arrival has to survive a teammate ending its turn first.
 if [ -n "$MAILDIR" ] && _mail_is_lead; then

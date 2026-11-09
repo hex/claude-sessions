@@ -1526,6 +1526,142 @@ test_doctor_warns_on_a_claimed_seed_whose_open_is_gone() {
         "doctor should leave a live open's claim alone" || return 1
 }
 
+# A /finish retire killed between setting the worktree's .cs aside and the
+# record fuse leaves $SESSIONS_ROOT/.retire-<worktree>.<pid>; nothing else
+# names it.
+test_doctor_warns_on_a_retire_aside_whose_run_is_gone() {
+    local dead
+    sh -c 'exit 0' & dead=$!
+    wait "$dead"
+    local aside="$CS_SESSIONS_ROOT/.retire-test-session@feat.$dead"
+    mkdir -p "$aside/cs"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Retire leftovers: $aside holds the session records of test-session@feat, set aside by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone" \
+        "doctor should name the aside directory a killed retire left, hedging the pid" || return 1
+    assert_output_contains "$output" "The worktree is gone, and /finish feat cannot run again without it, so finish the retire by hand: fuse what is missing from $aside/cs into $CLAUDE_SESSION_META_DIR, delete $aside, then delete the branch the retire would have removed with: git -C \"$CLAUDE_SESSION_DIR\" branch -d cs/feat" \
+        "the row carries the fuse, the delete and the branch the retire left" || return 1
+    assert_dir "$aside" "doctor reports and never deletes" || return 1
+    assert_output_contains "$output" "Complete with [1-9][0-9]* warning(s)\." "the warning is counted" || return 1
+}
+
+# Killed after the move but before the removal, the retire leaves the worktree
+# without its .cs; the records go back and /finish runs again.
+test_doctor_retire_aside_with_its_worktree_says_move_the_records_back() {
+    local dead
+    sh -c 'exit 0' & dead=$!
+    wait "$dead"
+    local aside="$CS_SESSIONS_ROOT/.retire-test-session@feat.$dead"
+    mkdir -p "$aside/cs" "$CS_SESSIONS_ROOT/test-session@feat"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Retire leftovers: $aside holds the session records of test-session@feat, set aside by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. The worktree is still there, so move $aside/cs back to $CS_SESSIONS_ROOT/test-session@feat/.cs by hand, delete the empty $aside, and run /finish feat in test-session again" \
+        "the row says to put the records back and run /finish again" || return 1
+}
+
+# Killed between making the aside and moving the .cs, the retire leaves an
+# empty aside and the worktree's .cs intact: there is nothing to move back.
+test_doctor_empty_retire_aside_says_nothing_moved() {
+    local dead
+    sh -c 'exit 0' & dead=$!
+    wait "$dead"
+    local aside="$CS_SESSIONS_ROOT/.retire-test-session@feat.$dead"
+    mkdir -p "$aside" "$CS_SESSIONS_ROOT/test-session@feat/.cs"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Retire leftovers: $aside was made by a /finish retire of test-session@feat (pid $dead), which this process cannot see; that retire is probably gone, and it moved nothing: the worktree keeps its .cs. Delete the empty directory with rmdir and run /finish feat in test-session again" \
+        "an empty aside gets the empty-aside remedy" || return 1
+    assert_output_not_contains "$output" "$aside/cs" \
+        "the row names no cs directory the aside does not hold" || return 1
+    assert_dir "$aside" "doctor reports and never deletes" || return 1
+}
+
+test_doctor_leaves_a_retire_aside_alone_while_its_run_lives() {
+    mkdir -p "$CS_SESSIONS_ROOT/.retire-test-session@feat.$$/cs"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "Retire leftovers" \
+        "a live retire's aside is a retire in progress" || return 1
+}
+
+# A pid no process can have is one cs cannot judge, and such a run gets no
+# remedy, as the integrate lock's does not.
+test_doctor_leaves_a_retire_aside_alone_when_its_pid_cannot_be_judged() {
+    mkdir -p "$CS_SESSIONS_ROOT/.retire-test-session@feat.99999999999/cs"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "Retire leftovers" \
+        "an aside whose pid cs cannot judge is not reported" || return 1
+}
+
+# pid 1 belongs to another user: kill -0 answers EPERM, which is a process
+# that exists, so its claim is held, not abandoned.
+test_doctor_leaves_a_spawn_claim_of_another_users_open_alone() {
+    mkdir -p "$CS_SESSIONS_ROOT/.spawn"
+    printf 'boss\ndo work\n' > "$CS_SESSIONS_ROOT/.spawn/.live.seed.claim.1"
+    local output
+    output=$(CS_TMUX_BIN="$(_doctor_tmux_fake '' '')" "$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" ".live.seed.claim.1" \
+        "a claim held by a process this user cannot signal is not abandoned" || return 1
+}
+
+# A /finish killed mid-run leaves finish-progress.json at a step that is no
+# outcome; the cs mod treats it as over, and nothing else says so.
+test_doctor_warns_on_a_finish_record_whose_run_is_gone() {
+    local dead
+    sh -c 'exit 0' & dead=$!
+    wait "$dead"
+    local f="$CLAUDE_SESSION_META_DIR/local/finish-progress.json"
+    printf '{"id":"%s-1","pid":%s,"task":"feat","sha":"abc1234","step":"merging","ts":1}\n' "$dead" "$dead" > "$f"
+    mkdir -p "$CS_SESSIONS_ROOT/test-session@feat"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Finish progress: $f records /finish feat at step 'merging' from pid $dead, which this process cannot see; that run probably ended without landing, refusing or retiring" \
+        "doctor should name the record a killed /finish left, hedging the pid" || return 1
+    assert_output_contains "$output" "Run /finish feat again" "the row says how to finish the work" || return 1
+    assert_file_exists "$f" "doctor reports and never deletes" || return 1
+    assert_output_contains "$output" "Complete with [1-9][0-9]* warning(s)\." "the warning is counted" || return 1
+}
+
+# Both /finish entries refuse without the worktree, so a record left by a
+# retire that removed it cannot be answered with "run /finish again".
+test_doctor_finish_record_without_its_worktree_does_not_say_run_finish_again() {
+    local dead
+    sh -c 'exit 0' & dead=$!
+    wait "$dead"
+    local f="$CLAUDE_SESSION_META_DIR/local/finish-progress.json"
+    printf '{"id":"%s-1","pid":%s,"task":"feat","sha":"abc1234","step":"started","ts":1}\n' "$dead" "$dead" > "$f"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Its worktree is gone, so /finish feat cannot run again: a Retire leftovers row, when there is one, says what is left to do by hand; without one the records are fused, and only the branch cs/feat may remain, deleted with: git -C \"$CLAUDE_SESSION_DIR\" branch -d cs/feat" \
+        "the row names the branch and the leftovers row instead" || return 1
+    assert_output_not_contains "$output" "Run /finish feat again" \
+        "no /finish can run without the worktree" || return 1
+}
+
+test_doctor_leaves_a_finish_record_at_an_outcome_alone() {
+    local dead step
+    sh -c 'exit 0' & dead=$!
+    wait "$dead"
+    local f="$CLAUDE_SESSION_META_DIR/local/finish-progress.json"
+    local output
+    for step in landed refused retired; do
+        printf '{"id":"%s-1","pid":%s,"task":"feat","sha":"abc1234","step":"%s","ts":1}\n' "$dead" "$dead" "$step" > "$f"
+        output=$("$CS_BIN" -doctor 2>&1) || true
+        assert_output_not_contains "$output" "Finish progress" \
+            "a record at '$step' is a finished run, dead pid or not" || return 1
+    done
+}
+
+test_doctor_leaves_a_finish_record_alone_while_its_run_lives() {
+    local f="$CLAUDE_SESSION_META_DIR/local/finish-progress.json"
+    printf '{"id":"%s-1","pid":%s,"task":"feat","sha":"abc1234","step":"gate","ts":1}\n' "$$" "$$" > "$f"
+    local output
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_not_contains "$output" "Finish progress" \
+        "a live pid is a /finish in progress" || return 1
+}
+
 test_doctor_warns_on_orphaned_spawn_seed() {
     mkdir -p "$CS_SESSIONS_ROOT/.spawn"
     printf 'boss\ndo work\n' > "$CS_SESSIONS_ROOT/.spawn/ghost.seed"
@@ -1682,6 +1818,16 @@ run_test test_doctor_completes_after_spawn_warning
 run_test test_doctor_warns_on_abandoned_spawn_staging
 run_test test_doctor_warns_on_a_claimed_seed_whose_open_is_gone
 run_test test_doctor_warns_on_orphaned_spawn_seed
+run_test test_doctor_warns_on_a_retire_aside_whose_run_is_gone
+run_test test_doctor_retire_aside_with_its_worktree_says_move_the_records_back
+run_test test_doctor_empty_retire_aside_says_nothing_moved
+run_test test_doctor_leaves_a_retire_aside_alone_while_its_run_lives
+run_test test_doctor_leaves_a_retire_aside_alone_when_its_pid_cannot_be_judged
+run_test test_doctor_leaves_a_spawn_claim_of_another_users_open_alone
+run_test test_doctor_warns_on_a_finish_record_whose_run_is_gone
+run_test test_doctor_finish_record_without_its_worktree_does_not_say_run_finish_again
+run_test test_doctor_leaves_a_finish_record_at_an_outcome_alone
+run_test test_doctor_leaves_a_finish_record_alone_while_its_run_lives
 run_test test_doctor_spawn_ok_when_seeds_clean
 run_test test_doctor_warns_on_dangling_spawned_by
 run_test test_doctor_spawned_by_ok_when_spawner_exists

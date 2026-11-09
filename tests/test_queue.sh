@@ -141,6 +141,36 @@ test_queue_start_refuses_an_unknown_mode() {
     assert_file_not_exists "$CLAUDE_SESSION_META_DIR/local/queue.state" "a refused start does not arm" || return 1
 }
 
+# While a running session drains, the Stop hook's armed branch would hand out
+# the first task again and forget the one in progress, so start refuses and
+# writes nothing: the state stays draining and the mode file keeps its word.
+test_queue_start_refuses_while_a_live_session_drains() {
+    local out rc=0
+    "$CS_BIN" -queue add "x" >/dev/null 2>&1
+    printf 'draining\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
+    printf 'workflow\n' > "$CLAUDE_SESSION_META_DIR/local/queue.mode"
+    printf '%s\n' "$$" > "$CLAUDE_SESSION_META_DIR/session.lock"
+    out=$("$CS_BIN" -queue start 2>&1) || rc=$?
+    assert_eq "1" "$rc" "a start during a live drain fails" || return 1
+    assert_eq "Error: the queue is draining in the running session (pid $$); the next Stop hands out the next task by itself. To stop the run, cs -queue clear removes the queued tasks with it." \
+        "$out" "the error names the state and the way out" || return 1
+    assert_eq "draining" "$(cat "$CLAUDE_SESSION_META_DIR/local/queue.state")" "the state is left as it was" || return 1
+    assert_eq "workflow" "$(cat "$CLAUDE_SESSION_META_DIR/local/queue.mode")" "the mode file is left as it was" || return 1
+}
+
+# A draining state whose session is gone (a crash, a close) is stale: no turn
+# is in progress to run twice, so start re-arms it as it does any other state.
+test_queue_start_rearms_a_drain_whose_session_is_gone() {
+    local dead
+    sh -c ':' & dead=$!
+    wait "$dead" 2>/dev/null || true
+    "$CS_BIN" -queue add "x" >/dev/null 2>&1
+    printf 'draining\n' > "$CLAUDE_SESSION_META_DIR/local/queue.state"
+    printf '%s\n' "$dead" > "$CLAUDE_SESSION_META_DIR/session.lock"
+    "$CS_BIN" -queue start >/dev/null 2>&1 || return 1
+    assert_eq "armed" "$(cat "$CLAUDE_SESSION_META_DIR/local/queue.state")" "a stale drain re-arms" || return 1
+}
+
 test_queue_clear_forgets_the_mode() {
     "$CS_BIN" -queue add "x" >/dev/null 2>&1
     "$CS_BIN" -queue start workflow >/dev/null 2>&1 || return 1
@@ -381,6 +411,8 @@ run_test test_queue_clear_empties_and_resets_state
 run_test test_queue_start_sets_armed
 run_test test_queue_start_records_how_the_tasks_run
 run_test test_queue_start_refuses_an_unknown_mode
+run_test test_queue_start_refuses_while_a_live_session_drains
+run_test test_queue_start_rearms_a_drain_whose_session_is_gone
 run_test test_queue_clear_forgets_the_mode
 run_test test_queue_defer_is_not_a_verb
 run_test test_queue_start_ignores_a_stale_state_tmp

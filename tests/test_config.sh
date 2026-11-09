@@ -582,6 +582,24 @@ test_the_launch_measurement_stands_without_a_file_theme() {
     assert_eq "$light" "$kept" "the measured light still draws light" || return 1
 }
 
+# A background set before a launch that measured the theme is the user's,
+# which CS_TERM_BG_RGB_PINNED says, and a file's background leaves it; an
+# unmarked one beside the measured theme is the launch's, and a file's
+# replaces it.
+test_a_pinned_background_beside_a_measured_theme_is_the_shells() {
+    assert_eq "30;30;30|shell" "$(CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_BG_RGB='30;30;30' CS_TERM_BG_RGB_PINNED=1 \
+        _porcelain_value CS_TERM_BG_RGB)" "a pinned background beside a measured theme is the shell's" || return 1
+    assert_eq "30;30;30|launch" "$(CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_BG_RGB='30;30;30' \
+        _porcelain_value CS_TERM_BG_RGB)" "an unmarked one is the launch's" || return 1
+    assert_eq "30;30;30|shell" "$(CS_TERM_BG_RGB='30;30;30' _porcelain_value CS_TERM_BG_RGB)" \
+        "one with no measured theme is the shell's" || return 1
+    machine_cfg 'CS_TERM_BG_RGB=1;2;3'
+    assert_eq "30;30;30|shell" "$(CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_BG_RGB='30;30;30' CS_TERM_BG_RGB_PINNED=1 \
+        _porcelain_value CS_TERM_BG_RGB)" "a file's background leaves the pinned one" || return 1
+    assert_eq "1;2;3|machine" "$(CS_TERM_THEME=dark CS_TERM_THEME_AUTO=1 CS_TERM_BG_RGB='30;30;30' \
+        _porcelain_value CS_TERM_BG_RGB)" "and replaces the measured one" || return 1
+}
+
 # An edit reaches the next repaint: the same bar, its file rewritten between
 # two renders, draws the second layout the second time.
 test_the_status_line_follows_a_file_edit() {
@@ -875,6 +893,7 @@ run_test test_concurrent_sets_both_land
 run_test test_verb_runs_under_bash_32
 run_test test_a_file_theme_wins_over_the_launch_measurement
 run_test test_the_launch_measurement_stands_without_a_file_theme
+run_test test_a_pinned_background_beside_a_measured_theme_is_the_shells
 run_test test_the_status_line_follows_a_file_edit
 run_test test_scope_prompt_sees_a_session_file_before_its_launch_mark
 run_test test_the_rewriter_and_its_child_read_the_file

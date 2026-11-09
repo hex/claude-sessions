@@ -312,10 +312,20 @@ _cs_config_read() {  # file, scope
     return 0
 }
 
+# Whether CS_TERM_BG_RGB is the user's own: set with no launch detection
+# behind it, or set before a launch that detected the theme, which marks it with
+# CS_TERM_BG_RGB_PINNED since CS_TERM_THEME_AUTO speaks for the theme alone.
+# It reads the environment as it stands, not the source cs_config_source
+# remembers: the status line exports a cached background after the loader
+# looked.
+cs_term_bg_pinned() {
+    [ -n "${CS_TERM_BG_RGB:-}" ] && { [ -z "${CS_TERM_THEME_AUTO:-}" ] || [ -n "${CS_TERM_BG_RGB_PINNED:-}" ]; }
+}
+
 # Where <key>'s value comes from, in _CS_CFG_SOURCE: shell (the environment
 # pins it), launch (the launch measured it: CS_TERM_THEME beside
 # CS_TERM_THEME_AUTO, and CS_TERM_BG_RGB under that marker without
-# CS_TERM_BG_RGB_PINNED, the rule the status line's _sl_bg_pinned states),
+# CS_TERM_BG_RGB_PINNED, the rule cs_term_bg_pinned states),
 # session, machine or default. A key the loader has not looked at in this
 # process holds what the process started with, so its value answers.
 cs_config_source() {  # key
@@ -330,7 +340,7 @@ cs_config_source() {  # key
     else
         case "$1" in
             CS_TERM_THEME) _CS_CFG_SOURCE=launch ;;
-            CS_TERM_BG_RGB) if [ -n "${CS_TERM_BG_RGB_PINNED:-}" ]; then _CS_CFG_SOURCE=shell; else _CS_CFG_SOURCE=launch; fi ;;
+            CS_TERM_BG_RGB) if cs_term_bg_pinned; then _CS_CFG_SOURCE=shell; else _CS_CFG_SOURCE=launch; fi ;;
             *) _CS_CFG_SOURCE=shell ;;
         esac
     fi

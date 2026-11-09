@@ -945,7 +945,282 @@ _wrap_only_migrate() {  # file
     esac
 }
 
-# Phases 9, 10, 14, 15, 16 and 17: the cs sections of CLAUDE.local.md.
+# Every Secure Secrets Handling section cs has written into a CLAUDE.local.md
+# before the current one, heading first, newest first, separated by a line of
+# @@. Each is a matcher: _secrets_section_migrate rewrites a section only when
+# it equals one of these to the byte. The by-hand paths they describe store the
+# value and delete the scratch file as two steps, pipe the value, or pass it in
+# argv; the current section stores and deletes in one Bash command from a
+# mktemp file outside the session.
+_secrets_section_wordings() {
+    cat << 'EOF'
+## Secure Secrets Handling
+
+Secrets live in the cs session store, never in a project file. `cs -secrets set`
+and the `store-secret` skill read the value on **stdin** via a file redirect —
+never `echo`/`printf` a secret into a pipe or a Bash heredoc, either of which
+puts the plaintext in the Bash command itself.
+
+Consume a secret inline — `some-command --token "$(cs -secrets get API_KEY)"` —
+so it stays out of the tool result and the transcript. A retrieved value is read
+by a command, never printed, echoed, piped, or written to a file (that includes
+`cs -secrets export` output). `cs -secrets --help` lists the rest of the verbs.
+
+**When you find a credential already in the workspace**, invoke the
+`store-secret` skill — it carries the full procedure. Replace the literal with
+the reference the file wants — `${API_KEY}` in a config, `$(cs -secrets get
+API_KEY)` in a shell script. Doing it by hand instead, the safe path is exactly
+this: write the value with the **Write** tool to a file OUTSIDE the session
+directory (any Write inside it is snapshotted into the autosave ref and survives
+`rm`), run `cs -secrets set NAME < that-file`, then delete the scratch file
+immediately.
+@@
+## Secure Secrets Handling
+
+Secrets live in the cs session store, never in a project file. `cs -secrets set`
+and the `store-secret` skill read the value on **stdin** via a file redirect —
+never `echo`/`printf` a secret into a pipe or a Bash heredoc: the bash-logger
+records the whole Bash command, plaintext and all, in `.cs/local/session.log`.
+
+Consume a secret inline — `some-command --token "$(cs -secrets get API_KEY)"` —
+so it stays out of the tool result and the transcript. A retrieved value is read
+by a command, never printed, echoed, piped, or written to a file (that includes
+`cs -secrets export` output). `cs -secrets --help` lists the rest of the verbs.
+
+**When you find a credential already in the workspace**, invoke the
+`store-secret` skill — it carries the full procedure. Replace the literal with
+the reference the file wants — `${API_KEY}` in a config, `$(cs -secrets get
+API_KEY)` in a shell script. Doing it by hand instead, the safe path is exactly
+this: write the value with the **Write** tool to a file OUTSIDE the session
+directory (any Write inside it is snapshotted into the autosave ref and survives
+`rm`), run `cs -secrets set NAME < that-file`, then delete the scratch file
+immediately.
+@@
+## Secure Secrets Handling
+
+Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
+encrypted file) instead of writing it into project files. The `store-secret`
+skill and `cs -secrets set` read the value from stdin so it never lands in a
+file or the command log.
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+Never print or echo a retrieved secret, and don't paste `cs -secrets export` output into a file — consume the value inline, e.g. `some-command --token "$(cs -secrets get API_KEY)"`, so the plaintext stays out of the tool result and the session transcript.
+
+**If you detect sensitive data** in the workspace (embedded credentials, a
+committed token, etc.), invoke the `store-secret` skill and replace the literal
+with a reference appropriate to the file — an env-var placeholder like
+`${API_KEY}` in configs, or `$(cs -secrets get API_KEY)` in shell scripts —
+noting that the value now lives in `cs -secrets`. The skill writes the value to
+a scratch file with the Write tool (which the bash-logger does not capture),
+feeds it in via a stdin redirect so the plaintext never reaches argv or the
+command log (`cs -secrets set <name> < scratch-file`), and deletes the scratch
+file afterward. If the skill is unavailable and you do this by hand, you MUST
+delete the scratch file immediately after, and never `echo`/`printf` a secret
+into a pipe — the bash-logger records the whole Bash command (secret and all)
+in `.cs/local/session.log`.
+@@
+## Secure Secrets Handling
+
+Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
+encrypted file) instead of writing it into project files. The `store-secret`
+skill and `cs -secrets set` read the value from stdin so it never lands in a
+file or the command log.
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as CS_SECRET_<NAME> environment variables
+```
+Never print or echo a retrieved secret, and don't paste `cs -secrets export` output into a file — consume the value inline, e.g. `some-command --token "$(cs -secrets get API_KEY)"`, so the plaintext stays out of the tool result and the session transcript.
+
+**If you detect sensitive data** in the workspace (embedded credentials, a
+committed token, etc.), invoke the `store-secret` skill and replace the literal
+with a reference appropriate to the file — an env-var placeholder like
+`${API_KEY}` in configs, or `$(cs -secrets get API_KEY)` in shell scripts —
+noting that the value now lives in `cs -secrets`. The skill writes the value to
+a scratch file with the Write tool (which the bash-logger does not capture),
+feeds it in via a stdin redirect so the plaintext never reaches argv or the
+command log (`cs -secrets set <name> < scratch-file`), and deletes the scratch
+file afterward. If the skill is unavailable and you do this by hand, you MUST
+delete the scratch file immediately after, and never `echo`/`printf` a secret
+into a pipe — the bash-logger records the whole Bash command (secret and all)
+in `.cs/local/session.log`.
+@@
+## Secure Secrets Handling
+
+Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
+encrypted file) instead of writing it into project files. The `store-secret`
+skill and `cs -secrets set` read the value from stdin so it never lands in a
+file or the command log.
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+
+**If you detect sensitive data** in the workspace (embedded credentials, a
+committed token, etc.), store it with the `store-secret` skill and replace it
+with a reference. The skill writes the value to a scratch file with the Write
+tool (which the bash-logger does not capture) and feeds it in via a stdin
+redirect, so the plaintext never reaches argv or the command log:
+```bash
+cs -secrets set <name> < /path/to/scratch-file   # value on stdin, not in argv
+```
+Never `echo`/`printf` a secret into a pipe — the bash-logger records the whole
+Bash command (secret and all) in `.cs/local/session.log`.
+@@
+## Secure Secrets Handling
+
+Store sensitive data (API keys, tokens, passwords) securely (macOS Keychain or
+encrypted file) instead of writing it into project files. The `store-secret`
+skill and `cs -secrets set` read the value from stdin so it never lands in a
+file or the command log.
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+
+**If you detect sensitive data** in the workspace (embedded credentials, a
+committed token, etc.), store it and replace it with a reference. Pass the value
+on stdin so it never hits argv or the command log:
+```bash
+printf '%s' "the-secret-value" | cs -secrets set <name>
+```
+@@
+## Secure Secrets Handling
+
+Sensitive data is automatically detected and stored securely (macOS Keychain or encrypted file):
+
+**Auto-detected patterns:**
+- Files: .env, filenames containing key, secret, password, token, credential, auth
+- Content: Variables like API_KEY, SECRET_TOKEN, PASSWORD, etc.
+
+**What happens:**
+1. Sensitive values are extracted and stored securely
+2. The artifact file contains redacted placeholders
+3. MANIFEST.json lists which secrets exist (not the values)
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+
+**If you detect sensitive data** that wasn't auto-captured (unusual patterns, embedded credentials, etc.), use cs -secrets directly:
+```bash
+cs -secrets set <name> <value>     # Store manually
+```
+@@
+## Secure Secrets Handling
+
+Sensitive data is automatically detected and stored securely (macOS Keychain, Windows Credential Manager, or encrypted file):
+
+**Auto-detected patterns:**
+- Files: .env, filenames containing key, secret, password, token, credential, auth
+- Content: Variables like API_KEY, SECRET_TOKEN, PASSWORD, etc.
+
+**What happens:**
+1. Sensitive values are extracted and stored securely
+2. The artifact file contains redacted placeholders
+3. MANIFEST.json lists which secrets exist (not the values)
+
+**Retrieving secrets:**
+```bash
+cs -secrets backend                # Check which storage backend is active
+cs -secrets list                   # List secrets for current session
+cs -secrets get API_KEY            # Get a specific secret value
+cs -secrets export                 # Export as environment variables
+```
+
+**If you detect sensitive data** that wasn't auto-captured (unusual patterns, embedded credentials, etc.), use cs -secrets directly:
+```bash
+cs -secrets set <name> <value>     # Store manually
+```
+EOF
+}
+
+# One awk program for the probe and the rewrite of the Secure Secrets Handling
+# sections of a CLAUDE.local.md. A section runs from its heading to the line
+# before the next heading or sentinel, or the end of the file. Its lines, the
+# trailing blank ones set aside, are compared whole against every wording in
+# CS_OLD (_secrets_section_wordings); an equal section becomes CS_NEW
+# (_emit_secrets_block) with its trailing blank lines back in place, and any
+# other section, one the user edited by a word included, prints as it was. With
+# probe set nothing prints and the exit status says whether a rewrite would
+# change the file, so the write only happens when it does. The texts travel in
+# the environment, not -v, so awk does not re-read their backslashes.
+_SECRETS_SECTION_AWK='
+    function flush(   i, k, body) {
+        k = n
+        while (k > 0 && lines[k] ~ /^[[:space:]]*$/) k--
+        body = ""
+        for (i = 1; i <= k; i++) body = body (i > 1 ? "\n" : "") lines[i]
+        if (body in old) {
+            hit = 1
+            if (!probe) {
+                print ENVIRON["CS_NEW"]
+                for (i = k + 1; i <= n; i++) print lines[i]
+            }
+        } else if (!probe) {
+            for (i = 1; i <= n; i++) print lines[i]
+        }
+        n = 0
+    }
+    BEGIN {
+        m = split(ENVIRON["CS_OLD"], w, "\n@@\n")
+        for (i = 1; i <= m; i++) old[w[i]] = 1
+    }
+    /^## Secure Secrets Handling$/ { if (n) flush(); insec = 1; lines[++n] = $0; next }
+    insec && (/^## / || /^<!-- /) { flush(); insec = 0 }
+    insec { lines[++n] = $0; next }
+    !probe { print }
+    END { if (n) flush(); if (probe) exit !hit }
+'
+
+# Phase 18: a Secure Secrets Handling section that still reads as one cs wrote
+# before takes the current wording. A section edited anywhere stays as it is,
+# whole. The rewrite goes through cs_write_atomic, which refuses a link out of
+# the session and leaves the file as it was when the awk fails; a refused
+# write warns and keeps the migration stamp from being written, so the next
+# open tries again, and a link that stays out of the session warns on each open.
+_secrets_section_migrate() {  # file
+    local f="$1"
+    [ -f "$f" ] || return 0
+    grep -q '^## Secure Secrets Handling$' "$f" || return 0
+    local rc=0
+    CS_OLD=$(_secrets_section_wordings) awk -v probe=1 "$_SECRETS_SECTION_AWK" "$f" || rc=$?
+    case "$rc" in
+        0) ;;
+        1) return 0 ;;
+        *) warn "could not read $f (awk exited $rc); its secrets section keeps the earlier wording"; _CS_MIGRATE_CLEAN=0; return 0 ;;
+    esac
+    if CS_OLD=$(_secrets_section_wordings) CS_NEW=$(_emit_secrets_block) \
+        cs_write_atomic "$f" awk "$_SECRETS_SECTION_AWK" "$f"; then
+        notice CLAUDE.local.md "the secrets section stores and deletes the scratch file in one command"
+    else
+        warn "could not rewrite $f; its secrets section keeps the earlier wording"
+        _CS_MIGRATE_CLEAN=0
+    fi
+}
+
+# Phases 9, 10, 14, 15, 16, 17 and 18: the cs sections of CLAUDE.local.md.
 _ensure_claude_local_sections() {  # session_dir
     local session_dir="$1"
 
@@ -1046,6 +1321,10 @@ _ensure_claude_local_sections() {  # session_dir
         { echo; _emit_mermaid_diagrams_block; } >> "$claude_md_p9"
         notice CLAUDE.local.md "added the diagram instruction"
     fi
+
+    # Phase 18: the Secure Secrets Handling section, when it still reads as cs
+    # wrote it before, takes the wording a new session gets.
+    _secrets_section_migrate "$claude_md_p9"
 }
 
 # The session files a completed migration vouches for. Changed after the stamp
