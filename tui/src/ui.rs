@@ -14,7 +14,8 @@ use unicode_width::UnicodeWidthStr;
 use ratatui::layout::Alignment;
 
 use crate::app::{
-    App, FeatureRow, FlashKind, Focus, Mode, NotesFocus, SortColumn, SortDirection, StatusLevel,
+    App, DeleteConfirm, DeleteTargets, FeatureRow, FlashKind, Focus, Mode, NotesFocus, Reveal, SecretsList,
+    SortColumn, SortDirection, StatusLevel,
 };
 use crate::session::DeleteWarning;
 use crate::theme::{self, Palette};
@@ -273,6 +274,7 @@ pub fn render(app: &mut App, frame: &mut Frame) {
                 render_notes_pane(app, frame, rows[2]);
             }
             PaneLayout::TableOnly => {
+                app.notes_pane_hidden();
                 render_table(app, frame, chunks[1], false);
             }
         }
@@ -286,14 +288,16 @@ pub fn render(app: &mut App, frame: &mut Frame) {
     // Overlay dialogs on top
     match &app.mode {
         Mode::SessionMenu => render_session_menu(app, frame),
-        Mode::ConfirmDelete => render_confirm_delete(app, frame),
-        Mode::ConfirmBatchDelete => render_confirm_batch_delete(app, frame),
+        Mode::ConfirmDelete(confirm) => match &confirm.targets {
+            DeleteTargets::One(name) => render_confirm_delete(app, confirm, name, frame),
+            DeleteTargets::Marked(names) => render_confirm_batch_delete(app, confirm, names, frame),
+        },
         Mode::ConfirmForceOpen => render_confirm_force_open(app, frame),
         Mode::ConfirmRotate => render_confirm_rotate(app, frame),
         Mode::Rename => render_rename_dialog(app, frame),
         Mode::CreateSession => render_create_dialog(app, frame),
-        Mode::Secrets => render_secrets_popup(app, frame),
-        Mode::CommandOutput(text) => render_command_output(text, p, frame),
+        Mode::Secrets { list, revealed } => render_secrets_popup(app, list, revealed.as_ref(), frame),
+        Mode::CommandOutput { text, .. } => render_command_output(text, p, frame),
         Mode::Changelog => render_changelog(app, frame),
         Mode::Legend => render_legend(app, frame),
         _ => {}
@@ -960,12 +964,12 @@ fn render_footer(app: &App, frame: &mut Frame, area: Rect) {
                 "q:quit  Enter:open  n:new  d:delete  r:rename  a:archive  A:archived  Tab:queue  Space:mark  /:search  1-6:sort  ?:legend"
             }
             Mode::SessionMenu => "j/k:navigate  Enter:select  key:run directly  q/Esc:close",
-            Mode::ConfirmDelete | Mode::ConfirmBatchDelete => "y:confirm  n:cancel",
+            Mode::ConfirmDelete(_) => "y:confirm  n:cancel",
             Mode::ConfirmForceOpen => "y:force open  n:cancel",
             Mode::ConfirmRotate => "y:rotate  n/Esc:cancel",
             Mode::Rename | Mode::CreateSession => "Enter:confirm  Esc:cancel",
-            Mode::Secrets => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
-            Mode::CommandOutput(_) => "Press any key to dismiss",
+            Mode::Secrets { .. } => "j/k:navigate  v/Enter:view  d:remove  Esc:close",
+            Mode::CommandOutput { .. } => "Press any key to dismiss",
             Mode::Changelog => "Esc:close",
             Mode::Legend => "Esc:close",
             Mode::Merge => "Enter:finish  j/k:select  r:refresh  Esc:back",
@@ -1115,19 +1119,15 @@ fn render_session_menu(app: &App, frame: &mut Frame) {
     frame.render_widget(Paragraph::new(lines).block(block), popup_area);
 }
 
-fn render_confirm_delete(app: &App, frame: &mut Frame) {
+fn render_confirm_delete(app: &App, confirm: &DeleteConfirm, name: &str, frame: &mut Frame) {
     let p = app.theme;
-    let session = match app.selected_session() {
-        Some(s) => s,
-        None => return,
-    };
-
     let remaining = app.delete_countdown_remaining();
 
-    let (question, note) = if session.is_adopted {
-        (format!("Remove adopted session '{}'?", session.name), "(removes symlink only, project preserved)")
+    let adopted = app.sessions.iter().any(|s| s.name == name && s.is_adopted);
+    let (question, note) = if adopted {
+        (format!("Remove adopted session '{}'?", name), "(removes symlink only, project preserved)")
     } else {
-        (format!("Delete session '{}'?", session.name), "This cannot be undone.")
+        (format!("Delete session '{}'?", name), "This cannot be undone.")
     };
 
     let hint = if remaining > 0 {
@@ -1140,9 +1140,9 @@ fn render_confirm_delete(app: &App, frame: &mut Frame) {
     // Borders, question, note, the blank above the hint and the hint.
     let fixed_rows = 6;
     let columns = popup_columns(50, frame.area());
-    let separator = grant_separator(app, frame.area().height, fixed_rows);
-    let grants = grant_rows(app, separator);
-    let warnings = warning_lines(&app.delete_warnings, frame.area().height, fixed_rows + grants, columns, p.red);
+    let separator = grant_separator(confirm, frame.area().height, fixed_rows);
+    let grants = grant_rows(confirm, separator);
+    let warnings = warning_lines(&confirm.warnings, frame.area().height, fixed_rows + grants, columns, p.red);
     let popup_area = centered_rect(50, fixed_rows + warnings.len() as u16 + grants, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
@@ -1153,7 +1153,7 @@ fn render_confirm_delete(app: &App, frame: &mut Frame) {
 
     let mut lines = vec![one_row(&question, columns, p.fg), one_row(note, columns, p.fg)];
     lines.extend(warnings);
-    push_grant_lines(&mut lines, app, columns, separator);
+    push_grant_lines(&mut lines, confirm, columns, p.fg, separator);
     lines.push(Line::from(""));
     lines.push(one_row(&hint, columns, hint_color));
     let text = Paragraph::new(lines)
@@ -1162,13 +1162,10 @@ fn render_confirm_delete(app: &App, frame: &mut Frame) {
     frame.render_widget(text, popup_area);
 }
 
-fn render_confirm_batch_delete(app: &App, frame: &mut Frame) {
+fn render_confirm_batch_delete(app: &App, confirm: &DeleteConfirm, names: &[String], frame: &mut Frame) {
     let p = app.theme;
-    let count = app.marked_sessions.len();
+    let count = names.len();
     let remaining = app.delete_countdown_remaining();
-
-    let mut names: Vec<&str> = app.marked_sessions.iter().map(|s| s.as_str()).collect();
-    names.sort();
 
     let list = if names.len() <= 5 {
         names.join(", ")
@@ -1186,9 +1183,9 @@ fn render_confirm_batch_delete(app: &App, frame: &mut Frame) {
     // Borders, question, names, the blank above the note, the note and the hint.
     let fixed_rows = 7;
     let columns = popup_columns(55, frame.area());
-    let separator = grant_separator(app, frame.area().height, fixed_rows);
-    let grants = grant_rows(app, separator);
-    let warnings = warning_lines(&app.delete_warnings, frame.area().height, fixed_rows + grants, columns, p.red);
+    let separator = grant_separator(confirm, frame.area().height, fixed_rows);
+    let grants = grant_rows(confirm, separator);
+    let warnings = warning_lines(&confirm.warnings, frame.area().height, fixed_rows + grants, columns, p.red);
     let popup_area = centered_rect(55, fixed_rows + warnings.len() as u16 + grants, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
@@ -1199,7 +1196,7 @@ fn render_confirm_batch_delete(app: &App, frame: &mut Frame) {
 
     let mut lines = vec![one_row(&format!("Delete {} sessions?", count), columns, p.fg), one_row(&list, columns, p.comment)];
     lines.extend(warnings);
-    push_grant_lines(&mut lines, app, columns, separator);
+    push_grant_lines(&mut lines, confirm, columns, p.fg, separator);
     lines.push(Line::from(""));
     lines.push(one_row("This cannot be undone.", columns, p.red));
     lines.push(one_row(&hint, columns, hint_color));
@@ -1212,14 +1209,14 @@ fn render_confirm_batch_delete(app: &App, frame: &mut Frame) {
 /// The escalations a delete confirm offers, each with its key and whether
 /// it is granted: the confirm refuses what is not granted, as `cs -rm` does
 /// without --delete-files or --force.
-fn grant_lines(app: &App) -> Vec<String> {
+fn grant_lines(confirm: &DeleteConfirm) -> Vec<String> {
     let state = |on: bool| if on { "yes" } else { "no" };
     let mut lines = Vec::new();
-    if app.delete_offers.unowned_files {
-        lines.push(format!("[D] Delete those files too: {}", state(app.delete_grants.unowned_files)));
+    if confirm.offers.unowned_files {
+        lines.push(format!("[D] Delete those files too: {}", state(confirm.grants.unowned_files)));
     }
-    if app.delete_offers.past_live_lock {
-        lines.push(format!("[F] Remove although live: {}", state(app.delete_grants.past_live_lock)));
+    if confirm.offers.past_live_lock {
+        lines.push(format!("[F] Remove although live: {}", state(confirm.grants.past_live_lock)));
     }
     lines
 }
@@ -1229,19 +1226,19 @@ fn grant_lines(app: &App) -> Vec<String> {
 /// with it but one without it. That row then holds the warning or their
 /// count, directly over the grant it explains. `fixed_rows` are the popup's
 /// rows besides its warnings and grants.
-fn grant_separator(app: &App, height: u16, fixed_rows: u16) -> bool {
-    app.delete_warnings.is_empty() || height != fixed_rows + grant_rows(app, true)
+fn grant_separator(confirm: &DeleteConfirm, height: u16, fixed_rows: u16) -> bool {
+    confirm.warnings.is_empty() || height != fixed_rows + grant_rows(confirm, true)
 }
 
 /// Rows the grant lines take: the blank separator when `separator`, then
 /// one row each.
-fn grant_rows(app: &App, separator: bool) -> u16 {
-    let n = grant_lines(app).len() as u16;
+fn grant_rows(confirm: &DeleteConfirm, separator: bool) -> u16 {
+    let n = grant_lines(confirm).len() as u16;
     if n == 0 { 0 } else { separator as u16 + n }
 }
 
-fn push_grant_lines(lines: &mut Vec<Line<'static>>, app: &App, columns: u16, separator: bool) {
-    let grants = grant_lines(app);
+fn push_grant_lines(lines: &mut Vec<Line<'static>>, confirm: &DeleteConfirm, columns: u16, color: Color, separator: bool) {
+    let grants = grant_lines(confirm);
     if grants.is_empty() {
         return;
     }
@@ -1249,7 +1246,7 @@ fn push_grant_lines(lines: &mut Vec<Line<'static>>, app: &App, columns: u16, sep
         lines.push(Line::from(""));
     }
     for text in grants {
-        lines.push(one_row(&text, columns, app.theme.fg));
+        lines.push(one_row(&text, columns, color));
     }
 }
 
@@ -1407,14 +1404,14 @@ fn render_create_dialog(app: &App, frame: &mut Frame) {
     frame.render_widget(text, popup_area);
 }
 
-fn render_secrets_popup(app: &App, frame: &mut Frame) {
+fn render_secrets_popup(app: &App, list: &SecretsList, revealed: Option<&Reveal>, frame: &mut Frame) {
     let p = app.theme;
     let session_name = app
         .selected_session()
         .map(|s| s.name.as_str())
         .unwrap_or("?");
 
-    let height = (app.secrets_names.len() as u16 + 3).max(5).min(20);
+    let height = (list.names.len() as u16 + 3).max(5).min(20);
     let popup_area = centered_rect(50, height, frame.area());
     frame.render_widget(Clear, popup_area);
     let block = Block::default()
@@ -1423,7 +1420,7 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
         .title(format!(" Secrets - {} ", session_name))
         .title_style(Style::default().fg(p.orange).add_modifier(Modifier::BOLD));
 
-    if app.secrets_names.is_empty() {
+    if list.names.is_empty() {
         let paragraph = Paragraph::new("No secrets stored")
             .style(Style::default().fg(p.comment))
             .block(block);
@@ -1431,17 +1428,13 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
         return;
     }
 
-    let lines: Vec<Line> = app
-        .secrets_names
+    let lines: Vec<Line> = list
+        .names
         .iter()
         .enumerate()
         .map(|(i, name)| {
-            let is_selected = i == app.secrets_selected;
-            let is_revealed = app
-                .revealed_secret
-                .as_ref()
-                .map(|(k, _, _)| k == name)
-                .unwrap_or(false);
+            let is_selected = i == list.selected;
+            let shown = revealed.filter(|r| &r.key == name);
 
             let mut spans = Vec::new();
             if is_selected {
@@ -1458,20 +1451,18 @@ fn render_secrets_popup(app: &App, frame: &mut Frame) {
                 spans.push(Span::styled(name.as_str(), Style::default().fg(p.comment)));
             }
 
-            if is_revealed {
-                if let Some((_, ref value, _)) = app.revealed_secret {
-                    let remaining = app.peek_remaining();
-                    let display_val = truncate_str(value, 30);
-                    spans.push(Span::styled("  ", Style::default()));
-                    spans.push(Span::styled(
-                        display_val,
-                        Style::default().fg(p.yellow),
-                    ));
-                    spans.push(Span::styled(
-                        format!(" ({}s)", remaining),
-                        Style::default().fg(p.comment),
-                    ));
-                }
+            if let Some(Reveal { value, .. }) = shown {
+                let remaining = app.peek_remaining();
+                let display_val = truncate_str(value, 30);
+                spans.push(Span::styled("  ", Style::default()));
+                spans.push(Span::styled(
+                    display_val,
+                    Style::default().fg(p.yellow),
+                ));
+                spans.push(Span::styled(
+                    format!(" ({}s)", remaining),
+                    Style::default().fg(p.comment),
+                ));
             }
 
             Line::from(spans)
@@ -5396,6 +5387,27 @@ mod tests {
         );
         assert!(rows[10].starts_with("[y] Confirm"), "the key hint stays on screen at 120x40: {rows:?}");
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    // The single delete confirm draws from the session it carries, so it
+    // still shows that session when no row of the table is selected.
+    #[test]
+    fn delete_confirm_draws_its_session_with_no_row_selected() {
+        let mut app = App::new(one_session());
+        app.mode = Mode::ConfirmDelete(DeleteConfirm {
+            targets: DeleteTargets::One("alpha".into()),
+            countdown_start: std::time::Instant::now() - std::time::Duration::from_secs(60),
+            warnings: Vec::new(),
+            offers: crate::session::RemoveGrants::default(),
+            grants: crate::session::RemoveGrants::default(),
+        });
+        app.table_state.select(None);
+
+        let screen = rows_at(&mut app, 100, 24).join("\n");
+
+        assert!(screen.contains("Delete session 'alpha'?"), "the question names the session:\n{screen}");
+        assert!(screen.contains("This cannot be undone."), "the note is drawn:\n{screen}");
+        assert!(screen.contains("[y] Confirm  [n/Esc] Cancel"), "the key hint is drawn:\n{screen}");
     }
 
     // The batch delete confirm gives each line one row too: the list of

@@ -261,17 +261,90 @@ pub enum Mode {
     Normal,
     Search,
     SessionMenu,
-    ConfirmDelete,
-    ConfirmBatchDelete,
+    ConfirmDelete(DeleteConfirm),
     ConfirmForceOpen,
     ConfirmRotate,
     Rename,
     CreateSession,
-    Secrets,
-    CommandOutput(String),
+    /// The secrets popup. A revealed value lives only here, so every way out
+    /// of the popup drops it.
+    Secrets { list: SecretsList, revealed: Option<Reveal> },
+    /// A helper's printed output; dismissing it goes to `then`.
+    CommandOutput { text: String, then: ReturnTo },
     Changelog,
     Legend,
     Merge,
+}
+
+/// What a delete confirm removes: the session it was opened on, or the
+/// sessions marked with Space when D opened it, sorted.
+#[derive(Debug, PartialEq)]
+pub enum DeleteTargets {
+    One(String),
+    Marked(Vec<String>),
+}
+
+impl DeleteTargets {
+    pub fn names(&self) -> &[String] {
+        match self {
+            DeleteTargets::One(name) => std::slice::from_ref(name),
+            DeleteTargets::Marked(names) => names,
+        }
+    }
+}
+
+/// The open delete confirm: the sessions it shows and removes on `y`, and
+/// what it shows about them.
+#[derive(Debug, PartialEq)]
+pub struct DeleteConfirm {
+    pub targets: DeleteTargets,
+    /// `y` is refused until DELETE_COUNTDOWN_SECS after this.
+    pub countdown_start: std::time::Instant,
+    /// What the confirm warns of: live sessions and files beyond cs's own
+    /// that the removal would take, read when the confirm opens (never in
+    /// render).
+    pub warnings: Vec<session::DeleteWarning>,
+    /// The escalations the confirm offers: the ones the sessions it would
+    /// delete need, read when it opens.
+    pub offers: session::RemoveGrants,
+    /// The escalations granted; none until its key is pressed.
+    pub grants: session::RemoveGrants,
+}
+
+/// The secrets popup's key names and the highlighted one.
+#[derive(Debug, PartialEq)]
+pub struct SecretsList {
+    pub names: Vec<String>,
+    pub selected: usize,
+}
+
+/// A secret's value drawn beside `key`; expires PEEK_DURATION_SECS after `at`.
+#[derive(PartialEq)]
+pub struct Reveal {
+    pub key: String,
+    pub value: String,
+    pub at: std::time::Instant,
+}
+
+/// Names the key and redacts the value, so a panic or a failing assertion
+/// that prints a mode cannot print the secret.
+impl std::fmt::Debug for Reveal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Reveal")
+            .field("key", &self.key)
+            .field("value", &"<redacted>")
+            .field("at", &self.at)
+            .finish()
+    }
+}
+
+/// Where dismissing a command's output goes. Back to the secrets popup
+/// carries its list but no reveal: the value is never drawn again without
+/// another `v`.
+#[derive(Debug, PartialEq)]
+pub enum ReturnTo {
+    Normal,
+    Secrets(SecretsList),
 }
 
 /// One feature worktree's merge readiness, as reported by
@@ -448,9 +521,6 @@ pub struct App {
     pub rename_input: TextInput,
     pub create_input: TextInput,
     pub queue_input: TextInput,
-    pub secrets_names: Vec<String>,
-    pub secrets_selected: usize,
-    pub return_to_secrets: bool,
     pub menu_selected: usize,
     pub status_message: Option<StatusMessage>,
     pub row_flashes: HashMap<String, (FlashKind, std::time::Instant)>,
@@ -461,17 +531,6 @@ pub struct App {
     /// where `start_y`/`height` are rows relative to `table_area.y`.
     pub row_hit_spans: Vec<(u16, u16, usize)>,
     pub visible_sort_columns: Vec<SortColumn>,
-    pub delete_countdown_start: Option<std::time::Instant>,
-    /// What the delete confirm warns of: live sessions and files beyond
-    /// cs's own that the removal would take, read when the confirm opens
-    /// (never in render).
-    pub delete_warnings: Vec<session::DeleteWarning>,
-    /// The escalations the open delete confirm offers: the ones the sessions
-    /// it would delete need, read when it opens.
-    pub delete_offers: session::RemoveGrants,
-    /// The escalations granted in the open delete confirm; none until its
-    /// key is pressed, and none again once it closes.
-    pub delete_grants: session::RemoveGrants,
     /// Drawn beside a session tagged encrypted; resolved once at start from
     /// the machine's font consent.
     pub lock_marker: &'static str,
@@ -480,8 +539,6 @@ pub struct App {
     /// Worktree rows (`base@task`) currently attached under their base in
     /// `filtered`; the renderer shows these as indented `@task` children.
     pub attached_worktrees: HashSet<usize>,
-    /// Revealed secret: (key_name, value, reveal_time). Auto-expires after PEEK_DURATION_SECS.
-    pub revealed_secret: Option<(String, String, std::time::Instant)>,
     /// Section labels for time-based grouping (parallel to `filtered`).
     /// Each entry is Some("label") if this row starts a new time section, None otherwise.
     pub section_labels: Vec<Option<&'static str>>,
@@ -629,21 +686,13 @@ impl App {
             rename_input: TextInput::new(),
             create_input: TextInput::new(),
             queue_input: TextInput::new(),
-            secrets_names: Vec::new(),
-            secrets_selected: 0,
-            return_to_secrets: false,
             menu_selected: 0,
             status_message: None,
             row_flashes: HashMap::new(),
             visible_sort_columns: Vec::new(),
-            delete_countdown_start: None,
-            delete_warnings: Vec::new(),
-            delete_offers: session::RemoveGrants::default(),
-            delete_grants: session::RemoveGrants::default(),
             lock_marker: session::lock_marker(),
             fuzzy_indices: HashMap::new(),
             attached_worktrees: HashSet::new(),
-            revealed_secret: None,
             section_labels: Vec::new(),
             nav_repeat: ('\0', 0, std::time::Instant::now()),
             marked_sessions: std::collections::HashSet::new(),
@@ -721,32 +770,38 @@ impl App {
     /// Seconds remaining on the delete confirmation countdown.
     /// Returns 0 when the countdown has elapsed and `y` should be accepted.
     pub fn delete_countdown_remaining(&self) -> u64 {
-        match self.delete_countdown_start {
-            Some(start) => {
-                let elapsed = start.elapsed().as_secs();
+        match &self.mode {
+            Mode::ConfirmDelete(confirm) => {
+                let elapsed = confirm.countdown_start.elapsed().as_secs();
                 DELETE_COUNTDOWN_SECS.saturating_sub(elapsed)
             }
-            None => 0,
+            _ => 0,
         }
     }
 
     /// Expire the revealed secret after PEEK_DURATION_SECS.
     pub fn expire_peek(&mut self) -> bool {
-        if let Some((_, _, ref at)) = self.revealed_secret {
-            if at.elapsed().as_secs() >= PEEK_DURATION_SECS {
-                self.revealed_secret = None;
+        if let Mode::Secrets { revealed, .. } = &mut self.mode {
+            if revealed.as_ref().is_some_and(|r| r.at.elapsed().as_secs() >= PEEK_DURATION_SECS) {
+                *revealed = None;
                 return true;
             }
         }
         false
     }
 
+    /// The secret value the open secrets popup shows, if any.
+    pub fn revealed(&self) -> Option<&Reveal> {
+        match &self.mode {
+            Mode::Secrets { revealed, .. } => revealed.as_ref(),
+            _ => None,
+        }
+    }
+
     /// Seconds remaining on the peek reveal countdown.
     pub fn peek_remaining(&self) -> u64 {
-        match self.revealed_secret {
-            Some((_, _, ref at)) => {
-                PEEK_DURATION_SECS.saturating_sub(at.elapsed().as_secs())
-            }
+        match self.revealed() {
+            Some(r) => PEEK_DURATION_SECS.saturating_sub(r.at.elapsed().as_secs()),
             None => 0,
         }
     }
@@ -759,8 +814,8 @@ impl App {
     pub fn has_timed_state(&self) -> bool {
         self.status_message.is_some()
             || !self.row_flashes.is_empty()
-            || self.revealed_secret.is_some()
-            || self.delete_countdown_start.is_some()
+            || self.revealed().is_some()
+            || matches!(self.mode, Mode::ConfirmDelete(_))
             || !self.preview_pending.is_empty()
     }
 
@@ -825,6 +880,34 @@ impl App {
 
     pub fn selected_session_name(&self) -> Option<String> {
         self.selected_session().map(|s| s.name.clone())
+    }
+
+    /// Hand keyboard input back to the session list, with the notes pane's
+    /// input line ready for the next Tab.
+    pub fn leave_notes(&mut self) {
+        self.notes_focus = NotesFocus::Input;
+        self.focus = Focus::List;
+    }
+
+    /// Drop an in-place To-Do edit: the buffer empties and the highlight stays
+    /// on the task. Does nothing when no edit is open.
+    fn cancel_notes_edit(&mut self) {
+        if self.notes_focus == NotesFocus::Editing {
+            self.queue_input.clear();
+            self.notes_focus = NotesFocus::List;
+        }
+    }
+
+    /// The renderer drew the table alone, so a focused notes pane is not on
+    /// screen. Keys return to the list. A new-task draft stays in the input
+    /// for when the pane fits again; an in-place edit is cancelled as Esc
+    /// cancels it, so its text cannot come back as a second task.
+    pub fn notes_pane_hidden(&mut self) {
+        if self.focus == Focus::Notes {
+            self.cancel_notes_edit();
+            self.leave_notes();
+            self.set_status("The queue pane needs a taller or wider window", StatusLevel::Info);
+        }
     }
 
     /// Ask the worker for the selected session's preview, unless it is already
@@ -1052,27 +1135,24 @@ impl App {
             Mode::Normal => self.handle_normal(key),
             Mode::Search => self.handle_search(key),
             Mode::SessionMenu => self.handle_session_menu(key),
-            Mode::ConfirmDelete => self.handle_confirm_delete(key),
-            Mode::ConfirmBatchDelete => self.handle_confirm_batch_delete(key),
+            Mode::ConfirmDelete(_) => self.handle_confirm_delete(key),
             Mode::ConfirmForceOpen => self.handle_confirm_force_open(key),
             Mode::ConfirmRotate => self.handle_confirm_rotate(key),
             Mode::Rename => self.handle_rename(key),
             Mode::CreateSession => self.handle_create_session(key),
-            Mode::Secrets => self.handle_secrets(key),
+            Mode::Secrets { .. } => self.handle_secrets(key),
             Mode::Changelog => self.handle_changelog(key),
             Mode::Legend => self.handle_legend(key),
             Mode::Merge => self.handle_merge(key),
-            Mode::CommandOutput(_) => {
-                if self.return_to_secrets {
-                    self.return_to_secrets = false;
-                    if self.secrets_names.is_empty() {
-                        self.mode = Mode::Normal;
+            Mode::CommandOutput { .. } => {
+                if let Mode::CommandOutput { then: ReturnTo::Secrets(list), .. } =
+                    std::mem::replace(&mut self.mode, Mode::Normal)
+                {
+                    if list.names.is_empty() {
                         self.set_status("No secrets remaining", StatusLevel::Info);
                     } else {
-                        self.mode = Mode::Secrets;
+                        self.mode = Mode::Secrets { list, revealed: None };
                     }
-                } else {
-                    self.mode = Mode::Normal;
                 }
                 Action::None
             }
@@ -1185,7 +1265,7 @@ impl App {
                 } else {
                     let mut names: Vec<String> = self.marked_sessions.iter().cloned().collect();
                     names.sort();
-                    self.open_delete_confirm(&names, Mode::ConfirmBatchDelete);
+                    self.open_delete_confirm(DeleteTargets::Marked(names));
                 }
                 Action::None
             }
@@ -1257,8 +1337,7 @@ impl App {
         match key.code {
             KeyCode::Esc => {
                 self.queue_input.clear();
-                self.notes_focus = NotesFocus::Input;
-                self.focus = Focus::List;
+                self.leave_notes();
             }
             KeyCode::Enter => {
                 return self.submit_notes_input();
@@ -1328,8 +1407,7 @@ impl App {
                 }
             }
             KeyCode::Esc => {
-                self.notes_focus = NotesFocus::Input;
-                self.focus = Focus::List;
+                self.leave_notes();
             }
             _ => {}
         }
@@ -1342,10 +1420,7 @@ impl App {
     fn handle_notes_editing(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Enter => return self.submit_notes_input(),
-            KeyCode::Esc => {
-                self.queue_input.clear();
-                self.notes_focus = NotesFocus::List;
-            }
+            KeyCode::Esc => self.cancel_notes_edit(),
             KeyCode::Left => self.queue_input.move_left(),
             KeyCode::Right => self.queue_input.move_right(),
             KeyCode::Home => self.queue_input.move_home(),
@@ -1374,9 +1449,9 @@ impl App {
 
     /// Swap in every finished rescan the worker has delivered. Returns whether
     /// the table changed, so the event loop knows to repaint. While a modal is
-    /// open the result stays in the channel: a delete or rename dialog acts on
-    /// the current selection, and a table replaced underneath it could move
-    /// that selection to a different session than the one the user confirmed.
+    /// open the result stays in the channel: a rename dialog acts on the
+    /// current selection, and a table replaced underneath it could move that
+    /// selection to a different session than the one the user confirmed.
     pub fn drain_scans(&mut self) -> bool {
         if self.mode != Mode::Normal {
             return false;
@@ -1570,7 +1645,7 @@ impl App {
                 // `cs <name> --remote` server serves it, where cs -rm
                 // refuses it outright and so does the confirm.
                 if let Some(name) = self.selected_session().map(|s| s.name.clone()) {
-                    self.open_delete_confirm(std::slice::from_ref(&name), Mode::ConfirmDelete);
+                    self.open_delete_confirm(DeleteTargets::One(name));
                 }
                 Action::None
             }
@@ -1657,73 +1732,58 @@ impl App {
         Action::None
     }
 
+    /// `y` removes the confirm's targets once its countdown has run out. D
+    /// and F switch the escalation it offers on or off (`cs -rm
+    /// --delete-files` and `--force`); any other key cancels.
     fn handle_confirm_delete(&mut self, key: KeyEvent) -> Action {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                if self.delete_countdown_remaining() == 0 {
-                    self.execute_delete();
-                } else {
-                    self.set_status("Wait...", StatusLevel::Info);
-                }
+        if matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')) {
+            if self.delete_countdown_remaining() > 0 {
+                self.set_status("Wait...", StatusLevel::Info);
+                return Action::None;
             }
-            code => self.toggle_delete_grant_or_cancel(code),
+            let Mode::ConfirmDelete(confirm) = std::mem::replace(&mut self.mode, Mode::Normal) else {
+                unreachable!("handle_confirm_delete dispatched outside Mode::ConfirmDelete");
+            };
+            match confirm.targets {
+                DeleteTargets::One(name) => self.execute_delete(&name, confirm.grants),
+                DeleteTargets::Marked(names) => self.execute_batch_delete(&names, confirm.grants),
+            }
+            return Action::None;
+        }
+        let Mode::ConfirmDelete(confirm) = &mut self.mode else {
+            unreachable!("handle_confirm_delete dispatched outside Mode::ConfirmDelete");
+        };
+        match key.code {
+            KeyCode::Char('D') if confirm.offers.unowned_files => {
+                confirm.grants.unowned_files = !confirm.grants.unowned_files;
+            }
+            KeyCode::Char('F') if confirm.offers.past_live_lock => {
+                confirm.grants.past_live_lock = !confirm.grants.past_live_lock;
+            }
+            _ => self.mode = Mode::Normal,
         }
         Action::None
     }
 
-    fn handle_confirm_batch_delete(&mut self, key: KeyEvent) -> Action {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                if self.delete_countdown_remaining() == 0 {
-                    self.execute_batch_delete();
-                } else {
-                    self.set_status("Wait...", StatusLevel::Info);
-                }
-            }
-            code => self.toggle_delete_grant_or_cancel(code),
-        }
-        Action::None
-    }
-
-    /// In a delete confirm, D and F switch the escalation it offers on or
-    /// off (`cs -rm --delete-files` and `--force`); any other key cancels.
-    fn toggle_delete_grant_or_cancel(&mut self, code: KeyCode) {
-        match code {
-            KeyCode::Char('D') if self.delete_offers.unowned_files => {
-                self.delete_grants.unowned_files = !self.delete_grants.unowned_files;
-            }
-            KeyCode::Char('F') if self.delete_offers.past_live_lock => {
-                self.delete_grants.past_live_lock = !self.delete_grants.past_live_lock;
-            }
-            _ => self.close_delete_confirm(),
-        }
-    }
-
-    /// Open the delete confirm `mode` for `names`, with every escalation
-    /// off: its lines name each live session and each one holding files
-    /// beyond cs's own, and it offers the escalation each needs. Stays
-    /// closed, with the reason in the status line, when `cs -rm` run inside
-    /// the picker's session would refuse any of `names` from there, when a
-    /// `cs <name> --remote` server serves any of them, and when a file
-    /// listing fails.
-    fn open_delete_confirm(&mut self, names: &[String], mode: Mode) {
-        match self.delete_confirm_lines(names) {
+    /// Open the delete confirm for `targets`, with every escalation off: its
+    /// lines name each live session and each one holding files beyond cs's
+    /// own, and it offers the escalation each needs. Stays closed, with the
+    /// reason in the status line, when `cs -rm` run inside the picker's
+    /// session would refuse any of them from there, when a `cs <name>
+    /// --remote` server serves any of them, and when a file listing fails.
+    fn open_delete_confirm(&mut self, targets: DeleteTargets) {
+        match self.delete_confirm_lines(targets.names()) {
             Ok((warnings, offers)) => {
-                self.delete_warnings = warnings;
-                self.delete_offers = offers;
-                self.delete_grants = session::RemoveGrants::default();
-                self.delete_countdown_start = Some(std::time::Instant::now());
-                self.mode = mode;
+                self.mode = Mode::ConfirmDelete(DeleteConfirm {
+                    targets,
+                    countdown_start: std::time::Instant::now(),
+                    warnings,
+                    offers,
+                    grants: session::RemoveGrants::default(),
+                });
             }
             Err(e) => self.set_status(e, StatusLevel::Error),
         }
-    }
-
-    fn close_delete_confirm(&mut self) {
-        self.mode = Mode::Normal;
-        self.delete_countdown_start = None;
-        self.delete_offers = session::RemoveGrants::default();
-        self.delete_grants = session::RemoveGrants::default();
     }
 
     fn handle_confirm_force_open(&mut self, key: KeyEvent) -> Action {
@@ -1965,46 +2025,58 @@ impl App {
         }
     }
 
+    /// Taken out of the mode and put back only while the popup stays open, so
+    /// any key that leaves it leaves its reveal behind.
     fn handle_secrets(&mut self, key: KeyEvent) -> Action {
+        let Mode::Secrets { mut list, mut revealed } = std::mem::replace(&mut self.mode, Mode::Normal) else {
+            unreachable!("handle_secrets dispatched outside Mode::Secrets");
+        };
         match key.code {
-            KeyCode::Esc | KeyCode::Char('q') => {
-                self.revealed_secret = None;
-                self.mode = Mode::Normal;
-            }
+            KeyCode::Esc | KeyCode::Char('q') => return Action::None,
             KeyCode::Down | KeyCode::Char('j') => {
-                if !self.secrets_names.is_empty()
-                    && self.secrets_selected < self.secrets_names.len() - 1
-                {
-                    self.secrets_selected += 1;
+                if list.selected + 1 < list.names.len() {
+                    list.selected += 1;
                 }
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                if self.secrets_selected > 0 {
-                    self.secrets_selected -= 1;
+                if list.selected > 0 {
+                    list.selected -= 1;
                 }
             }
             KeyCode::Char('v') | KeyCode::Enter => {
-                if let Some(key_name) = self.secrets_names.get(self.secrets_selected).cloned() {
-                    self.peek_secret(&key_name);
+                if let Some(key_name) = list.names.get(list.selected) {
+                    if let Some(reveal) = self.peek_secret(key_name) {
+                        revealed = Some(reveal);
+                    }
                 }
             }
             KeyCode::Char('d') => {
-                if let Some(key_name) = self.secrets_names.get(self.secrets_selected).cloned() {
-                    // Only mirror a deletion the helper actually made: a denied
-                    // keychain prompt exits non-zero, and dropping the row
-                    // anyway claims a deletion that did not happen.
-                    if self.run_secrets_subcommand("delete", &key_name) {
-                        self.secrets_names.remove(self.secrets_selected);
-                        if self.secrets_selected >= self.secrets_names.len()
-                            && !self.secrets_names.is_empty()
-                        {
-                            self.secrets_selected = self.secrets_names.len() - 1;
+                if let Some(key_name) = list.names.get(list.selected).cloned() {
+                    match self.run_secrets_subcommand("delete", &key_name) {
+                        Some(Ok((deleted, text))) => {
+                            // Only mirror a deletion the helper actually made: a denied
+                            // keychain prompt exits non-zero, and dropping the row
+                            // anyway claims a deletion that did not happen.
+                            if deleted {
+                                list.names.remove(list.selected);
+                                if list.selected >= list.names.len() && !list.names.is_empty() {
+                                    list.selected = list.names.len() - 1;
+                                }
+                            }
+                            self.mode = Mode::CommandOutput { text, then: ReturnTo::Secrets(list) };
+                            return Action::None;
                         }
+                        Some(Err(e)) => {
+                            self.set_status(format!("Secrets failed: {}", e), StatusLevel::Error);
+                            return Action::None;
+                        }
+                        None => {}
                     }
                 }
             }
             _ => {}
         }
+        self.mode = Mode::Secrets { list, revealed };
         Action::None
     }
 
@@ -2029,9 +2101,19 @@ impl App {
     /// this, now: the row's pid was read at the last scan and its process
     /// may have exited since.
     fn locked_selection_refusal(&self) -> Option<String> {
-        let session = self.selected_session()?;
-        let pid = session.liveness.lock_pid().filter(|&pid| session::is_pid_alive(pid))?;
-        Some(session::live_refusal(&session.name, pid))
+        let name = &self.selected_session()?.name;
+        let pid = self.live_lock_pid(name)?;
+        Some(session::live_refusal(name, pid))
+    }
+
+    /// The pid holding `name`'s lock as its row was scanned, when that
+    /// process is alive now.
+    fn live_lock_pid(&self, name: &str) -> Option<u32> {
+        self.sessions
+            .iter()
+            .find(|s| s.name == name)
+            .and_then(|s| s.liveness.lock_pid())
+            .filter(|&pid| session::is_pid_alive(pid))
     }
 
     /// `locked_selection_refusal`, then the selected session's lock read
@@ -2066,13 +2148,7 @@ impl App {
             if let Some(refusal) = session::served_refusal(name, &path) {
                 return Err(refusal);
             }
-            let live_pid = self
-                .sessions
-                .iter()
-                .find(|s| &s.name == name)
-                .and_then(|s| s.liveness.lock_pid())
-                .filter(|&pid| session::is_pid_alive(pid));
-            if let Some(pid) = live_pid {
+            if let Some(pid) = self.live_lock_pid(name) {
                 lines.push(session::DeleteWarning::line(format!("{name} is live (pid {pid})")));
                 offers.past_live_lock = true;
             }
@@ -2088,42 +2164,36 @@ impl App {
         Ok((lines, offers))
     }
 
-    fn execute_delete(&mut self) {
-        let grants = self.delete_grants;
+    fn execute_delete(&mut self, name: &str, grants: session::RemoveGrants) {
         if !grants.past_live_lock {
-            if let Some(refusal) = self.locked_selection_refusal() {
-                self.set_status(refusal, StatusLevel::Error);
-                self.close_delete_confirm();
+            if let Some(pid) = self.live_lock_pid(name) {
+                self.set_status(session::live_refusal(name, pid), StatusLevel::Error);
                 return;
             }
         }
-        if let Some(name) = self.selected_session().map(|s| s.name.clone()) {
-            let root = self.sessions_root.clone();
-            let path = root.join(&name);
-            // An adopted link loses only the link; the age state is the project's.
-            let was_link = is_symlink(&path);
-            match session::remove_session_path(&root, &name, &path, grants) {
-                Ok(()) => {
-                    match if was_link { Ok(None) } else { drop_age_state(&name) } {
-                        Ok(None) => self.set_status(format!("Deleted: {}", name), StatusLevel::Success),
-                        Ok(Some(dir)) => self.set_status(
-                            format!("Deleted: {} · removed age state {}", name, dir.display()),
-                            StatusLevel::Success,
-                        ),
-                        Err(e) => self.set_status(format!("Deleted: {}, but {}", name, e), StatusLevel::Error),
-                    }
-                    self.rescan_now();
+        let root = self.sessions_root.clone();
+        let path = root.join(name);
+        // An adopted link loses only the link; the age state is the project's.
+        let was_link = is_symlink(&path);
+        match session::remove_session_path(&root, name, &path, grants) {
+            Ok(()) => {
+                match if was_link { Ok(None) } else { drop_age_state(name) } {
+                    Ok(None) => self.set_status(format!("Deleted: {}", name), StatusLevel::Success),
+                    Ok(Some(dir)) => self.set_status(
+                        format!("Deleted: {} · removed age state {}", name, dir.display()),
+                        StatusLevel::Success,
+                    ),
+                    Err(e) => self.set_status(format!("Deleted: {}, but {}", name, e), StatusLevel::Error),
                 }
-                Err(e) => {
-                    self.set_status(format!("Delete failed: {}", e), StatusLevel::Error);
-                }
+                self.rescan_now();
+            }
+            Err(e) => {
+                self.set_status(format!("Delete failed: {}", e), StatusLevel::Error);
             }
         }
-        self.close_delete_confirm();
     }
 
-    fn execute_batch_delete(&mut self) {
-        let grants = self.delete_grants;
+    fn execute_batch_delete(&mut self, names: &[String], grants: session::RemoveGrants) {
         let root = self.sessions_root.clone();
         let mut deleted = 0;
         let mut errors = 0;
@@ -2131,16 +2201,10 @@ impl App {
         let mut reasons: Vec<String> = Vec::new();
         let mut aged: Vec<String> = Vec::new();
         let mut age_failures: Vec<String> = Vec::new();
-        let names: Vec<String> = self.marked_sessions.iter().cloned().collect();
-        for name in &names {
+        for name in names {
             // Resolved per name rather than from the selection: a batch mixes
             // states, and a row can take the lock between marking and confirming.
-            let lock_pid = self
-                .sessions
-                .iter()
-                .find(|s| &s.name == name)
-                .and_then(|s| s.liveness.lock_pid())
-                .filter(|&pid| !grants.past_live_lock && session::is_pid_alive(pid));
+            let lock_pid = if grants.past_live_lock { None } else { self.live_lock_pid(name) };
             if let Some(pid) = lock_pid {
                 live.push(format!("{} (pid {})", name, pid));
                 errors += 1;
@@ -2190,7 +2254,6 @@ impl App {
         }
         let level = if errors == 0 && age_failures.is_empty() { StatusLevel::Success } else { StatusLevel::Error };
         self.set_status(text, level);
-        self.close_delete_confirm();
     }
 
     fn execute_rename(&mut self) {
@@ -2362,9 +2425,10 @@ impl App {
             match output {
                 Ok(out) if out.status.success() => {
                     let text = String::from_utf8_lossy(&out.stdout).to_string();
-                    self.secrets_names = Self::parse_secrets_list(&text);
-                    self.secrets_selected = 0;
-                    self.mode = Mode::Secrets;
+                    self.mode = Mode::Secrets {
+                        list: SecretsList { names: Self::parse_secrets_list(&text), selected: 0 },
+                        revealed: None,
+                    };
                 }
                 Ok(out) => {
                     let err = String::from_utf8_lossy(&out.stderr);
@@ -2392,38 +2456,27 @@ impl App {
             .collect()
     }
 
-    /// Run `cs <session> -secrets <subcommand> <key>` and show what it printed.
-    /// Returns whether the helper ran AND exited zero, so a caller mirroring the
-    /// store in memory mirrors only the changes the helper actually made.
-    fn run_secrets_subcommand(&mut self, subcommand: &str, key: &str) -> bool {
-        let mut succeeded = false;
-        if let Some(session) = self.selected_session() {
-            let name = session.name.clone();
-            let output = std::process::Command::new(cs_bin())
-                .args([&name, "-secrets", subcommand, key])
-                .output();
-            match output {
-                Ok(out) => {
-                    succeeded = out.status.success();
-                    let text = String::from_utf8_lossy(&out.stdout).to_string()
-                        + &String::from_utf8_lossy(&out.stderr).to_string();
-                    self.return_to_secrets = true;
-                    self.mode = Mode::CommandOutput(text);
-                }
-                Err(e) => {
-                    self.set_status(format!("Secrets failed: {}", e), StatusLevel::Error);
-                    self.mode = Mode::Normal;
-                }
-            }
-        }
-        succeeded
+    /// Run `cs <session> -secrets <subcommand> <key>` for the selected session:
+    /// None without one, else whether the helper ran AND exited zero, so a
+    /// caller mirroring the store in memory mirrors only the changes the helper
+    /// actually made, and what it printed on both streams.
+    fn run_secrets_subcommand(&self, subcommand: &str, key: &str) -> Option<std::io::Result<(bool, String)>> {
+        let name = self.selected_session()?.name.clone();
+        let output = std::process::Command::new(cs_bin())
+            .args([&name, "-secrets", subcommand, key])
+            .output();
+        Some(output.map(|out| {
+            let text = String::from_utf8_lossy(&out.stdout).to_string()
+                + &String::from_utf8_lossy(&out.stderr).to_string();
+            (out.status.success(), text)
+        }))
     }
 
     /// Archive the selected session's oldest narrative sections through
     /// `cs <name> -narrative rotate`. Both streams land in the output popup:
     /// a narrative under budget rotates nothing and says so, and that sentence
-    /// is the whole answer as often as a rotation is. Unlike the secrets
-    /// helper this never sets `return_to_secrets`, so dismissing the output
+    /// is the whole answer as often as a rotation is. Unlike a secrets
+    /// delete's output this one goes to `ReturnTo::Normal`, so dismissing it
     /// returns to the list.
     fn rotate_narrative(&mut self) {
         let name = match self.selected_session_name() {
@@ -2458,7 +2511,7 @@ impl App {
                 self.preview_pending.remove(&name);
                 let text = String::from_utf8_lossy(&out.stdout).to_string()
                     + &String::from_utf8_lossy(&out.stderr);
-                self.mode = Mode::CommandOutput(text);
+                self.mode = Mode::CommandOutput { text, then: ReturnTo::Normal };
             }
             Err(e) => {
                 self.set_status(format!("Rotate failed: {}", e), StatusLevel::Error);
@@ -2467,27 +2520,25 @@ impl App {
         }
     }
 
-    fn peek_secret(&mut self, key_name: &str) {
-        if let Some(session) = self.selected_session() {
-            let name = session.name.clone();
-            let output = std::process::Command::new(cs_bin())
-                .args([&name, "-secrets", "get", key_name])
-                .output();
-            match output {
-                Ok(out) if out.status.success() => {
-                    let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    self.revealed_secret =
-                        Some((key_name.to_string(), value, std::time::Instant::now()));
-                }
-                Ok(out) => {
-                    let err = String::from_utf8_lossy(&out.stderr);
-                    self.set_status(format!("Peek failed: {}", err.trim()), StatusLevel::Error);
-                }
-                Err(e) => {
-                    self.set_status(format!("Peek failed: {}", e), StatusLevel::Error);
-                }
+    fn peek_secret(&mut self, key_name: &str) -> Option<Reveal> {
+        let name = self.selected_session()?.name.clone();
+        let output = std::process::Command::new(cs_bin())
+            .args([&name, "-secrets", "get", key_name])
+            .output();
+        match output {
+            Ok(out) if out.status.success() => {
+                let value = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                return Some(Reveal { key: key_name.to_string(), value, at: std::time::Instant::now() });
+            }
+            Ok(out) => {
+                let err = String::from_utf8_lossy(&out.stderr);
+                self.set_status(format!("Peek failed: {}", err.trim()), StatusLevel::Error);
+            }
+            Err(e) => {
+                self.set_status(format!("Peek failed: {}", e), StatusLevel::Error);
             }
         }
+        None
     }
 
     /// The session menu as it should be drawn for the selected row: MENU_ITEMS
@@ -2528,10 +2579,7 @@ impl App {
     /// a different session's queue. Resets the Notes highlight when the session
     /// actually changes.
     fn switch_selected_session(&mut self, idx: usize) {
-        if self.notes_focus == NotesFocus::Editing {
-            self.queue_input.clear();
-            self.notes_focus = NotesFocus::List;
-        }
+        self.cancel_notes_edit();
         if self.table_state.selected() != Some(idx) {
             self.notes_selected = 0;
         }
@@ -3086,15 +3134,15 @@ mod tests {
         app.row_flashes.clear();
         assert!(!app.has_timed_state());
 
-        app.revealed_secret =
-            Some(("KEY".into(), "value".into(), std::time::Instant::now()));
+        app.mode = revealed_popup("KEY", "value", 0);
         assert!(app.has_timed_state());
-        app.revealed_secret = None;
+        app.mode = secrets_mode(&["KEY"], 0);
         assert!(!app.has_timed_state());
+        app.mode = Mode::Normal;
 
-        app.delete_countdown_start = Some(std::time::Instant::now());
+        app.mode = delete_confirm_on(DeleteTargets::One("alpha".into()));
         assert!(app.has_timed_state());
-        app.delete_countdown_start = None;
+        app.mode = Mode::Normal;
         assert!(!app.has_timed_state());
     }
 
@@ -3500,7 +3548,7 @@ mod tests {
     fn d_enters_confirm_delete_mode() {
         let mut app = App::new(sample_sessions());
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-        assert_eq!(app.mode, Mode::ConfirmDelete);
+        assert!(matches!(app.mode, Mode::ConfirmDelete(_)));
     }
 
     #[test]
@@ -3604,10 +3652,24 @@ mod tests {
         assert_eq!(app.table_state.selected(), Some(0));
     }
 
+    /// The secrets popup open on `names`, `selected` highlighted, nothing revealed.
+    fn secrets_mode(names: &[&str], selected: usize) -> Mode {
+        let names = names.iter().map(|n| n.to_string()).collect();
+        Mode::Secrets { list: SecretsList { names, selected }, revealed: None }
+    }
+
+    /// The open secrets popup's list; panics when the popup is not open.
+    fn secrets_list(app: &App) -> &SecretsList {
+        match &app.mode {
+            Mode::Secrets { list, .. } => list,
+            other => panic!("expected the secrets popup, got {other:?}"),
+        }
+    }
+
     #[test]
     fn secrets_esc_returns_to_normal() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
+        app.mode = secrets_mode(&[], 0);
         app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
     }
@@ -3615,7 +3677,7 @@ mod tests {
     #[test]
     fn secrets_q_returns_to_normal() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
+        app.mode = secrets_mode(&[], 0);
         app.handle_key(KeyEvent::from(KeyCode::Char('q')));
         assert_eq!(app.mode, Mode::Normal);
     }
@@ -3623,47 +3685,40 @@ mod tests {
     #[test]
     fn secrets_navigate_down() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
-        app.secrets_names = vec!["KEY1".into(), "KEY2".into(), "KEY3".into()];
-        app.secrets_selected = 0;
+        app.mode = secrets_mode(&["KEY1", "KEY2", "KEY3"], 0);
         app.handle_key(KeyEvent::from(KeyCode::Char('j')));
-        assert_eq!(app.secrets_selected, 1);
+        assert_eq!(secrets_list(&app).selected, 1);
         app.handle_key(KeyEvent::from(KeyCode::Char('j')));
-        assert_eq!(app.secrets_selected, 2);
+        assert_eq!(secrets_list(&app).selected, 2);
         // Should not go past the end
         app.handle_key(KeyEvent::from(KeyCode::Char('j')));
-        assert_eq!(app.secrets_selected, 2);
+        assert_eq!(secrets_list(&app).selected, 2);
     }
 
     #[test]
     fn secrets_navigate_up() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
-        app.secrets_names = vec!["KEY1".into(), "KEY2".into()];
-        app.secrets_selected = 1;
+        app.mode = secrets_mode(&["KEY1", "KEY2"], 1);
         app.handle_key(KeyEvent::from(KeyCode::Char('k')));
-        assert_eq!(app.secrets_selected, 0);
+        assert_eq!(secrets_list(&app).selected, 0);
         // Should not go below 0
         app.handle_key(KeyEvent::from(KeyCode::Char('k')));
-        assert_eq!(app.secrets_selected, 0);
+        assert_eq!(secrets_list(&app).selected, 0);
     }
 
     #[test]
     fn command_output_returns_to_secrets_when_flagged() {
         let mut app = App::new(sample_sessions());
-        app.secrets_names = vec!["KEY1".into(), "KEY2".into()];
-        app.secrets_selected = 0;
-        app.return_to_secrets = true;
-        app.mode = Mode::CommandOutput("value: 123".into());
+        let list = SecretsList { names: vec!["KEY1".into(), "KEY2".into()], selected: 0 };
+        app.mode = Mode::CommandOutput { text: "value: 123".into(), then: ReturnTo::Secrets(list) };
         app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
-        assert_eq!(app.mode, Mode::Secrets);
-        assert!(!app.return_to_secrets);
+        assert_eq!(app.mode, secrets_mode(&["KEY1", "KEY2"], 0));
     }
 
     #[test]
     fn command_output_returns_to_normal_when_not_flagged() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::CommandOutput("some output".into());
+        app.mode = Mode::CommandOutput { text: "some output".into(), then: ReturnTo::Normal };
         app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
         assert_eq!(app.mode, Mode::Normal);
     }
@@ -3760,13 +3815,13 @@ mod tests {
         app.mode = Mode::SessionMenu;
         app.menu_selected = 1;
         app.handle_key(KeyEvent::from(KeyCode::Enter));
-        assert_eq!(app.mode, Mode::ConfirmDelete);
-        assert_eq!(app.delete_warnings, vec![session::DeleteWarning::line(format!("gamma is live (pid {pid})"))]);
+        let confirm = open_confirm(&mut app);
+        assert_eq!(confirm.warnings, vec![session::DeleteWarning::line(format!("gamma is live (pid {pid})"))]);
         assert_eq!(
-            app.delete_offers,
+            confirm.offers,
             session::RemoveGrants { past_live_lock: true, unowned_files: false }
         );
-        assert_eq!(app.delete_grants, session::RemoveGrants::default(), "nothing is granted until F");
+        assert_eq!(confirm.grants, session::RemoveGrants::default(), "nothing is granted until F");
     }
 
     #[test]
@@ -3777,8 +3832,8 @@ mod tests {
         app.mode = Mode::SessionMenu;
         app.menu_selected = 1;
         app.handle_key(KeyEvent::from(KeyCode::Enter));
-        assert_eq!(app.mode, Mode::ConfirmDelete);
-        assert!(app.delete_countdown_start.is_some());
+        assert!(matches!(app.mode, Mode::ConfirmDelete(_)));
+        assert!(app.delete_countdown_remaining() > 0);
     }
 
     #[test]
@@ -3803,7 +3858,7 @@ mod tests {
         let mut app = App::new(sample_sessions());
         app.mode = Mode::SessionMenu;
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-        assert_eq!(app.mode, Mode::ConfirmDelete);
+        assert!(matches!(app.mode, Mode::ConfirmDelete(_)));
     }
 
     #[test]
@@ -3821,7 +3876,7 @@ mod tests {
         app.mode = Mode::SessionMenu;
         app.menu_selected = 1; // Delete
         app.handle_key(KeyEvent::from(KeyCode::Enter));
-        assert_eq!(app.mode, Mode::ConfirmDelete);
+        assert!(matches!(app.mode, Mode::ConfirmDelete(_)));
     }
 
     #[test]
@@ -4008,9 +4063,8 @@ mod tests {
 
         app.execute_menu_action(MenuAction::Delete);
 
-        assert!(matches!(app.mode, Mode::ConfirmDelete));
         assert_eq!(
-            app.delete_warnings,
+            open_confirm(&mut app).warnings,
             vec![session::DeleteWarning {
                 text: "Also deletes files cs did not create:".to_string(),
                 entries: vec![crate::untracked::Entry { path: "journal.sparsebundle".to_string(), files: 1 }],
@@ -4030,7 +4084,7 @@ mod tests {
         let _guard = test_root::scoped(root.clone());
         let mut app = app_on(&root, "rel");
         app.execute_menu_action(MenuAction::Delete);
-        app.delete_countdown_start = Some(std::time::Instant::now() - std::time::Duration::from_secs(60));
+        run_out_countdown(&mut app);
 
         app.handle_key(KeyEvent::from(KeyCode::Char('y')));
 
@@ -4850,7 +4904,7 @@ mod tests {
         // A periodic rescan starts, then the user opens the delete dialog on
         // bravo while another process removes bravo from disk.
         app.auto_refresh();
-        app.mode = Mode::ConfirmDelete;
+        app.mode = delete_confirm_on(DeleteTargets::One("bravo".into()));
         std::fs::remove_dir_all(root.join("bravo")).unwrap();
         // Make the worker's read see the removal: wait for its answer, then
         // request one more so the applied read is post-removal.
@@ -4864,7 +4918,8 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         // The dialog is still open: the table under it must be untouched, or
-        // confirming would delete whichever row the selection fell back to.
+        // a modal acting on the selection would act on whichever row it fell
+        // back to.
         assert_eq!(app.sessions.len(), 2, "a scan must not land under a modal");
         assert_eq!(app.selected_session_name().as_deref(), Some("bravo"));
 
@@ -5163,8 +5218,8 @@ mod tests {
     fn confirm_delete_sets_countdown_start() {
         let mut app = App::new(sample_sessions());
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-        assert_eq!(app.mode, Mode::ConfirmDelete);
-        assert!(app.delete_countdown_start.is_some());
+        assert!(matches!(app.mode, Mode::ConfirmDelete(_)));
+        assert!(app.delete_countdown_remaining() > 0);
     }
 
     #[test]
@@ -5173,7 +5228,7 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
         // Countdown just started — y should be rejected
         app.handle_key(KeyEvent::from(KeyCode::Char('y')));
-        assert_eq!(app.mode, Mode::ConfirmDelete); // still in confirm mode
+        assert!(matches!(app.mode, Mode::ConfirmDelete(_))); // still in confirm mode
         assert_eq!(app.sessions.len(), 3); // not deleted
         // Should show a "Wait..." status message
         assert!(app.status_message.as_ref().unwrap().text.contains("Wait"));
@@ -5184,8 +5239,8 @@ mod tests {
         let mut app = App::new(sample_sessions());
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
         // Simulate countdown elapsed by backdating the start
-        app.delete_countdown_start =
-            Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
+        open_confirm(&mut app).countdown_start =
+            std::time::Instant::now() - std::time::Duration::from_secs(3);
         app.handle_key(KeyEvent::from(KeyCode::Char('y')));
         // execute_delete runs and returns to Normal
         // (actual filesystem delete fails in tests, but mode change confirms acceptance)
@@ -5200,6 +5255,31 @@ mod tests {
             .position(|&i| app.sessions[i].name == name)
             .expect("session should be in the filtered set");
         app.table_state.select(Some(idx));
+    }
+
+    /// The open delete confirm; panics when none is open.
+    fn open_confirm(app: &mut App) -> &mut DeleteConfirm {
+        match &mut app.mode {
+            Mode::ConfirmDelete(confirm) => confirm,
+            other => panic!("expected the delete confirm, got {other:?}"),
+        }
+    }
+
+    /// Runs the open confirm's countdown out, so `y` is taken.
+    fn run_out_countdown(app: &mut App) {
+        open_confirm(app).countdown_start = std::time::Instant::now() - std::time::Duration::from_secs(60);
+    }
+
+    /// A delete confirm on `targets` that warns of and offers nothing, its
+    /// countdown just started.
+    fn delete_confirm_on(targets: DeleteTargets) -> Mode {
+        Mode::ConfirmDelete(DeleteConfirm {
+            targets,
+            countdown_start: std::time::Instant::now(),
+            warnings: Vec::new(),
+            offers: session::RemoveGrants::default(),
+            grants: session::RemoveGrants::default(),
+        })
     }
 
     /// Gives gamma's lock to this test process, which is alive for as long as
@@ -5224,7 +5304,7 @@ mod tests {
         // Called directly rather than through `d`+`y`: this is the guard that
         // has to hold even when the row takes the lock after the confirmation
         // was opened, so the key path must not be what proves it.
-        app.execute_delete();
+        app.execute_delete("gamma", session::RemoveGrants::default());
 
         assert_eq!(app.mode, Mode::Normal);
         let status = app
@@ -5252,8 +5332,8 @@ mod tests {
         select_named(&mut app, "gamma");
 
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-        assert_eq!(app.mode, Mode::ConfirmDelete);
-        app.delete_countdown_start = Some(std::time::Instant::now() - std::time::Duration::from_secs(60));
+        assert!(matches!(app.mode, Mode::ConfirmDelete(_)));
+        run_out_countdown(&mut app);
         app.handle_key(KeyEvent::from(KeyCode::Char('y')));
 
         assert_eq!(app.mode, Mode::Normal);
@@ -5275,14 +5355,14 @@ mod tests {
         let mut app = app_on(&root, "busy");
 
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-        assert!(app.delete_offers.past_live_lock, "a live session is offered F");
+        assert!(open_confirm(&mut app).offers.past_live_lock, "a live session is offered F");
         app.handle_key(KeyEvent::from(KeyCode::Char('F')));
-        assert!(app.delete_grants.past_live_lock);
-        app.delete_countdown_start = Some(std::time::Instant::now() - std::time::Duration::from_secs(60));
+        assert!(open_confirm(&mut app).grants.past_live_lock);
+        run_out_countdown(&mut app);
         app.handle_key(KeyEvent::from(KeyCode::Char('y')));
 
         assert!(!root.join("busy").exists(), "status: {:?}", app.status_message.as_ref().map(|m| &m.text));
-        assert_eq!(app.delete_grants, session::RemoveGrants::default(), "a closed confirm keeps no grant");
+        assert_eq!(app.mode, Mode::Normal, "a closed confirm keeps no grant");
         std::fs::remove_dir_all(&root).ok();
     }
 
@@ -5301,9 +5381,9 @@ mod tests {
         let mut app = app_on(&root, "busy");
 
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-        assert_eq!(app.mode, Mode::ConfirmDelete, "a dormant session opens the confirm");
+        assert!(matches!(app.mode, Mode::ConfirmDelete(_)), "a dormant session opens the confirm");
         std::fs::write(root.join("busy/.cs/session.lock"), format!("{pid}\n")).unwrap();
-        app.delete_countdown_start = Some(std::time::Instant::now() - std::time::Duration::from_secs(60));
+        run_out_countdown(&mut app);
         app.handle_key(KeyEvent::from(KeyCode::Char('y')));
 
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
@@ -5333,7 +5413,6 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
 
         assert_eq!(app.mode, Mode::Normal, "the confirm stays closed");
-        assert_eq!(app.delete_offers, session::RemoveGrants::default(), "nothing is offered");
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
         assert_eq!(
             status,
@@ -5428,8 +5507,8 @@ mod tests {
 
             app.handle_key(KeyEvent::from(KeyCode::Char('d')));
 
-            assert_eq!(app.mode, Mode::ConfirmDelete, "caller {caller:?}, target {target}");
-            assert_eq!(app.delete_offers.past_live_lock, offers_f, "caller {caller:?}, target {target}");
+            assert!(matches!(app.mode, Mode::ConfirmDelete(_)), "caller {caller:?}, target {target}");
+            assert_eq!(open_confirm(&mut app).offers.past_live_lock, offers_f, "caller {caller:?}, target {target}");
         }
         std::fs::remove_dir_all(&root).ok();
     }
@@ -5448,12 +5527,9 @@ mod tests {
         let _guard = test_root::scoped(root.clone());
         let _caller = test_caller::scoped("caller");
         let mut app = app_on(&root, "busy");
-        for name in ["busy", "idle"] {
-            app.marked_sessions.insert(name.to_string());
-        }
-        app.delete_grants.past_live_lock = true;
+        let grants = session::RemoveGrants { past_live_lock: true, unowned_files: false };
 
-        app.execute_batch_delete();
+        app.execute_batch_delete(&["busy".to_string(), "idle".to_string()], grants);
 
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
         assert_eq!(
@@ -5508,12 +5584,11 @@ mod tests {
             app.handle_key(KeyEvent::from(KeyCode::Char('d')));
 
             let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
-            seen.push((caller, app.mode == Mode::Normal, app.delete_offers, status));
+            seen.push((caller, app.mode == Mode::Normal, status));
         }
         stop(server);
-        for (caller, closed, offers, status) in seen {
+        for (caller, closed, status) in seen {
             assert!(closed, "caller {caller:?}: the confirm stays closed");
-            assert_eq!(offers, session::RemoveGrants::default(), "caller {caller:?}: nothing is offered");
             assert_eq!(
                 status,
                 format!("Session busy is served by cs busy --remote (remote-control PID {spid}); stop it first with Ctrl-C in its window, or close the window."),
@@ -5543,15 +5618,15 @@ mod tests {
             let mut app = app_on(&root, "busy");
 
             app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-            assert_eq!(app.mode, Mode::ConfirmDelete, "force {force}: an unserved session opens the confirm");
+            assert!(matches!(app.mode, Mode::ConfirmDelete(_)), "force {force}: an unserved session opens the confirm");
             if force {
                 app.handle_key(KeyEvent::from(KeyCode::Char('F')));
-                assert!(app.delete_grants.past_live_lock, "a live session is granted F");
+                assert!(open_confirm(&mut app).grants.past_live_lock, "a live session is granted F");
             }
             let server = fake_remote_server("busy");
             let spid = server.id();
             serve(&root, "busy", &server);
-            app.delete_countdown_start = Some(std::time::Instant::now() - std::time::Duration::from_secs(60));
+            run_out_countdown(&mut app);
             app.handle_key(KeyEvent::from(KeyCode::Char('y')));
             stop(server);
 
@@ -5613,15 +5688,12 @@ mod tests {
         }
         let _guard = test_root::scoped(root.clone());
         let mut app = app_on(&root, "busy");
-        for name in ["busy", "idle"] {
-            app.marked_sessions.insert(name.to_string());
-        }
-        app.delete_grants.past_live_lock = true;
+        let grants = session::RemoveGrants { past_live_lock: true, unowned_files: false };
         let server = fake_remote_server("busy");
         let spid = server.id();
         serve(&root, "busy", &server);
 
-        app.execute_batch_delete();
+        app.execute_batch_delete(&["busy".to_string(), "idle".to_string()], grants);
         stop(server);
 
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
@@ -5659,10 +5731,15 @@ mod tests {
             let mut app = app_on(&root, "busy");
 
             app.handle_key(KeyEvent::from(KeyCode::Char('d')));
-            let opened = app.mode == Mode::ConfirmDelete;
-            let offers = app.delete_offers;
+            let opened = matches!(app.mode, Mode::ConfirmDelete(_));
+            let offers = match &app.mode {
+                Mode::ConfirmDelete(confirm) => confirm.offers,
+                _ => session::RemoveGrants::default(),
+            };
             app.handle_key(KeyEvent::from(KeyCode::Char('F')));
-            app.delete_countdown_start = Some(std::time::Instant::now() - std::time::Duration::from_secs(60));
+            if let Mode::ConfirmDelete(confirm) = &mut app.mode {
+                confirm.countdown_start = std::time::Instant::now() - std::time::Duration::from_secs(60);
+            }
             app.handle_key(KeyEvent::from(KeyCode::Char('y')));
             if let Some(p) = process {
                 stop(p);
@@ -5695,14 +5772,14 @@ mod tests {
 
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
         assert_eq!(
-            app.delete_offers,
+            open_confirm(&mut app).offers,
             session::RemoveGrants { past_live_lock: false, unowned_files: true }
         );
         app.handle_key(KeyEvent::from(KeyCode::Char('D')));
         app.handle_key(KeyEvent::from(KeyCode::Char('D')));
-        assert!(!app.delete_grants.unowned_files, "a second D takes the grant back");
+        assert!(!open_confirm(&mut app).grants.unowned_files, "a second D takes the grant back");
         app.handle_key(KeyEvent::from(KeyCode::Char('D')));
-        app.delete_countdown_start = Some(std::time::Instant::now() - std::time::Duration::from_secs(60));
+        run_out_countdown(&mut app);
         app.handle_key(KeyEvent::from(KeyCode::Char('y')));
 
         assert!(!root.join("rel").exists(), "status: {:?}", app.status_message.as_ref().map(|m| &m.text));
@@ -5720,7 +5797,8 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Char('F')));
 
         assert_eq!(app.mode, Mode::Normal);
-        assert_eq!(app.delete_grants, session::RemoveGrants::default());
+        app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+        assert_eq!(open_confirm(&mut app).grants, session::RemoveGrants::default());
     }
 
     /// A batch mixes states: the dormant rows go, the locked one stays and is
@@ -5729,9 +5807,8 @@ mod tests {
     fn batch_delete_skips_a_locked_session() {
         let mut app = App::new(sample_sessions());
         let pid = hold_gamma_lock(&mut app);
-        app.marked_sessions.insert("gamma".to_string());
 
-        app.execute_batch_delete();
+        app.execute_batch_delete(&["gamma".to_string()], session::RemoveGrants::default());
 
         let status = app
             .status_message
@@ -5757,7 +5834,7 @@ mod tests {
         let pid = std::process::id();
         std::fs::write(root.join("busy/.cs/session.lock"), format!("{pid}\n")).unwrap();
 
-        app.execute_delete();
+        app.execute_delete("busy", session::RemoveGrants::default());
 
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
         assert!(
@@ -5782,8 +5859,8 @@ mod tests {
 
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
 
-        assert_eq!(app.mode, Mode::ConfirmDelete, "status: {:?}", app.status_message.as_ref().map(|m| &m.text));
-        assert!(app.delete_countdown_start.is_some());
+        assert!(matches!(app.mode, Mode::ConfirmDelete(_)), "status: {:?}", app.status_message.as_ref().map(|m| &m.text));
+        assert!(app.delete_countdown_remaining() > 0);
     }
 
     /// A sessions root and a home dir under the temp dir, both scoped to this
@@ -5815,7 +5892,7 @@ mod tests {
         let _home = test_home::scoped(home.clone());
         let mut app = app_on(&root, "agebase");
 
-        app.execute_delete();
+        app.execute_delete("agebase", session::RemoveGrants::default());
 
         let age_dir = home.join(".cs-secrets/sessions/agebase");
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
@@ -5833,11 +5910,9 @@ mod tests {
         let _root = test_root::scoped(root.clone());
         let _home = test_home::scoped(home.clone());
         let mut app = app_on(&root, "agea");
-        for name in ["agea", "ageb", "agec"] {
-            app.marked_sessions.insert(name.to_string());
-        }
+        let names: Vec<String> = ["agea", "ageb", "agec"].map(String::from).to_vec();
 
-        app.execute_batch_delete();
+        app.execute_batch_delete(&names, session::RemoveGrants::default());
 
         let sessions = home.join(".cs-secrets/sessions");
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
@@ -5865,11 +5940,9 @@ mod tests {
         let _root = test_root::scoped(root.clone());
         let _home = test_home::scoped(home.clone());
         let mut app = app_on(&root, "agebk@t");
-        for name in ["agebk@t", "agebl"] {
-            app.marked_sessions.insert(name.to_string());
-        }
+        let names: Vec<String> = ["agebk@t", "agebl"].map(String::from).to_vec();
 
-        app.execute_batch_delete();
+        app.execute_batch_delete(&names, session::RemoveGrants::default());
 
         let sessions = home.join(".cs-secrets/sessions");
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
@@ -5890,7 +5963,7 @@ mod tests {
         let _home = test_home::scoped(home.clone());
         let mut app = app_on(&root, "agewt@t");
 
-        app.execute_delete();
+        app.execute_delete("agewt@t", session::RemoveGrants::default());
 
         let sessions = home.join(".cs-secrets/sessions");
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
@@ -5914,7 +5987,7 @@ mod tests {
         let _home = test_home::scoped(home.clone());
         let mut app = app_on(&root, "ageln");
 
-        app.execute_delete();
+        app.execute_delete("ageln", session::RemoveGrants::default());
 
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
         assert_eq!(status, "Deleted: ageln");
@@ -5954,7 +6027,7 @@ mod tests {
         let _home = test_home::scoped(home.clone());
         let mut app = app_on(&root, "agelk");
 
-        app.execute_delete();
+        app.execute_delete("agelk", session::RemoveGrants::default());
 
         let msg = app.status_message.as_ref().unwrap();
         assert!(!root.join("agelk").exists(), "the session is removed; status: {}", msg.text);
@@ -5985,11 +6058,9 @@ mod tests {
         let _root = test_root::scoped(root.clone());
         let _home = test_home::scoped(home.clone());
         let mut app = app_on(&root, "agelk");
-        for name in ["agelk", "agelknext"] {
-            app.marked_sessions.insert(name.to_string());
-        }
+        let names: Vec<String> = ["agelk", "agelknext"].map(String::from).to_vec();
 
-        app.execute_batch_delete();
+        app.execute_batch_delete(&names, session::RemoveGrants::default());
 
         let msg = app.status_message.as_ref().unwrap();
         assert!(!root.join("agelk").exists(), "agelk is removed; status: {}", msg.text);
@@ -6024,7 +6095,7 @@ mod tests {
         let _home = test_home::scoped(home.clone());
         let mut app = app_on(&root, "agelkhid");
 
-        app.execute_delete();
+        app.execute_delete("agelkhid", session::RemoveGrants::default());
 
         std::fs::set_permissions(&elsewhere, std::fs::Permissions::from_mode(0o700)).unwrap();
         let msg = app.status_message.as_ref().unwrap();
@@ -6054,7 +6125,7 @@ mod tests {
         assert_eq!(age_state_dir("agesent"), None);
         let mut app = app_on(&root, "agesent");
 
-        app.execute_delete();
+        app.execute_delete("agesent", session::RemoveGrants::default());
 
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
         assert_eq!(status, "Deleted: agesent");
@@ -6073,9 +6144,8 @@ mod tests {
         std::os::unix::fs::symlink(&vault, root.join("vt/.cs/memory")).unwrap();
         let _guard = test_root::scoped(root.clone());
         let mut app = app_on(&root, "vt");
-        app.marked_sessions.insert("vt".to_string());
 
-        app.execute_batch_delete();
+        app.execute_batch_delete(&["vt".to_string()], session::RemoveGrants::default());
 
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
         assert!(
@@ -6093,12 +6163,12 @@ mod tests {
         // Just started: should show 2
         assert_eq!(app.delete_countdown_remaining(), 2);
         // Backdate by 1 second
-        app.delete_countdown_start =
-            Some(std::time::Instant::now() - std::time::Duration::from_secs(1));
+        open_confirm(&mut app).countdown_start =
+            std::time::Instant::now() - std::time::Duration::from_secs(1);
         assert_eq!(app.delete_countdown_remaining(), 1);
         // Backdate by 2+ seconds
-        app.delete_countdown_start =
-            Some(std::time::Instant::now() - std::time::Duration::from_secs(3));
+        open_confirm(&mut app).countdown_start =
+            std::time::Instant::now() - std::time::Duration::from_secs(3);
         assert_eq!(app.delete_countdown_remaining(), 0);
     }
 
@@ -6245,52 +6315,64 @@ mod tests {
         assert!(app.fuzzy_indices.is_empty());
     }
 
+    /// The secrets popup listing only `key`, its `value` revealed `age_secs` ago.
+    fn revealed_popup(key: &str, value: &str, age_secs: u64) -> Mode {
+        Mode::Secrets {
+            list: SecretsList { names: vec![key.into()], selected: 0 },
+            revealed: Some(Reveal {
+                key: key.into(),
+                value: value.into(),
+                at: std::time::Instant::now() - std::time::Duration::from_secs(age_secs),
+            }),
+        }
+    }
+
+    /// A popup's debug text, which a failing assertion on the mode prints,
+    /// names the revealed key and never its value.
+    #[test]
+    fn debug_of_a_revealed_popup_hides_the_value() {
+        let text = format!("{:?}", revealed_popup("API_KEY", "s3cr3t-plaintext", 0));
+        assert!(!text.contains("s3cr3t-plaintext"), "the value is printed: {text}");
+        assert!(text.contains("key: \"API_KEY\""), "the key is not printed: {text}");
+        assert!(text.contains("value: \"<redacted>\""), "the value is not marked redacted: {text}");
+    }
+
     #[test]
     fn peek_remaining_returns_countdown() {
         let mut app = App::new(sample_sessions());
         // No reveal
         assert_eq!(app.peek_remaining(), 0);
         // Fresh reveal
-        app.revealed_secret = Some(("KEY".into(), "val".into(), std::time::Instant::now()));
+        app.mode = revealed_popup("KEY", "val", 0);
         assert_eq!(app.peek_remaining(), 5);
         // After 3 seconds
-        app.revealed_secret = Some((
-            "KEY".into(),
-            "val".into(),
-            std::time::Instant::now() - std::time::Duration::from_secs(3),
-        ));
+        app.mode = revealed_popup("KEY", "val", 3);
         assert_eq!(app.peek_remaining(), 2);
     }
 
     #[test]
     fn expire_peek_clears_after_timeout() {
         let mut app = App::new(sample_sessions());
-        app.revealed_secret = Some((
-            "KEY".into(),
-            "val".into(),
-            std::time::Instant::now() - std::time::Duration::from_secs(6),
-        ));
+        app.mode = revealed_popup("KEY", "val", 6);
         assert!(app.expire_peek());
-        assert!(app.revealed_secret.is_none());
+        assert!(app.revealed().is_none());
     }
 
     #[test]
     fn expire_peek_keeps_fresh_reveal() {
         let mut app = App::new(sample_sessions());
-        app.revealed_secret = Some(("KEY".into(), "val".into(), std::time::Instant::now()));
+        app.mode = revealed_popup("KEY", "val", 0);
         assert!(!app.expire_peek());
-        assert!(app.revealed_secret.is_some());
+        assert!(app.revealed().is_some());
     }
 
     #[test]
     fn secrets_esc_clears_revealed_secret() {
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
-        app.secrets_names = vec!["API_KEY".into()];
-        app.revealed_secret = Some(("API_KEY".into(), "sk-abc".into(), std::time::Instant::now()));
+        app.mode = revealed_popup("API_KEY", "sk-abc", 0);
         app.handle_key(KeyEvent::from(KeyCode::Esc));
         assert_eq!(app.mode, Mode::Normal);
-        assert!(app.revealed_secret.is_none());
+        assert!(app.revealed().is_none());
     }
 
     /// A delete the helper never performed must leave the list alone: dropping
@@ -6303,20 +6385,13 @@ mod tests {
         let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("CS_BIN", "/nonexistent/cs");
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
-        app.secrets_names = vec!["API_KEY".into(), "DB_PASSWORD".into()];
-        app.secrets_selected = 0;
+        app.mode = secrets_mode(&["API_KEY", "DB_PASSWORD"], 0);
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
         std::env::remove_var("CS_BIN");
         assert_eq!(
             app.mode,
             Mode::Normal,
             "the failed spawn must have been reached and reported"
-        );
-        assert_eq!(
-            app.secrets_names,
-            vec!["API_KEY", "DB_PASSWORD"],
-            "a delete that did not happen must not remove the key from the list"
         );
     }
 
@@ -6333,21 +6408,75 @@ mod tests {
             .expect("a POSIX host has false(1)");
         std::env::set_var("CS_BIN", failing);
         let mut app = App::new(sample_sessions());
-        app.mode = Mode::Secrets;
-        app.secrets_names = vec!["API_KEY".into(), "DB_PASSWORD".into()];
-        app.secrets_selected = 0;
+        app.mode = secrets_mode(&["API_KEY", "DB_PASSWORD"], 0);
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
         std::env::remove_var("CS_BIN");
+        let Mode::CommandOutput { text, then: ReturnTo::Secrets(list) } = &app.mode else {
+            panic!("the helper must have run and its output shown, returning to the popup: {:?}", app.mode);
+        };
+        assert_eq!(text, "", "the helper must have run and its (empty) output shown");
         assert_eq!(
-            app.mode,
-            Mode::CommandOutput(String::new()),
-            "the helper must have run and its (empty) output shown"
-        );
-        assert_eq!(
-            app.secrets_names,
+            list.names,
             vec!["API_KEY", "DB_PASSWORD"],
             "a refused delete must not remove the key from the list"
         );
+    }
+
+    /// A revealed value belongs to the popup that revealed it. Two exits from
+    /// the popup are not Esc or q: a delete whose helper cannot be spawned,
+    /// and dismissing the output of a delete that emptied the list. After
+    /// either, opening the popup again inside the five-second reveal must not
+    /// draw the value. The stand-in `cs` keeps no state, so it lists the key
+    /// again on the second open.
+    #[cfg(unix)]
+    #[test]
+    fn a_revealed_secret_is_not_drawn_when_the_popup_opens_again() {
+        use std::os::unix::fs::PermissionsExt;
+        let _env = CS_BIN_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join(format!("cs-tui-reveal-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let stub = tmp.join("cs-stub");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\ncase \"$3\" in\n    list) printf 'Secrets for session: beta\\n  - API_KEY\\n' ;;\n    get) printf 'sk-peeked-42\\n' ;;\n    delete) printf 'Removed API_KEY\\n' ;;\nesac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let rows = |app: &mut App| -> String {
+            let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+            terminal.draw(|frame| crate::ui::render(app, frame)).unwrap();
+            let buf = terminal.backend().buffer().clone();
+            (0..buf.area.height)
+                .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect::<String>() + "\n")
+                .collect()
+        };
+        for exit in ["unspawnable delete", "last key deleted"] {
+            std::env::set_var("CS_BIN", &stub);
+            let mut app = App::new(sample_sessions());
+            app.mode = Mode::SessionMenu;
+            app.handle_key(KeyEvent::from(KeyCode::Char('s')));
+            app.handle_key(KeyEvent::from(KeyCode::Char('v')));
+            assert!(rows(&mut app).contains("sk-peeked-42"), "{exit}: the reveal is drawn while the popup is open");
+
+            if exit == "unspawnable delete" {
+                std::env::set_var("CS_BIN", "/nonexistent/cs");
+                app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+                std::env::set_var("CS_BIN", &stub);
+            } else {
+                app.handle_key(KeyEvent::from(KeyCode::Char('d')));
+                app.handle_key(KeyEvent::from(KeyCode::Char(' ')));
+            }
+            assert_eq!(app.mode, Mode::Normal, "{exit}: the popup closed");
+
+            app.mode = Mode::SessionMenu;
+            app.handle_key(KeyEvent::from(KeyCode::Char('s')));
+            let screen = rows(&mut app);
+            assert!(screen.contains("API_KEY"), "{exit}: the popup opened again:\n{screen}");
+            assert!(!screen.contains("sk-peeked-42"), "{exit}: the value from the closed popup is drawn:\n{screen}");
+            assert_eq!(app.peek_remaining(), 0, "{exit}: no reveal is counting down");
+        }
+        std::env::remove_var("CS_BIN");
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     #[test]
@@ -6446,8 +6575,8 @@ mod tests {
         let mut app = App::new(sample_sessions());
         app.marked_sessions.insert("alpha".into());
         app.handle_key(KeyEvent::from(KeyCode::Char('D')));
-        assert_eq!(app.mode, Mode::ConfirmBatchDelete);
-        assert!(app.delete_countdown_start.is_some());
+        assert_eq!(open_confirm(&mut app).targets, DeleteTargets::Marked(vec!["alpha".into()]));
+        assert!(app.delete_countdown_remaining() > 0);
     }
 
     #[test]
@@ -6462,18 +6591,16 @@ mod tests {
     fn batch_delete_y_rejected_during_countdown() {
         let mut app = App::new(sample_sessions());
         app.marked_sessions.insert("alpha".into());
-        app.mode = Mode::ConfirmBatchDelete;
-        app.delete_countdown_start = Some(std::time::Instant::now());
+        app.mode = delete_confirm_on(DeleteTargets::Marked(vec!["alpha".into()]));
         app.handle_key(KeyEvent::from(KeyCode::Char('y')));
-        assert_eq!(app.mode, Mode::ConfirmBatchDelete); // still confirming
+        assert_eq!(open_confirm(&mut app).targets, DeleteTargets::Marked(vec!["alpha".into()])); // still confirming
     }
 
     #[test]
     fn batch_delete_n_cancels() {
         let mut app = App::new(sample_sessions());
         app.marked_sessions.insert("alpha".into());
-        app.mode = Mode::ConfirmBatchDelete;
-        app.delete_countdown_start = Some(std::time::Instant::now());
+        app.mode = delete_confirm_on(DeleteTargets::Marked(vec!["alpha".into()]));
         app.handle_key(KeyEvent::from(KeyCode::Char('n')));
         assert_eq!(app.mode, Mode::Normal);
         // Marks preserved after cancel
@@ -6672,6 +6799,57 @@ mod tests {
         assert_eq!(app.focus, Focus::List);
     }
 
+    /// Render through the real UI at `w`x`h` and return the rows as text.
+    fn rows_at(app: &mut App, w: u16, h: u16) -> String {
+        let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(w, h)).unwrap();
+        terminal.draw(|frame| crate::ui::render(app, frame)).unwrap();
+        let buf = terminal.backend().buffer().clone();
+        (0..buf.area.height)
+            .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect::<String>() + "\n")
+            .collect()
+    }
+
+    /// 100x24 leaves a 100x21 content area: under PREVIEW_MIN_WIDTH and two
+    /// rows short of STACK_MIN_HEIGHT once the masthead and footer are taken,
+    /// so the renderer draws the table alone whatever `show_preview` says.
+    #[test]
+    fn keys_go_to_the_list_when_the_window_cannot_show_the_notes_pane() {
+        for way_in in ["tab in a small window", "window shrinks after tab"] {
+            let mut app = App::new(sample_sessions());
+            app.table_state.select(Some(0));
+            app.handle_key(KeyEvent::from(KeyCode::Tab));
+            if way_in == "window shrinks after tab" {
+                let screen = rows_at(&mut app, 140, 30);
+                assert!(
+                    screen.contains("\u{256d} queue "),
+                    "{way_in}: the pane is drawn before the shrink:\n{screen}"
+                );
+                assert_eq!(
+                    app.focus,
+                    Focus::Notes,
+                    "{way_in}: Tab focused the pane before the shrink"
+                );
+            }
+            let screen = rows_at(&mut app, 100, 24);
+            assert!(!screen.contains("\u{256d} queue "), "{way_in}: no notes pane is drawn:\n{screen}");
+            assert!(
+                !screen.contains("type a task"),
+                "{way_in}: the footer offers no notes keys while the pane is hidden:\n{screen}"
+            );
+            assert!(
+                screen.contains("The queue pane needs a taller or wider window"),
+                "{way_in}: the footer says why Tab showed nothing:\n{screen}"
+            );
+            app.handle_key(KeyEvent::from(KeyCode::Char('j')));
+            assert_eq!(app.table_state.selected(), Some(1), "{way_in}: j moves the visible list");
+            assert_eq!(app.queue_input.text(), "", "{way_in}: nothing is typed into a hidden input");
+            assert!(
+                matches!(app.handle_key(KeyEvent::from(KeyCode::Char('q'))), Action::Quit),
+                "{way_in}: q quits"
+            );
+        }
+    }
+
     #[test]
     fn notes_enter_appends_to_queue_file_and_clears_input() {
         let tmp = std::env::temp_dir().join(format!("cs-tui-notes-{}", std::process::id()));
@@ -6802,6 +6980,32 @@ mod tests {
         assert_eq!(app.notes_focus, NotesFocus::List, "edit cancelled, back to list");
         let lines = session::read_queue("alpha");
         assert_eq!(lines, vec!["one", "two", "three"], "queue unchanged after cancel");
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    /// The pane hides mid-edit, so the edit is cancelled the way Esc cancels
+    /// it. The edited text must not come back as a new task once the pane
+    /// fits again.
+    #[test]
+    fn hiding_the_pane_mid_edit_cancels_the_edit() {
+        let (tmp, _local, _root) = seed_queue("notes-hide-edit", "alpha", &["fix X"]);
+        let mut app = App::new(sample_sessions());
+        app.table_state.select(Some(0));
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Down)); // list, row 0
+        app.handle_key(KeyEvent::from(KeyCode::Char('e')));
+        assert_eq!(app.notes_focus, NotesFocus::Editing, "editing row 0");
+        assert_eq!(app.queue_input.text(), "fix X", "task text loaded into the input");
+        for c in " and Y".chars() {
+            app.handle_key(KeyEvent::from(KeyCode::Char(c)));
+        }
+        rows_at(&mut app, 100, 24); // too small for the pane
+        rows_at(&mut app, 140, 30); // the pane fits again
+        app.handle_key(KeyEvent::from(KeyCode::Tab));
+        app.handle_key(KeyEvent::from(KeyCode::Enter));
+        assert_eq!(app.queue_input.text(), "", "the cancelled edit left nothing in the input");
+        let lines = session::read_queue("alpha");
+        assert_eq!(lines, vec!["fix X"], "the edited text is not appended as a new task");
         std::fs::remove_dir_all(&tmp).ok();
     }
 
@@ -7426,7 +7630,7 @@ mod tests {
         std::env::remove_var("CS_BIN");
 
         match &app.mode {
-            Mode::CommandOutput(text) => {
+            Mode::CommandOutput { text, .. } => {
                 assert!(text.contains("nothing to rotate"), "output: {}", text)
             }
             other => panic!("expected the output popup, got {:?}", other),
@@ -7456,7 +7660,7 @@ mod tests {
         std::env::remove_var("CS_BIN");
 
         match &app.mode {
-            Mode::CommandOutput(text) => {
+            Mode::CommandOutput { text, .. } => {
                 assert!(text.contains("Cannot write to archive"), "output: {}", text)
             }
             other => panic!("expected the refusal in the output popup, got {:?}", other),

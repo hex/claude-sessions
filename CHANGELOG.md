@@ -15,7 +15,9 @@ All notable changes to cs are documented here. Release notes are also available 
 - `tests/lint_shell.sh` runs its shellcheck fan-out under `nice -n 10`, so a lint run on every core yields to whoever is typing.
 
 ### Fixes
+- In the TUI, Tab in a window too small for the queue pane, or a window that shrinks after Tab, no longer sends every key to an input that is not drawn. The list keeps the keys, so `j`, `k` and `q` work, the footer says `The queue pane needs a taller or wider window`, a new-task draft typed before the shrink waits in the input for a window that fits, and an edit of a queued task that was still open is cancelled as Esc cancels it, so its text is not added as a second task.
 - cs opens a session where a tool keeps its own files under `.cs/local`, such as a Chrome profile. Chrome's `SingletonSocket` link to its temp folder stopped the open with a refusal naming a symlink outside the session. The open's link check now covers every entry directly in `.cs/local` and cs's own folders there, and leaves links deeper inside other folders alone.
+- A secret revealed in cs-tui's secrets popup is no longer drawn again after the popup closes, whichever way it closes. A delete that could not start, or that removed the last secret, used to bring the popup back with the value still showing.
 
 ## 2026.11.4
 
