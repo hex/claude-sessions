@@ -514,6 +514,31 @@ test_release_verifies_ci_workflow() {
         "release.md must describe the signing key override" || return 1
 }
 
+test_release_signing_stops_when_a_check_fails() {
+    # The Bash tool runs a command as `eval '...' && pwd`, and a shell ignores
+    # set -e on the left of &&. The block has to stop before signing even there.
+    local block bin rc signed
+    block=$(awk '
+        /^```bash$/ { inside = 1; text = ""; next }
+        /^```$/ { if (inside && text ~ /ssh-keygen -Y sign/) printf "%s", text; inside = 0; next }
+        inside { text = text $0 "\n" }
+    ' "$RELEASE_MD")
+    assert_eq "1" "$(printf '%s' "$block" | grep -c 'ssh-keygen -Y sign')" \
+        "the runbook's signing block must be found" || return 1
+    bin="$TEST_TMPDIR/signing-bin"
+    mkdir -p "$bin"
+    printf '#!/bin/sh\nexit 1\n' > "$bin/git"
+    printf '#!/bin/sh\nexit 0\n' > "$bin/gh"
+    printf '#!/bin/sh\n: > "%s/signed"\n' "$TEST_TMPDIR" > "$bin/ssh-keygen"
+    chmod +x "$bin/git" "$bin/gh" "$bin/ssh-keygen"
+    (cd "$TEST_TMPDIR" && PATH="$bin:$PATH" SHA=expected-sha bash -c 'eval "$1" && :' _ "$block") >/dev/null 2>&1
+    rc=$?
+    signed=no
+    [ ! -e "$TEST_TMPDIR/signed" ] || signed=yes
+    assert_eq "no" "$signed" "a failed git check must stop the block before signing" || return 1
+    assert_eq "1" "$rc" "the block must exit with the failed check's status" || return 1
+}
+
 test_release_uses_ci_wait_for_each_workflow_gate() {
     local calls step line runner mode rc expected_error
     local runners=(bash)
@@ -652,6 +677,7 @@ run_test test_release_handles_empty_prev_tag
 run_test test_release_approval_has_cancel_and_reapproval_loop
 run_test test_release_guards_stray_files_before_add_all
 run_test test_release_verifies_ci_workflow
+run_test test_release_signing_stops_when_a_check_fails
 run_test test_release_uses_ci_wait_for_each_workflow_gate
 run_test test_release_has_code_review_gate
 
