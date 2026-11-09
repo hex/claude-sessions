@@ -4045,7 +4045,7 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
-    fn app_on(root: &std::path::Path, select: &str) -> App {
+    fn app_on(_root: &std::path::Path, select: &str) -> App {
         let mut app = App::new(crate::session::scan_sessions());
         let pos = app.filtered.iter().position(|&i| app.sessions[i].name == select).unwrap();
         app.table_state.select(Some(pos));
