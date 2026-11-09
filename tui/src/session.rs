@@ -557,8 +557,9 @@ pub fn queue_dir(name: &str) -> PathBuf {
 }
 
 /// True while the session's queue drain is live: cs's Stop hook writes
-/// `draining` to queue.state when it hands tasks to the agent, and the first
-/// queued line is the task currently being worked.
+/// `draining` to queue.state when it hands tasks to the agent. The task being
+/// worked is the one queue.current names, which is the first queued file unless
+/// that task was removed or a file that sorts ahead of it was queued since.
 pub fn queue_active(name: &str) -> bool {
     fs::read_to_string(queue_dir(name).join("queue.state"))
         .map(|s| s.trim() == "draining")
