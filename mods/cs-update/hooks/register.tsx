@@ -22,7 +22,9 @@ export const HEARTBEAT = '.cs/local/cs-update.heartbeat'
 // engine runs it for each fresh load of a plugin), and the types fix no order
 // between it and that re-render, so the restore cannot wait for it. The module
 // that pressed the key can outlive its own reload and finish the run, so the
-// outcome can land after the reloaded module has read the marker.
+// outcome can land after the reloaded module has read the marker; or the
+// reload can end both, and then the installed-version stamp the running mark
+// carries says whether the install got through.
 export const DONE = '.cs/local/cs-update.done'
 // Where cs writes the id of the conversation it launched; a teammate claude
 // in the same directory has its own id and must not pop its own pane.
@@ -275,18 +277,45 @@ async function openPane($: EngineInterface, cwd: string, pending: string) {
 }
 
 // The marker as it reads on disk: `version`, then the outcome line, or
-// `running` and the press's epoch milliseconds.
+// `running`, the press's epoch milliseconds and the installed-version stamp
+// the press read (empty when it read none).
 type Marker =
-  | { state: 'running'; version: string; startedAt: number }
+  | { state: 'running'; version: string; startedAt: number; stampAtPress: string }
   | { state: 'finished'; version: string; outcome: string }
 
 const RUNNING_LINE = 'running'
+const FINISHED = 'Update finished. Takes effect on your next launch.'
 
 function parseMarker(text: string): Marker | undefined {
-  const [markerVersion, line, startedAt] = text.split('\n')
+  const [markerVersion, line, startedAt, stampAtPress] = text.split('\n')
   if (!markerVersion || line === undefined) return undefined
-  if (line === RUNNING_LINE) return { state: 'running', version: markerVersion, startedAt: Number(startedAt) }
+  if (line === RUNNING_LINE) {
+    return { state: 'running', version: markerVersion, startedAt: Number(startedAt), stampAtPress: stampAtPress ?? '' }
+  }
   return { state: 'finished', version: markerVersion, outcome: line }
+}
+
+// The version the installer stamps once everything but this mod's own files is
+// in place; undefined when there is none to read.
+async function installedStamp($: EngineInterface): Promise<string | undefined> {
+  const home = await $.env.get('HOME')
+  if (!home) return undefined
+  try {
+    return (await $.fs.read(`${home}/.claude/hooks/cs/.version`)).split('\n')[0] || undefined
+  } catch {
+    return undefined
+  }
+}
+
+// Whether a running mark's install has already finished: the installer stamps
+// the version before it places this mod's files, and the reload those files
+// cause can end the run, and the module that pressed the key, before either
+// writes the outcome. A stamp other than the one the press read is that
+// install's; any version counts, since cs -update installs the latest release.
+async function runInstalled($: EngineInterface, marker: Marker): Promise<boolean> {
+  if (marker.state !== 'running') return false
+  const stamp = await installedStamp($)
+  return stamp !== undefined && stamp !== marker.stampAtPress
 }
 
 // No run outlasts UPDATE_TIMEOUT_MS, so an older mark, or one with no readable
@@ -316,6 +345,9 @@ async function restoreMarker($: EngineInterface, cwd: string): Promise<boolean> 
   shown = true
   if (marker.state === 'finished') {
     phase = 'done'; outcome = marker.outcome
+  } else if (await runInstalled($, marker)) {
+    phase = 'done'; outcome = FINISHED
+    await recordFinished($, cwd, marker.version)
   } else {
     phase = 'running'; outcome = ''
     watchRun($, cwd)
@@ -415,6 +447,9 @@ async function runUpdate($: EngineInterface) {
   // Claimed before the first await: two presses in one tick must not both
   // pass the guard and start two installers.
   if (phase === 'running' || phase === 'done') return
+  // The key is drawn only on a pane opened for a pending version.
+  const forVersion = version
+  if (forVersion === undefined) throw new Error('cs-update: the update key ran with no pending version on the pane')
   const retrying = phase === 'failed'
   phase = 'running'; outcome = ''
   $.ui.invalidate('ui.render')
@@ -438,12 +473,8 @@ async function runUpdate($: EngineInterface) {
     if (exitCode === 0) {
       // Version-neutral: cs -update resolves the latest release when it runs,
       // which may be newer than the one this launch saw.
-      phase = 'done'; outcome = 'Update finished. Takes effect on your next launch.'
-      try {
-        if (await mayWriteControlFiles($, cwd)) await $.fs.write(`${cwd}/${DONE}`, `${version}\n${outcome}\n`)
-      } catch (err) {
-        $.ui.toast(TOASTS.notRecorded(String(err instanceof Error ? err.message : err)))
-      }
+      phase = 'done'; outcome = FINISHED
+      await recordFinished($, cwd, forVersion)
     } else {
       const tail = stderr.split('\n').filter(l => l.trim() !== '').slice(-5).join('\n')
       phase = 'failed'; outcome = `cs -update exited ${exitCode}.\n${tail}`
@@ -456,11 +487,21 @@ async function runUpdate($: EngineInterface) {
   $.ui.invalidate('ui.render')
 }
 
+// The finished outcome for `forVersion`, so a later reload redraws it.
+async function recordFinished($: EngineInterface, cwd: string, forVersion: string) {
+  try {
+    if (await mayWriteControlFiles($, cwd)) await $.fs.write(`${cwd}/${DONE}`, `${forVersion}\n${FINISHED}\n`)
+  } catch (err) {
+    $.ui.toast(TOASTS.notRecorded(String(err instanceof Error ? err.message : err)))
+  }
+}
+
 // A press that cannot be marked still runs: the mark only guards the key
 // across a reload, so its loss is worth a log line, not the update.
 async function markRun($: EngineInterface, cwd: string) {
   try {
-    if (await mayWriteControlFiles($, cwd)) await $.fs.write(`${cwd}/${DONE}`, `${version}\n${RUNNING_LINE}\n${Date.now()}\n`)
+    const stamp = (await installedStamp($)) ?? ''
+    if (await mayWriteControlFiles($, cwd)) await $.fs.write(`${cwd}/${DONE}`, `${version}\n${RUNNING_LINE}\n${Date.now()}\n${stamp}\n`)
   } catch (err) {
     $.ui.log(LOGS.notMarked(String(err instanceof Error ? err.message : err)))
   }

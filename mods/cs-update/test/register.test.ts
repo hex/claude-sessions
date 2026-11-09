@@ -116,7 +116,9 @@ const draw = () => hooks['ui.render:Pane']($, { requestId: PANE }, async () => '
 // `files` for `load()` to find; this module's own writes land in `written`.
 const FINISHED_LINE = 'Update finished. Takes effect on your next launch.'
 const finishedMarker = `2026.99.3\n${FINISHED_LINE}\n`
-const runningMarker = (startedAt: number) => `2026.99.3\nrunning\n${startedAt}\n`
+const runningMarker = (startedAt: number, stamp = '') => `2026.99.3\nrunning\n${startedAt}\n${stamp}\n`
+// The installed version the installer stamps, under HOME as beforeEach sets it.
+const STAMP = '/home/u/.claude/hooks/cs/.version'
 const TEN_MINUTES = 600000
 // Runs every timer due now; one a callback arms waits for the next tick.
 async function tick() { const due = timers; timers = []; for (const t of due) await t.fn() }
@@ -601,12 +603,74 @@ test('a press writes the running marker before the installer starts', async () =
     markerAtStart = written['/work/' + DONE]
     return { exitCode: 0, stdout: '', stderr: '' }
   }
+  files[STAMP] = '2026.1.1\n'
   const before = Date.now()
   await buttons(await draw())[0].props.onPress()
-  const [version, state, startedAt, rest] = (markerAtStart as string).split('\n')
-  expect([version, state, rest]).toEqual(['2026.99.3', 'running', ''])
+  const [version, state, startedAt, stamp, rest] = (markerAtStart as string).split('\n')
+  expect([version, state, stamp, rest]).toEqual(['2026.99.3', 'running', '2026.1.1', ''])
   expect(Number(startedAt)).toBeGreaterThanOrEqual(before)
   expect(written['/work/' + DONE]).toBe(finishedMarker)
+})
+
+// The installer stamps the installed version before it places this mod's
+// files, and a reload can end the run (and the module that pressed the key)
+// before either writes the outcome: a stamp that moved since the press says
+// the install finished.
+test('a reload after the install stamped a new version draws the finished pane at once and records it', async () => {
+  files['/work/' + DONE] = runningMarker(Date.now(), '2026.1.1')
+  files[STAMP] = '2026.99.3\n'
+  load(); await start()
+  const tree = await draw()
+  expect(texts(tree).join('\n')).toContain(FINISHED_LINE)
+  expect(buttons(tree)).toHaveLength(0)
+  expect(written['/work/' + DONE]).toBe(finishedMarker)
+  expect(timers).toHaveLength(0)
+  expect(updateRuns()).toHaveLength(0)
+})
+
+test('a stamp newer than the version the launch saw also reads as finished', async () => {
+  files['/work/' + DONE] = runningMarker(Date.now(), '2026.1.1')
+  files[STAMP] = '2026.99.4\n'
+  load()
+  expect(texts(await draw()).join('\n')).toContain(FINISHED_LINE)
+})
+
+test('a stamp unchanged since the press keeps the running pane', async () => {
+  files['/work/' + DONE] = runningMarker(Date.now(), '2026.1.1')
+  files[STAMP] = '2026.1.1\n'
+  load(); await start()
+  expect(texts(await draw()).join('\n')).toContain('updating…')
+  expect(written['/work/' + DONE]).toBeUndefined()
+  expect(timers).toHaveLength(1)
+})
+
+test('the watch draws the finished pane once the stamp moves, with nothing written by the pressing module', async () => {
+  files['/work/' + DONE] = runningMarker(Date.now(), '2026.1.1')
+  files[STAMP] = '2026.1.1\n'
+  load(); await start()
+  await tick()
+  expect(texts(await draw()).join('\n')).toContain('updating…')
+  files[STAMP] = '2026.99.3\n'
+  await tick()
+  expect(texts(await draw()).join('\n')).toContain(FINISHED_LINE)
+  expect(written['/work/' + DONE]).toBe(finishedMarker)
+  expect(timers).toHaveLength(0)
+})
+
+test('a press with no readable stamp records an empty one, and any stamp after it reads as finished', async () => {
+  await start()
+  let markerAtStart = ''
+  ;($ as any).process.run = async (argv: string[]) => {
+    if (argv[1] === '-vet-session') return { exitCode: 0, stdout: '', stderr: '' }
+    markerAtStart = written['/work/' + DONE]
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  await buttons(await draw())[0].props.onPress()
+  expect(markerAtStart.split('\n')[3]).toBe('')
+  files['/work/' + DONE] = markerAtStart
+  files[STAMP] = '2026.99.3\n'
+  load()
+  expect(texts(await draw()).join('\n')).toContain(FINISHED_LINE)
 })
 
 test('a reload during the run restores the running pane with no key and starts no second installer', async () => {
