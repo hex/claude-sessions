@@ -1534,7 +1534,7 @@ CS_PAYLOAD_SHA256=(
     "397f71caaa863ec6c1659a24a88f2faa1e824a05ce2a6c386e15586e535ae7de  mods/cs/tips.json"
     "2f8d4b45beddd0b27b050f1c2eb08ebb25552b4dea5f33b9398318a2ef636985  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
-    "3a3fa453e86bc3d1c60af35ef54f92ec11e8636a9b4c2bbfc14a7faadb5a4cb8  mods/cs-update/hooks/register.tsx"
+    "f5df22546ae0a51339d71ab7551cccb45c897cfdb5b769f8e3050aa975d9da7a  mods/cs-update/hooks/register.tsx"
     "67c3217e96ce069a27d2f8af84944f1aaf18aeab29f8a570bf0cb0f96fc61519  mods/cs-mermaid/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-mermaid/hooks/hooks.json"
     "17ded962d4bda355fb9f4c6e3707aab94062b42361df695e79a6e1702a8e8cf8  mods/cs-mermaid/hooks/layout.ts"
@@ -2250,8 +2250,14 @@ done
 
 # Record what this install wrote under ~/.claude, so the next install, update
 # or uninstall knows those files as cs's by their content. The cs-update mod's
-# files are not placed yet, so they keep the lines the last install wrote, true
-# of what is on disk until _deploy replaces each one below.
+# files are not placed yet, and _deploy at the end of this script asks this
+# record whether each one is cs's, so the lines the last install wrote for them
+# are carried over. That carry decides ownership: a module a checkout install
+# wrote is in no release's known hashes, and without its line _deploy would
+# keep it as the user's file and never update the mod. Each carried line stands
+# until _deploy replaces that file. A file _deploy keeps keeps its line, which
+# names content no longer at that path: the file counts as cs's again only if
+# it comes to hold that content.
 _record_tmp="$STAGE_DIR/installed"
 if [ "${#CS_RECORD_LINES[@]}" -gt 0 ]; then
     printf '%s\n' "${CS_RECORD_LINES[@]}" > "$_record_tmp"

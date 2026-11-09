@@ -823,8 +823,14 @@ done
 
 # Record what this install wrote under ~/.claude, so the next install, update
 # or uninstall knows those files as cs's by their content. The cs-update mod's
-# files are not placed yet, so they keep the lines the last install wrote, true
-# of what is on disk until _deploy replaces each one below.
+# files are not placed yet, and _deploy at the end of this script asks this
+# record whether each one is cs's, so the lines the last install wrote for them
+# are carried over. That carry decides ownership: a module a checkout install
+# wrote is in no release's known hashes, and without its line _deploy would
+# keep it as the user's file and never update the mod. Each carried line stands
+# until _deploy replaces that file. A file _deploy keeps keeps its line, which
+# names content no longer at that path: the file counts as cs's again only if
+# it comes to hold that content.
 _record_tmp="$STAGE_DIR/installed"
 if [ "${#CS_RECORD_LINES[@]}" -gt 0 ]; then
     printf '%s\n' "${CS_RECORD_LINES[@]}" > "$_record_tmp"

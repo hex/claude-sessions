@@ -3506,6 +3506,10 @@ test_install_stopped_at_the_update_mod_leaves_it_recorded_as_it_stands() {
     _write_rename_logging_mv "$shim"
     HOME="$home" PATH="$shim:$PATH" CS_TEST_RENAME_LOG="$TEST_TMPDIR/stopped.log" CS_TEST_RENAME_REFUSE="/cs-update/hooks/register.tsx" \
         bash "$INSTALL_SH" > "$TEST_TMPDIR/stopped.out" 2>&1 < /dev/null || rc=$?
+    # The previous module is in no release's known hashes, so only the record
+    # makes it cs's when _deploy reaches it, after the record was rewritten.
+    assert_file_not_contains "$TEST_TMPDIR/stopped.out" "Kept .*cs-update/hooks/register\.tsx" "the recorded previous module is cs's to replace" || return 1
+    assert_file_contains "$TEST_TMPDIR/stopped.log" "/\.claude/skills/cs-update/hooks/register\.tsx$" "the install went to replace it" || return 1
     assert_eq "1" "$rc" "the refused rename stops the install" || { cat "$TEST_TMPDIR/stopped.out"; return 1; }
     assert_eq "the module as the release before shipped it" "$(cat "$module")" "the module on disk is the previous one" || return 1
     assert_file_contains "$record" "^$previous_digest  \.claude/skills/cs-update/hooks/register\.tsx$" "the record still names what is on disk" || return 1
@@ -3514,6 +3518,7 @@ test_install_stopped_at_the_update_mod_leaves_it_recorded_as_it_stands() {
     assert_eq "true" "$(jq '.hooks | length > 0' "$home/.claude/settings.json")" "settings.json was merged before the mod" || return 1
     assert_eq "$version" "$(cat "$home/.claude/hooks/cs/.version")" "the version stamp was written before the mod" || return 1
     HOME="$home" bash "$INSTALL_SH" > "$TEST_TMPDIR/stopped2.out" 2>&1 < /dev/null || { cat "$TEST_TMPDIR/stopped2.out"; echo "  FAIL: the install run again failed"; return 1; }
+    assert_file_not_contains "$TEST_TMPDIR/stopped2.out" "Kept .*cs-update/" "the install run again keeps none of the mod's files" || return 1
     cmp -s "$SCRIPT_DIR/../mods/cs-update/hooks/register.tsx" "$module" || { echo "  FAIL: the install run again did not place the module"; return 1; }
     assert_file_contains "$record" "^$payload_digest  \.claude/skills/cs-update/hooks/register\.tsx$" "the install run again records it" || return 1
     assert_file_not_contains "$record" "^$previous_digest  \.claude/skills/cs-update/hooks/register\.tsx$" "its previous line is gone" || return 1
