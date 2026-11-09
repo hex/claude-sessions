@@ -846,10 +846,18 @@ installed_shellcheck_version() {
     shellcheck --version | sed -n 's/^version: //p'
 }
 
-# Sets GATE_OUT and GATE_RC.
+# Sets GATE_OUT and GATE_RC. Arguments are env assignments for the gate.
 run_gate_over_lint_checkout() {
     GATE_RC=0
-    GATE_OUT=$(env -u CS_TEST_REQUIRE_TOOLS CS_TEST_JOBS=1 CS_TEST_SUITE_DIR="$LINT_CHECKOUT/tests" bash "$RUN_ALL" 2>&1) || GATE_RC=$?
+    GATE_OUT=$(env -u CS_TEST_REQUIRE_TOOLS "$@" CS_TEST_JOBS=1 CS_TEST_SUITE_DIR="$LINT_CHECKOUT/tests" bash "$RUN_ALL" 2>&1) || GATE_RC=$?
+}
+
+# A PATH holding what the gate and the suite call, and no shellcheck. Sets NO_SHELLCHECK_PATH.
+make_path_without_shellcheck() {
+    NO_SHELLCHECK_PATH="$TEST_TMPDIR/no-shellcheck-bin"
+    mkdir -p "$NO_SHELLCHECK_PATH"
+    _stub_tools "$NO_SHELLCHECK_PATH" bash sh env git grep sed awk cut tr head tail wc sort uniq paste \
+        basename dirname cat date find kill mkdir mktemp nice rm sleep ps chmod ln cp mv stat touch tee xargs getconf uname || return 1
 }
 
 test_run_all_fails_when_the_checkout_lint_rises() {
@@ -895,9 +903,85 @@ test_run_all_fails_when_the_workflow_names_no_shellcheck_pin() {
         "the failure must name what is missing" || return 1
 }
 
+# YAML ends a value at a space and a #, and the workflow's other pins carry a
+# comment that way. A baseline of 0 would pass only if the lint did not run.
+test_run_all_judges_the_lint_at_a_pin_with_a_trailing_comment() {
+    require_tool shellcheck || return $?
+    make_lint_checkout 0 "$(installed_shellcheck_version) # with the baseline" || return 1
+    run_gate_over_lint_checkout
+    assert_eq 1 "$GATE_RC" "a pin with a trailing comment must be judged at the pin: $GATE_OUT" || return 1
+    assert_output_contains "$GATE_OUT" "shellcheck warnings rose from 0 to 1" "the lint must have run" || return 1
+}
+
+test_run_all_fails_on_a_duplicated_shellcheck_pin() {
+    require_tool shellcheck || return $?
+    make_lint_checkout 1 0.11.0 || return 1
+    printf '          SHELLCHECK_VERSION: v0.10.0\n' >> "$LINT_CHECKOUT/.github/workflows/test.yml"
+    run_gate_over_lint_checkout
+    assert_eq 1 "$GATE_RC" "two pins must fail the gate: $GATE_OUT" || return 1
+    assert_output_contains "$GATE_OUT" "  FAIL: SHELLCHECK_VERSION in .github/workflows/test.yml must be one vN.N.N, found 'v0.11.0 v0.10.0'" \
+        "the failure must name both values" || return 1
+}
+
+test_run_all_fails_on_a_shellcheck_pin_that_is_not_a_version() {
+    require_tool shellcheck || return $?
+    make_lint_checkout 1 0.11 || return 1
+    run_gate_over_lint_checkout
+    assert_eq 1 "$GATE_RC" "a malformed pin must fail the gate: $GATE_OUT" || return 1
+    assert_output_contains "$GATE_OUT" "  FAIL: SHELLCHECK_VERSION in .github/workflows/test.yml must be one vN.N.N, found 'v0.11'" \
+        "the failure must name the value" || return 1
+}
+
+test_run_all_fails_when_the_installed_shellcheck_version_is_unreadable() {
+    make_lint_checkout 1 0.11.0 || return 1
+    local fake="$TEST_TMPDIR/fake-shellcheck-bin"
+    mkdir -p "$fake"
+    printf '#!/bin/sh\nexit 1\n' > "$fake/shellcheck"
+    chmod +x "$fake/shellcheck"
+    run_gate_over_lint_checkout PATH="$fake:$PATH"
+    assert_eq 1 "$GATE_RC" "an unreadable version must fail the gate: $GATE_OUT" || return 1
+    assert_output_contains "$GATE_OUT" "  FAIL: no version in the output of shellcheck --version, found ''" \
+        "the failure must say what could not be read" || return 1
+}
+
+test_run_all_fails_at_another_version_when_shellcheck_is_declared() {
+    require_tool shellcheck || return $?
+    make_lint_checkout 1 0.0.0 || return 1
+    run_gate_over_lint_checkout CS_TEST_REQUIRE_TOOLS=shellcheck
+    assert_eq 1 "$GATE_RC" "a declared shellcheck at another version must fail the gate: $GATE_OUT" || return 1
+    assert_output_contains "$GATE_OUT" "  FAIL: shellcheck $(installed_shellcheck_version) is not the 0.0.0 CI pins, and CS_TEST_REQUIRE_TOOLS says this run has it" \
+        "the failure must name both versions" || return 1
+}
+
+test_run_all_skips_the_lint_when_shellcheck_is_absent() {
+    make_lint_checkout 1 0.11.0 || return 1
+    make_path_without_shellcheck || return 1
+    run_gate_over_lint_checkout PATH="$NO_SHELLCHECK_PATH"
+    assert_eq 0 "$GATE_RC" "an undeclared absent shellcheck must skip: $GATE_OUT" || return 1
+    assert_output_contains "$GATE_OUT" "test_lint_checkout.sh: test_checkout_holds_its_shellcheck_baseline (shellcheck not on PATH)" \
+        "the skip summary must give the reason" || return 1
+    assert_eq "OK: all 1 suites passed, 1 test skipped" "$(tail -n 1 <<< "$GATE_OUT")" "the verdict must count the skip" || return 1
+}
+
+test_run_all_fails_when_a_declared_shellcheck_is_absent() {
+    make_lint_checkout 1 0.11.0 || return 1
+    make_path_without_shellcheck || return 1
+    run_gate_over_lint_checkout PATH="$NO_SHELLCHECK_PATH" CS_TEST_REQUIRE_TOOLS=shellcheck
+    assert_eq 1 "$GATE_RC" "a declared absent shellcheck must fail: $GATE_OUT" || return 1
+    assert_output_contains "$GATE_OUT" "    FAIL: shellcheck is not on PATH, and CS_TEST_REQUIRE_TOOLS says this run has it" \
+        "the failure must name the tool" || return 1
+}
+
 run_test test_run_all_fails_when_the_checkout_lint_rises
 run_test test_run_all_passes_when_the_checkout_lint_holds_its_baseline
 run_test test_run_all_skips_the_lint_at_a_version_ci_does_not_pin
 run_test test_run_all_fails_when_the_workflow_names_no_shellcheck_pin
+run_test test_run_all_judges_the_lint_at_a_pin_with_a_trailing_comment
+run_test test_run_all_fails_on_a_duplicated_shellcheck_pin
+run_test test_run_all_fails_on_a_shellcheck_pin_that_is_not_a_version
+run_test test_run_all_fails_when_the_installed_shellcheck_version_is_unreadable
+run_test test_run_all_fails_at_another_version_when_shellcheck_is_declared
+run_test test_run_all_skips_the_lint_when_shellcheck_is_absent
+run_test test_run_all_fails_when_a_declared_shellcheck_is_absent
 
 report_results
