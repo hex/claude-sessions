@@ -889,11 +889,22 @@ impl App {
         self.focus = Focus::List;
     }
 
+    /// Drop an in-place To-Do edit: the buffer empties and the highlight stays
+    /// on the task. Does nothing when no edit is open.
+    fn cancel_notes_edit(&mut self) {
+        if self.notes_focus == NotesFocus::Editing {
+            self.queue_input.clear();
+            self.notes_focus = NotesFocus::List;
+        }
+    }
+
     /// The renderer drew the table alone, so a focused notes pane is not on
-    /// screen. Keys return to the list, and the typed text stays in the input
-    /// for when the pane fits again.
+    /// screen. Keys return to the list. A new-task draft stays in the input
+    /// for when the pane fits again; an in-place edit is cancelled as Esc
+    /// cancels it, so its text cannot come back as a second task.
     pub fn notes_pane_hidden(&mut self) {
         if self.focus == Focus::Notes {
+            self.cancel_notes_edit();
             self.leave_notes();
             self.set_status("The queue pane needs a taller or wider window", StatusLevel::Info);
         }
@@ -1409,10 +1420,7 @@ impl App {
     fn handle_notes_editing(&mut self, key: KeyEvent) -> Action {
         match key.code {
             KeyCode::Enter => return self.submit_notes_input(),
-            KeyCode::Esc => {
-                self.queue_input.clear();
-                self.notes_focus = NotesFocus::List;
-            }
+            KeyCode::Esc => self.cancel_notes_edit(),
             KeyCode::Left => self.queue_input.move_left(),
             KeyCode::Right => self.queue_input.move_right(),
             KeyCode::Home => self.queue_input.move_home(),
@@ -2571,10 +2579,7 @@ impl App {
     /// a different session's queue. Resets the Notes highlight when the session
     /// actually changes.
     fn switch_selected_session(&mut self, idx: usize) {
-        if self.notes_focus == NotesFocus::Editing {
-            self.queue_input.clear();
-            self.notes_focus = NotesFocus::List;
-        }
+        self.cancel_notes_edit();
         if self.table_state.selected() != Some(idx) {
             self.notes_selected = 0;
         }
