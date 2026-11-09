@@ -1031,7 +1031,10 @@ files cause can end both the run and the module that pressed the key before
 either writes the outcome. A reloaded module that finds the stamp changed since
 the press draws "Update finished" at once and writes it to the
 marker. Any version counts, since `cs -update` installs the latest release,
-which can be newer than the one the launch saw. The engine re-renders the open pane the instant it reloads the module, which can come
+which can be newer than the one the launch saw. A reinstall of the version
+already installed rewrites the stamp with the same text, so if its reload
+cuts the report short the pane stays `updating…` until the ten-minute stale
+rule, though the install finished. The engine re-renders the open pane the instant it reloads the module, which can come
 before the reloaded module's `session.start` runs, so the reloaded module reads the marker back and redraws the
 pane from its own next render, running or finished. That redraw asks the lead check first,
 so a directory the sessions root does not name gets no pane back. While the marker says `running`, a reloaded
