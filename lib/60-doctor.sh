@@ -402,10 +402,12 @@ _doctor_check_spawn() {
             abandoned+=("$(basename "$f")")
         done
         # A claim is held by an open still at the consent ask while its pid
-        # runs; once the pid is gone, nothing puts the seed back.
+        # runs; once the pid is gone, nothing puts the seed back. Another
+        # user's open holds its claim too, so only a pid this process can
+        # see is gone counts, as for the retire and finish rows below.
         for f in "$spawn_dir"/.*.seed.claim.[0-9]*; do
             [ -e "$f" ] || continue
-            kill -0 "${f##*.}" 2>/dev/null && continue
+            [ "$(_doctor_pid_verdict "${f##*.}")" = stale ] || continue
             abandoned+=("$(basename "$f")")
         done
     fi
@@ -1072,14 +1074,17 @@ _doctor_pid_verdict() {  # pid (digits)
     fi
 }
 
-# /finish's retire sets a worktree's .cs aside at
-# $SESSIONS_ROOT/.retire-<worktree>.<pid> between removing the worktree and
-# fusing the records into the base; a retire killed in that window leaves the
-# directory, and nothing else reads it. Only a directory whose retire is gone
-# is reported: a live one is a retire in progress, and one cs cannot judge
-# gets no remedy.
+# /finish's retire makes $SESSIONS_ROOT/.retire-<worktree>.<pid>, moves the
+# worktree's .cs into it as cs, removes the worktree, fuses the records into
+# the base from there, deletes the directory and then the branch; a retire
+# killed anywhere in that run leaves the directory, and nothing else reads
+# it. Which step it reached shows in what is there: an empty directory means
+# nothing moved, and a missing worktree means /finish cannot run again. Only
+# a directory whose retire is gone is reported: a live one is a retire in
+# progress, and one cs cannot judge gets no remedy. The pid is hedged as the
+# integrate lock's is: ESRCH is absence only in this pid namespace.
 _doctor_check_retire_asides() {
-    local d name wt pid base verdict
+    local d name wt pid base task verdict
     for d in "$SESSIONS_ROOT"/.retire-*.*; do
         [ -d "$d" ] || continue
         name=$(basename "$d")
@@ -1089,11 +1094,17 @@ _doctor_check_retire_asides() {
         case "$pid" in ''|*[!0-9]*) continue ;; esac
         verdict=$(_doctor_pid_verdict "$pid")
         [ "$verdict" = stale ] || continue
-        base="${wt%%@*}"
-        if [ -d "$SESSIONS_ROOT/$wt" ]; then
-            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid) that is no longer running; the worktree is still there, so move $d/cs back to $SESSIONS_ROOT/$wt/.cs by hand and run /finish ${wt#*@} in $base again"
+        base="${wt%%@*}" task="${wt#*@}"
+        if [ ! -d "$d/cs" ]; then
+            if [ -d "$SESSIONS_ROOT/$wt" ]; then
+                _doctor_warn "Retire leftovers: $d was made by a /finish retire of $wt (pid $pid), which this process cannot see; that retire is probably gone, and it moved nothing: the worktree keeps its .cs. Delete the empty directory with rmdir and run /finish $task in $base again"
+            else
+                _doctor_warn "Retire leftovers: $d was made by a /finish retire of $wt (pid $pid), which this process cannot see; that retire is probably gone, and the directory holds no records. Delete it with rmdir"
+            fi
+        elif [ -d "$SESSIONS_ROOT/$wt" ]; then
+            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is still there, so move $d/cs back to $SESSIONS_ROOT/$wt/.cs by hand, delete the empty $d, and run /finish $task in $base again"
         else
-            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid) that is no longer running; the worktree is gone, so fuse what is missing into $SESSIONS_ROOT/$base/.cs by hand, then delete that directory"
+            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is gone, and /finish $task cannot run again without it, so finish the retire by hand: fuse what is missing from $d/cs into $SESSIONS_ROOT/$base/.cs, delete $d, then delete the branch the retire would have removed with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task"
         fi
     done
 }
@@ -1114,7 +1125,15 @@ _doctor_check_finish_progress() {
     verdict=$(_doctor_pid_verdict "$pid")
     [ "$verdict" = stale ] || return 0
     task=$(jq -r '.task // empty' "$f" 2>/dev/null)
-    _doctor_warn "Finish progress: $f records /finish $task at step '$step' from pid $pid, which is no longer running; that run ended without landing, refusing or retiring. Run /finish $task again; the next run replaces the record"
+    # Both /finish entries refuse without the feature's worktree, so a record
+    # whose worktree is gone is a retire ended after the removal: the Retire
+    # leftovers row above carries the remedy while the aside exists, and
+    # running /finish is no part of it.
+    local remedy="Run /finish $task again; the next run replaces the record"
+    if [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ ! -d "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME@$task" ]; then
+        remedy="Its worktree is gone, so /finish $task cannot run again: a Retire leftovers row, when there is one, says what is left to do by hand; without one the records are fused, and only the branch cs/$task may remain, deleted with: git -C \"$CLAUDE_SESSION_DIR\" branch -d cs/$task. The next /finish of any feature replaces the record"
+    fi
+    _doctor_warn "Finish progress: $f records /finish $task at step '$step' from pid $pid, which this process cannot see; that run probably ended without landing, refusing or retiring. $remedy"
 }
 
 _doctor_check_integrate_lock() {
