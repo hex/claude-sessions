@@ -806,15 +806,15 @@ launch_claude_code() {
         _seg_secrets="${COMMENT}${ICON_LOCK}${NC} ${YELLOW}$secret_count${NC} ${COMMENT}$secret_word${NC}"
     fi
     if [ -n "$ctx_pct" ]; then
-        # The figure in the status line's inks: bold amber from warn, and from
-        # crit the bar's inverted capsule, bold white on the crit red with a
-        # space each side. The spaces belong to the fill, so a card without
-        # colour reads the same at every level.
+        # The figure in the status line's crit red: bold in the crit ink from
+        # warn, and from crit the bar's inverted capsule, bold white on the
+        # crit red with a space each side. The spaces belong to the fill, so a
+        # card without colour reads the same at every level.
         local _ctx_fig="" _pad=""
         [ -z "$NC" ] || _pad=" "
         case "$ctx_heat" in
             none) _ctx_fig="${YELLOW}${ctx_pct}%${NC}" ;;
-            warn) _ctx_fig="${BOLD}${AMBER}${ctx_pct}%${NC}" ;;
+            warn) _ctx_fig="${BOLD}${CRIT}${ctx_pct}%${NC}" ;;
             crit) _ctx_fig="${BOLD}${CRIT_FILL}${_pad}${ctx_pct}%${_pad}${NC}" ;;
             *) error "context heat '$ctx_heat' is not none, warn or crit" ;;
         esac
@@ -998,9 +998,12 @@ EOF
             # conversation here wrote, is the user's to choose: armed by a key
             # they did not mean for it, SessionStart would mark it consumed.
             # And r displaces the merge -finish armed for this launch, which
-            # only a typed r may do; n keeps it. The status line stamps the
-            # figure per session, not per conversation, so the line calls it
-            # the last reading in this session and claims no more.
+            # only a typed r may do; n keeps it. From the warn threshold up
+            # to crit, a line in the same ink gives the reading and points at
+            # n, and the ask, its default and every key keep their meaning.
+            # The status line stamps the figure per session, not per
+            # conversation, so the line calls it the last reading in this
+            # session and claims no more.
             local _resume_default=' · default' _handoff_default='' _fresh_default='' _ask_keys='[Y/n]'
             local _crit_default=n _crit_start='a fresh conversation'
             if [ "$ctx_heat" = crit ]; then
@@ -1015,6 +1018,8 @@ EOF
                     _fresh_default=' · default'
                 fi
                 printf "${BOLD}${CRIT}%s${NC}\n" "${ICON_CTX} The last context reading in this session was ${ctx_pct}%, so ${_crit_start} is the default. Press y to resume."
+            elif [ "$ctx_heat" = warn ]; then
+                printf "${BOLD}${CRIT}%s${NC}\n" "${ICON_CTX} The last context reading in this session was ${ctx_pct}%. Press n for a fresh conversation."
             fi
             if [ -n "$pending_handoff" ]; then
                 # Answering blind is the hazard this label exists for: r arms
