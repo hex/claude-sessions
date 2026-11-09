@@ -9,7 +9,7 @@ For example, write this line on its own:
 
 ![short name](/absolute/path.png)
 
-Supported formats are png, jpg, jpeg, gif, heic, webp, tiff, bmp.
+Supported formats are png, jpg, jpeg, gif, heic, webp, tif, tiff, bmp, in any letter case.
 
 cs-images draws real pixels where the terminal allows them and coloured blocks elsewhere. With blocks, the picture is a preview. Small text is not readable.
 

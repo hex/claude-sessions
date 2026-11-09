@@ -44,9 +44,10 @@ If empty, inform the user that secrets storage requires a cs session and skip st
    - Remove scratch files an interrupted earlier run left behind. Only files
      older than 60 minutes go: every cs session shares `$TMPDIR`, so a newer
      file may be another session's store in progress, and a store takes
-     seconds:
+     seconds. The trailing slash makes `find` enter macOS's `/tmp`, a
+     symlink to `/private/tmp`:
      ```bash
-     find "${TMPDIR:-/tmp}" -maxdepth 1 -type f -name 'cs-secret.*' -user "$(id -u)" -mmin +60 -delete
+     find "${TMPDIR:-/tmp}/" -maxdepth 1 -type f -name 'cs-secret.*' -user "$(id -u)" -mmin +60 -delete
      ```
    - Then, for each secret in turn, three calls:
      1. Create a fresh scratch file. It prints a new path each time:

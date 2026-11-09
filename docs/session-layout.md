@@ -122,7 +122,11 @@ supersedings and prunes and the task archive on disk, `/wrap` leaves the memory
 entries, the summary and the task archive, and `cs -narrative rotate` leaves
 the trimmed narrative and its archive chunk, all uncommitted. An open adds the
 section to a session that lacks it; delete its text but keep the comment to
-opt out.
+opt out. Its Secure Secrets Handling section gives the by-hand store path: a
+fresh `mktemp` file outside the session directory, stored and deleted in one
+Bash command that keeps the store's exit status. An open rewrites that section
+to the current text when it still reads byte for byte as one of the wordings
+cs wrote there before; a section edited anywhere keeps its text.
 
 ## Machine-local files (`.cs/local/`, gitignored)
 

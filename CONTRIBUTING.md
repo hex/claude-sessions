@@ -124,7 +124,7 @@ The full gate takes minutes. Most of the time you do not want it.
 | Waiting for a GitHub Actions run on `main` or a release tag | `bash tests/ci_wait.sh <run-id> [--max-reruns N] [--since <rev>]` |
 
 `tests/lint_shell.sh` fails on any shellcheck error, and on a warning count that differs from
-`.shellcheck-warnings`. It runs shellcheck once per file, as many at once as the machine has
+`.shellcheck-warnings`. It runs shellcheck once per file under `nice -n 10`, as many at once as the machine has
 processors, and stops with exit 2 naming any file shellcheck could not run on. The count is measured with the shellcheck version CI pins in
 `.github/workflows/test.yml` (v0.11.0); another version can count differently. When you fix
 warnings, lower that number in the same commit.

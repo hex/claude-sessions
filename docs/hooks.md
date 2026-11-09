@@ -1231,10 +1231,13 @@ hashes in `install.sh`.
 ## cs-images
 
 `mods/cs-images/` is a Claude Code function-hooks plugin, deployed and gated
-like the `cs` mod. It draws a picture wherever a reply has a line holding
+the same way as the `cs` mod: `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`, which every
+`cs <name>` launch exports and `CS_NO_FUNCTION_HOOKS=1` withholds. Unlike the
+`cs` mod it needs no cs session: with function hooks on it draws in any
+directory. It draws a picture wherever a reply has a line holding
 only `![short name](/absolute/path.png)`, outside a code block. The path must
 be absolute and have no spaces. It accepts `png`, `jpg`, `jpeg`, `gif`, `heic`,
-`webp`, `tiff` and `bmp` files. Prose around a picture stays with the engine's renderer.
+`webp`, `tif`, `tiff` and `bmp` files, in any letter case. Prose around a picture stays with the engine's renderer.
 
 Real pixels work in kitty and Ghostty, or iTerm2 3.5 and later. Inside tmux,
 every terminal needs tmux 3.3 or later with `allow-passthrough` and
@@ -1280,7 +1283,11 @@ or to explain something in pictures. For an explanation it draws a mermaid
 diagram and, beside it, a file on disk that shows the point or else one
 generated image where the session has an image tool; a generated image costs what that tool's provider charges and
 its description leaves the machine, so the skill keeps private content out
-of it. It needs no `prompt.compose` hook, which organizations can refuse. The
+of it. Before drawing a generated image, the skill has the model open it and
+compare it with its own explanation and diagram, then say what is wrong
+beside it or leave it out, and it presents the image as how the thing looks
+and the diagram as how it works.
+It needs no `prompt.compose` hook, which organizations can refuse. The
 engine lists it as `/cs-images:show-image`. Turning drawing off leaves the
 skill in place.
 

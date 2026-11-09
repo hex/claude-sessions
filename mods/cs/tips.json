@@ -26,7 +26,7 @@
     },
     {
       "id": "cs.resume-context",
-      "text": "reopening a session with cs <name> shows how full its last conversation got; from the status line's red mark, 60% by default, Enter starts a fresh conversation and y still resumes"
+      "text": "reopening a session with cs <name> shows how full its last conversation got; from 40% a red line says n starts a fresh conversation, and from the status line's red mark, 60% by default, Enter starts one and y still resumes"
     },
     {
       "id": "cs.rotate-nudge",
@@ -35,6 +35,14 @@
     {
       "id": "cs.mermaid-draw",
       "text": "ask Claude to show you how a flow works and the reply draws it as a flowchart; /config's cs: Draw mermaid diagrams turns the drawing off"
+    },
+    {
+      "id": "cs.images-file",
+      "text": "give Claude the path of a screenshot or photo and ask to see it: the reply draws the picture in the chat"
+    },
+    {
+      "id": "cs.images-pictures",
+      "text": "ask Claude to explain something in pictures and the reply draws a diagram and one image beside it; /config's cs: Draw images in replies turns the drawing off"
     }
   ]
 }

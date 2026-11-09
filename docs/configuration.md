@@ -262,8 +262,9 @@ export CS_REWRITE_CMD="/path/to/my-rewriter"
 # a plain integer of at most three digits; anything else falls back to the
 # default shown. A value above 100 is out of the gauge's reach and so switches
 # that band off, the same idiom cs -doctor uses on the Stop hook's tiers below.
-# The launch card colours its context figure at the same two marks, and from
-# the crit mark the resume prompt defaults to a fresh conversation.
+# The launch card colours its context figure at the same two marks. From the
+# warn mark a red line above the resume prompt says n starts a fresh
+# conversation, and from the crit mark the prompt defaults to one.
 export CS_STATUSLINE_CTX_WARN="40"
 export CS_STATUSLINE_CTX_CRIT="60"
 
