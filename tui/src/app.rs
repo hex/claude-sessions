@@ -319,11 +319,23 @@ pub struct SecretsList {
 }
 
 /// A secret's value drawn beside `key`; expires PEEK_DURATION_SECS after `at`.
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub struct Reveal {
     pub key: String,
     pub value: String,
     pub at: std::time::Instant,
+}
+
+/// Names the key and redacts the value, so a panic or a failing assertion
+/// that prints a mode cannot print the secret.
+impl std::fmt::Debug for Reveal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Reveal")
+            .field("key", &self.key)
+            .field("value", &"<redacted>")
+            .field("at", &self.at)
+            .finish()
+    }
 }
 
 /// Where dismissing a command's output goes. Back to the secrets popup
@@ -5396,7 +5408,6 @@ mod tests {
         app.handle_key(KeyEvent::from(KeyCode::Char('d')));
 
         assert_eq!(app.mode, Mode::Normal, "the confirm stays closed");
-        assert!(!matches!(app.mode, Mode::ConfirmDelete(_)), "nothing is offered");
         let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
         assert_eq!(
             status,
@@ -5568,12 +5579,11 @@ mod tests {
             app.handle_key(KeyEvent::from(KeyCode::Char('d')));
 
             let status = app.status_message.as_ref().map(|m| m.text.clone()).unwrap_or_default();
-            seen.push((caller, app.mode == Mode::Normal, matches!(app.mode, Mode::ConfirmDelete(_)), status));
+            seen.push((caller, app.mode == Mode::Normal, status));
         }
         stop(server);
-        for (caller, closed, offered, status) in seen {
+        for (caller, closed, status) in seen {
             assert!(closed, "caller {caller:?}: the confirm stays closed");
-            assert!(!offered, "caller {caller:?}: nothing is offered");
             assert_eq!(
                 status,
                 format!("Session busy is served by cs busy --remote (remote-control PID {spid}); stop it first with Ctrl-C in its window, or close the window."),
@@ -6310,6 +6320,16 @@ mod tests {
                 at: std::time::Instant::now() - std::time::Duration::from_secs(age_secs),
             }),
         }
+    }
+
+    /// A popup's debug text, which a failing assertion on the mode prints,
+    /// names the revealed key and never its value.
+    #[test]
+    fn debug_of_a_revealed_popup_hides_the_value() {
+        let text = format!("{:?}", revealed_popup("API_KEY", "s3cr3t-plaintext", 0));
+        assert!(!text.contains("s3cr3t-plaintext"), "the value is printed: {text}");
+        assert!(text.contains("key: \"API_KEY\""), "the key is not printed: {text}");
+        assert!(text.contains("value: \"<redacted>\""), "the value is not marked redacted: {text}");
     }
 
     #[test]

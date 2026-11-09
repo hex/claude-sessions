@@ -5389,6 +5389,27 @@ mod tests {
         std::fs::remove_dir_all(&root).ok();
     }
 
+    // The single delete confirm draws from the session it carries, so it
+    // still shows that session when no row of the table is selected.
+    #[test]
+    fn delete_confirm_draws_its_session_with_no_row_selected() {
+        let mut app = App::new(one_session());
+        app.mode = Mode::ConfirmDelete(DeleteConfirm {
+            targets: DeleteTargets::One("alpha".into()),
+            countdown_start: std::time::Instant::now() - std::time::Duration::from_secs(60),
+            warnings: Vec::new(),
+            offers: crate::session::RemoveGrants::default(),
+            grants: crate::session::RemoveGrants::default(),
+        });
+        app.table_state.select(None);
+
+        let screen = rows_at(&mut app, 100, 24).join("\n");
+
+        assert!(screen.contains("Delete session 'alpha'?"), "the question names the session:\n{screen}");
+        assert!(screen.contains("This cannot be undone."), "the note is drawn:\n{screen}");
+        assert!(screen.contains("[y] Confirm  [n/Esc] Cancel"), "the key hint is drawn:\n{screen}");
+    }
+
     // The batch delete confirm gives each line one row too: the list of
     // names and a warning naming its session are shortened in the middle.
     // At 80 columns the popup holds 42, at 120 it holds 64.
