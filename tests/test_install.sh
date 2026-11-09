@@ -3517,6 +3517,7 @@ test_install_stopped_at_the_update_mod_leaves_it_recorded_as_it_stands() {
     cmp -s "$SCRIPT_DIR/../mods/cs-update/hooks/register.tsx" "$module" || { echo "  FAIL: the install run again did not place the module"; return 1; }
     assert_file_contains "$record" "^$payload_digest  \.claude/skills/cs-update/hooks/register\.tsx$" "the install run again records it" || return 1
     assert_file_not_contains "$record" "^$previous_digest  \.claude/skills/cs-update/hooks/register\.tsx$" "its previous line is gone" || return 1
+    assert_eq "1" "$(grep -c '  \.claude/skills/cs-update/hooks/register\.tsx$' "$record")" "the record names the module once" || return 1
 }
 
 # A release's files under ~/.claude stay cs's when the install record is
