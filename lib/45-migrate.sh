@@ -1196,10 +1196,10 @@ _SECRETS_SECTION_AWK='
 
 # Phase 18: a Secure Secrets Handling section that still reads as one cs wrote
 # before takes the current wording. A section edited anywhere stays as it is,
-# whole. The rewrite goes through cs_write_atomic, which refuses a tracked
-# file or a link out of the session and leaves the file as it was when the
-# awk fails; a refused write warns and keeps the migration stamp from being
-# written, so the next open tries again.
+# whole. The rewrite goes through cs_write_atomic, which refuses a link out of
+# the session and leaves the file as it was when the awk fails; a refused
+# write warns and keeps the migration stamp from being written, so the next
+# open tries again, and a link that stays out of the session warns on each open.
 _secrets_section_migrate() {  # file
     local f="$1"
     [ -f "$f" ] || return 0

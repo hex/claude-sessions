@@ -881,7 +881,7 @@ fi
 ROTATION_FLIP_REFUSAL=""
 if [ -n "$ROTATION_HANDOFF" ]; then
     HANDOFF_FILE="$HANDOFF_DIR/$ROTATION_HANDOFF"
-    if ROTATION_FLIP_REFUSAL=$(CS_WRITE_QUIET= cs_write_atomic "$HANDOFF_FILE" awk -v uuid="$SESSION_ID" '
+    if ROTATION_FLIP_REFUSAL=$(CS_WRITE_QUIET='' cs_write_atomic "$HANDOFF_FILE" awk -v uuid="$SESSION_ID" '
         !flipped && $0 == "status: unconsumed" {
             print "status: consumed"
             print "consumed_by: " uuid
