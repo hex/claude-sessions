@@ -6809,18 +6809,27 @@ mod tests {
             .collect()
     }
 
-    /// 100x24 leaves a 100x21 content area: under PREVIEW_MIN_WIDTH and one
-    /// row short of STACK_MIN_HEIGHT once the masthead and footer are taken,
+    /// 100x24 leaves a 100x21 content area: under PREVIEW_MIN_WIDTH and two
+    /// rows short of STACK_MIN_HEIGHT once the masthead and footer are taken,
     /// so the renderer draws the table alone whatever `show_preview` says.
     #[test]
     fn keys_go_to_the_list_when_the_window_cannot_show_the_notes_pane() {
         for way_in in ["tab in a small window", "window shrinks after tab"] {
             let mut app = App::new(sample_sessions());
             app.table_state.select(Some(0));
-            if way_in == "window shrinks after tab" {
-                rows_at(&mut app, 140, 30);
-            }
             app.handle_key(KeyEvent::from(KeyCode::Tab));
+            if way_in == "window shrinks after tab" {
+                let screen = rows_at(&mut app, 140, 30);
+                assert!(
+                    screen.contains("\u{256d} queue "),
+                    "{way_in}: the pane is drawn before the shrink:\n{screen}"
+                );
+                assert_eq!(
+                    app.focus,
+                    Focus::Notes,
+                    "{way_in}: Tab focused the pane before the shrink"
+                );
+            }
             let screen = rows_at(&mut app, 100, 24);
             assert!(!screen.contains("\u{256d} queue "), "{way_in}: no notes pane is drawn:\n{screen}");
             assert!(
