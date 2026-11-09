@@ -1131,7 +1131,7 @@ _doctor_check_finish_progress() {
     # running /finish is no part of it.
     local remedy="Run /finish $task again; the next run replaces the record"
     if [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ ! -d "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME@$task" ]; then
-        remedy="Its worktree is gone, so /finish $task cannot run again: a Retire leftovers row, when there is one, says what is left to do by hand; without one the records are fused, and only the branch cs/$task may remain, deleted with: git -C \"$CLAUDE_SESSION_DIR\" branch -d cs/$task. The next /finish of any feature replaces the record"
+        remedy="Its worktree is gone, so /finish $task cannot run again: a Retire leftovers row, when there is one, says what is left to do by hand; without one the records are fused, and only the branch cs/$task may remain, deleted with: git -C \"$SESSIONS_ROOT/$CLAUDE_SESSION_NAME\" branch -d cs/$task. The next /finish of any feature replaces the record"
     fi
     _doctor_warn "Finish progress: $f records /finish $task at step '$step' from pid $pid, which this process cannot see; that run probably ended without landing, refusing or retiring. $remedy"
 }
