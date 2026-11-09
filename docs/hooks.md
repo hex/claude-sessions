@@ -1023,9 +1023,15 @@ closes the pane at any point.
 That reload resets the mod's module state mid-pane, which would otherwise
 blank a pane showing "Update finished" or offer the key again during a run. The
 update key keeps its state in `.cs/local/cs-update.done`: the press writes
-the version, `running` and the time, and a clean exit replaces those with the
-version and the outcome line. A failed run empties the marker, which gives the
-key back. The engine re-renders the open pane the instant it reloads the module, which can come
+the version, `running`, the time and the version `~/.claude/hooks/cs/.version`
+names then, and a clean exit replaces those with the version and the outcome
+line. A failed run empties the marker, which gives the key back. The installer
+writes that version stamp before the mod's own files, and the reload those
+files cause can end both the run and the module that pressed the key before
+either writes the outcome. A reloaded module that finds the stamp changed since
+the press draws "Update finished" at once and writes it to the
+marker. Any version counts, since `cs -update` installs the latest release,
+which can be newer than the one the launch saw. The engine re-renders the open pane the instant it reloads the module, which can come
 before the reloaded module's `session.start` runs, so the reloaded module reads the marker back and redraws the
 pane from its own next render, running or finished. That redraw asks the lead check first,
 so a directory the sessions root does not name gets no pane back. While the marker says `running`, a reloaded
@@ -1052,11 +1058,17 @@ toast that stands in for it; `/cs-update` still opens the pane with the option o
 `hooks/hooks.json`, `hooks/register.tsx`) under `~/.claude/skills/cs-update/`,
 the same layout as the `cs` mod, and `cs -uninstall` removes the directory. It
 places them last, after every other file, the install record, the completions,
-the settings merge and the version stamp, with only its closing report after
-them, because Claude Code reloads a mod soon after its files change (0.4 to 0.7 s
-measured on 2.1.319), and once the key press is older than 10 s that reload can
-stop the `cs -update` the key started. A run stopped before that step leaves the
-mod at its previous version, and the record still names it as it stands, so
+the settings merge and the version stamp. After them come only the report: the
+placed count, the list of files kept because cs did not write them, the
+completion setup hints and the closing line, then the release notes `cs -update`
+prints after the installer. Claude Code reloads a mod soon after its files
+change (0.4 to 0.7 s measured on 2.1.319). A key press older than 10 s no
+longer holds the process it started, and every real update runs longer than
+that, so the reload can stop `cs -update` during the report, which takes about
+0.16 s from the module landing to the installer's exit, before the release
+notes. The install has finished its work by then, and the version stamp is how
+the reloaded pane knows it. A run stopped before the mod's
+files leaves the mod at its previous version, and the record still names it, so
 running `cs -update` again finishes the install. When
 Claude Code loads the plugin, the mod writes `.cs/local/cs-update.heartbeat`
 (one UTC timestamp) when the cwd has `.cs/local`, the sessions root names the directory (as
