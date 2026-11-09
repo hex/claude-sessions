@@ -120,7 +120,7 @@ The full gate takes minutes. Most of the time you do not want it.
 | Red/green loop on one file | that file's suite alone, roughly a second or two |
 | About to commit | `bash tests/run_all.sh --changed` |
 | About to merge, or cutting a release | `bash tests/run_all.sh` |
-| About to push a shell change | `bash tests/lint_shell.sh` (the shellcheck lane CI runs; the suites never run it) |
+| About to push a shell change | `bash tests/lint_shell.sh` (the shellcheck lane CI runs; a full `run_all.sh` runs it too, `--changed` only for a change to the lint or its baseline) |
 | Waiting for a GitHub Actions run on `main` or a release tag | `bash tests/ci_wait.sh <run-id> [--max-reruns N] [--since <rev>]` |
 
 `tests/lint_shell.sh` fails on any shellcheck error, and on a warning count that differs from
@@ -128,6 +128,12 @@ The full gate takes minutes. Most of the time you do not want it.
 processors, and stops with exit 2 naming any file shellcheck could not run on. The count is measured with the shellcheck version CI pins in
 `.github/workflows/test.yml` (v0.11.0); another version can count differently. When you fix
 warnings, lower that number in the same commit.
+
+The suite `tests/test_lint_checkout.sh` runs the lint on the checkout, so a full `run_all.sh` fails
+when the lint fails. It judges only at the pinned version. Any other shellcheck skips the test, and
+`run_all.sh` names both versions in its skip list. A missing shellcheck skips it through `require_tool`.
+CI's bash jobs have no shellcheck at the pinned version, so they skip it and CI's `shellcheck` job does
+the linting there.
 
 Use `tests/ci_wait.sh` for runs on `main` and release tags, with an authenticated
 `gh`, `jq`, and Git. On a pull request, a newer push intentionally cancels the
