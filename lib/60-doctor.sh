@@ -402,10 +402,12 @@ _doctor_check_spawn() {
             abandoned+=("$(basename "$f")")
         done
         # A claim is held by an open still at the consent ask while its pid
-        # runs; once the pid is gone, nothing puts the seed back.
+        # runs; once the pid is gone, nothing puts the seed back. Another
+        # user's open holds its claim too, so only a pid this process can
+        # see is gone counts, as for the retire and finish rows below.
         for f in "$spawn_dir"/.*.seed.claim.[0-9]*; do
             [ -e "$f" ] || continue
-            kill -0 "${f##*.}" 2>/dev/null && continue
+            [ "$(_doctor_pid_verdict "${f##*.}")" = stale ] || continue
             abandoned+=("$(basename "$f")")
         done
     fi
@@ -1040,6 +1042,100 @@ _doctor_check_migration_stamp() {
 # exists. A lock left behind by a killed integrate silences this checkout's
 # autosave with nothing on screen to say why, so name it and the one command
 # that clears it.
+# Whether the process a record names is running: held, eperm, stale, or
+# "unknown <why>". kill -0, not ps: kill(2) sees a process that a restricted
+# /proc hides from ps, and its errno tells a holder owned by another user
+# (EPERM) from a pid that is gone (ESRCH). Only ESRCH is evidence of absence;
+# anything else the check cannot read is unknown, and an unknown must not come
+# with removal advice. LC_ALL=C pins the message kill prints, which is the only
+# channel for the errno. env runs the kill on PATH (/bin/kill on macOS) with
+# that locale in its own environment, so the shell never changes its own
+# locale in this forked copy, which can crash a bash linked against libintl.
+# That kill prints "kill: <pid>: No such process" or "kill: <pid>: Operation
+# not permitted" and exits 1, and refuses a pid it cannot parse with "kill:
+# illegal process id: <pid>", which is unknown. A number past the pid range
+# never reaches kill: procps kill on Linux would truncate it to a pid_t and
+# answer for another process (ESRCH for most values, and 4294967297 is pid 1,
+# which is held), so the range is screened by cs's own rule first and the
+# number is unknown.
+_doctor_pid_verdict() {  # pid (digits)
+    local pid="$1" why
+    pid="${pid#"${pid%%[!0]*}"}"
+    if ! _cs_pid_in_range "$pid"; then
+        echo "unknown no process can have that pid"
+    elif why=$(env LC_ALL=C kill -0 "$pid" 2>&1); then
+        echo held
+    else
+        case "$why" in
+            *"No such process"*)         echo stale ;;
+            *"Operation not permitted"*) echo eperm ;;
+            *)                           echo "unknown ${why#kill: }" ;;
+        esac
+    fi
+}
+
+# /finish's retire makes $SESSIONS_ROOT/.retire-<worktree>.<pid>, moves the
+# worktree's .cs into it as cs, removes the worktree, fuses the records into
+# the base from there, deletes the directory and then the branch; a retire
+# killed anywhere in that run leaves the directory, and nothing else reads
+# it. Which step it reached shows in what is there: an empty directory means
+# nothing moved, and a missing worktree means /finish cannot run again. Only
+# a directory whose retire is gone is reported: a live one is a retire in
+# progress, and one cs cannot judge gets no remedy. The pid is hedged as the
+# integrate lock's is: ESRCH is absence only in this pid namespace.
+_doctor_check_retire_asides() {
+    local d name wt pid base task verdict
+    for d in "$SESSIONS_ROOT"/.retire-*.*; do
+        [ -d "$d" ] || continue
+        name=$(basename "$d")
+        wt="${name#.retire-}"
+        pid="${wt##*.}"
+        wt="${wt%.*}"
+        case "$pid" in ''|*[!0-9]*) continue ;; esac
+        verdict=$(_doctor_pid_verdict "$pid")
+        [ "$verdict" = stale ] || continue
+        base="${wt%%@*}" task="${wt#*@}"
+        if [ ! -d "$d/cs" ]; then
+            if [ -d "$SESSIONS_ROOT/$wt" ]; then
+                _doctor_warn "Retire leftovers: $d was made by a /finish retire of $wt (pid $pid), which this process cannot see; that retire is probably gone, and it moved nothing: the worktree keeps its .cs. Delete the empty directory with rmdir and run /finish $task in $base again"
+            else
+                _doctor_warn "Retire leftovers: $d was made by a /finish retire of $wt (pid $pid), which this process cannot see; that retire is probably gone, and the directory holds no records. Delete it with rmdir"
+            fi
+        elif [ -d "$SESSIONS_ROOT/$wt" ]; then
+            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is still there, so move $d/cs back to $SESSIONS_ROOT/$wt/.cs by hand, delete the empty $d, and run /finish $task in $base again"
+        else
+            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is gone, and /finish $task cannot run again without it, so finish the retire by hand: fuse what is missing from $d/cs into $SESSIONS_ROOT/$base/.cs, delete $d, then delete the branch the retire would have removed with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task"
+        fi
+    done
+}
+
+# finish-progress.json ends at landed, refused or retired (the outcomes the cs
+# mod's FINISH_OUTCOMES names); a record left at any other step by a pid that
+# is gone belongs to a /finish a signal ended before it wrote one. A live pid
+# is a run in progress, and one cs cannot judge gets no remedy.
+_doctor_check_finish_progress() {
+    local dir f step pid task verdict
+    dir=$(cs_private_dir "$CLAUDE_SESSION_META_DIR") || return 0
+    f="$dir/finish-progress.json"
+    [ -f "$f" ] || return 0
+    step=$(jq -r '.step // empty' "$f" 2>/dev/null) || return 0
+    case "$step" in ''|landed|refused|retired) return 0 ;; esac
+    pid=$(jq -r '.pid // empty' "$f" 2>/dev/null) || return 0
+    case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+    verdict=$(_doctor_pid_verdict "$pid")
+    [ "$verdict" = stale ] || return 0
+    task=$(jq -r '.task // empty' "$f" 2>/dev/null)
+    # Both /finish entries refuse without the feature's worktree, so a record
+    # whose worktree is gone is a retire ended after the removal: the Retire
+    # leftovers row above carries the remedy while the aside exists, and
+    # running /finish is no part of it.
+    local remedy="Run /finish $task again; the next run replaces the record"
+    if [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ ! -d "$SESSIONS_ROOT/$CLAUDE_SESSION_NAME@$task" ]; then
+        remedy="Its worktree is gone, so /finish $task cannot run again: a Retire leftovers row, when there is one, says what is left to do by hand; without one the records are fused, and only the branch cs/$task may remain, deleted with: git -C \"$SESSIONS_ROOT/$CLAUDE_SESSION_NAME\" branch -d cs/$task. The next /finish of any feature replaces the record"
+    fi
+    _doctor_warn "Finish progress: $f records /finish $task at step '$step' from pid $pid, which this process cannot see; that run probably ended without landing, refusing or retiring. $remedy"
+}
+
 _doctor_check_integrate_lock() {
     local dir="${CLAUDE_SESSION_DIR:-}"
     [ -n "$dir" ] || return 0
@@ -1067,34 +1163,12 @@ _doctor_check_integrate_lock() {
         *[!0-9]*) pid="" ;;
     esac
     pid="${pid#"${pid%%[!0]*}"}"
-    # kill -0, not ps: kill(2) sees a process that a restricted /proc hides
-    # from ps, and its errno tells a holder owned by another user (EPERM) from
-    # a pid that is gone (ESRCH). Only ESRCH is evidence of absence; anything
-    # else the check cannot read is unknown, and an unknown must not come with
-    # removal advice. LC_ALL=C pins the message kill prints, which is the only
-    # channel for the errno. env runs the kill on PATH (/bin/kill on macOS)
-    # with that locale in its own environment, so the shell never changes its
-    # own locale in this forked copy, which can crash a bash linked against
-    # libintl. That kill prints "kill: <pid>: No such process" or "kill:
-    # <pid>: Operation not permitted" and exits 1, and refuses a pid it cannot
-    # parse with "kill: illegal process id: <pid>", which is unknown. A number
-    # past the pid range never reaches kill: procps kill on Linux would
-    # truncate it to a pid_t and answer for another process (ESRCH for most
-    # values, and 4294967297 is pid 1, which is held), so the range is
-    # screened by cs's own rule first and the number is unknown.
     local verdict="unrecorded" why=""
     if [ -n "$pid" ]; then
-        if ! _cs_pid_in_range "$pid"; then
-            verdict="unknown" why="no process can have that pid"
-        elif why=$(env LC_ALL=C kill -0 "$pid" 2>&1); then
-            verdict="held"
-        else
-            case "$why" in
-                *"No such process"*)        verdict="stale" ;;
-                *"Operation not permitted"*) verdict="eperm" ;;
-                *)                           verdict="unknown" why="${why#kill: }" ;;
-            esac
-        fi
+        verdict=$(_doctor_pid_verdict "$pid")
+        case "$verdict" in
+            unknown\ *) why="${verdict#unknown }" verdict=unknown ;;
+        esac
     fi
     case "$verdict" in
         held)    _doctor_ok "Integrate lock: $lock held by a running integrate (pid $pid)" ;;
@@ -1171,6 +1245,7 @@ run_doctor() {
     _doctor_check_rotate_wrap_keys
     _doctor_check_iterm2
     _doctor_check_spawn
+    _doctor_check_retire_asides
     _doctor_check_remote
     _doctor_check_config
     _doctor_check_hook_authority
@@ -1180,6 +1255,7 @@ run_doctor() {
         _doctor_check_merge_driver
         _doctor_check_migration_stamp
         _doctor_check_integrate_lock
+        _doctor_check_finish_progress
         _doctor_check_worktrees
         _doctor_check_auto_memory
         _doctor_check_narrative_size

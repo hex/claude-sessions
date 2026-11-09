@@ -1854,6 +1854,33 @@ test_pending_handoff_is_consumed_and_injected() {
     assert_output_contains "$out" "managed Claude Code session" "existing context spliced, not replaced" || return 1
 }
 
+# A consumed flip the store refuses leaves the handoff unconsumed, so the
+# marker stays armed for the next start to retry, and the preamble says so.
+test_a_failed_consumed_flip_keeps_the_marker_and_says_so() {
+    _rot_hook_session "rot-consume-fail"
+    _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
+    local f="$CLAUDE_SESSION_META_DIR/handoffs/2026-07-16-test.md"
+    printf '%s\n' "2026-07-16-test.md" > "$CLAUDE_SESSION_META_DIR/local/pending-handoff"
+    printf 'claude_session_id: %s\n' "$UUID_B" > "$CLAUDE_SESSION_META_DIR/local/state"
+    chmod 555 "$CLAUDE_SESSION_META_DIR/handoffs"
+    local out
+    out=$(_start_hook "$UUID_B"); local status=$?
+    chmod 755 "$CLAUDE_SESSION_META_DIR/handoffs"
+    [ "$status" -eq 0 ] || { echo "  FAIL: the hook must exit 0 (got $status)"; return 1; }
+    assert_eq "status: unconsumed" "$(grep '^status:' "$f")" "the handoff stays unconsumed" || return 1
+    assert_file_exists "$CLAUDE_SESSION_META_DIR/local/pending-handoff" \
+        "the marker stays armed so the next start retries the flip" || return 1
+    assert_output_contains "$out" "Conversation Rotation" "the rotation still loads" || return 1
+    assert_output_contains "$out" "could not mark .cs/handoffs/2026-07-16-test.md consumed" \
+        "the preamble names the failed flip" || return 1
+    # The reason is the store's own first stderr line: mktemp's refusal of
+    # the temp file, worded one way by BSD mktemp and another by GNU.
+    assert_output_contains "$out" "consumed: mktemp: .*\.cs-tmp\.2026-07-16-test\.md\..*Permission denied" \
+        "the preamble carries the store's refusal" || return 1
+    assert_output_contains "$out" "will load this same handoff again" \
+        "the preamble says the next start retries" || return 1
+}
+
 test_rotation_preamble_wins_over_fresh_rebind_block() {
     _rot_hook_session "rot-precedence"
     _seed_handoff "$CLAUDE_SESSION_DIR" "2026-07-16-test.md" "unconsumed"
@@ -2459,6 +2486,7 @@ test_body_quote_does_not_revive_a_discarded_handoff() {
 }
 
 run_test test_pending_handoff_is_consumed_and_injected
+run_test test_a_failed_consumed_flip_keeps_the_marker_and_says_so
 run_test test_consuming_a_handoff_leaves_a_tmp_sibling_alone_and_keeps_the_mode
 run_test test_rotation_preamble_wins_over_fresh_rebind_block
 run_test test_fresh_rebind_block_survives_without_handoff
