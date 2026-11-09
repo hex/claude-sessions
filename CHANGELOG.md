@@ -14,6 +14,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Changed
 - `tests/lint_shell.sh` runs its shellcheck fan-out under `nice -n 10`, so a lint run on every core yields to whoever is typing.
+- A full `tests/run_all.sh` fails when `tests/lint_shell.sh` fails on the checkout, through the suite `tests/test_lint_checkout.sh`, so a rise in the shellcheck warning count shows in a local gate and not only in CI's `shellcheck` job. The suite judges at the version `test.yml` pins. At another version, or with no shellcheck, the test skips and the skip list says why, and when `CS_TEST_REQUIRE_TOOLS` names shellcheck it fails instead. A pin that is not one `vN.N.N` and a shellcheck that reports no version fail it in every run.
 
 ### Fixes
 - `cs -queue start` refuses while the queue drains in a running session (exit 1, nothing written), with a message naming the session's pid, saying the next turn end hands out the next task by itself, and that `cs -queue clear` stops the run and removes the queued tasks with it. It wrote `armed` over `draining`, so the next turn end handed out the first task again, logged nothing done for the task in progress, and dropped a `cs-task-failed` line from that turn. A `draining` left behind by a crashed or closed session, with no process holding `session.lock`, re-arms as before, since no turn is in progress to run twice.
