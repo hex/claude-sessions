@@ -37,7 +37,7 @@ test_show_image_skill_names_itself_and_its_triggers() {
     assert_eq 'name: show-image' "$(sed -n '2p' "$skill")" "frontmatter name" || return 1
     assert_eq 'description: This skill should be used when the user asks to see, show or display an image, screenshot, photo or chart that is a file on disk, or asks for an explanation in pictures, such as "show me in pictures", "explain it visually" or "draw me a picture".' "$(sed -n '3p' "$skill")" "frontmatter trigger" || return 1
     assert_file_contains "$skill" '^!\[short name\](/absolute/path.png)$' "standalone image example" || return 1
-    assert_file_contains "$skill" 'png, jpg, jpeg, gif, heic, webp, tiff, bmp' "supported formats" || return 1
+    assert_file_contains "$skill" 'png, jpg, jpeg, gif, heic, webp, tif, tiff, bmp, in any letter case' "supported formats" || return 1
     assert_file_contains "$skill" '^- A flow, a structure or states: write a mermaid diagram' "diagrams come first for flows" || return 1
     assert_file_contains "$skill" 'make one image with one provider' "generation stays to one image" || return 1
     assert_file_contains "$skill" 'Before drawing a generated image, open the file the tool reports and compare it with your own explanation and diagram' "a generated image is checked before it is shown" || return 1
