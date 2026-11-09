@@ -1537,7 +1537,7 @@ CS_PAYLOAD_SHA256=(
     "fc0c2b4db8af8da64c52cd4f65b52785ed0a1b2113f5fea196f69d84f83ae5f3  skills/rotate/SKILL.md"
     "0d88656291eb6078b08187204807c72bd926b93c360041767cdbc26e64567353  skills/finish/SKILL.md"
     "938985c6dbc9166170d1e0d7e632cd3c4a4089d5cdd5b2cf5f0702600f29110f  skills/feature/SKILL.md"
-    "96cc4d5a8511904fe972fb1b47c35c970d6367485828c6cad0b89926528d7917  skills/write-as-me/SKILL.md"
+    "470bbdd41fe312195f002bd68ef833b299c0bc2eae8ccb9f6891bfaac07c58c9  skills/write-as-me/SKILL.md"
     "a8abe8e196ab085c28a30db08b3a52781d14c14ed1134cea5464a75ef03486b6  skills/write-as-me/scripts/build-corpus.sh"
     "a8a14c22510b49f89557b401730875996064682af719a85322215b61d046b054  skills/write-as-me/scripts/corpus-check.sh"
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
