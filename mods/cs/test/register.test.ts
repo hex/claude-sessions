@@ -1383,6 +1383,35 @@ test('a band raised while the zero tick reads is a count seen: the /clear runs a
   expect(toasts).toEqual([])
 })
 
+// A question that opens while the zero reads is what waits on the person,
+// whatever else drew: the zero says the question, not the band and hint unseen.
+test('a question dialog raised while the zero tick reads, nothing else raised, is said as the question', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 2)
+  await tickHidden()
+  let answer!: () => void
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => {
+    if (argv[1] !== '-vet-session') return run(argv, init)
+    await new Promise<void>(resolve => { answer = resolve })
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  try {
+    const zero = tickHidden()
+    await settle()
+    await dialog()
+    answer()
+    await zero
+  } finally {
+    $.process.run = run
+  }
+  expect(ran).toEqual([])
+  expect(toasts).toEqual(['/clear did not run: a question is waiting for an answer'])
+})
+
 test('a conversation that is no longer the lead at zero clears nothing and says so', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
