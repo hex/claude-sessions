@@ -191,6 +191,12 @@ export const TOASTS = {
   pressedNotEmptied: (err: string) => `could not empty ${PRESSED}: ${err}`,
   wrapFailed: (err: string) => `/wrap did not run: ${err}`,
   midTurn: (command: string) => `${command} did not run: a turn is running`,
+  countDisarmed: '/clear did not run: the handoff is no longer armed',
+  countNotLead: "/clear did not run: this conversation is no longer the session's lead",
+  countQuestion: '/clear did not run: a question is waiting for an answer',
+  countSurvey: '/clear did not run: a survey is waiting above the prompt',
+  countSurveyUnseen: '/clear did not run: a survey was waiting above the prompt when another mod took the band',
+  clearUnseen: 'another mod has the band above the prompt, so the count to /clear ran unseen; /clear runs now',
   queueNoBin: 'the launch did not say where cs is (CS_BIN); run cs -queue start from a shell in this session',
   queueModeUnknown: (how: string) => `'${how}' is not a way to run the queue; it is not started`,
   notCompacted: (reason: string) => `the conversation was not compacted (${reason}); the queue is not started`,
@@ -238,6 +244,17 @@ export const COMMANDS = {
 let left: number | undefined
 let ticker: { cancel: () => void } | undefined
 let bandIdle = false
+// What the count's zero knows of the band, none of it from a render it may
+// never get. A mod loaded before this one can answer the band's render
+// without passing it on, and the engine's question dialog takes the band's
+// place: either way the band's hook is not reached (measured on 2.1.322).
+// Each tick asks for a redraw and the engine raises the band 5 to 19 ms later
+// (measured), so `bandDrawn` and `dialogDrawn` say which of the two was
+// raised since the last tick. `bandSurvey` is the band's own word on a
+// survey, as last heard: nothing else says one is up.
+let bandDrawn = false
+let dialogDrawn = false
+let bandSurvey = false
 // Whether a turn runs, as each source last said it: the main loop's turn
 // events, and the band's and the hint's renders, which also tell a mod loaded
 // mid-turn. A turn runs while any says so, so two sites a render apart never
@@ -443,7 +460,7 @@ export function register(on: On) {
   filterChatPressPending = undefined
   filterChatComplaint = undefined
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; working = IDLE; stepToastedFor = undefined; adopted = undefined; clearSeen = false; clearing = false; birth = undefined; startPercent = undefined; registered = false
+  left = undefined; ticker = undefined; bandIdle = false; bandDrawn = false; dialogDrawn = false; bandSurvey = false; working = IDLE; stepToastedFor = undefined; adopted = undefined; clearSeen = false; clearing = false; birth = undefined; startPercent = undefined; registered = false
   finishWatch = undefined; finishTurnOver = false; finishShown = new Set(); finishGate = undefined; finishProblemShown = false
   lastRefusal = undefined
   filterChatVetRefused = false
@@ -627,6 +644,8 @@ export function register(on: On) {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    bandDrawn = true
+    bandSurvey = e.props.hasSurvey
     const drawn = await next(e)
     try {
       // The band draws in a new conversation before any of its turns end, so
@@ -737,6 +756,13 @@ export function register(on: On) {
         </Box>
       </Box>
     )
+  })
+
+  // The engine's question dialog draws as the engine's; the count's zero
+  // reads that one was up.
+  on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
+    dialogDrawn = true
+    return next(e)
   })
 
   // Where they have no room there, the keys stand in the notice's row in
@@ -1923,11 +1949,13 @@ async function forceRotation($: EngineInterface) {
 // Counts the band down, one redraw a second (the contract folds calls past
 // ten a second). Each redraw re-reads the marker and the handoff: the count
 // must see the press and the prompt that stop it, so nothing here is cached.
-// At zero the /clear runs only where the band would draw the button: the band
-// idle and no turn running once the reads below are done (a Stop hook's
-// turn starts with no prompt to stop the count), the handoff still armed,
-// this the lead; otherwise the count stops and the button stays for the
-// person.
+// At zero the /clear runs if the handoff is still armed, this is the lead, cs
+// trusts the session, and nothing waits on the person once those reads are
+// done: no turn (a Stop hook's turn starts with no prompt to stop the count),
+// no question dialog, no survey. Otherwise the count stops, a toast says
+// why, and the button stays for the person. A band another mod has taken
+// stops nothing: the /clear runs on time, and a toast says the count ran
+// unseen.
 function startCountdown($: EngineInterface) {
   left = GRACE_SECONDS
   // From a timer: the count starts inside the turn's own hook.
@@ -1937,16 +1965,40 @@ function startCountdown($: EngineInterface) {
     // lands while the zero tick is still reading leaves the count where it is.
     if (left === undefined || left <= 0) return
     left -= 1
+    if (left > 0) { bandDrawn = false; dialogDrawn = false }
     $.ui.invalidate('ui.render')
     if (left > 0) return
     // The count holds at zero through the reads below: a prompt or a press
     // landing meanwhile stops it (left becomes undefined), and this tick
     // then does nothing, so nothing clears twice or behind a new turn.
-    const idle = bandIdle && (await handoffArmed($)) && (await ownsRotation($)) && (await sessionVetted($, await $.session.cwd()))
+    // What waits on the person already spares the reads, a cs process among
+    // them; it is read again once they are done.
+    const waiting = waitsOnPerson()
+    const armed = waiting === undefined && (await handoffArmed($))
+    const lead = armed && (await ownsRotation($))
+    // cs's refusal of the session is toasted by the vet itself.
+    const vetted = lead && (await sessionVetted($, await $.session.cwd()))
     if (left !== 0) return
     stopCountdown($)
-    if (idle && !turnRunning()) await clearAndContinue($).catch(err => $.ui.toast(TOASTS.clearFailed(String(err))))
+    const refusal = waiting ?? (!armed ? TOASTS.countDisarmed : !lead ? TOASTS.countNotLead : waitsOnPerson())
+    if (refusal !== undefined) return $.ui.toast(refusal)
+    if (!vetted) return
+    if (!bandDrawn) $.ui.toast(TOASTS.clearUnseen)
+    await clearAndContinue($).catch(err => $.ui.toast(TOASTS.clearFailed(String(err))))
   })
+}
+
+// What waits on the person as the count reaches zero, as the toast that says
+// the /clear did not run; undefined when nothing does. What the band last
+// said of a turn counts only while the band is still drawn: a typed command
+// draws it as working for a moment (measured), and a band taken just then
+// would say so for good. The hint's word and the main loop's turn events
+// stand either way.
+function waitsOnPerson(): string | undefined {
+  if (working.turn || working.hint || (bandDrawn && working.band)) return TOASTS.midTurn('/clear')
+  if (dialogDrawn) return TOASTS.countQuestion
+  if (bandSurvey) return bandDrawn ? TOASTS.countSurvey : TOASTS.countSurveyUnseen
+  return undefined
 }
 
 function stopCountdown($: EngineInterface) {
