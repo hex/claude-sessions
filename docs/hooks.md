@@ -546,16 +546,22 @@ They add no row. Where they draw depends on what the footer has room for
   `⏵⏵ auto mode on · rotate · wrap · filter chat ○`. Shift+Tab still cycles
   the mode.
 - Not at all on a terminal narrower than the keys and 31 cells (60 columns
-  for all three), where that row would wrap.
+  for all three): the widest notice without its hint, the keys and the
+  footer's margins. That floor is reckoned, not measured.
 
 The mod learns the status line's width from
 [`.cs/local/statusline-width`](session-layout.md), which `cs-statusline`
 writes for the launched conversation whenever the line it prints changes
 width, and reads it again every 2 seconds while a key draws. With no record
-for this conversation (another status line command, `CS_STATUSLINE_DISABLE=1`,
-a session whose control files git tracks) the keys take the notice's text.
-They do too while another mod draws a tree of its own where the mode labels
-go, since nothing says how wide that is. The keys spell no chord: the row has
+for this conversation (a status line that was never cs's in it, a session
+whose control files git tracks) the keys take the notice's text. A status
+line turned off or replaced inside a conversation that already recorded a
+width leaves that record in place, and the keys are placed by it until the
+next conversation. The keys take the notice's text too while a mod that
+loaded after cs draws a tree of its own where the mode labels go, since
+nothing says how wide that is. A mod that loaded before cs and does the same
+is one cs cannot see: the keys then end where that mod's content starts, and
+on a narrow terminal they cover the end of the notice (measured). The keys spell no chord: the row has
 no cells for one. A chord bound to a key's action still presses it, and so
 does a click.
 
