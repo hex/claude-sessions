@@ -1071,8 +1071,11 @@ test('at zero the countdown runs /clear, once, and stops ticking', async () => {
 // then not reached, whatever the count's redraws ask for, and what the band
 // last said of a turn stays as it was. The toast follows the /clear: one shown
 // before it leaves the screen with the conversation (measured), and a /clear
-// the engine rejects has only its own to say.
-const CLEAR_UNSEEN = 'another mod has the band above the prompt, so the count to /clear ran unseen; /clear ran on time'
+// the engine rejects has only its own to say. The toast names both things
+// measured to keep the band from being raised with no question open: another
+// mod's band, and a picker such as /model's, behind which the engine holds
+// the /clear until it closes.
+const CLEAR_UNSEEN = 'the count to /clear ran unseen: another mod or a picker had the band above the prompt; /clear has run'
 const CLEAR = { command: 'clear', args: '' }
 
 test('a band another mod takes mid-turn does not stop the count: at zero /clear runs, once, and a toast then says the count ran unseen', async () => {
@@ -1148,7 +1151,7 @@ test('a survey above the prompt at zero keeps the /clear from running and a toas
   envVars.CS_ROTATE_FORCE_CTX = '70'
   const cases: [typeof tick, string][] = [
     [tick, '/clear did not run: a survey is waiting above the prompt'],
-    [tickUnseen, '/clear did not run: a survey was waiting above the prompt when another mod took the band'],
+    [tickUnseen, '/clear did not run: a survey was waiting above the prompt when the band last drew'],
   ]
   for (const [count, said] of cases) {
     arm(); percent = 80; toasts = []
