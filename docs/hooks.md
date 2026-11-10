@@ -881,11 +881,15 @@ is time, the status bar's amber from ten seconds and its crit red under five
 At zero the mod runs the `/clear` itself if the handoff is still armed, this
 is still the lead, cs still trusts the session's control files, and nothing
 waits on you: no turn running, no question dialog open, no survey above the
-prompt. Otherwise the count stops, the button waits for you, and a toast says
+prompt. Otherwise the count stops and a toast says
 why: `/clear did not run: a turn is running`, `a question is waiting for an
 answer`, `a survey is waiting above the prompt`, `the handoff is no longer
 armed` or `this conversation is no longer the session's lead`; cs's refusal
-of the session reads `no rotation in this session: <reason>`. Ctrl+X 1 during the count clears at once. A press while the mod's own `/clear` is
+of the session reads `no rotation in this session: <reason>`, toasted at that
+zero also when an earlier check said the same; a read that fails at zero
+reads `/clear did not run: <error>`. The clear key then waits for you where
+the mod's band is drawn; under a band another mod has taken there is none, so
+type `/clear`, or let the next turn's end start the count again. Ctrl+X 1 during the count clears at once. A press while the mod's own `/clear` is
 still running does nothing, so it cannot clear the conversation that `/clear` opened. Sending a prompt, from
 the composer or anywhere else a prompt enters the session, stops the count;
 the next turn's end starts it again from 20. A `/clear` from anywhere else
@@ -902,25 +906,36 @@ from drawing, and this mod gets no notice of it. A picker such as `/model`'s
 takes the band's place the same way. The mod reads a taken band from its
 own band hook not having run since the count's last tick: each tick asks for
 a redraw, and the engine raises the band within 20 ms of one (measured on
-2.1.322). The count then runs unseen. The mod takes the clear key and its
-count from the row under the prompt, where nothing would redraw them, runs
-the `/clear`, and then toasts `the count to /clear ran unseen: another mod or
-a picker had the band above the prompt; /clear has run`. Under another mod's
-band the `/clear` runs on time; the engine holds one behind a picker until
-the picker closes. The toast
+2.1.322). The count then runs unseen. The mod takes every key it put in the
+row under the prompt, the clear key and its count among them, since nothing
+would redraw them; they come back when its band is raised again. At zero it
+runs the `/clear`, and then toasts `the count to /clear reached zero unseen:
+the band above the prompt was not drawn; /clear has run`. The toast names no
+cause: the mod cannot tell another mod's band from a picker. The mod toasts it when
+the engine raised no band between the count's last tick and the end of the
+zero's checks, whatever part of the count before that stood on screen. Under
+another mod's band the `/clear` runs on time; the engine holds one behind a
+picker until the picker closes. The mod has no way to take a queued `/clear`
+back, so nothing that changes while the picker is open stops it. The toast
 follows the `/clear` because one shown before it leaves the screen with the
 conversation. The mod drops what the taken band last said of a turn; the
 main loop's turn events and the hint under the prompt say whether one runs.
 
-Two limits come with a taken band. Only the band's render says a survey is
+These limits come with a taken band. Only the band's render says a survey is
 up, so the mod does not see a survey the engine opens while another mod has
 the band, and the `/clear` runs under it, unless that mod passes the band on
-under a survey. And a survey the band drew before another mod took it keeps
-the `/clear` from running even if you have dismissed it since: `/clear did
-not run: a survey was waiting above the prompt when the band last drew`. The mod sees another plugin's question dialog either way, through the
+under a survey. What the band said of a survey lasts one count: a
+survey the band drew during the count, before another mod took the band,
+keeps that count's `/clear` from running even if you have dismissed it since
+(`/clear did not run: a survey was waiting above the prompt when the band
+last drew`), and the next count starts without it and clears on time. A
+survey drawn before the count began, under a band taken since, is likewise
+not seen. The mod sees another plugin's question dialog either way, through the
 dialog's own render: the dialog takes the prompt's place, the engine does not
 raise the band while one is open, and it does not refuse a `/clear` run under
-one. Whether the mod's own questions (the queue's, the wrap key's) reach that
+one. A band raised after a dialog says the question is answered; under a
+taken band none is raised, so a question answered inside the count's last
+second still stops that zero. Whether the mod's own questions (the queue's, the wrap key's) reach that
 render is not measured.
 
 When the count starts, the mod toasts the handoff's next step once:
