@@ -4003,8 +4003,7 @@ count_render_forks() {  # json
     FORKS_RC=$?
     FORKS_OUT=$(cat "$TEST_TMPDIR/stdout.txt")
     FORKS=0
-    local line
-    while IFS= read -r line; do FORKS=$((FORKS + 1)); done < "$log"
+    while IFS= read -r _; do FORKS=$((FORKS + 1)); done < "$log"
 }
 
 # A lead Fable render with every optional stage live: a matching session id in
