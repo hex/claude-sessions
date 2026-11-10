@@ -556,7 +556,8 @@ Ctrl+X then R submits `/rotate`, and Ctrl+X then W submits `/wrap`, keys or no
 keys. Ctrl+X then 1 or 2 presses the `cs` mod's keys under the
 prompt: 1 its rotate key, or its `/clear` after arming a handoff, and 2 its
 wrap key. The keys have no hotkey of their own, so a digit you type to answer a
-question never presses one; without these two chords they answer only a click.
+question never presses one; without these two chords they answer only a click,
+or Ctrl+X Tab where they draw on the band above the prompt.
 Text you are typing stays in the prompt. Claude Code drops a Ctrl+X that gets no second
 key within 3 seconds. The chords need no terminal setting. Ctrl+X 1 and
 Ctrl+X 2 reach the keys only because Claude Code mounts no handler of its own

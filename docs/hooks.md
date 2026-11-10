@@ -531,39 +531,78 @@ The keys under the prompt are, in order and each only when it applies,
 handoff's count, a space after its key), `wrap` and `filter chat`, a dim `·`
 between them: `rotate · wrap · filter chat ○`. They are dim, as the hint
 beside them is; only the count and the filter chat key's dot take a colour.
-They add no row. Where they draw depends on what the footer has room for
-(measured on Claude Code 2.1.322):
+Under the prompt they add no row. Where they draw depends on what the footer
+has room for (measured on Claude Code 2.1.322). The band above the prompt,
+the mode labels and the hint are three places the mod draws from, and all
+three read one route, so the keys draw in exactly one of them:
 
 - At the right end of the notice's row, flush with the terminal's edge, when
-  two things hold. The status line and any mode labels at its right
-  (`filter chat · /filter-chat to switch` while filter chat is on) share one
-  row: the terminal is at least the status line's width, the labels' and 5
-  cells wide. And the row holds the widest notice (bypass permissions, 48
-  cells), the keys and 3 cells, so the keys never cover the notice: 80
-  columns for all three keys.
+  three things hold. Claude Code draws its fullscreen layout: on the main
+  screen (`CLAUDE_CODE_NO_FLICKER=0`) it clips what a mod hangs under the mode
+  labels, and the keys never go there. The status line and any mode labels at
+  its right (`filter chat · /filter-chat to switch` while filter chat is on)
+  share one row: the terminal is at least the status line's width, the
+  labels' and 5 cells wide. And the row holds the notice, the keys and 3
+  cells, so the keys never cover the notice. The notice is as wide as the
+  hint in it says: 48 cells (bypass permissions, the widest) under
+  `(shift+tab to cycle)`, which is 80 columns for all three keys, and wider
+  under a pill such as `1 shell`, counted as 30 cells and the pill's own.
 - Otherwise in the notice's own text, in place of its `(shift+tab to cycle)`
-  hint, or of `? for shortcuts` where there is no notice:
-  `⏵⏵ auto mode on · rotate · wrap · filter chat ○`. Shift+Tab still cycles
-  the mode.
-- Not at all on a terminal narrower than the keys and 31 cells (60 columns
-  for all three): the widest notice without its hint, the keys and the
-  footer's margins. That floor is reckoned, not measured.
+  hint and of nothing else: `⏵⏵ auto mode on · rotate · wrap · filter chat ○`.
+  Shift+Tab still cycles the mode. This needs the keys and 31 cells (60
+  columns for all three).
+- Otherwise on the band above the prompt, at its left, as before the keys had
+  a place under it: `ctrl+x 1 rotate   2 wrap · filter chat ○`. That is
+  where they draw on a terminal too narrow for the two places above, while
+  the hint is anything but the cycle hint (a pill such as `1 shell`, or
+  `? for shortcuts` outside the permission modes), and on a surface that
+  has not reported its width. An armed handoff's `/clear now` and its count are
+  on the band then, so the count never runs unseen. There the keys take the
+  band's line, which a collapsed band (Ctrl+X Ctrl+A) hides with the rest of
+  it.
+
+A turn takes `rotate`, `/clear now` and `wrap` away and leaves `filter chat`.
+The hint's place hears of a turn before the band does, so the keys go as the
+turn starts; a chord pressed in that moment toasts
+`cs: /rotate did not run: a turn is running` (or `/wrap`) and runs nothing.
+If the band's own drawing fails, the keys leave the row under the prompt
+until it next succeeds.
 
 The mod learns the status line's width from
 [`.cs/local/statusline-width`](session-layout.md), which `cs-statusline`
 writes for the launched conversation whenever the line it prints changes
-width, and reads it again every 2 seconds while a key draws. With no record
-for this conversation (a status line that was never cs's in it, a session
-whose control files git tracks) the keys take the notice's text. A status
-line turned off or replaced inside a conversation that already recorded a
-width leaves that record in place, and the keys are placed by it until the
-next conversation. The keys take the notice's text too while a mod that
-loaded after cs draws a tree of its own where the mode labels go, since
-nothing says how wide that is. A mod that loaded before cs and does the same
-is one cs cannot see: the keys then end where that mod's content starts, and
-on a narrow terminal they cover the end of the notice (measured). The keys spell no chord: the row has
-no cells for one. A chord bound to a key's action still presses it, and so
-does a click.
+width. The mod reads it when the band draws, and again every 2 seconds for
+as long as the width could move the keys: not on the main screen, nor while
+the row is too narrow for the notice and the keys whatever the status line
+does. The record names the Claude Code whose status line wrote it, and the
+mod takes a width only from its own. The keys take the notice's text, or the
+band, whenever there is no such width:
+
+- no record for this conversation: a status line that was never cs's in it,
+  one turned off (`CS_STATUSLINE_DISABLE=1` removes the record), a session
+  whose control files git tracks;
+- a status line holding a character from outside ASCII that is not one of
+  its own glyphs, such as a conversation title in Chinese or with an emoji:
+  `cs-statusline` cannot tell how many cells that takes and records no width;
+- the conversation open in a second terminal: two status lines of different
+  widths share the file, so it carries no width while both run;
+- no room beside the status line: `CS_STATUSLINE_LAYOUT=band` fills its row
+  to the terminal's edge, unless `CS_STATUSLINE_COLS` holds the band at least
+  5 cells narrower than the terminal.
+
+A status line replaced by another program inside a conversation that already
+recorded a width leaves that record in place, and the keys are placed by it
+until the next conversation.
+
+The keys take the notice's text, or the band, too while a mod that loaded
+after cs draws a tree of its own where the mode labels go, since nothing
+says how wide that is. A mod that loaded before cs and does the same is one
+cs cannot see, and its content pushes the keys left by its own width: on a
+narrow terminal they then cover the end of the notice (measured with a mod
+written for the test). The event cs draws the mode labels' place from names
+no such mod, so cs cannot move the keys out of its way. Under the
+prompt the keys spell no chord: the row has no cells for one. A chord bound to a key's action
+still presses it, and so does a click.
 
 The band is one thin line above
 the prompt, two columns in where Claude Code draws its own footer, with a
@@ -697,11 +736,12 @@ The installer binds Ctrl+X 1 and Ctrl+X 2
 to them in `keybindings.json` (see
 [configuration.md](configuration.md#rotate-and-wrap-keys)). A chord that
 file's `Global` block binds to an action presses its Button under the prompt
-as it did on the band, while a turn runs too (measured on 2.1.322), and the
-mod no longer reads the file, since the keys spell no chord; the Buttons
-still answer a click. The band's focus (Ctrl+X Tab) does not reach under the
-prompt: it lands on the queue's start press and a features word that can be
-pressed. Claude Code re-reads `keybindings.json` while it runs, so a
+as on the band, and reaches the mod while a turn runs too (measured on
+2.1.322), when the rotate and wrap presses say so and run nothing. The mod
+reads the file to spell the chords beside the keys where they draw on the
+band; the Buttons still answer a click. The band's focus (Ctrl+X Tab) does
+not reach under the prompt: it lands on the queue's start press, a features
+word that can be pressed, and the keys while they draw on the band. Claude Code re-reads `keybindings.json` while it runs, so a
 chord bound after launch works at once (measured on 2.1.292). An encrypted
 session launched before `keybindings.json` existed gets the file at its next
 launch.
