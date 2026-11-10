@@ -1507,13 +1507,13 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "1fa4be9e05c90edc4a677a31c89eee34b034505f6011764a126b1defb8976a70  bin/cs"
+    "fb9cac76dcec9ee1a0d07149156ca57650847cf837f55de2a11e802fb52112cb  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
-    "ade5dd7e429d13a6e2918e5580ff29958d5ff8eec1f0a924e28953ec5c1a8597  bin/cs-statusline"
+    "52e78ab1d3891df314015ff0621c32ab50917e6dbecaa35d64ba1351123c322f  bin/cs-statusline"
     "324691a50519294a125520ee96e279bb02a08b1a4c2e4804cf9347c617521044  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
-    "64a8860cb69fb180f87e0216c9106e846f927978f94dde490216bfbc458e10ae  hooks/cs-shared.sh"
-    "4294cda40ff089f6cc15058daa1db6e488f93baaf4555478c9cda4a91d652a20  hooks/cs-config.sh"
+    "84d253e7ace05b24eef4e6f2c32efc4ba6b5563459452109a2ab5ab63fc097b0  hooks/cs-shared.sh"
+    "482981fa976e6543136f65d87931624825b983ef20547561fccc27796912f7af  hooks/cs-config.sh"
     "50d63ce0995e68fddd8503700c15f9585d11938c9cd3872a883146de7707c765  hooks/cs-iterm-tab.py"
     "21988bf58bb6fea15c6435445f4abc3a38f4c4a9a7db78c4ff4797650709ba3f  hooks/memory-index-guard.sh"
     "0202455687b8c8a584cfc1ecf0439de03e8f70fcb0062e479484fdfeb4b83147  hooks/prompt-rewriter.sh"
@@ -1541,10 +1541,10 @@ CS_PAYLOAD_SHA256=(
     "a8abe8e196ab085c28a30db08b3a52781d14c14ed1134cea5464a75ef03486b6  skills/write-as-me/scripts/build-corpus.sh"
     "a8a14c22510b49f89557b401730875996064682af719a85322215b61d046b054  skills/write-as-me/scripts/corpus-check.sh"
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
-    "a4a0978846dd5f6cca361977b6c8b4b951d475734af234cbe78aae1f3bf8148a  mods/cs/.claude-plugin/plugin.json"
+    "144391d7d2df6a89742528729ee8da1e51063b3783023a656571bec0f2235458  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
-    "12fe62d3e76ace5f5fa96cab0abf9c8822159640d0ac8b7d23df77d7f981d168  mods/cs/hooks/register.tsx"
-    "f03ff75abd5a5c2e87411c14a30d192d76a54f866ba3af87d50d4db5f521c504  mods/cs/tips.json"
+    "951c8267bd850baa4dda5173a4574ca0475020bd0b54903238db360ef2db3409  mods/cs/hooks/register.tsx"
+    "4c4955c1641b10394c5126ca1794419f2984a9a49e05658b21f96611bd2836d9  mods/cs/tips.json"
     "2f8d4b45beddd0b27b050f1c2eb08ebb25552b4dea5f33b9398318a2ef636985  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
     "f5df22546ae0a51339d71ab7551cccb45c897cfdb5b769f8e3050aa975d9da7a  mods/cs-update/hooks/register.tsx"
@@ -2719,7 +2719,7 @@ else
     _tips_name=""
     case "$_tips_record:$_tips_state" in
         *:foreign)
-            info "Spinner tips: ~/.claude/settings.json names its own tipsFile ($_current_tips_file), and Claude Code reads one; cs's tip (turn on the band's prompt bars in /config) is left out"
+            info "Spinner tips: ~/.claude/settings.json names its own tipsFile ($_current_tips_file), and Claude Code reads one; cs's tip (turn on the band's prompt bars in /cs) is left out"
             ;;
         *:not-object)
             warn "Spinner tips: spinnerTipsOverride in ~/.claude/settings.json is not an object; left as it is, so cs's tip is not in Claude Code's tips"

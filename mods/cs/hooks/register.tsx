@@ -5,7 +5,7 @@
 // ABOUTME: A turn ending past CS_ROTATE_FORCE_CTX (default 80, off disables) runs /rotate itself, then counts down to the /clear (session colour, amber, crit); session.start writes a heartbeat for doctor.
 // ABOUTME: /queue adds a task to the session's walk-away queue through `cs -queue add`, at once even mid-turn; bare, it prints `cs -queue list`. /finish toasts its start and outcome and, while its gate runs, the band carries the elapsed time.
 // ABOUTME: The band carries a rail: one tick per prompt on the transcript's live branch (read after each turn), the one being read thick; a press or /cs next|prev|first|last|N scrolls the transcript to that prompt; bare /cs goes on to the cs panel.
-import type { On, EngineInterface, PluginOptions, RenderElement, RenderSurface } from 'claude-code'
+import type { On, EngineInterface, RenderElement, RenderSurface } from 'claude-code'
 
 declare const h: any
 declare const Fragment: any
@@ -176,7 +176,7 @@ export const ASKS = {
 
 export const TOASTS = {
   queued: (task: string) => `queued: ${cutTask(task)}`,
-  bandOption: (problem: string) => `the band draws no prompt bars: ${problem}. Set it in /config.`,
+  bandOption: (problem: string) => `the band draws no prompt bars: ${problem}. /cs shows where it is set.`,
   promptNotDrawn: 'that prompt is not on screen yet',
   scrollRefused: (deny: string) => deny,
   transcriptTail: () => `the transcript is over ${READ_CAP / 1024 / 1024} MiB; the rail lists the prompts of its tail`,
@@ -389,38 +389,21 @@ let tailSaid = false
 // prompt is already scheduled.
 let drawnRead = -1
 let redrawPending = false
-// The band's /config rows (plugin.json userConfig), as this activation got
-// them: whether it draws the prompt bars at all (off by default), the prompt
-// it names, `latest` (the newest) or `read` (the one being read), and the
-// most bars it draws before the prompts past them fold into `…N` or `M…`. A
-// change reloads the plugin and register runs again. A stored value the band
-// cannot draw leaves it without bars (undefined), said once, and the rest of
-// the mod running: a throw from register would unload all of it.
-const CS_PLUGIN = 'cs'
+// cs's prompt-bar settings as the last band draw read them (readBandOptions):
+// whether it draws the bars at all, the prompt it names, `latest` (the
+// newest) or `read` (the one being read), and the most bars it draws before
+// the prompts past them fold into `…N` or `M…`. A value the band cannot draw
+// leaves it without bars (undefined) and the rest of the band running; the
+// lead's band says so once a value.
 type BandOptions = { prompts: boolean; prompt: 'latest' | 'read'; bars: number }
 let bandOptions: BandOptions | undefined
-let bandProblem: string | undefined
-let bandProblemSaid = false
+let bandProblemSaid: string | undefined
 let filterChatPressPending: Promise<void> | undefined
 let filterChatComplaint: string | undefined
 
-// What is wrong with a value for one of the band's rows, by field name;
-// undefined when the band can draw it, or the field is not the band's.
-function bandOptionProblem(field: string, value: unknown): string | undefined {
-  if (field === 'bandPrompts') return typeof value === 'boolean' ? undefined : `cs.bandPrompts is on or off; got ${String(value)}`
-  if (field === 'bandPrompt') return value === 'latest' || value === 'read' ? undefined : `cs.bandPrompt is latest or read; got ${String(value)}`
-  if (field === 'bandBars') {
-    return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? undefined : `cs.bandBars is the most bars the band draws, a whole number of 1 or more; got ${String(value)}`
-  }
-  return undefined
-}
-
-export function register(on: On, options: PluginOptions) {
-  bandProblem = bandOptionProblem('bandPrompts', options.bandPrompts) ?? bandOptionProblem('bandPrompt', options.bandPrompt) ?? bandOptionProblem('bandBars', options.bandBars)
-  bandOptions = bandProblem === undefined
-    ? { prompts: options.bandPrompts as boolean, prompt: options.bandPrompt as BandOptions['prompt'], bars: options.bandBars as number }
-    : undefined
-  bandProblemSaid = false
+export function register(on: On) {
+  bandOptions = undefined
+  bandProblemSaid = undefined
   filterChatPressPending = undefined
   filterChatComplaint = undefined
   // A (re)load has no countdown: the engine cancelled the old one's timers.
@@ -507,14 +490,6 @@ export function register(on: On, options: PluginOptions) {
     if (target < 0 || target >= count) return { text: REPLIES.railCount(count) }
     await jumpTo($, target)
     return {}
-  })
-
-  // A /config row of the band's takes only a value the band can draw: a bad
-  // one is refused at the menu, where it is typed, not met at the next load.
-  on('config.set', async ($, e, next) => {
-    if (e.provider.plugin !== CS_PLUGIN) return next(e)
-    const problem = bandOptionProblem(e.key.slice(e.key.lastIndexOf('.') + 1), e.value)
-    return problem === undefined ? next(e) : { deny: problem }
   })
 
   // The end of a turn is the one moment a rotation can be started for the
@@ -641,16 +616,19 @@ export function register(on: On, options: PluginOptions) {
     let queued = waiting > 0 ? 0 : queue
     // Mail from other sessions that `cs -msg` has not read yet.
     let mail = e.props.hasSurvey ? 0 : await unreadMail($)
-    // The rail draws, once cs.bandPrompts turns it on, whenever the
+    // The rail draws, once CS_BAND_PROMPTS turns it on, whenever the
     // conversation has two prompts to move between, a turn running or not,
     // under the same ownership as the keys; its bars draw not at all while a
-    // stored band row is bad, which the lead's band says once.
+    // prompt-bar setting is bad, which the lead's band says once a value.
+    const read = await readBandOptions($)
+    bandOptions = 'problem' in read ? undefined : read
+    if (!('problem' in read)) bandProblemSaid = undefined
+    else if (read.problem !== bandProblemSaid && (await ownsRotation($))) {
+      bandProblemSaid = read.problem
+      $.ui.toast(TOASTS.bandOption(read.problem))
+    }
     const bars = bandOptions?.bars
     let railing = !e.props.hasSurvey && prompts.length > 1 && bandOptions?.prompts === true
-    if (bandProblem !== undefined && !bandProblemSaid && (await ownsRotation($))) {
-      bandProblemSaid = true
-      $.ui.toast(TOASTS.bandOption(bandProblem))
-    }
     // The features word leads what the session is, at the line's right; a
     // running gate already names the feature it lands.
     let featured = !e.props.hasSurvey && gate === undefined ? featuresWord : undefined
@@ -700,7 +678,7 @@ export function register(on: On, options: PluginOptions) {
 
 // What the band's line is drawn from, as the AbovePrompt handler read it: the
 // engine's own tree, the entries, the bound chords by action, the session
-// colour, and the rail when cs.bandPrompts draws one.
+// colour, and the rail when CS_BAND_PROMPTS draws one.
 export type BandView = {
   drawn: RenderElement
   entries: BandEntry[]
@@ -926,7 +904,7 @@ export function drawBand(v: BandView, el: BandElements): RenderElement {
   // otherwise (side by side, flat ticks run together into one line), each a
   // Button (the named one a Text, as dim as the rest: there is nowhere to
   // jump, and its heavier stroke alone marks it). It draws at most
-  // cs.bandBars bars in what the line leaves after the inset, the gaps and
+  // CS_BAND_BARS bars in what the line leaves after the inset, the gaps and
   // the words, always the named one among them (railTicks); the older prompts
   // collapse into one `…N` run, a cell before the first bar, and any newer
   // than the drawn bars into one `M…` run, a cell after the last. The named
@@ -938,7 +916,7 @@ export function drawBand(v: BandView, el: BandElements): RenderElement {
   const drawnTick = (i: number) => ticks !== undefined && i >= ticks.from && i < ticks.to
   // Left of the rail, GAP cells before it so the `…N` run never reads as
   // the cut name's own `…`, the band names a prompt in what the line leaves:
-  // the newest or the one being read (cs.bandPrompt), or the one under the
+  // the newest or the one being read (CS_BAND_PROMPT), or the one under the
   // pointer. Too little left to name one names none.
   const railWidth = ticks === undefined ? 0 : railCells(ticks.prompts.length, ticks)
   const labelRoom = ticks === undefined ? 0 : budget - railWidth - GAP
@@ -1301,7 +1279,7 @@ function foldCells(folded: number): number {
   return folded > 0 ? `\u2026${folded}`.length + 1 : 0
 }
 
-// The prompt the band names: the newest, or the one being read (cs.bandPrompt).
+// The prompt the band names: the newest, or the one being read (CS_BAND_PROMPT).
 function namedIndex(): number {
   return bandOptions?.prompt === 'read' ? readIndex() : prompts.length - 1
 }
@@ -1679,6 +1657,22 @@ export function nextStepLine(text: string): string | undefined {
     return first.length > NEXT_STEP_CHARS ? `${first.slice(0, NEXT_STEP_CHARS)}\u2026` : first
   }
   return undefined
+}
+
+// The prompt-bar settings, each read as threshold() reads its own; an empty
+// or unset value is its default. The named prompt and the bar count are
+// judged only while the bars are on: off, the band draws nothing a bad value
+// could spoil. cs skips a file's value its check refuses, so a bad value here
+// comes from the environment, or is a bar count of 0, which cs's whole-number
+// check takes.
+async function readBandOptions($: EngineInterface): Promise<BandOptions | { problem: string }> {
+  const prompts = (fileValue('CS_BAND_PROMPTS') ?? await $.env.get("CS_BAND_PROMPTS"))?.trim()
+  const prompt = (fileValue('CS_BAND_PROMPT') ?? await $.env.get("CS_BAND_PROMPT"))?.trim() || 'latest'
+  const bars = (fileValue('CS_BAND_BARS') ?? await $.env.get("CS_BAND_BARS"))?.trim() || '10'
+  if (prompts !== '1') return { prompts: false, prompt: 'latest', bars: 10 }
+  if (prompt !== 'latest' && prompt !== 'read') return { problem: `CS_BAND_PROMPT is latest or read; got ${prompt}` }
+  if (!/^\d+$/.test(bars) || Number(bars) < 1) return { problem: `CS_BAND_BARS is a whole number of 1 or more; got ${bars}` }
+  return { prompts: true, prompt, bars: Number(bars) }
 }
 
 // The band's own threshold; without one it is the bar's warn band, read the way

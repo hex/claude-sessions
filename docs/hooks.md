@@ -550,11 +550,11 @@ caps answer; only the amber of the count and of the queue's `▤` still read the
 measurement. The percentage itself stays on the status bar: the band does not
 repeat it.
 
-The rail draws only when the `/config` row `cs.bandPrompts` is on (it is
+The rail draws only when the cs setting `CS_BAND_PROMPTS` is on (it is
 off by default; see [configuration.md](configuration.md#band-settings)).
 It is one upright bar per prompt the person sent in this conversation: `│` dim, `┃` dim too for the prompt the band
 names (its heavier stroke marks it), `┆` dim for a prompt the engine refused to scroll to. The band names
-the newest prompt; with the `/config` row `cs.bandPrompt` set to `read` it
+the newest prompt; with the cs setting `CS_BAND_PROMPT` set to `read` it
 names the prompt being read instead (the prompt whose row stands highest on
 screen, from the engine's own on-screen reports of the transcript's rows)
 and follows the scroll (see
@@ -580,13 +580,13 @@ results, slash-command echoes, hook feedback, task notifications, a
 teammate's message and the interrupt the engine writes when you stop a turn
 are not prompts. The rail ends in the line's last cell, so the actions at
 the left never move it while the line has room for every bar. At
-most `cs.bandBars` bars draw (10 by default), in what the line leaves after
+most `CS_BAND_BARS` bars draw (10 by default), in what the line leaves after
 the inset and the words, and the named bar always among them: the bars
 reach the newest prompt, or start at the named one when that prompt
 predates their reach. The older prompts collapse into one dim `…N` run at the rail's
 start, a cell before the first bar, and the newer into one dim `M…` run at
 its end, a cell after the last: `#7 step 7   …6 ┃││││ 3…` with the seventh
-of fourteen prompts named under `cs.bandPrompt` `read` and `cs.bandBars` at 5. The rail keeps its
+of fourteen prompts named under `CS_BAND_PROMPT` `read` and `CS_BAND_BARS` at 5. The rail keeps its
 least: the named bar alone, the older prompts folded into `…N` before it
 and the newer into `M…` after it, and three cells before that. The words fit what that leaves, so the queue count and the right edge's
 words drop, a right-edge word shortens, and the keys lose their words before the rail goes:
@@ -883,12 +883,13 @@ in the checkout the way it does hooks, commands and skills.
 Two facts about the plugin runtime shape the code. A module reads the
 environment through `$.env.get` with a literal name, which `claude plugin
 validate` lists, so a render reads each variable it needs by name: the
-threshold's `CS_ROTATE_BUTTON_CTX` and `CS_STATUSLINE_CTX_WARN`, the inks'
+threshold's `CS_ROTATE_BUTTON_CTX` and `CS_STATUSLINE_CTX_WARN`, the prompt
+bars' `CS_BAND_PROMPTS`, `CS_BAND_PROMPT` and `CS_BAND_BARS`, the inks'
 `CS_TERM_BG_RGB` and `CS_TERM_THEME`, the filter chat key's `CS_FILTER_CHAT`
 and `XDG_CONFIG_HOME`, and `CLAUDE_CONFIG_DIR`, `HOME` and `CS_SESSIONS_ROOT`
 to find `keybindings.json`, the settings files and the sessions root. For the
-thresholds, the theme and the background, a value a settings file gives comes
-first unless the shell exports the key. The
+thresholds, the prompt bars, the theme and the background, a value a settings
+file gives comes first unless the shell exports the key. The
 defaults and the twelve ink triplets (the eight session colours, and amber and
 crit for a light and a dark terminal) are literals in `register.tsx` that
 `tests/test_mod_rotate.sh` pins to the status line's. The

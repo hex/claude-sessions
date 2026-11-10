@@ -7,6 +7,7 @@ All notable changes to cs are documented here. Release notes are also available 
 ## Unreleased
 
 ### Changed
+- The band's prompt bars are cs settings in their own `Prompt bars` group of `/cs`, and no longer rows of Claude Code's `/config`: `CS_BAND_PROMPTS` (off by default), `CS_BAND_PROMPT` (`latest` or `read`) and `CS_BAND_BARS` (10). `cs -config set` changes them too, and a change applies by your next prompt instead of reloading the mod. The `/config` values are not carried over, so prompt bars you turned on there are off until you turn them on in `/cs`.
 - `/write-as-me` drafts a long PR description or issue reply as two or three lines in your voice, then the full detail folded under a `Full description` summary that GitHub shows collapsed. The label never names a model. Commit messages and review comments stay unfolded.
 
 ## 2026.11.5

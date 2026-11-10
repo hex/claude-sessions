@@ -65,7 +65,7 @@ The [statusline guide](docs/statusline.md) covers the quiet default layout, the 
 | Secrets | Uses the macOS keychain or encrypted files, with signed age exports for sync. | [Secrets guide](docs/secrets.md) |
 | Encrypted sessions | Keeps notes, transcripts, plans, and private state in a vault on macOS. | [Encrypted sessions](docs/session-layout.md#encrypted-sessions) |
 | Statusline | Shows session, git, model, context, queue, mail, and rate limits. | [Statusline guide](docs/statusline.md) |
-| Prompt rail | With `cs.bandPrompts` on in `/config`, the band above the prompt draws a bar per prompt. A press on a bar, or `/cs next`, `prev`, `first`, `last` or a prompt number, scrolls the transcript to that prompt. | [cs mod band](docs/hooks.md#cs-not-a-hook-script--a-claude-code-mod) |
+| Prompt rail | With the cs setting `CS_BAND_PROMPTS` on (in `/cs`, or `cs -config set CS_BAND_PROMPTS 1`), the band above the prompt draws a bar per prompt. A press on a bar, or `/cs next`, `prev`, `first`, `last` or a prompt number, scrolls the transcript to that prompt. | [cs mod band](docs/hooks.md#cs-not-a-hook-script--a-claude-code-mod) |
 | Prompt grounding | Adds matching files, recent commits, changes, and clarification guidance to code-work prompts. | [Scope hook](docs/hooks.md#scope-promptsh-userpromptsubmit) |
 | Prompt rewriting | Ctrl+G rewrites a draft in the composer for you to review before sending. | [Prompt rewriter](docs/hooks.md#prompt-rewritersh-not-a-hook--an-editor-shim) |
 | Writing skills | Judges prose or drafts from a writing profile. | [Skills](docs/hooks.md#skills) |

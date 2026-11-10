@@ -287,6 +287,13 @@ export CS_STOP_VERDICT_WAIT="7"   # this is the default
 # The mod reads it from the launched process's environment.
 export CS_ROTATE_BUTTON_CTX="40"
 
+# The cs mod's prompt bars above the prompt (see Band settings below): a bar
+# per prompt, off by default; the prompt the band names, the newest (latest)
+# or the one being read (read); and the most bars it draws.
+export CS_BAND_PROMPTS="1"
+export CS_BAND_PROMPT="latest"   # latest | read
+export CS_BAND_BARS="10"         # this is the default
+
 # Forced rotation with grace (on at 80 unless set): once a turn ends with context
 # at or past this percentage the mod runs /rotate itself, once per
 # conversation, then counts the band down for 20 seconds and runs the /clear
@@ -510,6 +517,9 @@ stays with its session.
 | `CS_NARRATIVE_KEEP_BYTES` | a byte count above 0, at most 15 digits | 65536 | when the next turn ends |
 | `CS_ROTATE_FORCE_CTX` | `off`, `0` or a percentage from 1 to 100 | 80 | by your next prompt |
 | `CS_ROTATE_BUTTON_CTX` | a whole number of 1 to 3 digits | the warn % | by your next prompt |
+| `CS_BAND_PROMPTS` | `1` (on) or `0` (off) | off | by your next prompt |
+| `CS_BAND_PROMPT` | `latest`, `read` | latest | by your next prompt |
+| `CS_BAND_BARS` | a whole number of 1 to 3 digits | 10 | by your next prompt |
 | `CS_NO_ROTATION_WAKE` | `1` (on) or `0` (off) | off | at the next `/clear` or launch |
 | `CS_ROTATION_KICK_DELAY` | seconds, 1 to 7 digits | 2 | at the next rotation |
 | `CS_REWRITE_PROVIDER` | `claude`, `claude-api`, `openai`, `openai-api`, `gemini`, `gemini-api`, `grok`, `xai` | claude | at the next ctrl+g |
@@ -602,20 +612,24 @@ release that mounts one takes the chord from the band without a warning.
 
 ## Band settings
 
-Three rows of Claude Code's `/config` menu shape the cs mod's band above the
-prompt (the cs plugin's `userConfig`, stored by Claude Code in
-`settings.json`). A change reloads the mod.
+Three cs settings, in the `Prompt bars` group of `/cs`, shape the cs mod's
+band above the prompt. Change them in `/cs`, with `cs -config set`, or export
+them in the shell that launches cs (see [Settings file](#settings-file)). The
+mod reads cs's settings at session start and as each turn starts and ends, so
+a change in `/cs` or with `cs -config set` applies by your next prompt, with
+no reload.
 
-| Row | Values | Default | What it does |
-|-----|--------|---------|--------------|
-| `cs.bandPrompts` | on, off | off | Draws the rail: a bar per prompt and the name of one prompt before the bars; a press on a bar scrolls to its prompt. The band's other words draw either way. |
-| `cs.bandPrompt` | `latest`, `read` | `latest` | `latest` names the newest prompt and draws its bar thick. `read` names the prompt being read, the one whose row stands highest on screen, and follows your scroll. |
-| `cs.bandBars` | a whole number, 1 or more | `10` | The most prompt bars the band draws, the named prompt's always among them; older prompts fold into one `…N` run, and newer ones into one `M…` run when the named prompt is older than the bars reach. |
+| Setting | Values | Default | What it does |
+|---------|--------|---------|--------------|
+| `CS_BAND_PROMPTS` | `1` (on), `0` (off) | off | Draws the rail: a bar per prompt and the name of one prompt before the bars; a press on a bar scrolls to its prompt. The band's other words draw either way. |
+| `CS_BAND_PROMPT` | `latest`, `read` | `latest` | `latest` names the newest prompt and draws its bar thick. `read` names the prompt being read, the one whose row stands highest on screen, and follows your scroll. |
+| `CS_BAND_BARS` | a whole number, 1 or more | `10` | The most prompt bars the band draws, the named prompt's always among them; older prompts fold into one `…N` run, and newer ones into one `M…` run when the named prompt is older than the bars reach. |
 
-`/config` refuses a value the band cannot draw (a bar count under 1 or not
-whole), naming the row beside it. A bad value stored some other way, such
-as by editing `settings.json`, leaves the band without the rail and says so in
-one toast; the rest of the mod runs.
+`cs -config set` and `/cs` refuse a named prompt other than `latest` or
+`read`, and a bar count that is not a whole number of 1 to 3 digits, naming
+the setting. A value the band cannot draw, which can come from your shell or
+be a bar count of `0`, leaves the band without the rail while the bars are on
+and says so in one toast per value; the rest of the mod runs.
 
 ### Spinner tip
 
@@ -650,7 +664,7 @@ alone. To get cs's tips back, delete `~/.config/cs/tips-file` and run
 ## In-session switches
 
 Bare `/cs` (or `/cs-panel`) opens a pane of these switches and of cs's settings
-together: the `/config` rows of `cs`, `cs-update`, `cs-mermaid`, `cs-images` and `cs-filter-chat`, then every
+together: the `/config` rows of `cs-update`, `cs-mermaid`, `cs-images` and `cs-filter-chat`, then every
 setting `cs -config list` names. Type to filter the rows, then press Enter on
 one to open its choices under it: a new value, `Default` (which removes it from
 the file that holds it), or `Keep`; the scope line under the keys says which
