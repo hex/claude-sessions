@@ -1973,32 +1973,43 @@ function startCountdown($: EngineInterface) {
     // The keys under the prompt are what the band last put there, the count's
     // seconds among them: a band not raised since the last tick vouches for
     // none of them, and puts them back when it is raised again.
-    if (unseen) await clearFooter($)
-    if (left > 0) return
-    // The count holds at zero through the reads below: a prompt or a press
-    // landing meanwhile stops it (left becomes undefined), and this tick
-    // then does nothing, so nothing clears twice or behind a new turn.
-    // What waits on the person already spares the reads, a cs process among
-    // them; it is read again once they are done.
-    const waiting = waitsOnPerson()
-    const armed = waiting === undefined && (await handoffArmed($))
-    const lead = armed && (await ownsRotation($))
-    // cs's refusal of the session is toasted by the vet itself.
-    const vetted = lead && (await sessionVetted($, await $.session.cwd()))
-    if (left !== 0) return
-    stopCountdown($)
-    const refusal = waiting ?? (!armed ? TOASTS.countDisarmed : !lead ? TOASTS.countNotLead : waitsOnPerson())
-    if (refusal !== undefined) return $.ui.toast(refusal)
-    if (!vetted) return
-    // Said once the /clear has run: a toast shown before it leaves the screen
-    // with the conversation (measured).
     try {
-      await clearAndContinue($)
+      if (unseen) await clearFooter($)
+      if (left > 0) return
+      await countZero($, unseen)
     } catch (err) {
-      return $.ui.toast(TOASTS.clearFailed(String(err)))
+      // A read that throws at zero would leave the count there for good.
+      if (left !== 0) throw err
+      stopCountdown($)
+      $.ui.toast(TOASTS.clearFailed(String(err)))
     }
-    if (unseen) $.ui.toast(TOASTS.clearUnseen)
   })
+}
+
+// The count holds at zero through the reads below: a prompt or a press
+// landing meanwhile stops it (left becomes undefined), and this tick then
+// does nothing, so nothing clears twice or behind a new turn.
+async function countZero($: EngineInterface, unseen: boolean) {
+  // What waits on the person already spares the reads, a cs process among
+  // them; it is read again once they are done.
+  const waiting = waitsOnPerson()
+  const armed = waiting === undefined && (await handoffArmed($))
+  const lead = armed && (await ownsRotation($))
+  // cs's refusal of the session is toasted by the vet itself.
+  const vetted = lead && (await sessionVetted($, await $.session.cwd()))
+  if (left !== 0) return
+  stopCountdown($)
+  const refusal = waiting ?? (!armed ? TOASTS.countDisarmed : !lead ? TOASTS.countNotLead : waitsOnPerson())
+  if (refusal !== undefined) return $.ui.toast(refusal)
+  if (!vetted) return
+  // Said once the /clear has run: a toast shown before it leaves the screen
+  // with the conversation (measured).
+  try {
+    await clearAndContinue($)
+  } catch (err) {
+    return $.ui.toast(TOASTS.clearFailed(String(err)))
+  }
+  if (unseen) $.ui.toast(TOASTS.clearUnseen)
 }
 
 // What waits on the person as the count reaches zero, as the toast that says

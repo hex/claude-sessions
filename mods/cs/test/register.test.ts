@@ -1323,6 +1323,26 @@ test('a rejected /clear at zero shows a toast and clears nothing else', async ()
   expect(ran).toEqual([])
 })
 
+test('a read that throws at zero ends the count and a toast says the /clear did not run', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  const t = ticker()!
+  const exists = $.fs.exists
+  $.fs.exists = async () => { throw new Error('EIO') }
+  try {
+    await tickUnseen()
+  } finally {
+    $.fs.exists = exists
+  }
+  expect(t.cancelled).toBe(true)
+  expect(toasts).toEqual(['/clear did not run: Error: EIO'])
+  expect(ran).toEqual([])
+  expect(JSON.stringify(await keys())).not.toMatch(/"in -?\d+s"/)
+})
+
 // The SessionStart hook's own rule (_handoff_is_unconsumed): the frontmatter
 // must close, and the status must sit inside it.
 test('isUnconsumed follows the hook: unclosed frontmatter, or a status after it, is not armed', () => {
