@@ -196,8 +196,14 @@ const WIDTH = '/work/.cs/local/statusline-width'
 const CYCLE = '(shift+tab to cycle)'
 const footerMode = (columns: number | null = 110, modes: string[] = [], drawn: unknown = MODES_DRAWN, isFullscreen = true) =>
   hooks['ui.render:SessionMode']($, { surface: 'terminal', viewport: viewOf(columns, isFullscreen), props: { modes } }, async () => drawn)
-const footerHint = (columns: number | null = 110, hint = CYCLE, isWorking = false, isFullscreen = true) =>
-  hooks['ui.render:PromptHint']($, { surface: 'terminal', viewport: viewOf(columns, isFullscreen), props: { isDraft: false, isWorking, hint } }, async () => HINT_DRAWN)
+// How the hint was last raised: a tick under another mod's band raises it that way again.
+type HintArgs = [columns?: number | null, hint?: string, isWorking?: boolean, isFullscreen?: boolean]
+let lastHint: HintArgs
+const footerHint = (...args: HintArgs) => {
+  lastHint = args
+  const [columns = 110, hint = CYCLE, isWorking = false, isFullscreen = true] = args
+  return hooks['ui.render:PromptHint']($, { surface: 'terminal', viewport: viewOf(columns, isFullscreen), props: { isDraft: false, isWorking, hint } }, async () => HINT_DRAWN)
+}
 // The keys under the prompt once the band above it has drawn: with no width
 // recorded they stand in the hint's place, and with no key the hint is the engine's.
 const keys = async (props: Parameters<typeof band>[0] = {}) => { await band(props); return footerHint() }
@@ -213,6 +219,7 @@ beforeEach(() => {
   scrolls = []; scrollResult = {}; reads = []; mtimes = {}
   nowMs = 1_800_000_000_000; livePids = new Set(); claudePid = '4242'
   lastBand = [{}, 'terminal', viewOf(110)]
+  lastHint = []
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   // /work sits under the default sessions root by its own name, and the launch
@@ -1046,9 +1053,13 @@ const ticker = () => timers.find(t => t.kind === 'every' && t.ms === 1000 && !t.
 // Each tick asks for a redraw, and the engine raises the band again within
 // the second (measured on 2.1.322: 5 to 19 ms after the tick), as it was last
 // raised. While another mod answers the band without passing it on, the mod's
-// hook is not reached: the ticks go by unseen.
-const tickUnseen = async (n = 1) => { for (let i = 0; i < n; i++) await ticker()!.fn() }
-const tick = async (n = 1) => { for (let i = 0; i < n; i++) { await tickUnseen(); await band(...lastBand) } }
+// hook is not reached: the ticks go by unseen, and the hint under the prompt
+// is still raised (measured: 34 to 36 times a count). A picker such as
+// /model's hides both (measured: no hint raised in 29 s with it open), as
+// does a tick whose redraw has not come yet.
+const tickHidden = async (n = 1) => { for (let i = 0; i < n; i++) await ticker()!.fn() }
+const tickUnseen = async (n = 1) => { for (let i = 0; i < n; i++) { await tickHidden(); await footerHint(...lastHint) } }
+const tick = async (n = 1) => { for (let i = 0; i < n; i++) { await tickHidden(); await band(...lastBand) } }
 const promptSubmit = (text = 'keep going') =>
   hooks['prompt.submit']($, { text, wait: false, origin: { kind: 'composer' } }, async (e) => ({ text: e.text }))
 
@@ -1089,9 +1100,8 @@ test('at zero the countdown runs /clear, once, and stops ticking', async () => {
 // last said of a turn stays as it was. The toast follows the /clear: one shown
 // before it leaves the screen with the conversation (measured), and a /clear
 // the engine rejects has only its own to say. The toast says what the mod
-// knows, that its band was not drawn, and names no cause: another mod's band
-// and a picker such as /model's both keep it from being raised (measured),
-// and the mod cannot tell them apart.
+// knows, that its band was not drawn, and names no cause: the hint under the
+// prompt still raised says only that something other than a picker hides it.
 const CLEAR_UNSEEN = 'the count to /clear reached zero unseen: the band above the prompt was not drawn; /clear has run'
 const CLEAR = { command: 'clear', args: '' }
 
@@ -1154,7 +1164,7 @@ test('while another mod has the band the clear key and its count leave the row u
   await tick()
   expect(bandWords(await footerHint())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS - 1}s`])
   // a tick whose redraw has not come yet leaves them: the band was raised since the tick before
-  await tickUnseen()
+  await tickHidden()
   expect(bandWords(await footerHint())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS - 1}s`])
   await tickUnseen()
   expect(await footerHint()).toBe(HINT_DRAWN)
@@ -1170,11 +1180,11 @@ test('a band raised whose draw is still pending at zero is a count seen', async 
   await keys()
   await turnComplete()
   await tick(GRACE_SECONDS - 2)
-  await tickUnseen()
+  await tickHidden()
   let draw!: () => void
   const raised = hooks['ui.render:AbovePrompt']($, { surface: 'terminal', viewport: viewOf(110), props: { isWorking: false, hasSurvey: false, bodyColumns: 110 } }, () => new Promise(resolve => { draw = () => resolve(DRAWN) }))
   await settle()
-  await tickUnseen()
+  await tickHidden()
   draw()
   await raised
   expect(ran).toEqual([CLEAR])
@@ -1195,6 +1205,55 @@ test('the hint under the prompt saying a turn runs keeps the zero from clearing 
   expect(ran).toEqual([])
   expect(toasts).toEqual(['/clear did not run: a turn is running'])
   expect(t.cancelled).toBe(true)
+})
+
+// A picker such as /model's hides the band and the hint under the prompt
+// alike, and the engine holds a /clear run under it until it closes, with no
+// way to take it back (measured on 2.1.322). A zero with neither raised since
+// the tick before clears nothing: the mod knows only that nothing of its own
+// drew, so the toast names a picker as one cause of that.
+const COUNT_HIDDEN = '/clear did not run: neither the band above the prompt nor the hint under it was drawn, as while a picker is open; the clear key comes back when the band draws again'
+
+const countHiddenAtZero = async () => {
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick(3)
+  await tickUnseen(3)
+  const t = ticker()!
+  await tickHidden(GRACE_SECONDS - 6)
+  return t
+}
+
+test('a zero with neither the band nor the hint under the prompt raised since the tick before runs no /clear, stops the count, and says so', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  const t = await countHiddenAtZero()
+  expect(ran).toEqual([])
+  expect(toasts).toEqual([COUNT_HIDDEN])
+  expect(t.cancelled).toBe(true)
+})
+
+test('after a zero nothing drew at, the band drawn again offers the clear key with no count, and a press clears', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  await countHiddenAtZero()
+  toasts = []
+  const row = await keys()
+  expect(bandWords(row)).toEqual(['/clear now'])
+  await findButton(row).props.onPress()
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
+})
+
+test('after a zero nothing drew at, the next turn\'s end counts again and clears at its zero', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  await countHiddenAtZero()
+  toasts = []
+  await keys()
+  await turnComplete()
+  expect(bandWords(await keys())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS}s`])
+  await tick(GRACE_SECONDS)
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
 })
 
 // A survey is a question to the person, and the engine draws it whoever has
@@ -1256,7 +1315,7 @@ test('a survey the band drew before the count began, under a band taken since, d
 // under it is not refused).
 const DIALOG_DRAWN = { type: 'engine', ref: 2 }
 const dialog = () => hooks['ui.render:AskUserQuestion']?.($, { surface: 'terminal', props: { tool: 'AskUserQuestion', questions: [] } }, async () => DIALOG_DRAWN)
-const tickUnderDialog = async (n = 1) => { for (let i = 0; i < n; i++) { await tickUnseen(); await dialog() } }
+const tickUnderDialog = async (n = 1) => { for (let i = 0; i < n; i++) { await tickHidden(); await dialog() } }
 
 test('a question dialog open at zero keeps the /clear from running and a toast says so; one answered before zero changes nothing', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
@@ -1289,7 +1348,7 @@ test('a question answered inside the count\'s last second, the band raised again
   await tick(GRACE_SECONDS - 1)
   await dialog()
   await band()
-  await tickUnseen()
+  await tickHidden()
   expect(ran).toEqual([CLEAR])
   expect(toasts).toEqual([])
 })
@@ -1303,7 +1362,7 @@ test('a band raised while the zero tick reads is a count seen: the /clear runs a
   await band()
   await turnComplete()
   await tick(GRACE_SECONDS - 2)
-  await tickUnseen()
+  await tickHidden()
   let answer!: () => void
   const run = $.process.run
   $.process.run = async (argv: string[], init: any) => {
@@ -1312,7 +1371,7 @@ test('a band raised while the zero tick reads is a count seen: the /clear runs a
     return { exitCode: 0, stdout: '', stderr: '' }
   }
   try {
-    const zero = tickUnseen()
+    const zero = tickHidden()
     await settle()
     await band()
     answer()
@@ -1462,7 +1521,7 @@ test('a read that throws at zero ends the count and a toast says the /clear did 
   const exists = $.fs.exists
   $.fs.exists = async () => { throw new Error('EIO') }
   try {
-    await tickUnseen()
+    await tickHidden()
   } finally {
     $.fs.exists = exists
   }
