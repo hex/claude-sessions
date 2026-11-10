@@ -172,8 +172,13 @@ const DRAWN = { type: 'Survey', props: {}, children: [] }
 type View = { columns: number; rows: number; isFullscreen: boolean } | undefined
 const viewOf = (columns: number | null, isFullscreen = true): View => columns === null ? undefined : { columns, rows: 35, isFullscreen }
 // `null` is an event with no viewport: a surface nobody has measured.
-const band = (props: Partial<{ isWorking: boolean; hasSurvey: boolean; bodyColumns: number }> = {}, surface = 'terminal', viewport: View | null = viewOf(110)) =>
-  hooks['ui.render:AbovePrompt']($, { surface, viewport: viewport ?? undefined, props: { isWorking: false, hasSurvey: false, bodyColumns: 110, ...props } }, async () => DRAWN)
+type BandProps = Partial<{ isWorking: boolean; hasSurvey: boolean; bodyColumns: number }>
+// How the band was last raised: a tick of the count raises it that way again.
+let lastBand: [BandProps, string, View | null]
+const band = (props: BandProps = {}, surface = 'terminal', viewport: View | null = viewOf(110)) => {
+  lastBand = [props, surface, viewport]
+  return hooks['ui.render:AbovePrompt']($, { surface, viewport: viewport ?? undefined, props: { isWorking: false, hasSurvey: false, bodyColumns: 110, ...props } }, async () => DRAWN)
+}
 
 function buttons(tree: any): any[] {
   if (!tree || typeof tree !== 'object') return []
@@ -207,6 +212,7 @@ beforeEach(() => {
   availableCommands = []
   scrolls = []; scrollResult = {}; reads = []; mtimes = {}
   nowMs = 1_800_000_000_000; livePids = new Set(); claudePid = '4242'
+  lastBand = [{}, 'terminal', viewOf(110)]
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   // /work sits under the default sessions root by its own name, and the launch
@@ -684,6 +690,7 @@ test('a control file git starts tracking during the count clears nothing at zero
   runResult = tracked
   await tick(GRACE_SECONDS)
   expect(ran).toEqual([])
+  expect(toasts).toEqual([`no rotation in this session: ${TRACKED}`])
 })
 
 test('a press while cs is still answering, then the count reaching zero, clears once', async () => {
@@ -1019,7 +1026,12 @@ test('a turn ending past the force threshold with a handoff already armed runs n
 // The countdown's ticker, and one tick of it as the clock would run it.
 // The countdown's clock, a tick a second; the footer's reads the status line's width on a slower one.
 const ticker = () => timers.find(t => t.kind === 'every' && t.ms === 1000 && !t.cancelled)
-const tick = async (n = 1) => { for (let i = 0; i < n; i++) await ticker()!.fn() }
+// Each tick asks for a redraw, and the engine raises the band again within
+// the second (measured on 2.1.322: 5 to 19 ms after the tick), as it was last
+// raised. While another mod answers the band without passing it on, the mod's
+// hook is not reached: the ticks go by unseen.
+const tickUnseen = async (n = 1) => { for (let i = 0; i < n; i++) await ticker()!.fn() }
+const tick = async (n = 1) => { for (let i = 0; i < n; i++) { await tickUnseen(); await band(...lastBand) } }
 const promptSubmit = (text = 'keep going') =>
   hooks['prompt.submit']($, { text, wait: false, origin: { kind: 'composer' } }, async (e) => ({ text: e.text }))
 
@@ -1050,6 +1062,77 @@ test('at zero the countdown runs /clear, once, and stops ticking', async () => {
   expect(ran).toEqual([{ command: 'clear', args: '' }])
   expect(t.cancelled).toBe(true)
   expect(JSON.stringify(await keys())).not.toMatch(/"in -?\d+s"/)
+  // the band drew the count at every tick: nothing more to say
+  expect(toasts).toEqual([])
+})
+
+// A mod loaded before this one may answer the band's render without passing
+// it on (measured: a council run's band, a link prompt's). The mod's hook is
+// then not reached, whatever the count's redraws ask for, and what the band
+// last said of a turn stays as it was.
+const CLEAR_UNSEEN = 'another mod has the band above the prompt, so the count to /clear ran unseen; /clear runs now'
+const CLEAR = { command: 'clear', args: '' }
+
+test('a band another mod takes mid-turn does not stop the count: at zero /clear runs, once, and a toast says the count ran unseen', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band({ isWorking: true })
+  await turnComplete()
+  const t = ticker()!
+  await tickUnseen(GRACE_SECONDS)
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([CLEAR_UNSEEN])
+  expect(t.cancelled).toBe(true)
+})
+
+test('a band another mod takes while the count runs changes nothing either, whether it last drew idle or a command running', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  for (const last of [{}, { isWorking: true }]) {
+    arm(); percent = 80; ran = []; toasts = []
+    await keys()
+    await turnComplete()
+    await tick(5)
+    // A typed command draws the band as working for a moment (measured), and
+    // the hint under the prompt goes on saying no turn runs.
+    await keys(last)
+    await tickUnseen(GRACE_SECONDS - 5)
+    expect([last, ran]).toEqual([last, [CLEAR]])
+    expect([last, toasts]).toEqual([last, [CLEAR_UNSEEN]])
+  }
+})
+
+// A survey is a question to the person, and the engine draws it whoever has
+// the band (measured). What the band last said of one stands once another mod
+// takes the band: nothing else tells the mod a survey is up.
+test('a survey above the prompt at zero keeps the /clear from running and a toast says so, also when another mod took the band after the survey drew', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  const cases: [typeof tick, string][] = [
+    [tick, '/clear did not run: a survey is waiting above the prompt'],
+    [tickUnseen, '/clear did not run: a survey was waiting above the prompt when another mod took the band'],
+  ]
+  for (const [count, said] of cases) {
+    arm(); percent = 80; toasts = []
+    await band()
+    await turnComplete()
+    const t = ticker()!
+    await band({ hasSurvey: true })
+    await count(GRACE_SECONDS)
+    expect(ran).toEqual([])
+    expect(toasts).toEqual([said])
+    expect(t.cancelled).toBe(true)
+  }
+})
+
+test('a conversation that is no longer the lead at zero clears nothing and says so', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-other\n'
+  await tick(GRACE_SECONDS)
+  expect(ran).toEqual([])
+  expect(toasts).toEqual(["/clear did not run: this conversation is no longer the session's lead"])
+  expect(ticker()).toBeUndefined()
 })
 
 test('a prompt entering the session stops the countdown and passes through', async () => {
@@ -1080,10 +1163,15 @@ test('pressing the clear button mid-countdown stops the ticker before it clears'
   expect(ran).toEqual([{ command: 'clear', args: '' }])
 })
 
-test('a countdown reaching zero while a turn runs or a survey holds the band clears nothing and stops', async () => {
+test('a countdown reaching zero while the band draws a turn running or a survey clears nothing, stops, and says which', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  for (const props of [{ isWorking: true }, { hasSurvey: true }]) {
+  const cases: [BandProps, string][] = [
+    [{ isWorking: true }, '/clear did not run: a turn is running'],
+    [{ hasSurvey: true }, '/clear did not run: a survey is waiting above the prompt'],
+  ]
+  for (const [props, said] of cases) {
+    toasts = []
     await band()
     await turnComplete()
     const t = ticker()!
@@ -1091,6 +1179,7 @@ test('a countdown reaching zero while a turn runs or a survey holds the band cle
     await tick(GRACE_SECONDS)
     expect(ran).toEqual([])
     expect(t.cancelled).toBe(true)
+    expect(toasts).toEqual([said])
   }
 })
 
@@ -1102,6 +1191,7 @@ test('a countdown reaching zero re-checks the handoff: one consumed meanwhile cl
   files[HANDOFF] = UNCONSUMED.replace('status: unconsumed', 'status: consumed')
   await tick(GRACE_SECONDS)
   expect(ran).toEqual([])
+  expect(toasts).toEqual(['/clear did not run: the handoff is no longer armed'])
 })
 
 test('with the forcing off, or outside the lead, an armed handoff starts no countdown and prompt.submit passes through', async () => {
@@ -1433,6 +1523,7 @@ test('a /clear the mod runs itself that is rejected leaves no birth behind: a la
   await tick(GRACE_SECONDS)
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
   expect(toasts).toEqual(['/clear did not run: Error: no session'])
+  await fireAfter() // the redraw the count's last tick asked for, spent
   files = { '/work/.cs/local/state': 'claude_session_id: uuid-resumed\n' }
   sessionId = 'uuid-resumed'
   percent = 72
@@ -5082,6 +5173,7 @@ test('a turn a Stop hook starts with no prompt, before the band draws it, keeps 
   await tick()
   expect(ran).toEqual([])
   expect(ticker()).toBeUndefined()
+  expect(toasts).toEqual([TOASTS.midTurn('/clear')])
   // Nor does one that starts while the zero tick waits on cs.
   await turnComplete()
   await keys()
@@ -5103,6 +5195,7 @@ test('a turn a Stop hook starts with no prompt, before the band draws it, keeps 
     $.process.run = run
   }
   expect(ran).toEqual([])
+  expect(toasts).toEqual([TOASTS.midTurn('/clear'), TOASTS.midTurn('/clear')])
 })
 
 const footerClock = () => timers.find(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS && !t.cancelled)
