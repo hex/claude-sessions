@@ -1436,6 +1436,7 @@ _stamp_written() {  # file
 # Print the dir basename as a last-resort plain status, then exit cleanly.
 _fallback() {
     printf '%s\n' "$(basename "${PWD:-/}")"
+    _forget_width
     exit 0
 }
 
@@ -2696,36 +2697,130 @@ _display_width() {
     _WIDTH=${#s}
 }
 
-# Print the bar's line "$1" and record how many cells it takes, beside the id
-# of the conversation it was drawn for, in .cs/local/statusline-width
-# (`<session id> <cells>`). The cs mod draws its keys at the right of the row
-# under the bar only where the bar leaves them room, and Claude Code tells a
-# mod nothing of the bar. The SGR escapes, the only ones this script emits,
-# take no cell. Same partition rules as context-pct: machine-local, atomic,
-# best-effort, nothing while git tracks the control files, and only the
-# launched conversation named in .cs/local/state writes, since a tmux
-# teammate's bar is not the one over the lead's keys. An unchanged record is
-# left alone: the move is a fork, and the bar repaints on every event.
-_emit_line() {  # line
-    printf '%s\n' "$1"
-    [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${SL_SESSION_ID:-}" ] || return 0
-    case "$SL_SESSION_ID" in *[[:space:]]*) return 0 ;; esac
-    [ -d "${SL_LOCAL_DIR:-}" ] || return 0
-    _session_files_tracked && return 0
-    _read_state_key "$SL_LOCAL_DIR/state" claude_session_id
-    [ "$_STATE_VALUE" = "$SL_SESSION_ID" ] || return 0
-    local rest="$1" text="" csi=$'\033[' file="$SL_LOCAL_DIR/statusline-width" was=""
+# Every character past ASCII this script prints of its own: the icons, the
+# joins, the caps, the branch marks. Each takes one cell. A line may also
+# carry text from outside (a conversation's title, a branch, a model's name),
+# and a character there may take two cells (East Asian wide, emoji) or none
+# (a combining mark): bash cannot tell which without a table of them.
+_SL_NARROW=(
+    '·' '⋮' '↑' '↓'
+    $'\xe2\x8e\x87' $'\xe2\x96\xa4' $'\xe2\x97\x8b' $'\xe2\x97\x8f' $'\xe2\x97\x91'
+    $'\xe2\x97\x94' $'\xe2\x97\x95' $'\xe2\x97\xab' $'\xe2\x97\xb6' $'\xe2\x97\xb7'
+    $'\xe2\x9c\x89' $'\xe2\x9c\xa6' $'\xe2\x9c\xa7' $'\xe2\x9c\xb3'
+    $'\xee\x82\xb4' $'\xee\x82\xb6' $'\xef\x80\xa3'
+)
+
+# Set _WIDTH to the cells "$1", a line with no escapes in it, takes on screen.
+# Returns 1, the width unknown, when the line holds a control character or a
+# character that is neither ASCII nor one of this script's own (_SL_NARROW).
+# [:ascii:] and a literal glyph match the same under a UTF-8 locale and under
+# C, where bash sees bytes: UTF-8 never holds one character's bytes inside
+# another's.
+_known_cells() {  # text
+    case "$1" in *[[:cntrl:]]*) return 1 ;; esac
+    local rest="${1//[[:ascii:]]/}" glyph
+    for glyph in "${_SL_NARROW[@]}"; do
+        [ -n "$rest" ] || break
+        rest="${rest//"$glyph"/}"
+    done
+    [ -z "$rest" ] || return 1
+    _display_width "$1"
+}
+
+# The width record's path in _WIDTH_FILE; returns 1 where this render may
+# neither write nor remove one. Same partition rules as context-pct:
+# machine-local, best-effort, nothing while git tracks the control files.
+_width_file() {
+    [ -n "${CLAUDE_SESSION_NAME:-}" ] || return 1
+    _WIDTH_FILE="$SESSIONS_ROOT/$CLAUDE_SESSION_NAME/.cs/local/statusline-width"
+    [ -d "${_WIDTH_FILE%/*}" ] || return 1
+    ! _session_files_tracked
+}
+
+# Whether this render draws for the launched conversation named in
+# .cs/local/state: a tmux teammate's bar is not the one over the lead's keys.
+_width_is_the_leads() {
+    case "${SL_SESSION_ID:-}" in ''|*[[:space:]]*) return 1 ;; esac
+    _read_state_key "${_WIDTH_FILE%/*}/state" claude_session_id
+    [ "$_STATE_VALUE" = "$SL_SESSION_ID" ]
+}
+
+# Remove the width record: this run printed no line the record is true of
+# (the bar turned off, stdin unreadable, no segment, a line of unknown
+# width). A run that knows its conversation leaves the lead's record to the
+# lead; one that does not (the first two) removes it, and the lead's next
+# render writes it again. The rm is a fork, paid once: the record is gone
+# after it.
+_forget_width() {
+    _width_file || return 0
+    [ -e "$_WIDTH_FILE" ] || return 0
+    [ -z "${SL_SESSION_ID:-}" ] || _width_is_the_leads || return 0
+    rm -f "$_WIDTH_FILE" 2>/dev/null
+    return 0
+}
+
+_pid_alive() {  # pid
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$1" 2>/dev/null
+}
+
+# Record how many cells the bar's line "$1" takes in .cs/local/statusline-width,
+# as `<session id> <cells> <pid>`: the conversation it was drawn for and the
+# Claude Code that drew it (_sl_parent_pid). The cs mod draws its keys at the
+# right of the row under the bar only where the bar leaves them room, Claude
+# Code tells a mod nothing of the bar, and the mod trusts only the record its
+# own Claude Code's bar wrote. The SGR escapes, the only ones this script
+# emits, take no cell. An unchanged record is left alone: the move is a fork,
+# and the bar repaints on every event.
+#
+# Two Claude Codes on one conversation (it was resumed in a second terminal)
+# share the file, and each bar is as wide as its own terminal lets it be. A
+# render that finds the record of another live one writes
+# `<session id> - <pid> <pid>` instead, which gives the mod no width and which
+# neither rewrites while the other lives, so the two never trade the file
+# back and forth; the one left writes its width again.
+_record_width() {  # line
+    _width_file || return 0
+    _width_is_the_leads || return 0
+    local rest="$1" text="" csi=$'\033['
     while [ "$rest" != "${rest#*"$csi"}" ]; do
         text+="${rest%%"$csi"*}"
         rest="${rest#*"$csi"}"
         rest="${rest#*m}"
     done
-    _display_width "$text$rest"
-    [ -f "$file" ] && IFS= read -r was < "$file"
-    [ "$was" = "$SL_SESSION_ID $_WIDTH" ] && return 0
-    printf '%s %s\n' "$SL_SESSION_ID" "$_WIDTH" > "$file.tmp" 2>/dev/null \
-        && mv "$file.tmp" "$file" 2>/dev/null
+    _known_cells "$text$rest" || { _forget_width; return 0; }
+    _sl_parent_pid
+    local was="" id="" cells="" a="" b="" other="" want="$SL_SESSION_ID $_WIDTH $_PARENT"
+    [ -f "$_WIDTH_FILE" ] && IFS= read -r was < "$_WIDTH_FILE"
+    read -r id cells a b <<< "$was"
+    if [ "$id" = "$SL_SESSION_ID" ]; then
+        if [ "$cells" != "-" ]; then
+            other="$a"
+        elif [ "$a" = "$_PARENT" ]; then
+            other="$b"
+        elif [ "$b" = "$_PARENT" ]; then
+            other="$a"
+        else
+            _pid_alive "$a" && return 0
+            _pid_alive "$b" && return 0
+        fi
+        if [ "$other" != "$_PARENT" ] && _pid_alive "$other"; then
+            [ "$cells" = "-" ] && return 0
+            want="$SL_SESSION_ID - $_PARENT $other"
+        fi
+    fi
+    [ "$was" = "$want" ] && return 0
+    # Named for this process, so two renders never write one temporary file.
+    local tmp="$_WIDTH_FILE.$$"
+    { printf '%s\n' "$want" > "$tmp"; } 2>/dev/null || return 0
+    mv "$tmp" "$_WIDTH_FILE" 2>/dev/null || rm -f "$tmp" 2>/dev/null
     return 0
+}
+
+# Print the bar's line "$1" and record its width for the cs mod.
+_emit_line() {  # line
+    printf '%s\n' "$1"
+    _record_width "$1"
 }
 
 # Parse "$1" as an "r;g;b" triplet of 0-255 integers into _R/_G/_B. Returns 1
@@ -3402,7 +3497,10 @@ _render_quiet() {
 # --- main ------------------------------------------------------------------
 
 main() {
-    [ "${CS_STATUSLINE_DISABLE:-}" = "1" ] && exit 0
+    if [ "${CS_STATUSLINE_DISABLE:-}" = "1" ]; then
+        _forget_width
+        exit 0
+    fi
 
     # Out-of-band refresh mode. Re-invoking this script rather than installing a
     # second binary keeps the feature to one file and off the install manifest.
@@ -3436,6 +3534,9 @@ main() {
             cost)    _seg_cost ;;
         esac
     done
+
+    # No segment prints no line, in every layout.
+    [ "${#_SEG_TEXT[@]}" -gt 0 ] || { _forget_width; return 0; }
 
     # Quiet is the layout unless CS_STATUSLINE_LAYOUT names the band or the
     # capsules; quiet and the band need colour to draw, so plain prints what
