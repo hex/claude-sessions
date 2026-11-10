@@ -881,10 +881,13 @@ is time, the status bar's amber from ten seconds and its crit red under five
 At zero the mod runs the `/clear` itself if the handoff is still armed, this
 is still the lead, cs still trusts the session's control files, and nothing
 waits on you: no turn running, no question dialog open, no survey above the
-prompt. Otherwise the count stops and a toast says
+prompt, and the band or the hint under the prompt drawn since the count's
+tick before zero. Otherwise the count stops and a toast says
 why: `/clear did not run: a turn is running`, `a question is waiting for an
 answer`, `a survey is waiting above the prompt`, `the handoff is no longer
-armed` or `this conversation is no longer the session's lead`; cs's refusal
+armed`, `this conversation is no longer the session's lead` or `neither the
+band nor the hint drew, as under a picker; the clear key returns with the
+band`; cs's refusal
 of the session reads `no rotation in this session: <reason>`, toasted at that
 zero also when an earlier check said the same; a read that fails at zero
 reads `/clear did not run: <error>`. The clear key then waits for you where
@@ -903,20 +906,30 @@ inside), so a truncated handoff is never cleared into.
 Another mod can take the band above the prompt. A mod loaded before this one
 that answers the band's render without passing it on keeps this mod's band
 from drawing, and this mod gets no notice of it. A picker such as `/model`'s
-takes the band's place the same way. The mod reads a taken band from its
+takes the band's place the same way. The mod reads a band not drawn from its
 own band hook not having run since the count's last tick: each tick asks for
 a redraw, and the engine raises the band within 20 ms of one (measured on
 2.1.322). The count then runs unseen. The mod takes every key it put in the
 row under the prompt, the clear key and its count among them, since nothing
-would redraw them; they come back when its band is raised again. At zero it
-runs the `/clear`, and then toasts `the count to /clear reached zero unseen:
-the band above the prompt was not drawn; /clear has run`. The toast names no
-cause: the mod cannot tell another mod's band from a picker. The mod toasts it when
-the engine raised no band between the tick before zero and the end of the
-zero's checks, whatever part of the count before that stood on screen. Under
-another mod's band the `/clear` runs on time; the engine holds one behind a
-picker until the picker closes. The mod has no way to take a queued `/clear`
-back, so nothing that changes while the picker is open stops it. The toast
+would redraw them; they come back when its band is raised again.
+
+What happens at zero turns on the hint under the prompt, which the engine
+still raises under another mod's band (34 to 36 times a count) and not while
+a picker is open (none in 29 s with `/model`'s open; measured on 2.1.322). The
+engine holds a `/clear` run under a picker until the picker closes, and the
+mod has no way to take it back. When the engine raised neither the band nor
+the hint between the tick before zero and the end of the zero's checks, the
+count stops with no `/clear` and toasts `/clear did not run: neither the band
+nor the hint drew, as under a picker; the clear key returns with the band`.
+The mod knows only that nothing of its own drew, so the toast names a picker
+as a likeness, not a cause. When the picker closes the band draws again with
+the clear key and no count, and the next turn's end counts again. A picker
+opened in the count's last second, after that tick's redraw, still reads as a
+count seen: the `/clear` runs and the engine holds it until the picker
+closes. When the engine raised the hint and not the band, as under another
+mod's band, the mod runs the `/clear` on time and then toasts `the count to /clear
+reached zero unseen: the band above the prompt was not drawn; /clear has
+run`, whatever part of the count before that stood on screen. The toast
 follows the `/clear` because one shown before it leaves the screen with the
 conversation. The mod drops what the taken band last said of a turn; the
 main loop's turn events and the hint under the prompt say whether one runs.
