@@ -4684,7 +4684,8 @@ run_test test_teammate_heartbeat_does_not_reset_the_lead_cadence
 # The render records the width in cells of the line it printed, beside the id
 # of the conversation it drew for: the cs mod draws its keys at the right of
 # the row under the bar only where the bar leaves them room. The escapes take
-# no cell, so the quiet line counts as its text alone.
+# no cell, so the quiet line counts as its text alone; the layout is named,
+# since this suite draws the capsules unless a test says otherwise.
 test_render_records_the_width_of_the_line_it_printed() {
     export CLAUDE_SESSION_NAME=widthsess
     local dir="$CS_SESSIONS_ROOT/widthsess/.cs/local" out
@@ -4694,7 +4695,7 @@ test_render_records_the_width_of_the_line_it_printed() {
     out=$(NO_COLOR=1 run_sl "$input")
     assert_eq "widthsess · ✦ Opus high > ○ ctx 8%" "$out" "the plain line" || return 1
     assert_eq "lead 34" "$(cat "$dir/statusline-width" 2>/dev/null)" "the plain line's 34 cells are recorded" || return 1
-    out=$(COLORTERM=truecolor run_sl "$input")
+    out=$(CS_STATUSLINE_LAYOUT=quiet COLORTERM=truecolor run_sl "$input")
     assert_output_contains_f "$out" "${ESC_}[" "the quiet line carries escapes" || return 1
     assert_eq "lead 42" "$(cat "$dir/statusline-width" 2>/dev/null)" "the quiet line's 42 cells are recorded, its escapes not counted" || return 1
     assert_not_exists "$dir/statusline-width.tmp" "the record is moved into place" || return 1
@@ -4766,7 +4767,7 @@ test_render_writes_nothing_into_a_tracked_control_directory() {
     CS_STATUSLINE_NOW=1000 run_sl "$input" >/dev/null
     assert_eq "30" "$(cat "$sess/.cs/local/context-pct" 2>/dev/null)" "unmarked, the render stamps the context" || return 1
     assert_file_exists "$sess/.cs/local/limits" "and the limits" || return 1
-    assert_eq "lead 42" "$(cat "$sess/.cs/local/statusline-width" 2>/dev/null)" "and the width of its 42-cell line" || return 1
+    assert_eq "lead 38" "$(cat "$sess/.cs/local/statusline-width" 2>/dev/null)" "and the width of its 38-cell line of three capsules" || return 1
 }
 
 run_test test_render_writes_nothing_into_a_tracked_control_directory
