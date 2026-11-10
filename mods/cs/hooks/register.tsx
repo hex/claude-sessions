@@ -1965,8 +1965,13 @@ function startCountdown($: EngineInterface) {
     // lands while the zero tick is still reading leaves the count where it is.
     if (left === undefined || left <= 0) return
     left -= 1
+    const unseen = !bandDrawn
     if (left > 0) { bandDrawn = false; dialogDrawn = false }
     $.ui.invalidate('ui.render')
+    // The keys under the prompt are what the band last put there, the count's
+    // seconds among them: a band not raised since the last tick vouches for
+    // none of them, and puts them back when it is raised again.
+    if (unseen) await clearFooter($)
     if (left > 0) return
     // The count holds at zero through the reads below: a prompt or a press
     // landing meanwhile stops it (left becomes undefined), and this tick
@@ -1985,7 +1990,6 @@ function startCountdown($: EngineInterface) {
     if (!vetted) return
     // Said once the /clear has run: a toast shown before it leaves the screen
     // with the conversation (measured).
-    const unseen = !bandDrawn
     try {
       await clearAndContinue($)
     } catch (err) {
