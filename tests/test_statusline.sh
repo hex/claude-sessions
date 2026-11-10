@@ -4842,7 +4842,8 @@ run_test test_every_glyph_the_bar_draws_is_one_the_width_counts
 # neither rewrites it while the other lives (the inode tells a rewrite); the
 # one left when the other exits records its width again. This suite's shell
 # and a child it starts stand in for the two; a pid already reaped for one
-# that exited.
+# that exited. The child reads a fifo this shell holds open, so it ends when
+# the test closes it, or with the suite if the suite is killed.
 _two_writers_case() {  # dir one two gone
     local dir="$1" one="$2" two="$3" gone="$4" marked
     local input='{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}'
@@ -4864,15 +4865,17 @@ _two_writers_case() {  # dir one two gone
 
 test_two_live_writers_share_the_width_record_without_trading_it() {
     export CLAUDE_SESSION_NAME=twosess NO_COLOR=1
-    local dir="$CS_SESSIONS_ROOT/twosess/.cs/local" two gone rc=0
+    local dir="$CS_SESSIONS_ROOT/twosess/.cs/local" two gone rc=0 hold="$TEST_TMPDIR/hold"
     mkdir -p "$dir"
     printf 'claude_session_id: lead\n' > "$dir/state"
     ( exit 0 ) & gone=$!
     wait "$gone"
-    sleep 60 & two=$!
-    _two_writers_case "$dir" "$$" "$two" "$gone" || rc=1
-    kill "$two" 2>/dev/null
-    wait "$two" 2>/dev/null
+    mkfifo "$hold"
+    cat "$hold" > /dev/null & two=$!
+    exec 4> "$hold"
+    _two_writers_case "$dir" "$$" "$two" "$gone" 4>&- || rc=1
+    exec 4>&-
+    wait "$two"
     return "$rc"
 }
 
