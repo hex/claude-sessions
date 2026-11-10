@@ -5025,6 +5025,44 @@ test('a mod loaded while a turn runs takes the turn from the site that draws it,
   expect(ran).toEqual([{ command: 'rotate', args: '' }])
 })
 
+// The press reads the turn as it lands, and again once cs has answered: a
+// turn started meanwhile without a prompt (a Stop hook's feedback) bumps no
+// press count.
+test('a /clear now key pressed once a turn runs, before any site draws the turn, does nothing but say so', async () => {
+  await startGrace()
+  const clear = findButton(await keys())
+  expect(clear.props.label).toBe('/clear now')
+  await promptSubmit()
+  await turnStart('keep going')
+  const asked = runs.length
+  await clear.props.onPress()
+  expect(ran).toEqual([])
+  expect(runs).toHaveLength(asked)
+  expect(toasts.filter(t => t.startsWith('/clear'))).toEqual([TOASTS.midTurn('/clear')])
+  await turnComplete()
+  let answered!: () => void
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => {
+    if (argv[1] !== '-vet-session') return run(argv, init)
+    await new Promise<void>(resolve => { answered = resolve })
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  try {
+    const pressed = clear.props.onPress()
+    await settle()
+    await turnStart('')
+    answered()
+    await pressed
+  } finally {
+    $.process.run = run
+  }
+  expect(ran).toEqual([])
+  expect(toasts.filter(t => t.startsWith('/clear'))).toEqual([TOASTS.midTurn('/clear'), TOASTS.midTurn('/clear')])
+  await turnComplete()
+  await clear.props.onPress()
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+})
+
 const footerClock = () => timers.find(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS && !t.cancelled)
 test('the status line\'s width is read on a clock only while it can move the keys, and a line that grows or shrinks moves them on the next read', async () => {
   files[WIDTH] = 'uuid-lead 82 4242\n'

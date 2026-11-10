@@ -1543,7 +1543,7 @@ CS_PAYLOAD_SHA256=(
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
     "144391d7d2df6a89742528729ee8da1e51063b3783023a656571bec0f2235458  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
-    "506eae2f96a75f388938785e4c8a22d16afc39b361cc1bf3f0cfc2c5f98e9673  mods/cs/hooks/register.tsx"
+    "58fe58f1139263ec10cc9ef8e771b567b43c596aed9ab1c93b312d3b84c24ad5  mods/cs/hooks/register.tsx"
     "4c4955c1641b10394c5126ca1794419f2984a9a49e05658b21f96611bd2836d9  mods/cs/tips.json"
     "2f8d4b45beddd0b27b050f1c2eb08ebb25552b4dea5f33b9398318a2ef636985  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"

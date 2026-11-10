@@ -562,9 +562,11 @@ three read one route, so the keys draw in exactly one of them:
   it.
 
 A turn takes `rotate`, `/clear now` and `wrap` away and leaves `filter chat`.
-The hint's place hears of a turn before the band does, so the keys go as the
-turn starts; a chord pressed in that moment toasts
-`cs: /rotate did not run: a turn is running` (or `/wrap`) and runs nothing.
+The mod hears of a turn as it starts, before any of the three places draws
+again, so the keys go then; a key pressed once a turn runs, by a click or its
+chord, toasts `cs: /rotate did not run: a turn is running` (or `/clear`,
+`/wrap`) and runs nothing. A `/clear now` press reads the turn again once
+`cs -vet-session` has answered it.
 If the band's own drawing fails, the keys leave the row under the prompt
 until it next succeeds.
 

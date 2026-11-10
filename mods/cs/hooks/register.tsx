@@ -2544,14 +2544,18 @@ async function offerToStart($: EngineInterface, bin: string, count: number) {
 // The clear button's press: the /clear runs only once cs says it trusts the
 // session's control files, as at a countdown's zero. The press stops the count
 // before it asks, so the zero tick cannot clear while cs answers, and only the
-// latest press acts.
+// latest press acts. Like the rotate key's, a press once a turn runs runs
+// nothing, read again once cs answers: a turn started meanwhile with no
+// prompt (a Stop hook's feedback) moves no press count.
 async function pressClear($: EngineInterface) {
   if (clearing) return
+  if (turnRunning()) return $.ui.toast(TOASTS.midTurn('/clear'))
   if (ticker) stopCountdown($)
   const press = ++pressCount
   const vetted = await sessionVetted($, await $.session.cwd())
   if (press !== pressCount) return
   if (!vetted) return stopCountdown($)
+  if (turnRunning()) return $.ui.toast(TOASTS.midTurn('/clear'))
   await clearAndContinue($)
 }
 
