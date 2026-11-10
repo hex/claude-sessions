@@ -612,92 +612,97 @@ export function register(on: On) {
     return next(e)
   })
 
-  // An evaluation that throws takes the keys of the one before it from under
-  // the prompt: nothing vouches for them any more.
-  on('ui.render', { component: 'AbovePrompt' }, clearingFooterOnThrow(async ($, e, next) => {
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const drawn = await next(e)
-    // The band draws in a new conversation before any of its turns end, so
-    // the birth is settled here: a later /resume is not mistaken for it.
-    await noteConversation($, await $.session.id())
-    // A survey owns the band; a running turn cannot be rotated out of.
-    await noteScreen($, viewOf(e.viewport), e.props.isWorking)
-    bandIdle = !e.props.hasSurvey && !e.props.isWorking
-    // The /finish gate's word draws mid-turn, since the gate runs inside one,
-    // whatever else the band has to say.
-    const gate = await gateWord($)
-    // The band draws on every redraw and asks cs nothing: it shows the last
-    // answer cs gave (sessionVetted), which every step that acts asks afresh.
-    // An armed handoff makes the rotation due at any context.
-    const handoff = lastRefusal === undefined && (await handoffArmed($))
-    const armed = bandIdle && handoff
-    const { context } = await $.session.usage()
-    const percent = context.percent
-    const due = handoff || (percent !== undefined && percent >= (await threshold($)))
-    let rotating = bandIdle && due
-    // Tasks queued and nothing running them, at any context, draw the start
-    // key; an armed handoff draws its clear key alone. Tasks queued that the
-    // start key does not offer (the queue runs them, a turn runs, or the
-    // clear key stands alone) are said, not pressed.
-    const queue = e.props.hasSurvey ? 0 : await queueLength($)
-    const queueStarted = queue > 0 && (await queueRunning($))
-    let waiting = !bandIdle || armed || queueStarted ? 0 : queue
-    let queued = waiting > 0 ? 0 : queue
-    // Mail from other sessions that `cs -msg` has not read yet.
-    let mail = e.props.hasSurvey ? 0 : await unreadMail($)
-    // The rail draws, once CS_BAND_PROMPTS turns it on, whenever the
-    // conversation has two prompts to move between, a turn running or not,
-    // under the same ownership as the keys; its bars draw not at all while a
-    // prompt-bar setting is bad, which the lead's band says once a value.
-    const read = await readBandOptions($)
-    bandOptions = 'problem' in read ? undefined : read
-    if (!('problem' in read)) bandProblemSaid = undefined
-    else if (read.problem !== bandProblemSaid && (await ownsRotation($))) {
-      bandProblemSaid = read.problem
-      $.ui.toast(TOASTS.bandOption(read.problem))
+    try {
+      // The band draws in a new conversation before any of its turns end, so
+      // the birth is settled here: a later /resume is not mistaken for it.
+      await noteConversation($, await $.session.id())
+      // A survey owns the band; a running turn cannot be rotated out of.
+      await noteScreen($, viewOf(e.viewport), e.props.isWorking)
+      bandIdle = !e.props.hasSurvey && !e.props.isWorking
+      // The /finish gate's word draws mid-turn, since the gate runs inside one,
+      // whatever else the band has to say.
+      const gate = await gateWord($)
+      // The band draws on every redraw and asks cs nothing: it shows the last
+      // answer cs gave (sessionVetted), which every step that acts asks afresh.
+      // An armed handoff makes the rotation due at any context.
+      const handoff = lastRefusal === undefined && (await handoffArmed($))
+      const armed = bandIdle && handoff
+      const { context } = await $.session.usage()
+      const percent = context.percent
+      const due = handoff || (percent !== undefined && percent >= (await threshold($)))
+      let rotating = bandIdle && due
+      // Tasks queued and nothing running them, at any context, draw the start
+      // key; an armed handoff draws its clear key alone. Tasks queued that the
+      // start key does not offer (the queue runs them, a turn runs, or the
+      // clear key stands alone) are said, not pressed.
+      const queue = e.props.hasSurvey ? 0 : await queueLength($)
+      const queueStarted = queue > 0 && (await queueRunning($))
+      let waiting = !bandIdle || armed || queueStarted ? 0 : queue
+      let queued = waiting > 0 ? 0 : queue
+      // Mail from other sessions that `cs -msg` has not read yet.
+      let mail = e.props.hasSurvey ? 0 : await unreadMail($)
+      // The rail draws, once CS_BAND_PROMPTS turns it on, whenever the
+      // conversation has two prompts to move between, a turn running or not,
+      // under the same ownership as the keys; its bars draw not at all while a
+      // prompt-bar setting is bad, which the lead's band says once a value.
+      const read = await readBandOptions($)
+      bandOptions = 'problem' in read ? undefined : read
+      if (!('problem' in read)) bandProblemSaid = undefined
+      else if (read.problem !== bandProblemSaid && (await ownsRotation($))) {
+        bandProblemSaid = read.problem
+        $.ui.toast(TOASTS.bandOption(read.problem))
+      }
+      const bars = bandOptions?.bars
+      let railing = !e.props.hasSurvey && prompts.length > 1 && bandOptions?.prompts === true
+      // The features word leads what the session is, at the line's right; a
+      // running gate already names the feature it lands.
+      let featured = !e.props.hasSurvey && gate === undefined ? featuresWord : undefined
+      // The filter chat key draws mid-turn too: the switch works while a turn
+      // runs, and a reader wants it where it was. A survey or an armed handoff
+      // takes the row.
+      let filterChatEligible = !e.props.hasSurvey && !armed
+      if ((rotating || waiting > 0 || queued > 0 || mail > 0 || railing || featured || filterChatEligible) && !(await ownsRotation($))) { rotating = false; waiting = 0; queued = 0; mail = 0; railing = false; featured = undefined; filterChatEligible = false }
+      // The named tick is remembered on every path, drawn or not, so a row's
+      // report that moves nothing visible schedules no redraw.
+      const named = namedIndex()
+      drawnRead = named
+      const hasContent = rotating || waiting > 0 || queued > 0 || mail > 0 || gate !== undefined || railing || featured !== undefined
+      if (!hasContent && !filterChatEligible) { await postFooter($, [], false); return drawn }
+      // Listing /filter-chat reads availability without queuing a command or adding a status row.
+      const offersFilterChat = filterChatEligible && (await $.command.list()).some(command => command.name === 'filter-chat' && command.source === 'plugin' && command.plugin === 'cs-filter-chat')
+      if (!hasContent && !offersFilterChat) { await postFooter($, [], false); return drawn }
+      const wrapped = rotating && !armed && (await wrapFinished($))
+      const chords = await boundChords($)
+      const own = paletteColor(await sessionColor($))
+      const { Box, Text, Button } = await $.ui.resolve(e)
+      const wrapping = rotating && !armed && !wrapped
+      const finish = featured?.finish
+      const { bg, theme } = await themeAndBackground($)
+      const filterChat = offersFilterChat && !filterChatVetRefused && (await readFilterChat($))
+      const entries = buildBandEntries({
+        featured: featured === undefined ? undefined : { label: featured.label, onPress: finish === undefined || !bandIdle ? undefined : () => pressFinish($, finish) },
+        countdown: armed && left !== undefined ? { seconds: left, ink: await rampColor($, left) } : undefined,
+        rotating, armed, wrapping, waiting, gate, queued, queueRunning: queueStarted, mail,
+        queueInk: amberColor(bg, theme),
+        filterChat: offersFilterChat ? { on: filterChat, onPress: () => pressFilterChat($) } : undefined,
+        rotate: armed ? () => pressClear($) : () => pressRotate($),
+        wrap: () => askToWrap($),
+        queue: () => pressQueueStart($),
+      })
+      const rail = railing && bars !== undefined ? { prompts, named, denied, bars, jump: (i: number) => jumpTo($, i) } : undefined
+      await postFooter($, entriesAt(entries, 'footer'), filterChat)
+      // Where the footer cannot draw the keys they stay on the band, as before
+      // they had a place under the prompt.
+      return drawBand({ drawn, entries: routeNow() === 'band' ? entries : entriesAt(entries, 'band'), chords, own, bodyColumns: e.props.bodyColumns, surface: e.surface, rail }, { Box, Text, Button })
+    } catch (err) {
+      // An evaluation that throws takes the keys of the one before it from
+      // under the prompt: nothing vouches for them any more.
+      await clearFooter($)
+      throw err
     }
-    const bars = bandOptions?.bars
-    let railing = !e.props.hasSurvey && prompts.length > 1 && bandOptions?.prompts === true
-    // The features word leads what the session is, at the line's right; a
-    // running gate already names the feature it lands.
-    let featured = !e.props.hasSurvey && gate === undefined ? featuresWord : undefined
-    // The filter chat key draws mid-turn too: the switch works while a turn
-    // runs, and a reader wants it where it was. A survey or an armed handoff
-    // takes the row.
-    let filterChatEligible = !e.props.hasSurvey && !armed
-    if ((rotating || waiting > 0 || queued > 0 || mail > 0 || railing || featured || filterChatEligible) && !(await ownsRotation($))) { rotating = false; waiting = 0; queued = 0; mail = 0; railing = false; featured = undefined; filterChatEligible = false }
-    // The named tick is remembered on every path, drawn or not, so a row's
-    // report that moves nothing visible schedules no redraw.
-    const named = namedIndex()
-    drawnRead = named
-    const hasContent = rotating || waiting > 0 || queued > 0 || mail > 0 || gate !== undefined || railing || featured !== undefined
-    if (!hasContent && !filterChatEligible) { await postFooter($, [], false); return drawn }
-    // Listing /filter-chat reads availability without queuing a command or adding a status row.
-    const offersFilterChat = filterChatEligible && (await $.command.list()).some(command => command.name === 'filter-chat' && command.source === 'plugin' && command.plugin === 'cs-filter-chat')
-    if (!hasContent && !offersFilterChat) { await postFooter($, [], false); return drawn }
-    const wrapped = rotating && !armed && (await wrapFinished($))
-    const chords = await boundChords($)
-    const own = paletteColor(await sessionColor($))
-    const { Box, Text, Button } = await $.ui.resolve(e)
-    const wrapping = rotating && !armed && !wrapped
-    const finish = featured?.finish
-    const { bg, theme } = await themeAndBackground($)
-    const filterChat = offersFilterChat && !filterChatVetRefused && (await readFilterChat($))
-    const entries = buildBandEntries({
-      featured: featured === undefined ? undefined : { label: featured.label, onPress: finish === undefined || !bandIdle ? undefined : () => pressFinish($, finish) },
-      countdown: armed && left !== undefined ? { seconds: left, ink: await rampColor($, left) } : undefined,
-      rotating, armed, wrapping, waiting, gate, queued, queueRunning: queueStarted, mail,
-      queueInk: amberColor(bg, theme),
-      filterChat: offersFilterChat ? { on: filterChat, onPress: () => pressFilterChat($) } : undefined,
-      rotate: armed ? () => pressClear($) : () => pressRotate($),
-      wrap: () => askToWrap($),
-      queue: () => pressQueueStart($),
-    })
-    const rail = railing && bars !== undefined ? { prompts, named, denied, bars, jump: (i: number) => jumpTo($, i) } : undefined
-    await postFooter($, entriesAt(entries, 'footer'), filterChat)
-    // Where the footer cannot draw the keys they stay on the band, as before
-    // they had a place under the prompt.
-    return drawBand({ drawn, entries: routeNow() === 'band' ? entries : entriesAt(entries, 'band'), chords, own, bodyColumns: e.props.bodyColumns, surface: e.surface, rail }, { Box, Text, Button })
-  }))
+  })
 
   // The keys at the right end of the permission notice's row, where the status
   // line leaves them room (keysRoute). SessionMode draws at the right end of
@@ -1306,18 +1311,6 @@ async function followStatusWidth($: EngineInterface) {
 }
 
 const clearFooter = ($: EngineInterface) => changeFooter($, () => { footer = NO_FOOTER })
-
-// A render hook that takes the keys from under the prompt when it throws.
-function clearingFooterOnThrow<E, N, R>(hook: ($: EngineInterface, e: E, next: N) => Promise<R>) {
-  return async ($: EngineInterface, e: E, next: N): Promise<R> => {
-    try {
-      return await hook($, e, next)
-    } catch (err) {
-      await clearFooter($)
-      throw err
-    }
-  }
-}
 
 // What an event says of the screen: its width, and whether the layout is the
 // fullscreen one. An event with no viewport says nothing, and leaves what
