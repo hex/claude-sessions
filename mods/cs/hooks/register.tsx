@@ -425,9 +425,10 @@ let screen = NO_SCREEN
 // keys, and whether a redraw for a changed footer is already scheduled.
 let footerWatch: { cancel: () => void } | undefined
 let footerRedraw = false
+let ownPid: Promise<string | undefined> | undefined
 
 export function register(on: On) {
-  footer = NO_FOOTER; screen = NO_SCREEN; footerWatch = undefined; footerRedraw = false
+  footer = NO_FOOTER; screen = NO_SCREEN; footerWatch = undefined; footerRedraw = false; ownPid = undefined
   bandOptions = undefined
   bandProblemSaid = undefined
   filterChatPressPending = undefined
@@ -1120,19 +1121,22 @@ export function entriesAt<T extends BandEntry>(entries: T[], site: Site): T[] {
 }
 
 // The status line's record of the line it last printed, under the session
-// directory: `<conversation id> <cells>` (_emit_line in bin/cs-statusline).
+// directory: `<conversation id> <cells> <pid>`, the pid that of the Claude
+// Code whose status line it is (_record_width in bin/cs-statusline).
 export const STATUS_WIDTH = '.cs/local/statusline-width'
 // How often the record is read again while it can move the keys: the status
 // line repaints on its own, and a render hook runs again only for its own
 // inputs.
 export const FOOTER_POLL_MS = 2000
 
-// The cells of the status line conversation `id` last printed, from the
-// record's text; undefined for a record of another conversation (an earlier
-// one's, left by a status line since turned off) or one in another shape.
-export function parseStatusWidth(text: string, id: string): number | undefined {
-  const record = text.match(/^(\S+) (\d{1,4})\n?$/)
-  return record !== null && record[1] === id ? Number(record[2]) : undefined
+// The cells of the line the status line of Claude Code `pid` last printed
+// for conversation `id`, from the record's text; undefined for a record of
+// another conversation (an earlier one's), of another Claude Code (the
+// conversation is open in a second terminal, of another width), of the two
+// at once (`<id> - <pid> <pid>`), or in any other shape.
+export function parseStatusWidth(text: string, id: string, pid: string): number | undefined {
+  const record = text.match(/^(\S+) (\d{1,4}) (\d+)\n?$/)
+  return record !== null && record[1] === id && record[3] === pid ? Number(record[2]) : undefined
 }
 
 // The label cs-filter-chat adds to the footer's modes while it is on. KEEP IN
@@ -1258,11 +1262,22 @@ export function drawFooterKeys(keys: BandEntry[], el: BandElements): RenderEleme
   )
 }
 
-// What the status line last recorded for this conversation; undefined when it
-// recorded nothing the mod can read.
+// This Claude Code's pid, as its status line knows it: the status line is
+// Claude Code's child, and so is a process the mod runs (measured on 2.1.322:
+// both name one parent). Asked once a load; undefined when the answer is no
+// pid, and then no record is this Claude Code's.
+function claudePid($: EngineInterface): Promise<string | undefined> {
+  ownPid ??= $.process.run(['/bin/sh', '-c', 'echo $PPID']).then(ran => (/^\d+$/.test(ran.stdout.trim()) ? ran.stdout.trim() : undefined), () => undefined)
+  return ownPid
+}
+
+// What this Claude Code's status line last recorded for this conversation;
+// undefined when it recorded nothing the mod can read.
 async function readStatusWidth($: EngineInterface): Promise<number | undefined> {
+  const pid = await claudePid($)
+  if (pid === undefined) return undefined
   try {
-    return parseStatusWidth(await $.fs.read(`${await $.session.cwd()}/${STATUS_WIDTH}`), await $.session.id())
+    return parseStatusWidth(await $.fs.read(`${await $.session.cwd()}/${STATUS_WIDTH}`), await $.session.id(), pid)
   } catch {
     return undefined // no record: this status line is not cs's, or has not drawn yet
   }

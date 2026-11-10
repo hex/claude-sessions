@@ -71,6 +71,8 @@ let mtimes: Record<string, number>
 // The clock `$.clock.now` reads, and the pids `kill -0` finds alive.
 let nowMs: number
 let livePids: Set<string>
+// The pid a process the mod runs reports as its parent: this Claude Code's.
+let claudePid: string | Error
 const timer = (kind: 'after' | 'every') => (ms: number, fn: () => void) => {
   const t = { ms, fn, kind, cancelled: false }
   timers.push(t)
@@ -100,6 +102,10 @@ const $ = {
   process: {
     run: async (argv: string[], init: any) => {
       if (argv[0] === 'kill' && argv[1] === '-0') return { exitCode: livePids.has(argv[2]) ? 0 : 1, stdout: '', stderr: '' }
+      if (argv[0] === '/bin/sh' && argv[2] === 'echo $PPID') {
+        if (claudePid instanceof Error) throw claudePid
+        return { exitCode: 0, stdout: `${claudePid}\n`, stderr: '' }
+      }
       if (argv[1] === '-config') {
         settingsRuns.push(argv)
         if (settingsResult instanceof Error) throw settingsResult
@@ -200,7 +206,7 @@ beforeEach(() => {
   compactedAt = []; compactResult = { messages: [] }
   availableCommands = []
   scrolls = []; scrollResult = {}; reads = []; mtimes = {}
-  nowMs = 1_800_000_000_000; livePids = new Set()
+  nowMs = 1_800_000_000_000; livePids = new Set(); claudePid = '4242'
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   // /work sits under the default sessions root by its own name, and the launch
@@ -1570,7 +1576,7 @@ function buttonsUnderText(tree: any, inText = false): number {
 test('no button is ever nested in a Text, armed or not, above the prompt or under it', async () => {
   // The count sees a Button under a Text through a nested list of children.
   expect(buttonsUnderText({ type: 'Text', props: {}, children: [[{ type: 'Button', props: {}, children: [] }]] })).toBe(1)
-  files[WIDTH] = 'uuid-lead 60\n'
+  files[WIDTH] = 'uuid-lead 60 4242\n'
   percent = 40
   queueTasks(2)
   const sites = async () => {
@@ -4544,13 +4550,17 @@ test('the notice is as wide as the hint in it says, the widest where the hint na
   expect(noticeCells('')).toBe(30)
 })
 
-test('the status line\'s record gives a width only for this conversation, in the one shape cs-statusline writes', () => {
+test('the status line\'s record gives a width only for this conversation and this Claude Code, in the one shape cs-statusline writes', () => {
   expect(STATUS_WIDTH).toBe('.cs/local/statusline-width')
-  expect(parseStatusWidth('uuid-lead 82\n', 'uuid-lead')).toBe(82)
-  expect(parseStatusWidth('uuid-lead 0\n', 'uuid-lead')).toBe(0)
-  expect(parseStatusWidth('uuid-old 82\n', 'uuid-lead')).toBeUndefined()
-  for (const text of ['', '82\n', 'uuid-lead\n', 'uuid-lead 82 1\n', 'uuid-lead -3\n', 'uuid-lead 8e1\n', 'uuid-lead  82\n', 'uuid-lead 82\nuuid-lead 90\n', 'uuid-lead 12345\n']) {
-    expect(parseStatusWidth(text, 'uuid-lead')).toBeUndefined()
+  expect(parseStatusWidth('uuid-lead 82 4242\n', 'uuid-lead', '4242')).toBe(82)
+  expect(parseStatusWidth('uuid-lead 0 4242\n', 'uuid-lead', '4242')).toBe(0)
+  expect(parseStatusWidth('uuid-old 82 4242\n', 'uuid-lead', '4242')).toBeUndefined()
+  // The bar of another Claude Code on this conversation, in a terminal of another width.
+  expect(parseStatusWidth('uuid-lead 82 4243\n', 'uuid-lead', '4242')).toBeUndefined()
+  // Two of them alive: cs-statusline writes no width.
+  expect(parseStatusWidth('uuid-lead - 4242 4243\n', 'uuid-lead', '4242')).toBeUndefined()
+  for (const text of ['', '82\n', 'uuid-lead\n', 'uuid-lead 82\n', 'uuid-lead 82 4242 1\n', 'uuid-lead -3 4242\n', 'uuid-lead 8e1 4242\n', 'uuid-lead  82 4242\n', 'uuid-lead 82 4242\nuuid-lead 90 4242\n', 'uuid-lead 12345 4242\n', 'uuid-lead 82 42x2\n']) {
+    expect([text, parseStatusWidth(text, 'uuid-lead', '4242')]).toEqual([text, undefined])
   }
 })
 
@@ -4577,9 +4587,34 @@ test('the keys\' width is what the row draws: a middle dot between keys, a space
   expect(keysWidth([])).toBe(0)
 })
 
+// The record is trusted for the pid it names, so a mod that cannot learn its
+// own Claude Code's trusts none; the pid is asked for once.
+test('a mod that cannot learn its Claude Code\'s pid trusts no record, and asks once', async () => {
+  files[WIDTH] = 'uuid-lead 57 4242\n'
+  percent = 40
+  const asked = () => pidRuns
+  let pidRuns = 0
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => { if (argv[0] === '/bin/sh') pidRuns++; return run(argv, init) }
+  try {
+    claudePid = new Error('spawn EPERM')
+    expect(sitesWithKeys(await pass())).toEqual(['hint'])
+    expect(sitesWithKeys(await pass())).toEqual(['hint'])
+    expect(asked()).toBe(1)
+    reload()
+    claudePid = '4242'
+    expect(sitesWithKeys(await pass())).toEqual(['mode'])
+    expect(sitesWithKeys(await pass())).toEqual(['mode'])
+    expect(asked()).toBe(2)
+    expect(runs).toEqual([])
+  } finally {
+    $.process.run = run
+  }
+})
+
 const absoluteBoxes = (tree: any) => boxes(tree).filter((b: any) => b.props.position === 'absolute')
 test('with room the keys draw at the right end of the notice\'s row from the mode labels\' site, and the hint stays the engine\'s', async () => {
-  files[WIDTH] = 'uuid-lead 82\n'
+  files[WIDTH] = 'uuid-lead 82 4242\n'
   percent = 40
   expect(await band()).toBe(DRAWN)
   const tree = await footerMode(87)
@@ -4594,7 +4629,7 @@ test('with room the keys draw at the right end of the notice\'s row from the mod
 })
 
 test('without room there the keys stand in the hint\'s place, and the mode labels stay the engine\'s', async () => {
-  files[WIDTH] = 'uuid-lead 82\n'
+  files[WIDTH] = 'uuid-lead 82 4242\n'
   percent = 40
   await band()
   expect(await footerMode(86)).toBe(MODES_DRAWN)
@@ -4604,9 +4639,9 @@ test('without room there the keys stand in the hint\'s place, and the mode label
   expect(absoluteBoxes(tree)).toEqual([])
 })
 
-test('a record of another conversation, an unreadable one, or none sends the keys inline at any width', async () => {
+test('a record of another conversation or another Claude Code, an unreadable one, or none sends the keys inline at any width', async () => {
   percent = 40
-  for (const record of ['uuid-old 20\n', 'wide\n', undefined]) {
+  for (const record of ['uuid-old 20 4242\n', 'uuid-lead 20 4243\n', 'uuid-lead - 4242 4243\n', 'wide\n', undefined]) {
     if (record === undefined) delete files[WIDTH]
     else files[WIDTH] = record
     await band()
@@ -4625,7 +4660,7 @@ test('a footer too narrow for the keys inline draws the engine\'s own at both si
 })
 
 test('with no key to show, both footer sites return the engine\'s own', async () => {
-  files[WIDTH] = 'uuid-lead 82\n'
+  files[WIDTH] = 'uuid-lead 82 4242\n'
   expect(await footerMode()).toBe(MODES_DRAWN)
   expect(await footerHint()).toBe(HINT_DRAWN)
   await band()
@@ -4640,7 +4675,7 @@ test('with no key to show, both footer sites return the engine\'s own', async ()
 })
 
 test('keys once drawn leave both sites when a survey takes the band, a turn starts, or the conversation is not the lead\'s', async () => {
-  files[WIDTH] = 'uuid-lead 82\n'
+  files[WIDTH] = 'uuid-lead 82 4242\n'
   percent = 40
   const drawnAtBoth = async (props: Parameters<typeof band>[0]) => {
     await band(props)
@@ -4673,7 +4708,7 @@ test('the keys are dim plain Buttons with dim separators; only the count and the
 })
 
 test('a click on a key under the prompt does what its key on the band did', async () => {
-  files[WIDTH] = 'uuid-lead 82\n'
+  files[WIDTH] = 'uuid-lead 82 4242\n'
   percent = 40
   await band()
   await buttons(await footerMode(110)).find((b: any) => b.props.key === 'cs-wrap').props.onPress()
@@ -4686,7 +4721,7 @@ test('a click on a key under the prompt does what its key on the band did', asyn
 test('filter chat on adds its mode label to the status line\'s row, and the keys leave the notice\'s right where the two no longer fit', async () => {
   enableFilterChat()
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
-  files[WIDTH] = 'uuid-lead 60\n'
+  files[WIDTH] = 'uuid-lead 60 4242\n'
   await band()
   // 60 cells, the label's 36 and the margin's 5: the row holds them from 101 columns.
   expect(buttons(await footerMode(101)).map((b: any) => b.props.label)).toEqual(['filter chat ●'])
@@ -4702,7 +4737,7 @@ test('filter chat on adds its mode label to the status line\'s row, and the keys
 })
 
 test('another mode label the footer shows takes the keys\' route with it, and both sites draw again', async () => {
-  files[WIDTH] = 'uuid-lead 60\n'
+  files[WIDTH] = 'uuid-lead 60 4242\n'
   percent = 40
   await band()
   await fireAfter()
@@ -4718,7 +4753,7 @@ test('another mode label the footer shows takes the keys\' route with it, and bo
 
 // claude-errands draws its Codex line there, a tree as wide as its sessions' names.
 test('a tree another mod draws in the mode labels\' place sends the keys inline, since nothing says how wide it is', async () => {
-  files[WIDTH] = 'uuid-lead 60\n'
+  files[WIDTH] = 'uuid-lead 60 4242\n'
   percent = 40
   await band()
   expect(buttons(await footerMode(110))).toHaveLength(2)
@@ -4776,7 +4811,7 @@ test('exactly one site draws the keys, whatever each site is told of the screen'
   const drew = new Set<Site>()
   const everySite: Site[] = ['band', 'mode', 'hint']
   const subsets = everySite.reduce<Site[][]>((sets, site) => [...sets, ...sets.map(set => [...set, site])], [[]])
-  for (const record of ['uuid-lead 57\n', 'uuid-lead 139\n', undefined]) {
+  for (const record of ['uuid-lead 57 4242\n', 'uuid-lead 139 4242\n', undefined]) {
     if (record === undefined) delete files[WIDTH]
     else files[WIDTH] = record
     for (const columns of [40, 59, 60, 83, 84, 110, 180]) for (const fullscreen of [true, false]) for (const hint of [CYCLE, '1 shell', '? for shortcuts', ''])
@@ -4821,7 +4856,7 @@ test('an armed handoff\'s clear key and its count draw on the band where the foo
 // Measured on 2.1.322: on the main screen the engine clips what a mod hangs a
 // row under the mode labels, and the keys drew nowhere at 110 columns.
 test('on the main screen the keys never hang under the mode labels, whatever room the row has', async () => {
-  files[WIDTH] = 'uuid-lead 57\n'
+  files[WIDTH] = 'uuid-lead 57 4242\n'
   percent = 40
   expect(sitesWithKeys(await pass({ columns: 110 }))).toEqual(['mode'])
   expect(sitesWithKeys(await pass({ columns: 110, fullscreen: false }))).toEqual(['hint'])
@@ -4852,7 +4887,7 @@ test('the keys stand in the hint\'s place only while the hint is the cycle hint,
 })
 
 test('at the notice\'s right the keys clear a notice as wide as its hint makes it', async () => {
-  files[WIDTH] = 'uuid-lead 40\n'
+  files[WIDTH] = 'uuid-lead 40 4242\n'
   percent = 40
   // Before the hint's site has drawn, the widest notice at rest: its 48 cells, the 13 of `rotate · wrap` and 3 between.
   await band({}, 'terminal', viewOf(64))
@@ -4877,7 +4912,7 @@ test('at the notice\'s right the keys clear a notice as wide as its hint makes i
 })
 
 test('an evaluation of the band that throws leaves no key under the prompt', async () => {
-  files[WIDTH] = 'uuid-lead 57\n'
+  files[WIDTH] = 'uuid-lead 57 4242\n'
   percent = 40
   expect(sitesWithKeys(await pass())).toEqual(['mode'])
   const usage = $.session.usage
@@ -4895,7 +4930,7 @@ test('an evaluation of the band that throws leaves no key under the prompt', asy
 })
 
 test('a turn the hint\'s site reports takes the rotate and wrap keys from under the prompt before the band draws again, and leaves filter chat', async () => {
-  files[WIDTH] = 'uuid-lead 57\n'
+  files[WIDTH] = 'uuid-lead 57 4242\n'
   enableFilterChat()
   percent = 40
   await band()
@@ -4927,7 +4962,7 @@ test('a rotate or wrap key pressed once a turn runs does nothing but say so', as
 
 const footerClock = () => timers.find(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS && !t.cancelled)
 test('the status line\'s width is read on a clock only while it can move the keys, and a line that grows or shrinks moves them on the next read', async () => {
-  files[WIDTH] = 'uuid-lead 82\n'
+  files[WIDTH] = 'uuid-lead 82 4242\n'
   expect(footerClock()).toBeUndefined()
   percent = 40
   await band()
@@ -4940,7 +4975,7 @@ test('the status line\'s width is read on a clock only while it can move the key
   await fireAfter()
   expect(invalidated).toEqual([])
   // A turn ended and the context reading grew a digit.
-  files[WIDTH] = 'uuid-lead 86\n'
+  files[WIDTH] = 'uuid-lead 86 4242\n'
   await footerClock()!.fn()
   await fireAfter()
   expect(invalidated).toEqual(['ui.render'])
@@ -4960,7 +4995,7 @@ test('the status line\'s width is read on a clock only while it can move the key
     await pass(screen)
     expect(reads.filter(path => path === WIDTH)).toEqual([])
     // Back on a row with room, the record is read at once and the clock runs again.
-    files[WIDTH] = 'uuid-lead 57\n'
+    files[WIDTH] = 'uuid-lead 57 4242\n'
     expect(sitesWithKeys(await pass())).toEqual(['mode'])
     expect(footerClock()).toBeDefined()
   }
