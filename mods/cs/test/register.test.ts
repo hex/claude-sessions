@@ -1123,6 +1123,35 @@ test('a survey above the prompt at zero keeps the /clear from running and a toas
   }
 })
 
+// The engine's question dialog takes the prompt's place, the band's with it:
+// while one is open the band is not raised and the dialog is, at every redraw
+// (measured on 2.1.322, a plugin's question asked while idle; a /clear run
+// under it is not refused).
+const DIALOG_DRAWN = { type: 'engine', ref: 2 }
+const dialog = () => hooks['ui.render:AskUserQuestion']?.($, { surface: 'terminal', props: { tool: 'AskUserQuestion', questions: [] } }, async () => DIALOG_DRAWN)
+const tickUnderDialog = async (n = 1) => { for (let i = 0; i < n; i++) { await tickUnseen(); await dialog() } }
+
+test('a question dialog open at zero keeps the /clear from running and a toast says so; one answered before zero changes nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick(5)
+  const t = ticker()!
+  await tickUnderDialog(GRACE_SECONDS - 5)
+  expect(ran).toEqual([])
+  expect(toasts).toEqual(['/clear did not run: a question is waiting for an answer'])
+  expect(t.cancelled).toBe(true)
+  toasts = []
+  await turnComplete()
+  await tickUnderDialog(5)
+  await tick(GRACE_SECONDS - 5)
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
+  // the dialog itself draws as the engine's
+  expect(await dialog()).toBe(DIALOG_DRAWN)
+})
+
 test('a conversation that is no longer the lead at zero clears nothing and says so', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
