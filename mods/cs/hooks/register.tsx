@@ -196,7 +196,7 @@ export const TOASTS = {
   countQuestion: '/clear did not run: a question is waiting for an answer',
   countSurvey: '/clear did not run: a survey is waiting above the prompt',
   countSurveyUnseen: '/clear did not run: a survey was waiting above the prompt when another mod took the band',
-  clearUnseen: 'another mod has the band above the prompt, so the count to /clear ran unseen; /clear runs now',
+  clearUnseen: 'another mod has the band above the prompt, so the count to /clear ran unseen; /clear ran on time',
   queueNoBin: 'the launch did not say where cs is (CS_BIN); run cs -queue start from a shell in this session',
   queueModeUnknown: (how: string) => `'${how}' is not a way to run the queue; it is not started`,
   notCompacted: (reason: string) => `the conversation was not compacted (${reason}); the queue is not started`,
@@ -1954,7 +1954,7 @@ async function forceRotation($: EngineInterface) {
 // done: no turn (a Stop hook's turn starts with no prompt to stop the count),
 // no question dialog, no survey. Otherwise the count stops, a toast says
 // why, and the button stays for the person. A band another mod has taken
-// stops nothing: the /clear runs on time, and a toast says the count ran
+// stops nothing: the /clear runs on time, and a toast then says the count ran
 // unseen.
 function startCountdown($: EngineInterface) {
   left = GRACE_SECONDS
@@ -1983,8 +1983,15 @@ function startCountdown($: EngineInterface) {
     const refusal = waiting ?? (!armed ? TOASTS.countDisarmed : !lead ? TOASTS.countNotLead : waitsOnPerson())
     if (refusal !== undefined) return $.ui.toast(refusal)
     if (!vetted) return
-    if (!bandDrawn) $.ui.toast(TOASTS.clearUnseen)
-    await clearAndContinue($).catch(err => $.ui.toast(TOASTS.clearFailed(String(err))))
+    // Said once the /clear has run: a toast shown before it leaves the screen
+    // with the conversation (measured).
+    const unseen = !bandDrawn
+    try {
+      await clearAndContinue($)
+    } catch (err) {
+      return $.ui.toast(TOASTS.clearFailed(String(err)))
+    }
+    if (unseen) $.ui.toast(TOASTS.clearUnseen)
   })
 }
 
