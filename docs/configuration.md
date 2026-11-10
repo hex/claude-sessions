@@ -282,8 +282,8 @@ export CS_ROTATE_NUDGE_CTX="60"
 # (see hooks.md).
 export CS_STOP_VERDICT_WAIT="7"   # this is the default
 
-# Context percentage at which the cs mod's band draws its rotate key (Ctrl+X 1)
-# above the prompt (default: the status line's warn band, 40).
+# Context percentage at which the cs mod draws its rotate key (Ctrl+X 1)
+# under the prompt (default: the status line's warn band, 40).
 # The mod reads it from the launched process's environment.
 export CS_ROTATE_BUTTON_CTX="40"
 
@@ -296,8 +296,8 @@ export CS_BAND_BARS="10"         # this is the default
 
 # Forced rotation with grace (on at 80 unless set): once a turn ends with context
 # at or past this percentage the mod runs /rotate itself, once per
-# conversation, then counts the band down for 20 seconds and runs the /clear
-# that continues from the handoff. Pressing 1 clears at once; sending a
+# conversation, then counts down for 20 seconds beside its key and runs the /clear
+# that continues from the handoff. Pressing Ctrl+X 1 clears at once; sending a
 # prompt stops the countdown. On at 80 unless set; `off` or `0` disables it,
 # and a value that is not a number from 1 to 100 falls back to 80 rather than off. A
 # conversation born of a /clear that already starts past it is never forced
@@ -348,7 +348,7 @@ export CS_NO_TASK_TOOLS="1"
 
 # Launch without CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, even when the shell
 # carries it. A cs launch exports it so the cs mod the installer deployed
-# (the band's Ctrl+X 1 rotate key, past 40% context by default) loads; the flag
+# (the Ctrl+X 1 rotate key under the prompt, past 40% context by default) loads; the flag
 # also loads any other function-hooks plugin on the machine. Without this knob
 # cs keeps a value already in the shell (0 keeps function hooks off).
 export CS_NO_FUNCTION_HOOKS="1"
@@ -531,7 +531,7 @@ stays with its session.
 | `CS_TERM_BG_RGB` | r;g;b, each 0 to 255 | detected | at the next repaint |
 | `CS_NO_ITERM2` | `1` (on) or `0` (off) | off | the tab title, the bell bounce and the status line's iTerm reads: now; the launch's iTerm tmux path: at the next launch |
 | `CS_NERD_FONTS` | `1` (on) or `0` (off) | off | at the next cs command |
-| `CS_FILTER_CHAT` | `1` (on) or `0` (off) | off | `/filter-chat` and the band key: now. Here or in a shell: the next launch |
+| `CS_FILTER_CHAT` | `1` (on) or `0` (off) | off | `/filter-chat` and the key under the prompt: now. Here or in a shell: the next launch |
 | `CS_NO_TASK_TOOLS` | `1` (on) or `0` (off) | off | at the next launch |
 | `CS_NO_UPDATE_CHECK` | `1` (on) or `0` (off) | off | at the next launch |
 | `CS_NO_FUNCTION_HOOKS` | `1` (on) or `0` (off) | off | at the next launch; on, no mod loads, the cs panel included |
@@ -550,16 +550,16 @@ file instead, the one that session links:
 
 The two command keys sit in the `Chat` context, where Claude Code wants a
 `command:` binding (2.1.310 warns of one in any other named context), and the
-two band chords in `Global`, where the `cs` mod reads them.
+two key chords in `Global`, where Claude Code takes a chord for a mod's Button.
 
-Ctrl+X then R submits `/rotate`, and Ctrl+X then W submits `/wrap`, band or no
-band. Ctrl+X then 1 or 2 presses the `cs` mod's band above the
+Ctrl+X then R submits `/rotate`, and Ctrl+X then W submits `/wrap`, keys or no
+keys. Ctrl+X then 1 or 2 presses the `cs` mod's keys under the
 prompt: 1 its rotate key, or its `/clear` after arming a handoff, and 2 its
-wrap key. The band has no key of its own, so a digit you type to answer a
-question never presses it; without these two chords it answers only a click or
-Ctrl+X Tab. Text you are typing stays in the prompt. Claude Code drops a Ctrl+X that gets no second
+wrap key. The keys have no hotkey of their own, so a digit you type to answer a
+question never presses one; without these two chords they answer only a click.
+Text you are typing stays in the prompt. Claude Code drops a Ctrl+X that gets no second
 key within 3 seconds. The chords need no terminal setting. Ctrl+X 1 and
-Ctrl+X 2 reach the band only because Claude Code mounts no handler of its own
+Ctrl+X 2 reach the keys only because Claude Code mounts no handler of its own
 for `strip:jump1` and `strip:jump2` (measured on 2.1.291 and 2.1.292); a
 release that mounts one takes the chord from the band without a warning.
 
@@ -705,7 +705,7 @@ for the syntax and bundled skill.
 
 Filter chat is off by default. While it is on, the chat shows what you type and
 what Claude answers, and nothing of the work between them. `/filter-chat`, or
-the band's `filter chat` key, switches it for this session: each runs
+the `filter chat` key under the prompt, switches it for this session: each runs
 `cs <session> -config set CS_FILTER_CHAT`. See [the filter chat mod](hooks.md#cs-filter-chat-not-a-hook-script--a-claude-code-mod).
 
 ## Environment variables cs sets for you

@@ -1,5 +1,5 @@
 // ABOUTME: cs-filter-chat mod: while filter chat is on in this session, the chat shows your messages and Claude's replies and nothing of the work between them. Off by default; a session cs -vet-session refuses gets Claude Code's own drawing.
-// ABOUTME: On/off comes from cs's band key (a ui.press hook reads the setting after next) or /filter-chat. PAINTERS is the one table of render sites; site() is the one caller of next().
+// ABOUTME: On/off comes from cs's key under the prompt (a ui.press hook reads the setting after next) or /filter-chat. PAINTERS is the one table of render sites; site() is the one caller of next().
 import type { EngineInterface, On, PluginOptions, RenderComponent, RenderElement, RenderInput } from 'claude-code'
 
 import { applyFilterChat, filterChatRecord, newLoad, readFilterChat, writeFilterChat } from './session'
@@ -103,8 +103,8 @@ function registerFilterChat(on: On, ink: Inks) {
     return { text: await perform($, parseFilterChatArgs(e.args)) }
   })
 
-  // cs's band key (`filter chat`, Button key `cs-filter-chat`, pressed by a
-  // click or the band's focus). next(e) resolves only after cs's onPress
+  // cs's key under the prompt (`filter chat`, Button key `cs-filter-chat`,
+  // pressed by a click). next(e) resolves only after cs's onPress
   // (pressFilterChat) promise settles (spike5 M16: 64 of 64, idle and
   // mid-turn, both --plugin-dir orders), so the setting read straight after it
   // is the post-press value, with no timer. Band-side precondition:

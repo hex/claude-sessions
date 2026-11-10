@@ -36,7 +36,7 @@ _CS_CONFIG_SPEC=(
     'CS_CLARIFY_DISABLE|Prompts|Clarifying questions|flagoff|flag|-|off|now|applies at your next prompt|Asks Claude to question an unclear request instead of guessing; a leading ~ skips one prompt.'
     'CS_NARRATIVE_PROMPT_DISABLE|Prompts|Narrative line|flagoff|flag|-|off|now|applies at your next prompt|Asks Claude, on each prompt, to note a finding in its narrative before it answers.'
     'CS_CTX_WARN_CTX|Rotation|Context warning %|text|num|-|40|now|applies when the next turn ends|Context use at which Claude tells you, once, that the conversation is filling up.'
-    'CS_ROTATE_BUTTON_CTX|Rotation|Rotate button from %|text|num|-|the warn %|now|applies by your next prompt|Context use from which the band above the prompt shows the rotate key, Ctrl+X 1.'
+    'CS_ROTATE_BUTTON_CTX|Rotation|Rotate button from %|text|num|-|the warn %|now|applies by your next prompt|Context use from which the rotate key, Ctrl+X 1, shows under the prompt.'
     'CS_ROTATE_NUDGE_CTX|Rotation|Rotation nudge %|text|num|-|60|now|applies when the next turn ends|Context use at which Claude suggests, once, writing a handoff and going on after /clear.'
     'CS_ROTATE_FORCE_CTX|Rotation|Rotate on its own past %|text|force|-|80|now|applies by your next prompt|Context use past which cs rotates by itself after a 20 second countdown you can stop.'
     'CS_NO_ROTATION_WAKE|Rotation|Wake after /clear|flagoff|flag|-|off|/clear|applies at the next /clear or launch|After /clear on a handoff, the fresh conversation starts its next step without you typing.'
@@ -53,7 +53,7 @@ _CS_CONFIG_SPEC=(
     'CS_TERM_BG_RGB|Terminal|Background r;g;b|text|rgb|-|detected|now|applies at the next repaint|Your terminal background colour, which the status line shades its capsules from.'
     'CS_NO_ITERM2|Terminal|iTerm2 features|flagoff|flag|-|off|now+launch|the tab title, the bell bounce and the iTerm reads of the bar: now. The iTerm tmux path of the launch: the next launch.|Uses iTerm2 for the tab title, a dock bounce when a turn ends and the theme of your profile.'
     'CS_NERD_FONTS|Terminal|Nerd Font glyphs|flag|flag|-|off|now|applies at the next cs command|Shows Nerd Font icons in cs banners and session lists; needs a Nerd Font in the terminal.'
-    'CS_FILTER_CHAT|Terminal|Filter chat|flag|flag|-|off|now+launch|/filter-chat and the band key: now. A change here or in a shell: the next launch.|Shows only your prompts and the replies from Claude in this session; the band key or /filter-chat flips it.'
+    'CS_FILTER_CHAT|Terminal|Filter chat|flag|flag|-|off|now+launch|/filter-chat and the key under the prompt: now. A change here or in a shell: the next launch.|Shows only your prompts and the replies from Claude in this session; the key under the prompt or /filter-chat flips it.'
     'CS_NO_MAIL_WAKE|Mail|Wake on mail|flagoff|flag|-|off|now|applies when the next turn ends|Unread mail from another session takes a turn, so the exchange goes on without you typing.'
     'CS_MAIL_WAKE_MAX|Mail|Wakes in a row|text|num|-|5|now|applies when the next turn ends|How many turns mail may take in a row before it waits for a prompt from you.'
     'CS_NO_TASK_TOOLS|Launch|Task tools|flagoff|flag|-|off|launch|applies at the next launch|Gives Claude its task list tools on every model, for rotation, the queue and handoffs.'
@@ -2696,6 +2696,38 @@ _display_width() {
     _WIDTH=${#s}
 }
 
+# Print the bar's line "$1" and record how many cells it takes, beside the id
+# of the conversation it was drawn for, in .cs/local/statusline-width
+# (`<session id> <cells>`). The cs mod draws its keys at the right of the row
+# under the bar only where the bar leaves them room, and Claude Code tells a
+# mod nothing of the bar. The SGR escapes, the only ones this script emits,
+# take no cell. Same partition rules as context-pct: machine-local, atomic,
+# best-effort, nothing while git tracks the control files, and only the
+# launched conversation named in .cs/local/state writes, since a tmux
+# teammate's bar is not the one over the lead's keys. An unchanged record is
+# left alone: the move is a fork, and the bar repaints on every event.
+_emit_line() {  # line
+    printf '%s\n' "$1"
+    [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ -n "${SL_SESSION_ID:-}" ] || return 0
+    case "$SL_SESSION_ID" in *[[:space:]]*) return 0 ;; esac
+    [ -d "${SL_LOCAL_DIR:-}" ] || return 0
+    _session_files_tracked && return 0
+    _read_state_key "$SL_LOCAL_DIR/state" claude_session_id
+    [ "$_STATE_VALUE" = "$SL_SESSION_ID" ] || return 0
+    local rest="$1" text="" csi=$'\033[' file="$SL_LOCAL_DIR/statusline-width" was=""
+    while [ "$rest" != "${rest#*"$csi"}" ]; do
+        text+="${rest%%"$csi"*}"
+        rest="${rest#*"$csi"}"
+        rest="${rest#*m}"
+    done
+    _display_width "$text$rest"
+    [ -f "$file" ] && IFS= read -r was < "$file"
+    [ "$was" = "$SL_SESSION_ID $_WIDTH" ] && return 0
+    printf '%s %s\n' "$SL_SESSION_ID" "$_WIDTH" > "$file.tmp" 2>/dev/null \
+        && mv "$file.tmp" "$file" 2>/dev/null
+    return 0
+}
+
 # Parse "$1" as an "r;g;b" triplet of 0-255 integers into _R/_G/_B. Returns 1
 # (leaving _R/_G/_B unset) if the string doesn't parse — a missing field, an
 # extra field, a non-numeric value, and an out-of-range channel are all
@@ -2791,7 +2823,7 @@ _render() {
                 out+="${_SEG_TEXT[i]}"
             done
         done
-        printf '%s\n' "$out"
+        _emit_line "$out"
         return 0
     fi
 
@@ -2839,7 +2871,7 @@ _render() {
         out+="$reset"
         [ $((k + 1)) -lt ${#_GROUPS[@]} ] && out+=" "
     done
-    printf '%s\n' "$out"
+    _emit_line "$out"
 }
 
 # --- band layout -------------------------------------------------------------
@@ -3148,7 +3180,7 @@ _render_band() {
         _band_blank "$step"
     done
     [ "$_BAND_POS" -eq "$last" ] && _band_blank 1
-    printf '%s\033[0m\n' "$_BAND_OUT"
+    _emit_line "$_BAND_OUT"$'\033[0m'
 }
 
 # --- quiet layout ------------------------------------------------------------
@@ -3364,7 +3396,7 @@ _render_quiet() {
     done
     [ -n "$inchip" ] && out+="${e}[${chipbg}m "
     [ -n "$critchip" ] && out+="${e}[${critbg}m "
-    printf '%s\033[0m\n' "$out"
+    _emit_line "$out"$'\033[0m'
 }
 
 # --- main ------------------------------------------------------------------

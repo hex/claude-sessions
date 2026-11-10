@@ -1,7 +1,8 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: cs mod: keys above the prompt: rotate past the threshold, wrap up, /clear once a handoff is armed, or start a queue nothing runs.
+// ABOUTME: cs mod: keys under the prompt, at the right of the permission notice: rotate past the threshold, wrap up, filter chat, and /clear with its countdown once a handoff is armed.
+// ABOUTME: Above the prompt a band: the key that starts a queue nothing runs, mail, the features word and the /finish gate.
 // ABOUTME: A turn ending past CS_ROTATE_FORCE_CTX (default 80, off disables) runs /rotate itself, then counts down to the /clear (session colour, amber, crit); session.start writes a heartbeat for doctor.
 // ABOUTME: /queue adds a task to the session's walk-away queue through `cs -queue add`, at once even mid-turn; bare, it prints `cs -queue list`. /finish toasts its start and outcome and, while its gate runs, the band carries the elapsed time.
 // ABOUTME: The band carries a rail: one tick per prompt on the transcript's live branch (read after each turn), the one being read thick; a press or /cs next|prev|first|last|N scrolls the transcript to that prompt; bare /cs goes on to the cs panel.
@@ -332,7 +333,7 @@ export function buildBandEntries(facts: BandFacts): BandEntry[] {
   // The grace follows the clear key whose press stops it.
   if (facts.countdown !== undefined) entries.push({ key: 'cs-countdown', kind: 'word', label: `in ${facts.countdown.seconds}s`, ink: { color: facts.countdown.ink } })
   if (facts.wrapping) entries.push({ key: 'cs-wrap', kind: 'chord', label: 'wrap', action: WRAP_ACTION, onPress: facts.wrap })
-  // The filter chat key and the queue have no chord: a click or Enter under the band's focus presses them.
+  // The filter chat key and the queue have no chord: a click presses them, and Enter under the band's focus the queue.
   // Its tail is a switch dot: ● in green while on, ○ in the line's ink while off.
   if (facts.filterChat !== undefined) entries.push({ key: 'cs-filter-chat', kind: 'press', label: facts.filterChat.on ? 'filter chat ●' : 'filter chat ○', onPress: facts.filterChat.onPress, ink: { tail: facts.filterChat.on ? '●' : '○', color: facts.filterChat.on ? FILTER_CHAT_ON : undefined } })
   if (facts.waiting > 0) entries.push({ key: 'cs-queue', kind: 'press', label: `${QUEUE_GLYPH} run ${facts.waiting} queued ${facts.waiting === 1 ? 'task' : 'tasks'}`, onPress: facts.queue, ink: { lead: QUEUE_GLYPH, color: facts.queueInk } })
@@ -401,7 +402,26 @@ let bandProblemSaid: string | undefined
 let filterChatPressPending: Promise<void> | undefined
 let filterChatComplaint: string | undefined
 
+// The keys under the prompt, as the band's last evaluation left them: the
+// footer's two sites are raised with neither the survey nor the turn the keys
+// depend on, so the band, which is, decides for them. With the keys go what
+// their route is read from: whether filter chat is on, which adds its label
+// to the footer's modes, and the width the status line last recorded. Both
+// sites route from this one record and the modes the footer last named, so
+// they never both draw the keys, nor neither. The modes are undefined while
+// another mod draws a tree of its own in their place: what it takes of the
+// status line's row this mod cannot know.
+type Footer = { keys: BandEntry[]; filterChat: boolean; statusWidth: number | undefined }
+const NO_FOOTER: Footer = { keys: [], filterChat: false, statusWidth: undefined }
+let footer = NO_FOOTER
+let footerModes: readonly string[] | undefined = []
+// The clock that reads the status line's width again while the keys draw, and
+// whether a redraw for a changed footer is already scheduled.
+let footerWatch: { cancel: () => void } | undefined
+let footerRedraw = false
+
 export function register(on: On) {
+  footer = NO_FOOTER; footerModes = []; footerWatch = undefined; footerRedraw = false
   bandOptions = undefined
   bandProblemSaid = undefined
   filterChatPressPending = undefined
@@ -642,29 +662,61 @@ export function register(on: On) {
     const named = namedIndex()
     drawnRead = named
     const hasContent = rotating || waiting > 0 || queued > 0 || mail > 0 || gate !== undefined || railing || featured !== undefined
-    if (!hasContent && !filterChatEligible) return drawn
+    if (!hasContent && !filterChatEligible) { await postFooter($, [], false); return drawn }
     // Listing /filter-chat reads availability without queuing a command or adding a status row.
     const offersFilterChat = filterChatEligible && (await $.command.list()).some(command => command.name === 'filter-chat' && command.source === 'plugin' && command.plugin === 'cs-filter-chat')
-    if (!hasContent && !offersFilterChat) return drawn
+    if (!hasContent && !offersFilterChat) { await postFooter($, [], false); return drawn }
     const wrapped = rotating && !armed && (await wrapFinished($))
-    const chords = await boundChords($)
     const own = paletteColor(await sessionColor($))
     const { Box, Text, Button } = await $.ui.resolve(e)
     const wrapping = rotating && !armed && !wrapped
     const finish = featured?.finish
     const { bg, theme } = await themeAndBackground($)
+    const filterChat = offersFilterChat && !filterChatVetRefused && (await readFilterChat($))
     const entries = buildBandEntries({
       featured: featured === undefined ? undefined : { label: featured.label, onPress: finish === undefined || !bandIdle ? undefined : () => pressFinish($, finish) },
       countdown: armed && left !== undefined ? { seconds: left, ink: await rampColor($, left) } : undefined,
       rotating, armed, wrapping, waiting, gate, queued, queueRunning: queueStarted, mail,
       queueInk: amberColor(bg, theme),
-      filterChat: offersFilterChat ? { on: !filterChatVetRefused && await readFilterChat($), onPress: () => pressFilterChat($) } : undefined,
+      filterChat: offersFilterChat ? { on: filterChat, onPress: () => pressFilterChat($) } : undefined,
       rotate: armed ? () => pressClear($) : () => pressRotate($),
       wrap: () => askToWrap($),
       queue: () => pressQueueStart($),
     })
     const rail = railing && bars !== undefined ? { prompts, named, denied, bars, jump: (i: number) => jumpTo($, i) } : undefined
-    return drawBand({ drawn, entries, chords, own, bodyColumns: e.props.bodyColumns, surface: e.surface, rail }, { Box, Text, Button })
+    await postFooter($, entriesAt(entries, 'footer'), filterChat)
+    // No entry left on the band is a chord, so it has none to spell.
+    return drawBand({ drawn, entries: entriesAt(entries, 'band'), chords: {}, own, bodyColumns: e.props.bodyColumns, surface: e.surface, rail }, { Box, Text, Button })
+  })
+
+  // The keys at the right end of the permission notice's row, where the status
+  // line leaves them room (footerRoute). SessionMode draws at the right end of
+  // the row above, the status line's: a box of no width there holds the keys
+  // one row down, flush right, and takes no row of its own (measured on
+  // 2.1.322; a tree drawn in the flow takes a third footer row once the
+  // status line is long).
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    const drawn = await next(e)
+    noteModes($, drawn.type === 'engine' ? e.props.modes : undefined)
+    if (routeOf(e.viewport?.columns) !== 'notice-right') return drawn
+    const { Box, Text, Button } = await $.ui.resolve(e)
+    return (
+      <Box flexDirection="row">
+        {drawn}
+        <Box width={0} height={1}>
+          <Box position="absolute" right={0} top={1}>{drawFooterKeys(footer.keys, { Box, Text, Button })}</Box>
+        </Box>
+      </Box>
+    )
+  })
+
+  // Where they have no room there, the keys stand in the notice's row in
+  // place of its hint: the engine keeps the notice and joins the two.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    const drawn = await next(e)
+    if (routeOf(e.viewport?.columns) !== 'inline') return drawn
+    const { Box, Text, Button } = await $.ui.resolve(e)
+    return drawFooterKeys(footer.keys, { Box, Text, Button })
   })
 
   // A rail tick never takes the band's focus ring: the ring draws as an
@@ -1030,6 +1082,169 @@ export function sharedPrefix(chords: (string | undefined)[]): string | undefined
   })
   const first = prefixes[0]
   return first !== undefined && prefixes.every(prefix => prefix === first) ? first : undefined
+}
+
+// Where each entry draws: on the band above the prompt, or among the keys in
+// the footer under it. The band builds one list (buildBandEntries); each site
+// draws its own part.
+export type Site = 'band' | 'footer'
+const SITES = new Map<string, Site>([
+  ['cs-rotate', 'footer'], ['cs-countdown', 'footer'], ['cs-wrap', 'footer'], ['cs-filter-chat', 'footer'],
+  ['cs-queue', 'band'], ['cs-queued', 'band'], ['cs-features', 'band'], ['cs-gate', 'band'], ['cs-mail', 'band'],
+])
+
+// The entries of one site, in the list's order.
+export function entriesAt<T extends BandEntry>(entries: T[], site: Site): T[] {
+  return entries.filter(entry => {
+    const at = SITES.get(entry.key)
+    if (at === undefined) throw new Error(`cs: ${entry.key} has no site`)
+    return at === site
+  })
+}
+
+// The status line's record of the line it last printed, under the session
+// directory: `<conversation id> <cells>` (_emit_line in bin/cs-statusline).
+export const STATUS_WIDTH = '.cs/local/statusline-width'
+// How often the record is read again while the keys draw: the status line
+// repaints on its own, and a render hook runs again only for its own inputs.
+export const FOOTER_POLL_MS = 2000
+
+// The cells of the status line conversation `id` last printed, from the
+// record's text; undefined for a record of another conversation (an earlier
+// one's, left by a status line since turned off) or one in another shape.
+export function parseStatusWidth(text: string, id: string): number | undefined {
+  const record = text.match(/^(\S+) (\d{1,4})\n?$/)
+  return record !== null && record[1] === id ? Number(record[2]) : undefined
+}
+
+// The label cs-filter-chat adds to the footer's modes while it is on. KEEP IN
+// SYNC with labels.mode in mods/cs-filter-chat/hooks/words.ts (the two mods
+// share no module; mods/cs/test pins the two against each other).
+export const FILTER_CHAT_MODE = 'filter chat · /filter-chat to switch'
+
+// The cells the footer's mode labels take at the right of the status line's
+// row, as the engine joins them. cs-filter-chat adds its label on the way to
+// the engine, so this mod's hook sees it or not by the order the two loaded
+// in: while filter chat is on the label is counted either way.
+export function modesWidth(modes: readonly string[], filterChat: boolean): number {
+  return cellWidth((filterChat && !modes.includes(FILTER_CHAT_MODE) ? [...modes, FILTER_CHAT_MODE] : modes).join(' & '))
+}
+
+// Between two footer keys; the clear key's countdown follows it after a space.
+const FOOTER_SEP = ' · '
+const footerGap = (entry: BandEntry) => (entry.key === 'cs-countdown' ? ' ' : FOOTER_SEP)
+
+// The cells the footer's keys take, as drawFooterKeys draws them.
+export function keysWidth(keys: BandEntry[]): number {
+  return cellWidth(keys.map((entry, index) => `${index > 0 ? footerGap(entry) : ''}${entry.label}`).join(''))
+}
+
+// Where the footer draws its keys. Measured on Claude Code 2.1.322:
+// - at the notice's right, the keys take no row of their own only while the
+//   status line and the mode labels share the row above: the footer pads two
+//   cells a side and keeps one between the two, so `columns` must hold the
+//   status line's cells, the labels' and STATUS_MARGIN more;
+// - there they are painted over the row, so the row must also hold the widest
+//   notice (bypass permissions, with its hint and the indent), the keys and
+//   NOTICE_GAP, or the keys cover the notice's end;
+// - inline, in place of the notice's hint, they follow the notice the engine
+//   keeps (the widest without its hint, with the indent and the engine's
+//   ` · `), and the row must hold both or it wraps.
+// A width nobody recorded leaves the first question open, as does a tree
+// another mod draws where the mode labels go, so the keys go inline, which
+// asks nothing of the status line's row; a row too narrow for that draws no
+// keys.
+export type FooterRoute = 'notice-right' | 'inline' | 'hidden'
+const STATUS_MARGIN = 5
+const NOTICE_CELLS = 48
+const NOTICE_GAP = 3
+const INLINE_LEAD = 29
+const INLINE_MARGIN = 2
+export function footerRoute(columns: number | undefined, statusWidth: number | undefined, modesCells: number, keysCells: number): FooterRoute {
+  if (columns === undefined) return 'inline'
+  if (statusWidth !== undefined && columns >= statusWidth + STATUS_MARGIN + modesCells && columns >= NOTICE_CELLS + keysCells + NOTICE_GAP) return 'notice-right'
+  return columns >= INLINE_LEAD + keysCells + INLINE_MARGIN ? 'inline' : 'hidden'
+}
+
+// The route of the keys the band last left, on a footer `columns` wide;
+// undefined with no key to draw.
+function routeOf(columns: number | undefined): FooterRoute | undefined {
+  if (footer.keys.length === 0) return undefined
+  if (footerModes === undefined) return footerRoute(columns, undefined, 0, keysWidth(footer.keys))
+  return footerRoute(columns, footer.statusWidth, modesWidth(footerModes, footer.filterChat), keysWidth(footer.keys))
+}
+
+// The footer's keys in one row, dim as the hint they stand beside: each key a
+// Button that keeps its action, so the chord bound to it still presses it,
+// and spells no chord, which the row has no cells for. A Button nested in a
+// Text is refused with its whole tree, so each separator stands beside it.
+export function drawFooterKeys(keys: BandEntry[], el: BandElements): RenderElement {
+  const { Box, Text, Button } = el
+  return (
+    <Box flexDirection="row">
+      {keys.flatMap((entry, index) => [
+        index > 0 && <Text dimColor>{footerGap(entry)}</Text>,
+        entry.kind === 'word'
+          ? <Text bold color={entry.ink !== undefined && 'color' in entry.ink ? entry.ink.color : undefined}>{entry.label}</Text>
+          : entry.kind === 'chord'
+            ? <Button key={entry.key} action={entry.action} plain dimColor label={entry.label} onPress={entry.onPress} />
+            : entry.ink !== undefined && 'tail' in entry.ink
+              ? <Button key={entry.key} plain dimColor label={entry.label} onPress={entry.onPress}>{entry.label.slice(0, -entry.ink.tail.length)}<Text color={entry.ink.color}>{entry.ink.tail}</Text></Button>
+              : <Button key={entry.key} plain dimColor label={entry.label} onPress={entry.onPress} />,
+      ])}
+    </Box>
+  )
+}
+
+// What the status line last recorded for this conversation; undefined when it
+// recorded nothing the mod can read.
+async function readStatusWidth($: EngineInterface): Promise<number | undefined> {
+  try {
+    return parseStatusWidth(await $.fs.read(`${await $.session.cwd()}/${STATUS_WIDTH}`), await $.session.id())
+  } catch {
+    return undefined // no record: this status line is not cs's, or has not drawn yet
+  }
+}
+
+const footerSignature = (f: Footer) => JSON.stringify([f.keys.map(entry => [entry.key, entry.label, 'ink' in entry ? entry.ink : undefined]), f.filterChat, f.statusWidth])
+
+// One redraw for a footer that changed, from a timer: the change is found
+// inside a render hook.
+function redrawFooter($: EngineInterface) {
+  if (footerRedraw) return
+  footerRedraw = true
+  $.clock.after(0, () => { footerRedraw = false; $.ui.invalidate('ui.render') })
+}
+
+// The band hands the footer its keys. The footer's sites drew from the last
+// record, so one that differs draws them again; the keys' presses are taken
+// as they come, since a press reads the session afresh. While there are keys
+// the status line's width is read again on a clock.
+async function postFooter($: EngineInterface, keys: BandEntry[], filterChat: boolean) {
+  const next: Footer = { keys, filterChat, statusWidth: keys.length > 0 ? await readStatusWidth($) : undefined }
+  const changed = footerSignature(next) !== footerSignature(footer)
+  footer = next
+  if (changed) redrawFooter($)
+  if (keys.length === 0) {
+    footerWatch?.cancel()
+    footerWatch = undefined
+  } else footerWatch ??= $.clock.every(FOOTER_POLL_MS, () => followStatusWidth($))
+}
+
+async function followStatusWidth($: EngineInterface) {
+  const statusWidth = await readStatusWidth($)
+  if (footer.keys.length === 0 || statusWidth === footer.statusWidth) return
+  footer = { ...footer, statusWidth }
+  $.ui.invalidate('ui.render')
+}
+
+// The mode labels the engine last drew in the footer, or undefined where
+// another mod drew in their place. The hint's site is raised without them, so
+// a change draws both again.
+function noteModes($: EngineInterface, modes: readonly string[] | undefined) {
+  if (modes?.join('\n') === footerModes?.join('\n')) return
+  footerModes = modes
+  if (footer.keys.length > 0) redrawFooter($)
 }
 
 // One `-features --porcelain` record, as _feature_readiness prints it.
@@ -1792,9 +2007,10 @@ async function sessionColor($: EngineInterface): Promise<string | undefined> {
 
 // The engine actions the rotate and wrap Buttons answer to. They carry no default
 // chord and no engine handler is mounted for them (measured on 2.1.291 and
-// 2.1.292), so the chord a person binds to one presses the Button. The band
-// depends on that: a Claude Code that mounts a handler for either action
-// takes Ctrl+X 1 or Ctrl+X 2 from the band without a word. KEEP IN SYNC with
+// 2.1.292), so the chord a person binds to one presses the Button, under the
+// prompt as above it (measured on 2.1.322). The keys depend on that: a Claude
+// Code that mounts a handler for either action takes Ctrl+X 1 or Ctrl+X 2
+// from them without a word. KEEP IN SYNC with
 // CS_ROTATE_WRAP_KEYS in lib/01-manifests.sh, which binds them.
 export const ROTATE_ACTION = 'strip:jump1'
 export const WRAP_ACTION = 'strip:jump2'
@@ -1865,29 +2081,6 @@ async function pressFilterChat($: EngineInterface) {
   } finally {
     if (filterChatPressPending === pending) filterChatPressPending = undefined
   }
-}
-
-// The chord keybindings.json binds to each action in the Global context, as
-// the person wrote it. Claude Code reads that file from CLAUDE_CONFIG_DIR, else
-// ~/.claude; an encrypted session's config dir holds a link to the shell's
-// file, so this reads the file Claude Code reads. An unreadable or malformed
-// file, or a key unbound with null, binds nothing.
-async function boundChords($: EngineInterface): Promise<Record<string, string>> {
-  const dir = (await $.env.get("CLAUDE_CONFIG_DIR")) || `${await $.env.get("HOME")}/.claude`
-  let doc: any
-  try {
-    doc = JSON.parse(await $.fs.read(`${dir}/keybindings.json`))
-  } catch {
-    return {} // no file, or not JSON: no chord to spell
-  }
-  const chords: Record<string, string> = {}
-  for (const block of Array.isArray(doc?.bindings) ? doc.bindings : []) {
-    if (block?.context !== 'Global' || typeof block.bindings !== 'object' || block.bindings === null) continue
-    for (const [chord, action] of Object.entries(block.bindings)) {
-      if (typeof action === 'string' && chords[action] === undefined) chords[action] = chord
-    }
-  }
-  return chords
 }
 
 async function readState($: EngineInterface): Promise<string | undefined> {
