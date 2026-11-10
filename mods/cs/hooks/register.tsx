@@ -1924,8 +1924,10 @@ async function forceRotation($: EngineInterface) {
 // ten a second). Each redraw re-reads the marker and the handoff: the count
 // must see the press and the prompt that stop it, so nothing here is cached.
 // At zero the /clear runs only where the band would draw the button: the band
-// idle, the handoff still armed, this the lead; otherwise the count stops and
-// the button stays for the person.
+// idle and no turn running once the reads below are done (a Stop hook's
+// turn starts with no prompt to stop the count), the handoff still armed,
+// this the lead; otherwise the count stops and the button stays for the
+// person.
 function startCountdown($: EngineInterface) {
   left = GRACE_SECONDS
   // From a timer: the count starts inside the turn's own hook.
@@ -1943,7 +1945,7 @@ function startCountdown($: EngineInterface) {
     const idle = bandIdle && (await handoffArmed($)) && (await ownsRotation($)) && (await sessionVetted($, await $.session.cwd()))
     if (left !== 0) return
     stopCountdown($)
-    if (idle) await clearAndContinue($).catch(err => $.ui.toast(TOASTS.clearFailed(String(err))))
+    if (idle && !turnRunning()) await clearAndContinue($).catch(err => $.ui.toast(TOASTS.clearFailed(String(err))))
   })
 }
 

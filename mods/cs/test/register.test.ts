@@ -4873,8 +4873,9 @@ test('a footer too narrow for the keys, or one nobody measured, draws them on th
   expect(words(trees.band)).toEqual(['ctrl+x', '1', '   ', '2'])
 })
 
-// The band is as narrow as the footer: the count holds its place on it down to
-// 23 columns, and only a narrower band drops it before the clear key's word.
+// The band's line here is as wide as the footer (the engine's is a few cells
+// narrower: 105 of 110): the count holds its place on a line of 23 cells, and
+// only a narrower line drops it before the clear key's word.
 test('an armed handoff\'s clear key and its count draw on the band where the footer has no room for them', async () => {
   bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
   await startGrace()
@@ -5071,6 +5072,37 @@ test('a /clear now key pressed once a turn runs, before any site draws the turn,
   await turnComplete()
   await clear.props.onPress()
   expect(ran).toEqual([{ command: 'clear', args: '' }])
+})
+
+test('a turn a Stop hook starts with no prompt, before the band draws it, keeps the count\'s zero from clearing', async () => {
+  await startGrace()
+  await keys()
+  await tick(GRACE_SECONDS - 1)
+  await turnStart('')
+  await tick()
+  expect(ran).toEqual([])
+  expect(ticker()).toBeUndefined()
+  // Nor does one that starts while the zero tick waits on cs.
+  await turnComplete()
+  await keys()
+  await tick(GRACE_SECONDS - 1)
+  let answered!: () => void
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => {
+    if (argv[1] !== '-vet-session') return run(argv, init)
+    await new Promise<void>(resolve => { answered = resolve })
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  try {
+    const zero = tick()
+    await settle()
+    await turnStart('')
+    answered()
+    await zero
+  } finally {
+    $.process.run = run
+  }
+  expect(ran).toEqual([])
 })
 
 const footerClock = () => timers.find(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS && !t.cancelled)
