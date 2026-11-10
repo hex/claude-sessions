@@ -49,10 +49,19 @@ if [ -n "$since" ]; then
 fi
 
 _gh() {
-    if ! gh "$@" > "$scratch/response" 2> "$scratch/error"; then
+    local retries=0
+    while ! gh "$@" > "$scratch/response" 2> "$scratch/error"; do
+        # Only reads are retried: a 5xx on a rerun does not prove the rerun did not start.
+        if [ "$1 $2" = 'run view' ] && [ "$retries" -lt 2 ] &&
+            grep -Eq '(^|[^0-9A-Za-z])HTTP 5[0-9][0-9]([^0-9]|$)' "$scratch/error"; then
+            retries=$((retries + 1))
+            printf 'retrying: gh %s failed: "%s" (retry %s of 2)\n' "$*" "$(cat "$scratch/error")" "$retries"
+            sleep "$interval"
+            continue
+        fi
         printf 'ci_wait: gh %s failed: "%s"\n' "$*" "$(cat "$scratch/error")" >&2
         exit 4
-    fi
+    done
 }
 
 _report_skips() {
