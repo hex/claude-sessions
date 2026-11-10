@@ -4728,8 +4728,12 @@ run_test test_render_leaves_an_unchanged_width_record_alone
 
 # Only the launched conversation records its line: a tmux teammate shares the
 # directory and draws a bar of its own, and the lead's mod would place the
-# lead's keys by the teammate's width. A session whose state names no
-# conversation yet gets no record either, since the mod trusts none.
+# lead's keys by the teammate's width. Nor does a teammate's render remove the
+# lead's record, even one that cannot say which conversation it draws for
+# (its bar turned off, stdin it cannot read): the record names the Claude
+# Code that wrote it, and a teammate in its own pane is another. A session
+# whose state names no conversation yet gets no record either, since the mod
+# trusts none.
 test_teammate_render_leaves_the_lead_width_record() {
     export CLAUDE_SESSION_NAME=matesess NO_COLOR=1 CS_STATUSLINE_PARENT=4242
     local dir="$CS_SESSIONS_ROOT/matesess/.cs/local"
@@ -4740,6 +4744,10 @@ test_teammate_render_leaves_the_lead_width_record() {
     assert_eq "lead 19 4242" "$(cat "$dir/statusline-width")" "the lead's record stands" || return 1
     CS_STATUSLINE_SEGMENTS=none run_sl '{"session_id":"mate","context_window":{"used_percentage":55},"workspace":{"current_dir":"/none"}}' >/dev/null
     assert_eq "lead 19 4242" "$(cat "$dir/statusline-width")" "and stands when the teammate's bar prints no line" || return 1
+    CS_STATUSLINE_PARENT=4343 CS_STATUSLINE_DISABLE=1 run_sl '{"session_id":"mate","context_window":{"used_percentage":55},"workspace":{"current_dir":"/none"}}' >/dev/null
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "and when another Claude Code's bar is turned off" || return 1
+    (cd "$TEST_TMPDIR" && CS_STATUSLINE_PARENT=4343 run_sl 'not json') >/dev/null
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "and when another Claude Code's render cannot read its stdin" || return 1
     : > "$dir/state"
     rm "$dir/statusline-width"
     run_sl '{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}' >/dev/null

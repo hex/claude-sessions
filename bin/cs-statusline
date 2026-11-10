@@ -2747,14 +2747,19 @@ _width_is_the_leads() {
 
 # Remove the width record: this run printed no line the record is true of
 # (the bar turned off, stdin unreadable, no segment, a line of unknown
-# width). A run that knows its conversation leaves the lead's record to the
-# lead; one that does not (the first two) removes it, and the lead's next
-# render writes it again. The rm is a fork, paid once: the record is gone
-# after it.
+# width). Only a record this render's Claude Code wrote goes, alone or in a
+# shared mark, and for this conversation when the render knows it (the
+# first two do not): a teammate's render in its own pane never removes the
+# lead's. The rm is a fork, paid once: the record is gone after it.
 _forget_width() {
     _width_file || return 0
-    [ -e "$_WIDTH_FILE" ] || return 0
-    [ -z "${SL_SESSION_ID:-}" ] || _width_is_the_leads || return 0
+    [ -f "$_WIDTH_FILE" ] || return 0
+    _sl_parent_pid
+    local was="" id="" cells="" a="" b=""
+    IFS= read -r was < "$_WIDTH_FILE"
+    read -r id cells a b <<< "$was"
+    [ -z "${SL_SESSION_ID:-}" ] || [ "$id" = "$SL_SESSION_ID" ] || return 0
+    [ "$a" = "$_PARENT" ] || [ "$b" = "$_PARENT" ] || return 0
     rm -f "$_WIDTH_FILE" 2>/dev/null
     return 0
 }
