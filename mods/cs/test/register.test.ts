@@ -693,6 +693,23 @@ test('a control file git starts tracking during the count clears nothing at zero
   expect(toasts).toEqual([`no rotation in this session: ${TRACKED}`])
 })
 
+test('a zero cs refuses says so, also when the same refusal was toasted earlier in the count', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(5)
+  runResult = tracked
+  await hooks['session.start']($, { cwd: '/work', surface: 'terminal', isInteractive: true }, async (e: any) => ({ cwd: e.cwd }))
+  expect(toasts).toEqual([`no rotation in this session: ${TRACKED}`])
+  toasts = []
+  const t = ticker()!
+  await tick(GRACE_SECONDS - 5)
+  expect(ran).toEqual([])
+  expect(t.cancelled).toBe(true)
+  expect(toasts).toEqual([`no rotation in this session: ${TRACKED}`])
+})
+
 test('a press while cs is still answering, then the count reaching zero, clears once', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80

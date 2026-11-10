@@ -1995,13 +1995,18 @@ async function countZero($: EngineInterface, unseen: boolean) {
   const waiting = waitsOnPerson()
   const armed = waiting === undefined && (await handoffArmed($))
   const lead = armed && (await ownsRotation($))
-  // cs's refusal of the session is toasted by the vet itself.
+  const told = lastRefusal
   const vetted = lead && (await sessionVetted($, await $.session.cwd()))
   if (left !== 0) return
   stopCountdown($)
   const refusal = waiting ?? (!armed ? TOASTS.countDisarmed : !lead ? TOASTS.countNotLead : waitsOnPerson())
   if (refusal !== undefined) return $.ui.toast(refusal)
-  if (!vetted) return
+  if (!vetted) {
+    // The vet toasts a refusal it has not said before; this zero says its
+    // own either way.
+    if (lastRefusal !== undefined && lastRefusal === told) $.ui.toast(TOASTS.noRotation(lastRefusal))
+    return
+  }
   // Said once the /clear has run: a toast shown before it leaves the screen
   // with the conversation (measured).
   try {
