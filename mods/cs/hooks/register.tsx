@@ -2,7 +2,7 @@
 /* @jsx h */
 /* @jsxFrag Fragment */
 // ABOUTME: cs mod: keys under the prompt, at the right of the permission notice: rotate past the threshold, wrap up, filter chat, and /clear with its countdown once a handoff is armed.
-// ABOUTME: Above the prompt a band: the key that starts a queue nothing runs, mail, the features word and the /finish gate.
+// ABOUTME: Above the prompt a band: the key that starts a queue nothing runs, mail, the features word and the /finish gate, and the keys themselves where the footer has no safe place for them.
 // ABOUTME: A turn ending past CS_ROTATE_FORCE_CTX (default 80, off disables) runs /rotate itself, then counts down to the /clear (session colour, amber, crit); session.start writes a heartbeat for doctor.
 // ABOUTME: /queue adds a task to the session's walk-away queue through `cs -queue add`, at once even mid-turn; bare, it prints `cs -queue list`. /finish toasts its start and outcome and, while its gate runs, the band carries the elapsed time.
 // ABOUTME: The band carries a rail: one tick per prompt on the transcript's live branch (read after each turn), the one being read thick; a press or /cs next|prev|first|last|N scrolls the transcript to that prompt; bare /cs goes on to the cs panel.
