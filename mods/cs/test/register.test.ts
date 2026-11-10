@@ -1510,18 +1510,20 @@ test('a /wrap the answer runs that the engine refuses is said once', async () =>
 // A summary written any other way proves nothing.
 const WRAPPED = '/work/.cs/local/wrapped'
 const turnStart = (text: string) => hooks['turn.start']($, { text, turnId: `turn-${text.length}` }, async (e: any) => ({ turnId: e.turnId }))
+// A main-loop turn from its start to its end: the keys draw again once it is over.
+const turn = async (text: string) => { await turnStart(text); await turnComplete() }
 
 test('a finished wrap hides the wrap key until a turn starts from a prompt', async () => {
   percent = 40
-  await turnStart('please wrap up')
+  await turn('please wrap up')
   files[WRAPPED] = 'uuid-lead\n'
   expect(wrapButton(await keys())).toBeUndefined()
   expect(findButton(await keys()).props.action).toBe('strip:jump1')
 
-  await turnStart('')
+  await turn('')
   expect(wrapButton(await keys())).toBeUndefined()
 
-  await turnStart('next thing')
+  await turn('next thing')
   expect(files[WRAPPED]).toBe('')
   expect(wrapButton(await keys())).toBeDefined()
 })
@@ -1531,11 +1533,11 @@ test('a finished wrap hides the wrap key until a turn starts from a prompt', asy
 test('queued work, or a second wrap that fails, brings the key back', async () => {
   percent = 40
   files[WRAPPED] = 'uuid-lead\n'
-  await turnStart('and then fix the tests')
+  await turn('and then fix the tests')
   expect(wrapButton(await keys())).toBeDefined()
 
   files[WRAPPED] = 'uuid-lead\n'
-  await turnStart('/wrap')
+  await turn('/wrap')
   expect(wrapButton(await keys())).toBeDefined()
 })
 
@@ -3228,7 +3230,7 @@ test('the golden\'s session CS_STATUSLINE_CTX_WARN=50 moves the band from the 40
 
 test('a settings file\'s CS_ROTATE_BUTTON_CTX moves the band alone', async () => {
   answerSettings(porcelainWith('CS_ROTATE_BUTTON_CTX', '55', 'machine'))
-  await turnStart('go'); await settle()
+  await turn('go'); await settle()
   percent = 54
   expect(await keys()).toBe(HINT_DRAWN)
   percent = 55
@@ -4984,6 +4986,43 @@ test('a rotate or wrap key pressed once a turn runs does nothing but say so', as
   await rotate.props.onPress()
   await wrap.props.onPress()
   expect(ran).toEqual([{ command: 'rotate', args: '' }, { command: 'wrap', args: '' }])
+})
+
+test('a turn on the main loop runs from its start to its end, before any site draws it and while the band and the hint disagree', async () => {
+  percent = 40
+  const [rotate] = buttons(await keys())
+  await turnStart('go')
+  await rotate.props.onPress()
+  expect(toasts).toEqual([TOASTS.midTurn('/rotate')])
+  await footerHint(110, CYCLE, false)
+  await band()
+  await turnComplete({ agentId: 'agent-1' })
+  await rotate.props.onPress()
+  expect(toasts).toEqual([TOASTS.midTurn('/rotate'), TOASTS.midTurn('/rotate')])
+  await turnComplete()
+  await rotate.props.onPress()
+  expect(ran).toEqual([{ command: 'rotate', args: '' }])
+})
+
+// The band a render behind says idle while the hint says working, after a
+// load that heard no turn start: the turn stands at both, and the footer stops
+// asking to be drawn again.
+const disagree = async () => { for (let draws = 0; draws < 3; draws++) { await footerHint(110, CYCLE, true); await band(); await settleTimers() } }
+test('a mod loaded while a turn runs takes the turn from the site that draws it, and its end from the main loop', async () => {
+  percent = 40
+  await keys()
+  reload()
+  const [rotate] = buttons(await keys())
+  await disagree()
+  const settled = invalidated.length
+  await disagree()
+  expect(invalidated).toHaveLength(settled)
+  expect(buttons(await footerHint(110, CYCLE, true))).toEqual([])
+  await rotate.props.onPress()
+  expect(toasts).toEqual([TOASTS.midTurn('/rotate')])
+  await turnComplete()
+  await rotate.props.onPress()
+  expect(ran).toEqual([{ command: 'rotate', args: '' }])
 })
 
 const footerClock = () => timers.find(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS && !t.cancelled)

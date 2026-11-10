@@ -238,9 +238,16 @@ export const COMMANDS = {
 let left: number | undefined
 let ticker: { cancel: () => void } | undefined
 let bandIdle = false
-// Whether a turn was running when the band last drew: a queue started then
-// reaches its first stop without a prompt from the mod.
-let turnRunning = false
+// Whether a turn runs, as each source last said it: the main loop's turn
+// events, and the band's and the hint's renders, which also tell a mod loaded
+// mid-turn. A turn runs while any says so, so two sites a render apart never
+// trade the answer back and forth, and a turn's end on the main loop clears
+// all three. A queue started mid-turn reaches its first stop without a prompt
+// from the mod.
+type Working = { turn: boolean; band: boolean; hint: boolean }
+const IDLE: Working = { turn: false, band: false, hint: false }
+let working = IDLE
+const turnRunning = () => working.turn || working.band || working.hint
 // The handoff whose next step the count has toasted, by its text: one toast
 // per armed handoff, so a count restarted for the same handoff (a prompt
 // stopped it, the next turn's end started it again) says nothing, and the
@@ -436,7 +443,7 @@ export function register(on: On) {
   filterChatPressPending = undefined
   filterChatComplaint = undefined
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; turnRunning = false; stepToastedFor = undefined; adopted = undefined; clearSeen = false; clearing = false; birth = undefined; startPercent = undefined; registered = false
+  left = undefined; ticker = undefined; bandIdle = false; working = IDLE; stepToastedFor = undefined; adopted = undefined; clearSeen = false; clearing = false; birth = undefined; startPercent = undefined; registered = false
   finishWatch = undefined; finishTurnOver = false; finishShown = new Set(); finishGate = undefined; finishProblemShown = false
   lastRefusal = undefined
   filterChatVetRefused = false
@@ -528,6 +535,7 @@ export function register(on: On) {
   // whatever ended it, is where the press is over.
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
+      await changeFooter($, () => { working = IDLE })
       finishTurnOver = true
       await clearPressed($)
       await refreshRail($)
@@ -588,7 +596,10 @@ export function register(on: On) {
   // A main-loop turn rereads cs's settings, so one changed while idle counts
   // from the next prompt, the rotation its end may force included.
   on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) readSettingsLater($)
+    if (e.agentId === undefined) {
+      await changeFooter($, () => { working = { ...working, turn: true } })
+      readSettingsLater($)
+    }
     if (e.text !== '') await clearWrapped($)
     return next(e)
   })
@@ -622,7 +633,7 @@ export function register(on: On) {
       // the birth is settled here: a later /resume is not mistaken for it.
       await noteConversation($, await $.session.id())
       // A survey owns the band; a running turn cannot be rotated out of.
-      await noteScreen($, viewOf(e.viewport), e.props.isWorking)
+      await noteScreen($, viewOf(e.viewport), { band: e.props.isWorking })
       bandIdle = !e.props.hasSurvey && !e.props.isWorking
       // The /finish gate's word draws mid-turn, since the gate runs inside one,
       // whatever else the band has to say.
@@ -730,10 +741,9 @@ export function register(on: On) {
 
   // Where they have no room there, the keys stand in the notice's row in
   // place of its cycle hint: the engine keeps the notice and joins the two.
-  // This site hears of a turn the moment it starts, the band a render later.
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
     const drawn = await next(e)
-    await noteScreen($, { ...viewOf(e.viewport), hint: e.props.hint }, e.props.isWorking)
+    await noteScreen($, { ...viewOf(e.viewport), hint: e.props.hint }, { hint: e.props.isWorking })
     if (routeNow() !== 'inline') return drawn
     const { Box, Text, Button } = await $.ui.resolve(e)
     return drawFooterKeys(liveKeys(), { Box, Text, Button })
@@ -1224,7 +1234,7 @@ export function noticeCells(hint: string | undefined): number {
 // The keys that draw under the prompt now: the band's last, less the ones a
 // running turn has no use for when a footer site heard of the turn first.
 const IDLE_KEYS = new Set(['cs-rotate', 'cs-countdown', 'cs-wrap'])
-const liveKeys = () => (turnRunning ? footer.keys.filter(entry => !IDLE_KEYS.has(entry.key)) : footer.keys)
+const liveKeys = () => (turnRunning() ? footer.keys.filter(entry => !IDLE_KEYS.has(entry.key)) : footer.keys)
 
 // What routes the keys now, but for the status line's width.
 function routeFacts(keys: BandEntry[]): Omit<RouteFacts, 'statusWidth'> {
@@ -1354,8 +1364,8 @@ const viewOf = (viewport: { columns: number; isFullscreen?: boolean } | undefine
 
 // A site notes what its event says of the screen, and the hint's and the
 // band's whether a turn runs.
-const noteScreen = ($: EngineInterface, seen: Partial<Screen>, working = turnRunning) =>
-  changeFooter($, () => { screen = { ...screen, ...seen }; turnRunning = working })
+const noteScreen = ($: EngineInterface, seen: Partial<Screen>, said: Partial<Working> = {}) =>
+  changeFooter($, () => { screen = { ...screen, ...seen }; working = { ...working, ...said } })
 
 // One `-features --porcelain` record, as _feature_readiness prints it.
 export type FeatureRecord = { task: string; ahead: number; untracked: number; lock: string; state: FeatureState }
@@ -2322,7 +2332,7 @@ async function rotate($: EngineInterface) {
 // drawn before a turn started is still on screen for a moment once it runs,
 // and its chord is bound all along: that press runs nothing.
 async function pressRotate($: EngineInterface) {
-  if (turnRunning) return $.ui.toast(TOASTS.midTurn('/rotate'))
+  if (turnRunning()) return $.ui.toast(TOASTS.midTurn('/rotate'))
   const cwd = await $.session.cwd()
   if (!(await sessionVetted($, cwd))) return
   await $.fs.write(`${cwd}/${PRESSED}`, `${await $.session.id()}\n`)
@@ -2382,7 +2392,7 @@ async function readWrapped($: EngineInterface): Promise<string> {
 // passes before the narrative rotation, so a key that may have been meant for
 // the composer opens the engine's own dialog rather than acting on the press.
 async function askToWrap($: EngineInterface) {
-  if (turnRunning) return $.ui.toast(TOASTS.midTurn('/wrap'))
+  if (turnRunning()) return $.ui.toast(TOASTS.midTurn('/wrap'))
   let answer: string
   try {
     answer = await $.ui.ask(ASKS.wrap.question, { header: ASKS.wrap.header, options: ASKS.wrap.options })
@@ -2523,7 +2533,7 @@ async function offerToStart($: EngineInterface, bin: string, count: number) {
     $.ui.toast(TOASTS.queueStartExited(result.exitCode, tail))
     return
   }
-  if (turnRunning) return
+  if (turnRunning()) return
   try {
     await $.prompt.submit({ text: QUEUE_KICK })
   } catch (err) {
