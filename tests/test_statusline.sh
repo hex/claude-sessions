@@ -4833,16 +4833,11 @@ run_test test_every_glyph_the_bar_draws_is_one_the_width_counts
 # second to draw marks the record shared, which gives the cs mod no width, and
 # neither rewrites it while the other lives (the inode tells a rewrite); the
 # one left when the other exits records its width again. This suite's shell
-# and its parent stand in for the two; a pid already reaped for one that
-# exited.
-test_two_live_writers_share_the_width_record_without_trading_it() {
-    export CLAUDE_SESSION_NAME=twosess NO_COLOR=1
-    local dir="$CS_SESSIONS_ROOT/twosess/.cs/local" one="$$" two="$PPID" gone marked
+# and a child it starts stand in for the two; a pid already reaped for one
+# that exited.
+_two_writers_case() {  # dir one two gone
+    local dir="$1" one="$2" two="$3" gone="$4" marked
     local input='{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}'
-    mkdir -p "$dir"
-    printf 'claude_session_id: lead\n' > "$dir/state"
-    ( exit 0 ) & gone=$!
-    wait "$gone"
     CS_STATUSLINE_PARENT=$gone run_sl "$input" >/dev/null
     CS_STATUSLINE_PARENT=$one run_sl "$input" >/dev/null
     assert_eq "lead 18 $one" "$(cat "$dir/statusline-width")" "a writer that exited is replaced" || return 1
@@ -4857,6 +4852,20 @@ test_two_live_writers_share_the_width_record_without_trading_it() {
     printf 'lead - %s %s\n' "$gone" "$one" > "$dir/statusline-width"
     CS_STATUSLINE_PARENT=$one run_sl "$input" >/dev/null
     assert_eq "lead 18 $one" "$(cat "$dir/statusline-width")" "the writer left alone records its width again" || return 1
+}
+
+test_two_live_writers_share_the_width_record_without_trading_it() {
+    export CLAUDE_SESSION_NAME=twosess NO_COLOR=1
+    local dir="$CS_SESSIONS_ROOT/twosess/.cs/local" two gone rc=0
+    mkdir -p "$dir"
+    printf 'claude_session_id: lead\n' > "$dir/state"
+    ( exit 0 ) & gone=$!
+    wait "$gone"
+    sleep 60 & two=$!
+    _two_writers_case "$dir" "$$" "$two" "$gone" || rc=1
+    kill "$two" 2>/dev/null
+    wait "$two" 2>/dev/null
+    return "$rc"
 }
 
 run_test test_two_live_writers_share_the_width_record_without_trading_it
