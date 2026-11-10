@@ -11,6 +11,9 @@ All notable changes to cs are documented here. Release notes are also available 
 - The band's prompt bars are cs settings in their own `Prompt bars` group of `/cs`, and no longer rows of Claude Code's `/config`: `CS_BAND_PROMPTS` (off by default), `CS_BAND_PROMPT` (`latest` or `read`) and `CS_BAND_BARS` (10). `cs -config set` changes them too, and a change applies by your next prompt instead of reloading the mod. The `/config` values are not carried over, so prompt bars you turned on there are off until you turn them on in `/cs`.
 - `/write-as-me` drafts a long PR description or issue reply as two or three lines in your voice, then the full detail folded under a `Full description` summary that GitHub shows collapsed. The label never names a model. Commit messages and review comments stay unfolded.
 
+### Fixes
+- The `cs` mod's count to `/clear` no longer depends on its band drawing. When another mod took the band above the prompt, the count ended without a word and no `/clear` ran, or the `/clear` ran after a count nobody saw. The `/clear` now runs on time, the clear key and its count leave the row under the prompt while nothing redraws them, and a toast then says `another mod has the band above the prompt, so the count to /clear ran unseen; /clear ran on time`. A count that ends without a `/clear` toasts why: a turn is running, a survey is waiting above the prompt, a question dialog is open, the handoff is no longer armed, or the conversation is no longer the session's lead. A question dialog open at zero now stops the `/clear`, which ran under one before. The mod still does not see a survey that opens while another mod has the band.
+
 ## 2026.11.5
 
 ### Added

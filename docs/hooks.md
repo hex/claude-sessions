@@ -878,10 +878,14 @@ keys read `/clear now in 20s`,
 redrawn once a second. The count wears the session's own colour while there
 is time, the status bar's amber from ten seconds and its crit red under five
 (the bar's inks, pinned against `bin/cs-statusline` by `tests/test_mod_rotate.sh`).
-At zero the mod runs the `/clear` itself, only if
-the band is idle at that moment (no turn running, no survey), the handoff still
-armed and this still the lead; otherwise the count stops and the button waits
-for you. Ctrl+X 1 during the count clears at once. A press while the mod's own `/clear` is
+At zero the mod runs the `/clear` itself if the handoff is still armed, this
+is still the lead, cs still trusts the session's control files, and nothing
+waits on you: no turn running, no question dialog open, no survey above the
+prompt. Otherwise the count stops, the button waits for you, and a toast says
+why: `/clear did not run: a turn is running`, `a question is waiting for an
+answer`, `a survey is waiting above the prompt`, `the handoff is no longer
+armed` or `this conversation is no longer the session's lead`; cs's refusal
+of the session reads `no rotation in this session: <reason>`. Ctrl+X 1 during the count clears at once. A press while the mod's own `/clear` is
 still running does nothing, so it cannot clear the conversation that `/clear` opened. Sending a prompt, from
 the composer or anywhere else a prompt enters the session, stops the count;
 the next turn's end starts it again from 20. A `/clear` from anywhere else
@@ -891,6 +895,29 @@ timer, because a timer started before a `/clear` keeps firing after one
 (measured). At zero the mod re-reads the handoff with the SessionStart hook's
 own rule (frontmatter opened and closed by `---`, `status: unconsumed`
 inside), so a truncated handoff is never cleared into.
+
+Another mod can take the band above the prompt. A mod loaded before this one
+that answers the band's render without passing it on keeps this mod's band
+from drawing, and this mod gets no notice of it. It reads a taken band from its
+own band hook not having run since the count's last tick: each tick asks for
+a redraw, and the engine raises the band within 20 ms of one (measured on
+2.1.322). The count then runs unseen. The mod takes the clear key and its
+count from the row under the prompt, where nothing would redraw them, runs
+the `/clear` on time, and then toasts `another mod has the band above the
+prompt, so the count to /clear ran unseen; /clear ran on time`. The toast
+follows the `/clear` because one shown before it leaves the screen with the
+conversation. The mod drops what the taken band last said of a turn; the
+main loop's turn events and the hint under the prompt say whether one runs.
+
+Two limits come with a taken band. Only the band's render says a survey is
+up, so the mod does not see a survey the engine opens while another mod has
+the band, and the `/clear` runs under it, unless that mod passes the band on
+under a survey. And a survey the band drew before another mod took it keeps
+the `/clear` from running even if you have dismissed it since: `/clear did
+not run: a survey was waiting above the prompt when another mod took the
+band`. The mod sees a question dialog either way, through the dialog's own
+render: the dialog takes the prompt's place, the engine does not raise the
+band while one is open, and it does not refuse a `/clear` run under one.
 
 When the count starts, the mod toasts the handoff's next step once:
 `cs: next step: <line>`, the first non-empty line of the handoff's `Next Step`
