@@ -197,7 +197,7 @@ export const TOASTS = {
   countSurvey: '/clear did not run: a survey is waiting above the prompt',
   countSurveyUnseen: '/clear did not run: a survey was waiting above the prompt when the band last drew',
   clearUnseen: 'the count to /clear reached zero unseen: the band above the prompt was not drawn; /clear has run',
-  countHidden: '/clear did not run: neither the band above the prompt nor the hint under it was drawn, as while a picker is open; the clear key comes back when the band draws again',
+  countHidden: '/clear did not run: neither the band nor the hint drew, as under a picker; the clear key returns with the band',
   queueNoBin: 'the launch did not say where cs is (CS_BIN); run cs -queue start from a shell in this session',
   queueModeUnknown: (how: string) => `'${how}' is not a way to run the queue; it is not started`,
   notCompacted: (reason: string) => `the conversation was not compacted (${reason}); the queue is not started`,

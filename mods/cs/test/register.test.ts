@@ -1212,7 +1212,7 @@ test('the hint under the prompt saying a turn runs keeps the zero from clearing 
 // way to take it back (measured on 2.1.322). A zero with neither raised since
 // the tick before clears nothing: the mod knows only that nothing of its own
 // drew, so the toast names a picker as one cause of that.
-const COUNT_HIDDEN = '/clear did not run: neither the band above the prompt nor the hint under it was drawn, as while a picker is open; the clear key comes back when the band draws again'
+const COUNT_HIDDEN = '/clear did not run: neither the band nor the hint drew, as under a picker; the clear key returns with the band'
 
 const countHiddenAtZero = async () => {
   arm(); percent = 80
