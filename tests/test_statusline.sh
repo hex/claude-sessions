@@ -4681,6 +4681,69 @@ test_teammate_heartbeat_does_not_reset_the_lead_cadence() {
 
 run_test test_teammate_heartbeat_does_not_reset_the_lead_cadence
 
+# The render records the width in cells of the line it printed, beside the id
+# of the conversation it drew for: the cs mod draws its keys at the right of
+# the row under the bar only where the bar leaves them room. The escapes take
+# no cell, so the quiet line counts as its text alone.
+test_render_records_the_width_of_the_line_it_printed() {
+    export CLAUDE_SESSION_NAME=widthsess
+    local dir="$CS_SESSIONS_ROOT/widthsess/.cs/local" out
+    mkdir -p "$dir"
+    printf 'claude_session_id: lead\n' > "$dir/state"
+    local input='{"session_id":"lead","model":{"id":"claude-opus-4-8","display_name":"Opus"},"effort":{"level":"high"},"context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}'
+    out=$(NO_COLOR=1 run_sl "$input")
+    assert_eq "widthsess · ✦ Opus high > ○ ctx 8%" "$out" "the plain line" || return 1
+    assert_eq "lead 34" "$(cat "$dir/statusline-width" 2>/dev/null)" "the plain line's 34 cells are recorded" || return 1
+    out=$(COLORTERM=truecolor run_sl "$input")
+    assert_output_contains_f "$out" "${ESC_}[" "the quiet line carries escapes" || return 1
+    assert_eq "lead 42" "$(cat "$dir/statusline-width" 2>/dev/null)" "the quiet line's 42 cells are recorded, its escapes not counted" || return 1
+    assert_not_exists "$dir/statusline-width.tmp" "the record is moved into place" || return 1
+}
+
+run_test test_render_records_the_width_of_the_line_it_printed
+
+# A line as wide as the last is not written again: the write is a fork, and
+# the bar repaints on every event. The file's inode tells a rewrite, since the
+# record is moved into place; a wider line moves it, so the check is sensitive.
+test_render_leaves_an_unchanged_width_record_alone() {
+    export CLAUDE_SESSION_NAME=samesess NO_COLOR=1
+    local dir="$CS_SESSIONS_ROOT/samesess/.cs/local" first second third
+    mkdir -p "$dir"
+    printf 'claude_session_id: lead\n' > "$dir/state"
+    local input='{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}'
+    run_sl "$input" >/dev/null
+    first=$(ls -i "$dir/statusline-width" | awk '{print $1}')
+    run_sl "$input" >/dev/null
+    second=$(ls -i "$dir/statusline-width" | awk '{print $1}')
+    assert_eq "$first" "$second" "the same width is not written again" || return 1
+    run_sl "${input/8/18}" >/dev/null
+    third=$(ls -i "$dir/statusline-width" | awk '{print $1}')
+    assert_eq "lead 20" "$(cat "$dir/statusline-width")" "a wider line is recorded" || return 1
+    [ "$third" != "$second" ] || { echo "  FAIL: a changed width should replace the record"; return 1; }
+}
+
+run_test test_render_leaves_an_unchanged_width_record_alone
+
+# Only the launched conversation records its line: a tmux teammate shares the
+# directory and draws a bar of its own, and the lead's mod would place the
+# lead's keys by the teammate's width. A session whose state names no
+# conversation yet gets no record either, since the mod trusts none.
+test_teammate_render_leaves_the_lead_width_record() {
+    export CLAUDE_SESSION_NAME=matesess NO_COLOR=1
+    local dir="$CS_SESSIONS_ROOT/matesess/.cs/local"
+    mkdir -p "$dir"
+    printf 'claude_session_id: "lead"\n' > "$dir/state"
+    run_sl '{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}' >/dev/null
+    run_sl '{"session_id":"mate","model":{"display_name":"Sonnet"},"context_window":{"used_percentage":55},"workspace":{"current_dir":"/none"}}' >/dev/null
+    assert_eq "lead 19" "$(cat "$dir/statusline-width")" "the lead's record stands" || return 1
+    : > "$dir/state"
+    rm "$dir/statusline-width"
+    run_sl '{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}' >/dev/null
+    assert_not_exists "$dir/statusline-width" "a state naming no conversation records nothing" || return 1
+}
+
+run_test test_teammate_render_leaves_the_lead_width_record
+
 # While git tracks the session's control files the hooks mark the session under
 # ~/.cache/cs/tracked (hooks/cs-resolve.sh), and the render adds, changes and
 # removes nothing in .cs/local: neither the context stamp nor the limits stamp.
@@ -4703,6 +4766,7 @@ test_render_writes_nothing_into_a_tracked_control_directory() {
     CS_STATUSLINE_NOW=1000 run_sl "$input" >/dev/null
     assert_eq "30" "$(cat "$sess/.cs/local/context-pct" 2>/dev/null)" "unmarked, the render stamps the context" || return 1
     assert_file_exists "$sess/.cs/local/limits" "and the limits" || return 1
+    assert_eq "lead 42" "$(cat "$sess/.cs/local/statusline-width" 2>/dev/null)" "and the width of its 42-cell line" || return 1
 }
 
 run_test test_render_writes_nothing_into_a_tracked_control_directory
