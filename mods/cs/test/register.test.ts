@@ -828,6 +828,10 @@ const turnComplete = (e: Partial<{ reason: string; agentId: string }> = {}) =>
   hooks['turn.complete']($, { reason: 'answer', answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', ...e }, async () => ({ text: 'ok' }))
 // The pending `after` timers, run the way the clock would run them.
 const fireAfter = async () => { for (const t of timers.filter(t => t.kind === 'after' && !t.cancelled)) { t.cancelled = true; await t.fn() } }
+// Every one-shot timer run, and those they start: after a launch's first
+// draw the mod has asked which Claude Code it runs in, from a timer, and read
+// the width its status line recorded.
+const settleTimers = async () => { for (let rounds = 0; rounds < 6 && timers.some(t => t.kind === 'after' && !t.cancelled); rounds++) await fireAfter() }
 
 test('with CS_ROTATE_FORCE_CTX set, a turn ending past it schedules /rotate from a timer, not from the hook', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
@@ -1586,6 +1590,8 @@ test('no button is ever nested in a Text, armed or not, above the prompt or unde
     expect([above, right, inline].map(tree => buttons(tree).length)).toEqual([1, 2, 2])
     return [above, right, inline].map(tree => buttonsUnderText(tree))
   }
+  await band()
+  await settleTimers()
   expect(await sites()).toEqual([0, 0, 0])
   arm()
   const armed = [await band(), await footerMode(110), await footerHint(64)]
@@ -4589,23 +4595,33 @@ test('the keys\' width is what the row draws: a middle dot between keys, a space
 
 // The record is trusted for the pid it names, so a mod that cannot learn its
 // own Claude Code's trusts none; the pid is asked for once.
-test('a mod that cannot learn its Claude Code\'s pid trusts no record, and asks once', async () => {
+test('the mod asks which Claude Code it runs in from a timer, three times at most, and trusts no record until it knows', async () => {
   files[WIDTH] = 'uuid-lead 57 4242\n'
   percent = 40
-  const asked = () => pidRuns
   let pidRuns = 0
   const run = $.process.run
   $.process.run = async (argv: string[], init: any) => { if (argv[0] === '/bin/sh') pidRuns++; return run(argv, init) }
   try {
-    claudePid = new Error('spawn EPERM')
-    expect(sitesWithKeys(await pass())).toEqual(['hint'])
-    expect(sitesWithKeys(await pass())).toEqual(['hint'])
-    expect(asked()).toBe(1)
+    // A render starts no process: the engine aborts one whose render it supersedes.
+    await band()
+    expect(pidRuns).toBe(0)
+    expect(await footerMode()).toBe(MODES_DRAWN)
+    await settleTimers()
+    expect(pidRuns).toBe(1)
+    expect(sitesWithKeys(await pass())).toEqual(['mode'])
+    expect(pidRuns).toBe(1)
     reload()
+    claudePid = new Error('spawn EPERM')
+    for (let draws = 0; draws < 5; draws++) expect(sitesWithKeys(await pass())).toEqual(['hint'])
+    expect(pidRuns).toBe(4)
+    // An answer on a later ask is taken.
+    reload()
+    await band()
+    await fireAfter()
+    expect(pidRuns).toBe(5)
     claudePid = '4242'
     expect(sitesWithKeys(await pass())).toEqual(['mode'])
-    expect(sitesWithKeys(await pass())).toEqual(['mode'])
-    expect(asked()).toBe(2)
+    expect(pidRuns).toBe(6)
     expect(runs).toEqual([])
   } finally {
     $.process.run = run
@@ -4617,6 +4633,7 @@ test('with room the keys draw at the right end of the notice\'s row from the mod
   files[WIDTH] = 'uuid-lead 82 4242\n'
   percent = 40
   expect(await band()).toBe(DRAWN)
+  await settleTimers()
   const tree = await footerMode(87)
   // The engine's own labels stay; the keys hang one row down from a box of no width, flush right.
   expect(tree.children[0]).toBe(MODES_DRAWN)
@@ -4681,6 +4698,8 @@ test('keys once drawn leave both sites when a survey takes the band, a turn star
     await band(props)
     return [await footerMode(110), await footerHint(86)].map(tree => buttons(tree).length)
   }
+  await band()
+  await settleTimers()
   expect(await drawnAtBoth({})).toEqual([2, 2])
   expect(await drawnAtBoth({ hasSurvey: true })).toEqual([0, 0])
   expect(await footerMode(110)).toBe(MODES_DRAWN)
@@ -4711,6 +4730,7 @@ test('a click on a key under the prompt does what its key on the band did', asyn
   files[WIDTH] = 'uuid-lead 82 4242\n'
   percent = 40
   await band()
+  await settleTimers()
   await buttons(await footerMode(110)).find((b: any) => b.props.key === 'cs-wrap').props.onPress()
   expect(asks.map(ask => ask.question)).toEqual([WRAP_QUESTION])
   expect(ran).toEqual([{ command: 'wrap', args: '' }])
@@ -4723,6 +4743,7 @@ test('filter chat on adds its mode label to the status line\'s row, and the keys
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
   files[WIDTH] = 'uuid-lead 60 4242\n'
   await band()
+  await settleTimers()
   // 60 cells, the label's 36 and the margin's 5: the row holds them from 101 columns.
   expect(buttons(await footerMode(101)).map((b: any) => b.props.label)).toEqual(['filter chat ●'])
   expect(await footerHint(101)).toBe(HINT_DRAWN)
@@ -4756,6 +4777,7 @@ test('a tree another mod draws in the mode labels\' place sends the keys inline,
   files[WIDTH] = 'uuid-lead 60 4242\n'
   percent = 40
   await band()
+  await settleTimers()
   expect(buttons(await footerMode(110))).toHaveLength(2)
   const theirs = { type: 'Box', props: { flexDirection: 'row' }, children: [MODES_DRAWN, { type: 'Text', props: {}, children: ['2 Codex sessions'] }] }
   expect(await footerMode(110, [], theirs)).toBe(theirs)
@@ -4769,8 +4791,9 @@ test('a footer that changed is drawn again once, and one that did not is left al
   percent = 40
   await band()
   await band()
-  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toHaveLength(1)
-  await fireAfter()
+  // One redraw for the keys, beside the timer that asks which Claude Code this is.
+  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toHaveLength(2)
+  await settleTimers()
   expect(invalidated).toEqual(['ui.render'])
   await band()
   expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toEqual([])
@@ -4891,9 +4914,11 @@ test('at the notice\'s right the keys clear a notice as wide as its hint makes i
   percent = 40
   // Before the hint's site has drawn, the widest notice at rest: its 48 cells, the 13 of `rotate · wrap` and 3 between.
   await band({}, 'terminal', viewOf(64))
+  await settleTimers()
   expect(buttons(await footerMode(64))).toHaveLength(2)
   reload()
   await band({}, 'terminal', viewOf(63))
+  await settleTimers()
   expect(await footerMode(63)).toBe(MODES_DRAWN)
   // The cycle hint, bare or after the widest label, is that same notice.
   for (const hint of [CYCLE, 'bypass permissions on (shift+tab to cycle)']) {
@@ -4934,6 +4959,7 @@ test('a turn the hint\'s site reports takes the rotate and wrap keys from under 
   enableFilterChat()
   percent = 40
   await band()
+  await settleTimers()
   expect(buttons(await footerMode()).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap', 'cs-filter-chat'])
   expect(await footerHint(110, CYCLE, true)).toBe(HINT_DRAWN)
   expect(buttons(await footerMode()).map((b: any) => b.props.key)).toEqual(['cs-filter-chat'])

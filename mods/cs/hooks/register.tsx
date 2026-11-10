@@ -425,10 +425,12 @@ let screen = NO_SCREEN
 // keys, and whether a redraw for a changed footer is already scheduled.
 let footerWatch: { cancel: () => void } | undefined
 let footerRedraw = false
-let ownPid: Promise<string | undefined> | undefined
+let ownPid: string | undefined
+let pidAsks = 0
+let pidAsking = false
 
 export function register(on: On) {
-  footer = NO_FOOTER; screen = NO_SCREEN; footerWatch = undefined; footerRedraw = false; ownPid = undefined
+  footer = NO_FOOTER; screen = NO_SCREEN; footerWatch = undefined; footerRedraw = false; ownPid = undefined; pidAsks = 0; pidAsking = false
   bandOptions = undefined
   bandProblemSaid = undefined
   filterChatPressPending = undefined
@@ -1264,20 +1266,37 @@ export function drawFooterKeys(keys: BandEntry[], el: BandElements): RenderEleme
 
 // This Claude Code's pid, as its status line knows it: the status line is
 // Claude Code's child, and so is a process the mod runs (measured on 2.1.322:
-// both name one parent). Asked once a load; undefined when the answer is no
-// pid, and then no record is this Claude Code's.
-function claudePid($: EngineInterface): Promise<string | undefined> {
-  ownPid ??= $.process.run(['/bin/sh', '-c', 'echo $PPID']).then(ran => (/^\d+$/.test(ran.stdout.trim()) ? ran.stdout.trim() : undefined), () => undefined)
-  return ownPid
+// both name one parent). The engine aborts a process started in a render it
+// then supersedes (measured: the first ask at launch), so the pid is asked
+// for from a timer, PID_ASKS times a load at most, and the width is read
+// again once it is known.
+const PID_ASKS = 3
+function askClaudePid($: EngineInterface) {
+  if (ownPid !== undefined || pidAsking || pidAsks >= PID_ASKS) return
+  pidAsking = true
+  pidAsks++
+  $.clock.after(0, async () => {
+    try {
+      const said = (await $.process.run(['/bin/sh', '-c', 'echo $PPID'])).stdout.trim()
+      if (/^\d+$/.test(said)) ownPid = said
+    } catch {
+      // no answer: the next read of the width asks again
+    }
+    pidAsking = false
+    if (ownPid !== undefined) await followStatusWidth($)
+  })
 }
 
 // What this Claude Code's status line last recorded for this conversation;
-// undefined when it recorded nothing the mod can read.
+// undefined when it recorded nothing the mod can read, and until the mod
+// knows which Claude Code it runs in.
 async function readStatusWidth($: EngineInterface): Promise<number | undefined> {
-  const pid = await claudePid($)
-  if (pid === undefined) return undefined
+  if (ownPid === undefined) {
+    askClaudePid($)
+    return undefined
+  }
   try {
-    return parseStatusWidth(await $.fs.read(`${await $.session.cwd()}/${STATUS_WIDTH}`), await $.session.id(), pid)
+    return parseStatusWidth(await $.fs.read(`${await $.session.cwd()}/${STATUS_WIDTH}`), await $.session.id(), ownPid)
   } catch {
     return undefined // no record: this status line is not cs's, or has not drawn yet
   }
