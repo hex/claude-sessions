@@ -1509,7 +1509,7 @@ CS_KNOWN_SHA256=(
 CS_PAYLOAD_SHA256=(
     "e1a3eedbc2a384bb5cdc3cc187e64a72b414fd61f9be82b7eb29c5b74972af01  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
-    "a565cbf9091ba97fc94b50fbf0b1ba0b0bc8dee6a19a8118bd3d8da7075ddb01  bin/cs-statusline"
+    "d820b88ba54b59d5838e2381c98e892c3ac392986943bf571e55a54f714660fd  bin/cs-statusline"
     "324691a50519294a125520ee96e279bb02a08b1a4c2e4804cf9347c617521044  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
     "de0e29ac0977281b7b93ac1fe33d62a61fd6740e45f98c1ffaea7890be428f9a  hooks/cs-shared.sh"
@@ -1543,7 +1543,7 @@ CS_PAYLOAD_SHA256=(
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
     "144391d7d2df6a89742528729ee8da1e51063b3783023a656571bec0f2235458  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
-    "4b3e08dae574aec85a278d7adc7f551d152c72f5acc56921e69e9b2b8e49a113  mods/cs/hooks/register.tsx"
+    "798515f439490b3074d7371a73b1e3c59d29e3371d83414b73a439c6960094e1  mods/cs/hooks/register.tsx"
     "4c4955c1641b10394c5126ca1794419f2984a9a49e05658b21f96611bd2836d9  mods/cs/tips.json"
     "2f8d4b45beddd0b27b050f1c2eb08ebb25552b4dea5f33b9398318a2ef636985  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"
