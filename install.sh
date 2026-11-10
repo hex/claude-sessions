@@ -1507,13 +1507,13 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "e1a3eedbc2a384bb5cdc3cc187e64a72b414fd61f9be82b7eb29c5b74972af01  bin/cs"
+    "77afa63573e0f70bdf325b64749e23701a34e63415d604821431ebcc0cd1e257  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
-    "e0ce04413ef5187dbdc4fe764e98e136357f7e5b9718b7a3cfce008efab3b044  bin/cs-statusline"
+    "4cfed2e36463e06c222bf9ed3573a0d66c4ecff25000b5c9aa28a4da3bbc1e20  bin/cs-statusline"
     "324691a50519294a125520ee96e279bb02a08b1a4c2e4804cf9347c617521044  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
-    "de0e29ac0977281b7b93ac1fe33d62a61fd6740e45f98c1ffaea7890be428f9a  hooks/cs-shared.sh"
-    "257eda9242ed0fdf4c7bb816e013964eebcd784dd512e8af2c614389dc979f3c  hooks/cs-config.sh"
+    "d11733860d6b7531cdc522fdf20e163c4821f9b5299c3eb1aab75e7ae149d0f2  hooks/cs-shared.sh"
+    "b7f47c3499f8a4288471c2f53ccbf2b8b2490c6a658f45b668236e4154a43342  hooks/cs-config.sh"
     "50d63ce0995e68fddd8503700c15f9585d11938c9cd3872a883146de7707c765  hooks/cs-iterm-tab.py"
     "21988bf58bb6fea15c6435445f4abc3a38f4c4a9a7db78c4ff4797650709ba3f  hooks/memory-index-guard.sh"
     "0202455687b8c8a584cfc1ecf0439de03e8f70fcb0062e479484fdfeb4b83147  hooks/prompt-rewriter.sh"
@@ -1534,7 +1534,7 @@ CS_PAYLOAD_SHA256=(
     "054454213cef99daeec0a56bc2b39496b7044e46795b0fca29be59101941e18a  commands/wrap.md"
     "3449835309c77b8b3cb7f1023401591e38cad230ae124161f1cde2b7bbe6e798  skills/store-secret/SKILL.md"
     "eaf2ade4ce76f74b8d6ab979f536007606e77308a0c33dfedf28d31befd1eaec  skills/prose-hygiene/SKILL.md"
-    "66e5fce9467734112ef247b073bbaca996115c4232bff5e108e982633bac9357  skills/rotate/SKILL.md"
+    "eb10294a1ea23043b20460606c9b378bfbd657180da55d9e446b29cf116df0dc  skills/rotate/SKILL.md"
     "0d88656291eb6078b08187204807c72bd926b93c360041767cdbc26e64567353  skills/finish/SKILL.md"
     "938985c6dbc9166170d1e0d7e632cd3c4a4089d5cdd5b2cf5f0702600f29110f  skills/feature/SKILL.md"
     "470bbdd41fe312195f002bd68ef833b299c0bc2eae8ccb9f6891bfaac07c58c9  skills/write-as-me/SKILL.md"

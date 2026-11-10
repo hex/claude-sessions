@@ -520,7 +520,9 @@ one key to conversation rotation. Once the context window reaches 40% (the
 status bar's warn band, where the Stop hook gives its headroom notice), the row
 under the prompt that carries the permission notice
 (`⏵⏵ auto mode on (shift+tab to cycle)`) draws `rotate` at its right end,
-pressed by Ctrl+X 1.
+pressed by Ctrl+X 1, where that row has room; otherwise it stands in the
+notice's text or on the band above the prompt, as the list of the keys'
+places says.
 `CS_ROTATE_BUTTON_CTX=<percent>`, kept with `cs -config set` or exported in the
 shell that launches cs, moves it; unset or not a number, the key follows the
 bar's own warn band (`CS_STATUSLINE_CTX_WARN`, 40 by default), read the same
@@ -553,13 +555,16 @@ three read one route, so the keys draw in exactly one of them:
   columns for all three).
 - Otherwise on the band above the prompt, at its left, as before the keys had
   a place under it: `ctrl+x 1 rotate   2 wrap · filter chat ○`. That is
-  where they draw on a terminal too narrow for the two places above, while
-  the hint is anything but the cycle hint (a pill such as `1 shell`, or
-  `? for shortcuts` outside the permission modes), and on a surface that
-  has not reported its width. An armed handoff's `/clear now` and its count are
-  on the band then, so the count never runs unseen. There the keys take the
-  band's line, which a collapsed band (Ctrl+X Ctrl+A) hides with the rest of
-  it.
+  where they draw on a terminal too narrow for the two places above; when
+  the notice's right has no room for them and the hint is anything but the
+  cycle hint (a pill such as `1 shell`, or `? for shortcuts` outside the
+  permission modes); and on a surface that has not reported its width. An
+  armed handoff's `/clear now` and its count are on the band then. There
+  the keys take the band's line, as wide as the footer: the count holds its
+  place down to 23 columns, and a narrower band drops it before
+  `/clear now` loses its word. A collapsed band (Ctrl+X Ctrl+A) hides the
+  keys and the count with the rest of it. In those two cases the count runs
+  unseen, and the `/clear` at its zero still runs.
 
 A turn takes `rotate`, `/clear now` and `wrap` away and leaves `filter chat`.
 The mod hears of a turn as it starts, before any of the three places draws
@@ -577,8 +582,13 @@ width. The mod reads it when the band draws, and again every 2 seconds for
 as long as the width could move the keys: not on the main screen, nor while
 the row is too narrow for the notice and the keys whatever the status line
 does. The record names the Claude Code whose status line wrote it, and the
-mod takes a width only from its own. The keys take the notice's text, or the
-band, whenever there is no such width:
+mod takes a width only from its own. To know its own, the mod runs one
+process a load, `/bin/sh -c 'echo $PPID'`, whose parent is that Claude Code.
+It runs it from a timer once a draw first needs the width, since Claude Code
+aborts a process started inside a render it then replaces. With no answer the mod
+asks again at its next read of the width, three times a load at most, and
+then stops reading the width. The keys take the notice's text, or the band,
+whenever there is no such width:
 
 - no record for this conversation: a status line that was never cs's in it,
   one turned off (`CS_STATUSLINE_DISABLE=1` removes the record), a session
@@ -743,7 +753,7 @@ to them in `keybindings.json` (see
 [configuration.md](configuration.md#rotate-and-wrap-keys)). A chord that
 file's `Global` block binds to an action presses its Button under the prompt
 as on the band, and reaches the mod while a turn runs too (measured on
-2.1.322), when the rotate and wrap presses say so and run nothing. The mod
+2.1.322), when the rotate, `/clear now` and wrap presses say so and run nothing. The mod
 reads the file to spell the chords beside the keys where they draw on the
 band; the Buttons still answer a click. The band's focus (Ctrl+X Tab) does
 not reach under the prompt: it lands on the queue's start press, a features

@@ -283,7 +283,8 @@ export CS_ROTATE_NUDGE_CTX="60"
 export CS_STOP_VERDICT_WAIT="7"   # this is the default
 
 # Context percentage at which the cs mod draws its rotate key (Ctrl+X 1)
-# under the prompt (default: the status line's warn band, 40).
+# under the prompt, or on the band above it where that row has no room
+# (default: the status line's warn band, 40).
 # The mod reads it from the launched process's environment.
 export CS_ROTATE_BUTTON_CTX="40"
 
@@ -348,7 +349,7 @@ export CS_NO_TASK_TOOLS="1"
 
 # Launch without CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, even when the shell
 # carries it. A cs launch exports it so the cs mod the installer deployed
-# (the Ctrl+X 1 rotate key under the prompt, past 40% context by default) loads; the flag
+# (the Ctrl+X 1 rotate key, past 40% context by default) loads; the flag
 # also loads any other function-hooks plugin on the machine. Without this knob
 # cs keeps a value already in the shell (0 keeps function hooks off).
 export CS_NO_FUNCTION_HOOKS="1"
@@ -531,7 +532,7 @@ stays with its session.
 | `CS_TERM_BG_RGB` | r;g;b, each 0 to 255 | detected | at the next repaint |
 | `CS_NO_ITERM2` | `1` (on) or `0` (off) | off | the tab title, the bell bounce and the status line's iTerm reads: now; the launch's iTerm tmux path: at the next launch |
 | `CS_NERD_FONTS` | `1` (on) or `0` (off) | off | at the next cs command |
-| `CS_FILTER_CHAT` | `1` (on) or `0` (off) | off | `/filter-chat` and the key under the prompt: now. Here or in a shell: the next launch |
+| `CS_FILTER_CHAT` | `1` (on) or `0` (off) | off | `/filter-chat` and its key: now. Here or in a shell: the next launch |
 | `CS_NO_TASK_TOOLS` | `1` (on) or `0` (off) | off | at the next launch |
 | `CS_NO_UPDATE_CHECK` | `1` (on) or `0` (off) | off | at the next launch |
 | `CS_NO_FUNCTION_HOOKS` | `1` (on) or `0` (off) | off | at the next launch; on, no mod loads, the cs panel included |
@@ -553,8 +554,8 @@ The two command keys sit in the `Chat` context, where Claude Code wants a
 two key chords in `Global`, where Claude Code takes a chord for a mod's Button.
 
 Ctrl+X then R submits `/rotate`, and Ctrl+X then W submits `/wrap`, keys or no
-keys. Ctrl+X then 1 or 2 presses the `cs` mod's keys under the
-prompt: 1 its rotate key, or its `/clear` after arming a handoff, and 2 its
+keys. Ctrl+X then 1 or 2 presses the `cs` mod's keys, under the prompt
+or on the band above it: 1 its rotate key, or its `/clear` after arming a handoff, and 2 its
 wrap key. The keys have no hotkey of their own, so a digit you type to answer a
 question never presses one; without these two chords they answer only a click,
 or Ctrl+X Tab where they draw on the band above the prompt.
@@ -706,7 +707,7 @@ for the syntax and bundled skill.
 
 Filter chat is off by default. While it is on, the chat shows what you type and
 what Claude answers, and nothing of the work between them. `/filter-chat`, or
-the `filter chat` key under the prompt, switches it for this session: each runs
+the cs mod's `filter chat` key, switches it for this session: each runs
 `cs <session> -config set CS_FILTER_CHAT`. See [the filter chat mod](hooks.md#cs-filter-chat-not-a-hook-script--a-claude-code-mod).
 
 ## Environment variables cs sets for you
