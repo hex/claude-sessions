@@ -588,6 +588,9 @@ band, whenever there is no such width:
   `cs-statusline` cannot tell how many cells that takes and records no width;
 - the conversation open in a second terminal: two status lines of different
   widths share the file, so it carries no width while both run;
+- a status-line wrapper that runs `cs-statusline` as its child without
+  setting `CS_STATUSLINE_PARENT`: the record names the wrapper, never this
+  Claude Code (see [statusline.md](statusline.md#data-sources-and-performance));
 - no room beside the status line: `CS_STATUSLINE_LAYOUT=band` fills its row
   to the terminal's edge, unless `CS_STATUSLINE_COLS` holds the band at least
   5 cells narrower than the terminal.
