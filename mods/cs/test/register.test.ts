@@ -4,12 +4,13 @@ import { test, expect, beforeEach } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { labels as filterChatLabels } from '../../cs-filter-chat/hooks/words.ts'
 
 // The plugin realm provides `h` and `Fragment` as globals; the test does the same.
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, buildBandEntries, drawBand, fitBand, type BandView, parsePrompts, RAIL_TEXT_CHARS, DEFAULT_PERCENT, GRACE_SECONDS, NEXT_STEP_CHARS, WRAP_QUESTION, WRAP_YES, QUEUE_START, QUEUE_COMPACT, QUEUE_KICK, QUEUE_MODE_QUESTION, QUEUE_HERE, QUEUE_SUBAGENTS, QUEUE_WORKFLOWS, nextStepLine, isUnconsumed, TOASTS, LOGS, REPLIES, finishToast, parseFeatures, featuresWordOf } from '../hooks/register.tsx'
+import { register, buildBandEntries, drawBand, fitBand, entriesAt, drawFooterKeys, keysRoute, isCycleHint, noticeCells, parseStatusWidth, modesWidth, keysWidth, STATUS_WIDTH, FOOTER_POLL_MS, FILTER_CHAT_MODE, type BandView, parsePrompts, RAIL_TEXT_CHARS, DEFAULT_PERCENT, GRACE_SECONDS, NEXT_STEP_CHARS, WRAP_QUESTION, WRAP_YES, QUEUE_START, QUEUE_COMPACT, QUEUE_KICK, QUEUE_MODE_QUESTION, QUEUE_HERE, QUEUE_SUBAGENTS, QUEUE_WORKFLOWS, nextStepLine, isUnconsumed, TOASTS, LOGS, REPLIES, finishToast, parseFeatures, featuresWordOf } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -70,6 +71,8 @@ let mtimes: Record<string, number>
 // The clock `$.clock.now` reads, and the pids `kill -0` finds alive.
 let nowMs: number
 let livePids: Set<string>
+// The pid a process the mod runs reports as its parent: this Claude Code's.
+let claudePid: string | Error
 const timer = (kind: 'after' | 'every') => (ms: number, fn: () => void) => {
   const t = { ms, fn, kind, cancelled: false }
   timers.push(t)
@@ -99,6 +102,10 @@ const $ = {
   process: {
     run: async (argv: string[], init: any) => {
       if (argv[0] === 'kill' && argv[1] === '-0') return { exitCode: livePids.has(argv[2]) ? 0 : 1, stdout: '', stderr: '' }
+      if (argv[0] === '/bin/sh' && argv[2] === 'echo $PPID') {
+        if (claudePid instanceof Error) throw claudePid
+        return { exitCode: 0, stdout: `${claudePid}\n`, stderr: '' }
+      }
       if (argv[1] === '-config') {
         settingsRuns.push(argv)
         if (settingsResult instanceof Error) throw settingsResult
@@ -153,15 +160,25 @@ const $ = {
   },
 }
 
-// The options the engine hands register, with the prompt bars turned on, as
-// most tests here are about them; plugin.json's defaults leave them off.
-const OPTIONS = { bandPrompts: true, bandPrompt: 'latest', bandBars: 10 }
+// cs's prompt-bar settings as the launch environment pins them, with the bars
+// turned on, as most tests here are about them; cs's defaults leave them off.
+const OPTIONS = { CS_BAND_PROMPTS: '1' }
 // The band following the reader's scroll, and drawing every bar that fits.
-const READING = { ...OPTIONS, bandPrompt: 'read' }
-const UNCAPPED = { ...OPTIONS, bandBars: 100 }
+const READING = { ...OPTIONS, CS_BAND_PROMPT: 'read' }
+const UNCAPPED = { ...OPTIONS, CS_BAND_BARS: '100' }
 const DRAWN = { type: 'Survey', props: {}, children: [] }
-const band = (props: Partial<{ isWorking: boolean; hasSurvey: boolean; bodyColumns: number }> = {}, surface = 'terminal') =>
-  hooks['ui.render:AbovePrompt']($, { surface, props: { isWorking: false, hasSurvey: false, bodyColumns: 110, ...props } }, async () => DRAWN)
+// What every terminal render event says of the screen (measured on 2.1.322):
+// the fullscreen layout, 110 columns wide unless a test says otherwise.
+type View = { columns: number; rows: number; isFullscreen: boolean } | undefined
+const viewOf = (columns: number | null, isFullscreen = true): View => columns === null ? undefined : { columns, rows: 35, isFullscreen }
+// `null` is an event with no viewport: a surface nobody has measured.
+type BandProps = Partial<{ isWorking: boolean; hasSurvey: boolean; bodyColumns: number }>
+// How the band was last raised: a tick of the count raises it that way again.
+let lastBand: [BandProps, string, View | null]
+const band = (props: BandProps = {}, surface = 'terminal', viewport: View | null = viewOf(110)) => {
+  lastBand = [props, surface, viewport]
+  return hooks['ui.render:AbovePrompt']($, { surface, viewport: viewport ?? undefined, props: { isWorking: false, hasSurvey: false, bodyColumns: 110, ...props } }, async () => DRAWN)
+}
 
 function buttons(tree: any): any[] {
   if (!tree || typeof tree !== 'object') return []
@@ -170,6 +187,26 @@ function buttons(tree: any): any[] {
   return (tree.children ?? []).flatMap(buttons)
 }
 const findButton = (tree: any) => buttons(tree)[0]
+
+// The footer under the prompt: the engine's mode labels and its hint, each as
+// the engine draws it, and the status line's record of its width.
+const MODES_DRAWN = { type: 'engine', ref: 1 }
+const HINT_DRAWN = { type: 'Hint', props: {}, children: [] }
+const WIDTH = '/work/.cs/local/statusline-width'
+const CYCLE = '(shift+tab to cycle)'
+const footerMode = (columns: number | null = 110, modes: string[] = [], drawn: unknown = MODES_DRAWN, isFullscreen = true) =>
+  hooks['ui.render:SessionMode']($, { surface: 'terminal', viewport: viewOf(columns, isFullscreen), props: { modes } }, async () => drawn)
+// How the hint was last raised: a tick under another mod's band raises it that way again.
+type HintArgs = [columns?: number | null, hint?: string, isWorking?: boolean, isFullscreen?: boolean]
+let lastHint: HintArgs
+const footerHint = (...args: HintArgs) => {
+  lastHint = args
+  const [columns = 110, hint = CYCLE, isWorking = false, isFullscreen = true] = args
+  return hooks['ui.render:PromptHint']($, { surface: 'terminal', viewport: viewOf(columns, isFullscreen), props: { isDraft: false, isWorking, hint } }, async () => HINT_DRAWN)
+}
+// The keys under the prompt once the band above it has drawn: with no width
+// recorded they stand in the hint's place, and with no key the hint is the engine's.
+const keys = async (props: Parameters<typeof band>[0] = {}) => { await band(props); return footerHint() }
 
 beforeEach(() => {
   for (const k of Object.keys(hooks)) delete hooks[k]
@@ -180,16 +217,18 @@ beforeEach(() => {
   compactedAt = []; compactResult = { messages: [] }
   availableCommands = []
   scrolls = []; scrollResult = {}; reads = []; mtimes = {}
-  nowMs = 1_800_000_000_000; livePids = new Set()
+  nowMs = 1_800_000_000_000; livePids = new Set(); claudePid = '4242'
+  lastBand = [{}, 'terminal', viewOf(110)]
+  lastHint = []
   // The default fixture is the lead conversation of a cs session.
   sessionId = 'uuid-lead'
   // /work sits under the default sessions root by its own name, and the launch
   // said where cs is, as every cs launch does.
-  envVars = { HOME: '/home', CS_BIN: '/opt/cs/bin/cs' }
+  envVars = { HOME: '/home', CS_BIN: '/opt/cs/bin/cs', ...OPTIONS }
   cwdPath = '/work'
   realPaths = { '/work': '/work', '/home/.claude-sessions/work': '/work' }
   files = { '/work/.cs/local/state': 'claude_session_color: red\nclaude_session_id: uuid-lead\n' }
-  register(on as any, OPTIONS)
+  register(on as any)
 })
 
 test('the default threshold is the statusline warn band', () => {
@@ -199,45 +238,46 @@ test('the default threshold is the statusline warn band', () => {
 test('CS_STATUSLINE_CTX_WARN moves the band with the bar', async () => {
   envVars.CS_STATUSLINE_CTX_WARN = '50'
   percent = 49
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
   percent = 50
-  expect(findButton(await band())).toBeDefined()
+  expect(findButton(await keys())).toBeDefined()
   envVars.CS_ROTATE_BUTTON_CTX = '10'
   percent = 10
-  expect(findButton(await band())).toBeDefined()
+  expect(findButton(await keys())).toBeDefined()
 })
 
 test('below the threshold the band passes the drawn tree through untouched', async () => {
   percent = 39
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
 })
 
 test('CS_ROTATE_BUTTON_CTX in the process environment sets the threshold', async () => {
   envVars.CS_ROTATE_BUTTON_CTX = '55'
   percent = 54
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
   percent = 55
-  expect(findButton(await band())).toBeDefined()
+  expect(findButton(await keys())).toBeDefined()
 })
 
 test('an unusable CS_ROTATE_BUTTON_CTX falls back to the default', async () => {
   envVars.CS_ROTATE_BUTTON_CTX = 'soon'
   percent = 39
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
   percent = 40
-  expect(findButton(await band())).toBeDefined()
+  expect(findButton(await keys())).toBeDefined()
 })
 
 test('a quoted claude_session_id in state still names the lead', async () => {
   files['/work/.cs/local/state'] = 'claude_session_id: "uuid-lead"  \n'
   percent = 40
-  expect(findButton(await band())).toBeDefined()
+  expect(findButton(await keys())).toBeDefined()
 })
 
-test('at the threshold the band adds the rotate key on the strip:jump1 action, first, beneath what was drawn', async () => {
+test('at the threshold the rotate key draws under the prompt on the strip:jump1 action, first, and the band above adds nothing', async () => {
   percent = 40
-  const tree = await band()
-  expect(tree).not.toBe(DRAWN)
+  expect(await band()).toBe(DRAWN)
+  const tree = await footerHint()
+  expect(tree).not.toBe(HINT_DRAWN)
   expect(buttons(tree)).toHaveLength(2)
   const button = findButton(tree)
   expect(button.props.action).toBe('strip:jump1')
@@ -246,14 +286,9 @@ test('at the threshold the band adds the rotate key on the strip:jump1 action, f
   expect(button.props.hotkey).toBeUndefined()
   expect(button.props.plain).toBe(true)
   expect(button.props.label).toBe('rotate')
-  const json1 = JSON.stringify(tree)
-  expect(json1).toContain('"Survey"')
-  expect(json1).not.toContain('borderStyle')
+  expect(JSON.stringify(tree)).not.toContain('borderStyle')
 })
 
-// The engine draws a Button with no hotkey as its label alone, so the band
-// spells the key itself: the chord the person's keybindings.json gives the
-// Button's action, as written there, and nothing when no chord presses it.
 const KEYS = '/home/.claude/keybindings.json'
 const bindKeys = (bindings: Record<string, string | null>, context = 'Global') => {
   files[KEYS] = JSON.stringify({ bindings: [{ context, bindings }] })
@@ -277,35 +312,57 @@ const restingWords = (tree: any): string[] => {
   return (tree.children ?? []).flatMap(restingWords)
 }
 
+// The footer's row has no cells for a chord: under the prompt the keys draw
+// as their words, whatever keybindings.json binds, and keep the actions a
+// chord presses.
+test('under the prompt the keys spell no chord, bound or not, and keep the actions a chord presses', async () => {
+  percent = 40
+  const cases: (() => void)[] = [
+    () => { delete files[KEYS] },
+    () => bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' }),
+    () => bindKeys({ 'Ctrl+K 9': 'strip:jump1' }),
+  ]
+  for (const arrange of cases) {
+    arrange()
+    const tree = await keys()
+    expect(bandWords(tree)).toEqual(['rotate', ' · ', 'wrap'])
+    expect(buttons(tree).map((b: any) => b.props.action)).toEqual(['strip:jump1', 'strip:jump2'])
+  }
+})
+
+// Where the footer has no safe place for them the keys draw on the band, as
+// before they had one under the prompt: a footer nobody has measured is the
+// plainest such case. The engine draws a Button with no hotkey as its label
+// alone, so the band spells the key itself: the chord the person's
+// keybindings.json gives the Button's action, as written there, and nothing
+// when no chord presses it.
+const keysOnBand = (props: Parameters<typeof band>[0] = {}) => band(props, 'terminal', null)
+
 // Chords that share a prefix (`ctrl+x 1`, `ctrl+x 2`) spell the prefix once,
 // dim, and each Button's own key beside its label: `ctrl+x 1 rotate   2 wrap`.
 test('the band spells a shared chord prefix once and each Button\'s own key beside it', async () => {
-  envVars.HOME = '/home'
   bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2', 'ctrl+x r': 'command:rotate' })
   percent = 40
-  expect(words(await band())).toEqual(['ctrl+x', '1', '   ', '2'])
+  expect(words(await keysOnBand())).toEqual(['ctrl+x', '1', '   ', '2'])
   arm()
-  expect(words(await band())).toEqual(['ctrl+x', '1'])
+  expect(words(await keysOnBand())).toEqual(['ctrl+x', '1'])
 })
 
 test('chords with different prefixes are spelled whole, as slice 1 drew them', async () => {
-  envVars.HOME = '/home'
   bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+w 2': 'strip:jump2' })
   percent = 40
-  expect(words(await band())).toEqual(['ctrl+x 1', '   ', 'ctrl+w 2'])
+  expect(words(await keysOnBand())).toEqual(['ctrl+x 1', '   ', 'ctrl+w 2'])
 })
 
 test('a chord bound elsewhere is spelled as the person wrote it', async () => {
-  envVars.HOME = '/home'
   bindKeys({ 'Ctrl+K 9': 'strip:jump1' })
   percent = 40
-  const drawn = words(await band())
+  const drawn = words(await keysOnBand())
   expect(drawn).toEqual(['Ctrl+K', '9', '   '])
   expect(drawn.join(' ')).not.toContain('ctrl+x')
 })
 
 test('with no chord bound the band draws no key, and the Buttons stay', async () => {
-  envVars.HOME = '/home'
   percent = 40
   const cases: (() => void)[] = [
     () => { delete files[KEYS] },
@@ -316,25 +373,24 @@ test('with no chord bound the band draws no key, and the Buttons stay', async ()
   ]
   for (const arrange of cases) {
     arrange()
-    const tree = await band()
+    const tree = await keysOnBand()
     expect(buttons(tree)).toHaveLength(2)
     expect(words(tree).join(' ')).not.toContain('+')
   }
 })
 
 test('CLAUDE_CONFIG_DIR names the keybindings.json the band reads, as it does for Claude Code', async () => {
-  envVars.HOME = '/home'
   envVars.CLAUDE_CONFIG_DIR = '/cfg'
   bindKeys({ 'ctrl+x 1': 'strip:jump1' })
   percent = 40
-  expect(words(await band()).join(' ')).not.toContain('ctrl+x 1')
+  expect(words(await keysOnBand()).join(' ')).not.toContain('ctrl+x 1')
   files['/cfg/keybindings.json'] = files[KEYS]
-  expect(words(await band())).toEqual(['ctrl+x', '1', '   '])
+  expect(words(await keysOnBand())).toEqual(['ctrl+x', '1', '   '])
 })
 
 test('the band draws no context gauge: the status bar already carries it', async () => {
   percent = 71
-  const tree = JSON.stringify(await band())
+  const tree = JSON.stringify([await band(), await footerHint()])
   expect(tree).not.toContain('ctx')
   expect(tree).not.toContain('71%')
 })
@@ -350,19 +406,17 @@ const boxes = (tree: any): any[] => {
 }
 
 test('the band starts in the status bar\'s column, two in from the prompt\'s rule', async () => {
-  percent = 40
+  files['/work/.cs/local/mail/new/one.json'] = '{}'
   const tree = await band()
   expect(boxes(tree).find((b: any) => b.props.key === 'cs-rotate-band').props.marginLeft).toBe(2)
 })
 
 // The chord is the one pressable thing a word has, so it alone wears the
 // session colour; the labels are the engine's plain Buttons and the
-// separators dim.
-test('the keys are in the session colour, the prefix bold light gray, the separators dim, and nothing else is coloured', async () => {
-  envVars.HOME = '/home'
-  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
-  percent = 40
-  const tree = await band()
+// separators dim. The handler's band holds no chord now; a view that does
+// (drawBand is also a design tool's) still draws them so.
+test('the keys are in the session colour, the prefix bold light gray, the separators dim, and nothing else is coloured', () => {
+  const tree: any = drawBand(view({ entries: buildBandEntries({ ...quiet, rotating: true, wrapping: true }) }), EL)
   for (const key of ['1', '2']) {
     expect(texts(tree).find((t: any) => textOf(t) === key).props).toMatchObject({ bold: true, color: 'rgb(220,38,38)' })
   }
@@ -373,35 +427,25 @@ test('the keys are in the session colour, the prefix bold light gray, the separa
   expect(texts(tree).filter((t: any) => t.props.color !== undefined && t.props.color !== 'subtle').map(textOf)).toEqual(['1', '2'])
 })
 
-test('the band draws no rule: its first word stands where the line starts', async () => {
-  envVars.HOME = '/home'
-  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
-  percent = 40
-  const tree = await band()
+test('the band draws no rule: its first word stands where the line starts', () => {
+  const tree: any = drawBand(view({ entries: buildBandEntries({ ...quiet, rotating: true, wrapping: true }) }), EL)
   expect(JSON.stringify(tree)).not.toContain('\u258c')
   expect(words(tree)[0]).toBe('ctrl+x')
 })
 
-test('with no palette colour the keys are bold in the terminal\'s ink, and nothing is coloured', async () => {
-  envVars.HOME = '/home'
-  files['/work/.cs/local/state'] = 'claude_session_color: teal\nclaude_session_id: uuid-lead\n'
-  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
-  percent = 40
-  const tree = await band()
+test('with no palette colour the keys are bold in the terminal\'s ink, and nothing is coloured', () => {
+  const tree: any = drawBand(view({ entries: buildBandEntries({ ...quiet, rotating: true, wrapping: true }), own: undefined }), EL)
+  expect(texts(tree).filter((t: any) => t.props.bold).map(textOf)).toEqual(['ctrl+x', '1', '2'])
   expect(texts(tree).filter((t: any) => t.props.color !== undefined && t.props.color !== 'subtle').map(textOf)).toEqual([])
 })
 
-// With a handoff armed and its count running, the line reads
-// `ctrl+x 1 /clear now   in 20s`: the key first, then the count it stops.
-test('armed and counting, the countdown follows its clear key, a separator between them', async () => {
-  envVars.HOME = '/home'
-  bindKeys({ 'ctrl+x 1': 'strip:jump1' })
+// With a handoff armed and its count running, the keys read
+// `/clear now in 20s`: the key first, then the count it stops, a space between.
+test('armed and counting, the countdown follows its clear key, a space between them', async () => {
   await startGrace()
-  const tree = await band()
-  expect(words(tree)).toEqual(['ctrl+x', '1', '   ', `in ${GRACE_SECONDS}s`])
-  const json = JSON.stringify(tree)
-  expect(json.indexOf(`in ${GRACE_SECONDS}s`)).toBeGreaterThan(json.indexOf('/clear now'))
-  expect(buttons(tree).map((b: any) => b.props.label)).toEqual(['/clear now'])
+  const tree = await keys()
+  expect(bandWords(tree)).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS}s`])
+  expect(buttons(tree).map((b: any) => [b.props.label, b.props.action])).toEqual([['/clear now', 'strip:jump1']])
 })
 
 // One thin line, a blank line above it: no fill, whatever the terminal
@@ -410,7 +454,7 @@ test('armed and counting, the countdown follows its clear key, a separator betwe
 test('the band is one thin line: a keyed box with no fill, chip, caps, border, hover or Claude mark', async () => {
   envVars.CS_TERM_BG_RGB = '252;247;229'
   envVars.CS_STATUSLINE_CAPS = '1'
-  percent = 40
+  files['/work/.cs/local/mail/new/one.json'] = '{}'
   const tree = JSON.stringify(await band())
   expect(tree).toContain('"marginTop":1')
   expect(tree).toContain('"key":"cs-rotate-band"')
@@ -428,22 +472,22 @@ test('the band is one thin line: a keyed box with no fill, chip, caps, border, h
 
 test('while a turn runs the button is hidden', async () => {
   percent = 90
-  expect(await band({ isWorking: true })).toBe(DRAWN)
+  expect(await keys({ isWorking: true })).toBe(HINT_DRAWN)
 })
 
 test('while a survey holds the band the hook yields', async () => {
   percent = 90
-  expect(await band({ hasSurvey: true })).toBe(DRAWN)
+  expect(await keys({ hasSurvey: true })).toBe(HINT_DRAWN)
 })
 
 test('an unknown percentage draws nothing', async () => {
   percent = undefined
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
 })
 
 test('a press runs the rotate skill and fills nothing', async () => {
   percent = 80
-  const button = findButton(await band())
+  const button = findButton(await keys())
   await button.props.onPress()
   expect(ran).toEqual([{ command: 'rotate', args: '' }])
   expect(filled).toEqual([])
@@ -454,7 +498,7 @@ test('a press runs the rotate skill and fills nothing', async () => {
 test('while git tracks a control file, a press runs no rotation', async () => {
   percent = 80
   runResult = tracked
-  await findButton(await band()).props.onPress()
+  await findButton(await keys()).props.onPress()
   expect(runs.map(r => r.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work']])
   expect(ran).toEqual([])
 })
@@ -462,25 +506,25 @@ test('while git tracks a control file, a press runs no rotation', async () => {
 test('outside a cs session the band draws nothing at crit', async () => {
   percent = 90
   existing = new Set(); files = {}
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
 })
 
 test('a session opted out with .cs/local/disabled gets no button', async () => {
   percent = 90
   existing.add('/work/.cs/local/disabled')
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
 })
 
 test('a teammate conversation (not the one .cs/local/state names) gets no button', async () => {
   percent = 90
   sessionId = 'uuid-teammate'
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
 })
 
 test('with no state file to name the lead the band draws nothing', async () => {
   percent = 90
   files = {}
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
 })
 
 const MARKER = '/work/.cs/local/pending-handoff'
@@ -493,7 +537,7 @@ test('an armed handoff turns the button into the clear button, whatever the cont
   arm()
   for (const p of [undefined, 3, 90]) {
     percent = p
-    const tree = await band()
+    const tree = await keys()
     expect(buttons(tree)).toHaveLength(1)
     const button = findButton(tree)
     expect(button.props.action).toBe('strip:jump1')
@@ -510,37 +554,37 @@ test('an armed handoff turns the button into the clear button, whatever the cont
 
 test('pressing the clear button runs /clear and fills nothing', async () => {
   arm(); percent = 3
-  await findButton(await band()).props.onPress()
+  await findButton(await keys()).props.onPress()
   expect(ran).toEqual([{ command: 'clear', args: '' }])
   expect(filled).toEqual([])
 })
 
 test('the rotate press never clears', async () => {
   percent = 80
-  await findButton(await band()).props.onPress()
+  await findButton(await keys()).props.onPress()
   expect(ran).not.toContainEqual({ command: 'clear', args: '' })
 })
 
 test('an armed handoff is still lead-only and yields to a running turn', async () => {
   arm(); percent = 90
-  expect(await band({ isWorking: true })).toBe(DRAWN)
-  expect(await band({ hasSurvey: true })).toBe(DRAWN)
+  expect(await keys({ isWorking: true })).toBe(HINT_DRAWN)
+  expect(await keys({ hasSurvey: true })).toBe(HINT_DRAWN)
   sessionId = 'uuid-teammate'
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
 })
 
 test('a marker naming a handoff that is gone, consumed, or outside the store does not arm', async () => {
   percent = 39
   arm(); delete files[HANDOFF]
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
   arm(); files[HANDOFF] = UNCONSUMED.replace('status: unconsumed', 'status: consumed')
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
   arm(); files[HANDOFF] = '## no frontmatter\nstatus: unconsumed\n'
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
   arm(); files[MARKER] = '../local/state\n'
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
   percent = 40
-  expect(findButton(await band()).props.label).toBe('rotate')
+  expect(findButton(await keys()).props.label).toBe('rotate')
 })
 
 // cs loads only a handoff whose file name is plain (letters, digits and ._@-,
@@ -550,11 +594,11 @@ test('a marker naming a handoff whose name is not plain does not arm', async () 
   percent = 39
   for (const name of ['2026-09-15-e\x1b[1mb\x07.md', '2026-09-15 next.md', 'a'.repeat(158) + '.md']) {
     files = { ...files, [`/work/.cs/handoffs/${name}`]: UNCONSUMED, [MARKER]: `${name}\n` }
-    expect(await band()).toBe(DRAWN)
+    expect(await keys()).toBe(HINT_DRAWN)
   }
   const longest = 'a'.repeat(157) + '.md'
   files = { ...files, [`/work/.cs/handoffs/${longest}`]: UNCONSUMED, [MARKER]: `${longest}\n` }
-  expect(findButton(await band()).props.label).toBe('/clear now')
+  expect(findButton(await keys()).props.label).toBe('/clear now')
 })
 
 // The marker is read as the SessionStart hook reads it (tr -d '[:space:]' in
@@ -565,10 +609,10 @@ test('a marker is read as the hook reads it: only ASCII whitespace is dropped', 
   percent = 39
   for (const lead of ['﻿', ' ', ' ']) {
     arm(); files[MARKER] = `${lead}2026-09-15-next-step.md\n`
-    expect(await band()).toBe(DRAWN)
+    expect(await keys()).toBe(HINT_DRAWN)
   }
   arm(); files[MARKER] = '\t 2026-09-15-next-step.md\r\n'
-  expect(findButton(await band()).props.label).toBe('/clear now')
+  expect(findButton(await keys()).props.label).toBe('/clear now')
 })
 
 // An encrypted session keeps the marker and its handoffs behind .cs/private.
@@ -578,13 +622,13 @@ const PRIVATE_HANDOFF = '/work/.cs/private/handoffs/2026-09-15-next-step.md'
 test('an encrypted session arms from the marker and handoff behind .cs/private', async () => {
   files[PRIVATE_HANDOFF] = UNCONSUMED; files[PRIVATE_MARKER] = '2026-09-15-next-step.md\n'
   percent = 3
-  expect(findButton(await band()).props.label).toBe('/clear now')
+  expect(findButton(await keys()).props.label).toBe('/clear now')
 })
 
 test('a private marker never arms from the plaintext handoff store', async () => {
   files[HANDOFF] = UNCONSUMED; files[PRIVATE_MARKER] = '2026-09-15-next-step.md\n'
   percent = 39
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
 })
 
 // cs judges whether it trusts the session's control files: a marker git tracks
@@ -596,20 +640,20 @@ const tracked = { exitCode: 1, stdout: '', stderr: `${TRACKED}\n` }
 
 test('the band asks cs nothing as it draws, however often it redraws', async () => {
   arm(); percent = 3
-  for (let i = 0; i < 5; i++) expect(findButton(await band()).props.label).toBe('/clear now')
+  for (let i = 0; i < 5; i++) expect(findButton(await keys()).props.label).toBe('/clear now')
   expect(runs).toEqual([])
 })
 
 test('pressing the clear button asks cs about the session, and a tracked control file clears nothing', async () => {
   arm(); percent = 3
   runResult = tracked
-  await findButton(await band()).props.onPress()
+  await findButton(await keys()).props.onPress()
   expect(runs.map(r => r.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work']])
   expect(ran).toEqual([])
   expect(toasts).toEqual([`no rotation in this session: ${TRACKED}`])
   // the band then draws the session as unarmed (below the threshold: nothing),
   // and the same refusal at the next turn's end is not said again
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
   envVars.CS_ROTATE_FORCE_CTX = '70'
   await turnComplete()
   expect(runs).toHaveLength(2)
@@ -619,12 +663,12 @@ test('pressing the clear button asks cs about the session, and a tracked control
 test('once cs trusts the session again, the next press clears', async () => {
   arm(); percent = 3
   runResult = tracked
-  await findButton(await band()).props.onPress()
+  await findButton(await keys()).props.onPress()
   runResult = VETTED
   envVars.CS_ROTATE_FORCE_CTX = '70'; percent = 80
   await turnComplete()
-  expect(findButton(await band()).props.label).toBe('/clear now')
-  await findButton(await band()).props.onPress()
+  expect(findButton(await keys()).props.label).toBe('/clear now')
+  await findButton(await keys()).props.onPress()
   expect(ran).toEqual([{ command: 'clear', args: '' }])
 })
 
@@ -653,12 +697,30 @@ test('a control file git starts tracking during the count clears nothing at zero
   runResult = tracked
   await tick(GRACE_SECONDS)
   expect(ran).toEqual([])
+  expect(toasts).toEqual([`no rotation in this session: ${TRACKED}`])
+})
+
+test('a zero cs refuses says so, also when the same refusal was toasted earlier in the count', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(5)
+  runResult = tracked
+  await hooks['session.start']($, { cwd: '/work', surface: 'terminal', isInteractive: true }, async (e: any) => ({ cwd: e.cwd }))
+  expect(toasts).toEqual([`no rotation in this session: ${TRACKED}`])
+  toasts = []
+  const t = ticker()!
+  await tick(GRACE_SECONDS - 5)
+  expect(ran).toEqual([])
+  expect(t.cancelled).toBe(true)
+  expect(toasts).toEqual([`no rotation in this session: ${TRACKED}`])
 })
 
 test('a press while cs is still answering, then the count reaching zero, clears once', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  await band()
+  await keys()
   await turnComplete()
   await tick(GRACE_SECONDS - 1)
   const zero = ticker()!
@@ -673,7 +735,7 @@ test('a press while cs is still answering, then the count reaching zero, clears 
     return new Promise(r => { answer = r })
   }
   try {
-    const press = findButton(await band()).props.onPress()
+    const press = findButton(await keys()).props.onPress()
     await reached
     await zero.fn()
     answer(VETTED)
@@ -688,19 +750,19 @@ test('with the forcing off, a prompt after a refusal asks cs afresh at the next 
   envVars.CS_ROTATE_FORCE_CTX = 'off'
   arm(); percent = 3
   runResult = tracked
-  await findButton(await band()).props.onPress()
-  expect(await band()).toBe(DRAWN)
+  await findButton(await keys()).props.onPress()
+  expect(await keys()).toBe(HINT_DRAWN)
   runResult = VETTED
   await promptSubmit()
-  expect(findButton(await band()).props.label).toBe('/clear now')
-  await findButton(await band()).props.onPress()
+  expect(findButton(await keys()).props.label).toBe('/clear now')
+  await findButton(await keys()).props.onPress()
   expect(ran).toEqual([{ command: 'clear', args: '' }])
 })
 
 test('when cs cannot answer, a press clears nothing and the band says why', async () => {
   arm(); percent = 3
   delete envVars.CS_BIN
-  await findButton(await band()).props.onPress()
+  await findButton(await keys()).props.onPress()
   expect(runs).toHaveLength(0)
   envVars.CS_BIN = '/opt/cs/bin/cs'
   runResult = new Error('spawn ENOENT')
@@ -716,9 +778,9 @@ test('when cs cannot answer, a press clears nothing and the band says why', asyn
 test('an empty marker names no handoff, so the band behaves as unarmed', async () => {
   files[MARKER] = '\n'
   percent = 39
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
   percent = 40
-  expect(findButton(await band()).props.label).toBe('rotate')
+  expect(findButton(await keys()).props.label).toBe('rotate')
 })
 
 test('session.start writes a heartbeat under the session meta dir', async () => {
@@ -789,7 +851,7 @@ test('an adopted session is named by the session_name its state records, and the
 test('the lead of a directory the sessions root does not name gets no button', async () => {
   percent = 90
   realPaths = { '/work': '/work' }
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
 })
 
 // A turn's end, the way the engine reports it: answered on the main loop unless said otherwise.
@@ -797,6 +859,10 @@ const turnComplete = (e: Partial<{ reason: string; agentId: string }> = {}) =>
   hooks['turn.complete']($, { reason: 'answer', answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', ...e }, async () => ({ text: 'ok' }))
 // The pending `after` timers, run the way the clock would run them.
 const fireAfter = async () => { for (const t of timers.filter(t => t.kind === 'after' && !t.cancelled)) { t.cancelled = true; await t.fn() } }
+// Every one-shot timer run, and those they start: after a launch's first
+// draw the mod has asked which Claude Code it runs in, from a timer, and read
+// the width its status line recorded.
+const settleTimers = async () => { for (let rounds = 0; rounds < 6 && timers.some(t => t.kind === 'after' && !t.cancelled); rounds++) await fireAfter() }
 
 test('with CS_ROTATE_FORCE_CTX set, a turn ending past it schedules /rotate from a timer, not from the hook', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
@@ -908,7 +974,7 @@ test('a press names the conversation in cs.pressed before /rotate runs, and the 
   const run = $.command.run
   $.command.run = async (args: any) => { atRun = files[PRESSED]; ran.push(args); return { text: '' } }
   try {
-    await findButton(await band()).props.onPress()
+    await findButton(await keys()).props.onPress()
   } finally {
     $.command.run = run
   }
@@ -926,7 +992,7 @@ test('a press whose /rotate the engine refuses empties cs.pressed at once', asyn
   $.command.run = async () => { throw new Error('unknown command') }
   let refused: unknown
   try {
-    await findButton(await band()).props.onPress()
+    await findButton(await keys()).props.onPress()
   } catch (err) {
     refused = err
   } finally {
@@ -982,72 +1048,419 @@ test('a turn ending past the force threshold with a handoff already armed runs n
 })
 
 // The countdown's ticker, and one tick of it as the clock would run it.
-const ticker = () => timers.find(t => t.kind === 'every' && !t.cancelled)
-const tick = async (n = 1) => { for (let i = 0; i < n; i++) await ticker()!.fn() }
+// The countdown's clock, a tick a second; the footer's reads the status line's width on a slower one.
+const ticker = () => timers.find(t => t.kind === 'every' && t.ms === 1000 && !t.cancelled)
+// Each tick asks for a redraw, and the engine raises the band again within
+// the second (measured on 2.1.322: 5 to 19 ms after the tick), as it was last
+// raised. While another mod answers the band without passing it on, the mod's
+// hook is not reached: the ticks go by unseen, and the hint under the prompt
+// is still raised (measured: 34 to 36 times a count). A picker such as
+// /model's hides both (measured: no hint raised in 29 s with it open), as
+// does a tick whose redraw has not come yet.
+const tickHidden = async (n = 1) => { for (let i = 0; i < n; i++) await ticker()!.fn() }
+const tickUnseen = async (n = 1) => { for (let i = 0; i < n; i++) { await tickHidden(); await footerHint(...lastHint) } }
+const tick = async (n = 1) => { for (let i = 0; i < n; i++) { await tickHidden(); await band(...lastBand) } }
 const promptSubmit = (text = 'keep going') =>
   hooks['prompt.submit']($, { text, wait: false, origin: { kind: 'composer' } }, async (e) => ({ text: e.text }))
 
 test('with the handoff armed and force on, a turn ending starts a countdown the band shows, one redraw a second', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  await band()
+  await keys()
   await turnComplete()
   expect(ticker()?.ms).toBe(1000)
   expect(GRACE_SECONDS).toBe(20)
-  expect(JSON.stringify(await band())).toContain(`"in ${GRACE_SECONDS}s"`)
+  expect(JSON.stringify(await keys())).toContain(`"in ${GRACE_SECONDS}s"`)
   await tick(3)
   expect(invalidated).toEqual(['ui.render', 'ui.render', 'ui.render'])
-  expect(JSON.stringify(await band())).toContain(`"in ${GRACE_SECONDS - 3}s"`)
+  expect(JSON.stringify(await keys())).toContain(`"in ${GRACE_SECONDS - 3}s"`)
   expect(ran).toEqual([])
   // one countdown at a time: another turn ending does not start a second
   await turnComplete()
-  expect(timers.filter(t => t.kind === 'every')).toHaveLength(1)
+  expect(timers.filter(t => t.kind === 'every' && t.ms === 1000)).toHaveLength(1)
 })
 
 test('at zero the countdown runs /clear, once, and stops ticking', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  await band()
+  await keys()
   await turnComplete()
   const t = ticker()!
   await tick(GRACE_SECONDS)
   expect(ran).toEqual([{ command: 'clear', args: '' }])
   expect(t.cancelled).toBe(true)
-  expect(JSON.stringify(await band())).not.toMatch(/"in -?\d+s"/)
+  expect(JSON.stringify(await keys())).not.toMatch(/"in -?\d+s"/)
+  // the band drew the count at every tick: nothing more to say
+  expect(toasts).toEqual([])
+})
+
+// A mod loaded before this one may answer the band's render without passing
+// it on (measured: a council run's band, a link prompt's). The mod's hook is
+// then not reached, whatever the count's redraws ask for, and what the band
+// last said of a turn stays as it was. The toast follows the /clear: one shown
+// before it leaves the screen with the conversation (measured), and a /clear
+// the engine rejects has only its own to say. The toast says what the mod
+// knows, that its band was not drawn, and names no cause: the hint under the
+// prompt still raised says only that something other than a picker hides it.
+const CLEAR_UNSEEN = 'the count to /clear reached zero unseen: the band above the prompt was not drawn; /clear has run'
+const CLEAR = { command: 'clear', args: '' }
+
+test('a band another mod takes mid-turn does not stop the count: at zero /clear runs, once, and a toast then says the count ran unseen', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band({ isWorking: true })
+  await turnComplete()
+  const t = ticker()!
+  let toastsAtClear: string[] | undefined
+  const run = $.command.run
+  $.command.run = async (args: any) => { toastsAtClear = [...toasts]; return run(args) }
+  try {
+    await tickUnseen(GRACE_SECONDS)
+  } finally {
+    $.command.run = run
+  }
+  expect(ran).toEqual([CLEAR])
+  expect(toastsAtClear).toEqual([])
+  expect(toasts).toEqual([CLEAR_UNSEEN])
+  expect(t.cancelled).toBe(true)
+  // a /clear the engine rejects under another mod's band says only that
+  toasts = []
+  await turnComplete()
+  $.command.run = async () => { throw new Error('no session') }
+  try {
+    await tickUnseen(GRACE_SECONDS)
+  } finally {
+    $.command.run = run
+  }
+  expect(toasts).toEqual(['/clear did not run: Error: no session'])
+})
+
+test('a band another mod takes while the count runs changes nothing either, whether it last drew idle or a command running', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  for (const last of [{}, { isWorking: true }]) {
+    arm(); percent = 80; ran = []; toasts = []
+    await keys()
+    await turnComplete()
+    await tick(5)
+    // A typed command draws the band as working for a moment (measured), and
+    // the hint under the prompt goes on saying no turn runs.
+    await keys(last)
+    await tickUnseen(GRACE_SECONDS - 5)
+    expect([last, ran]).toEqual([last, [CLEAR]])
+    expect([last, toasts]).toEqual([last, [CLEAR_UNSEEN]])
+    // and the key the band last put under the prompt is not left there
+    expect([last, await footerHint()]).toEqual([last, HINT_DRAWN])
+  }
+})
+
+// The keys under the prompt are what the band last put there, the count's
+// seconds among them: once another mod has the band nothing redraws them
+// (measured: `/clear now in 16s` stood through the count and after the /clear).
+test('while another mod has the band the clear key and its count leave the row under the prompt, and come back with the band', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick()
+  expect(bandWords(await footerHint())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS - 1}s`])
+  // a tick whose redraw has not come yet leaves them: the band was raised since the tick before
+  await tickHidden()
+  expect(bandWords(await footerHint())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS - 1}s`])
+  await tickUnseen()
+  expect(await footerHint()).toBe(HINT_DRAWN)
+  await tick()
+  expect(bandWords(await footerHint())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS - 4}s`])
+  expect(ran).toEqual([])
+  expect(toasts).toEqual([])
+})
+
+test('a band raised whose draw is still pending at zero is a count seen', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 2)
+  await tickHidden()
+  let draw!: () => void
+  const raised = hooks['ui.render:AbovePrompt']($, { surface: 'terminal', viewport: viewOf(110), props: { isWorking: false, hasSurvey: false, bodyColumns: 110 } }, () => new Promise(resolve => { draw = () => resolve(DRAWN) }))
+  await settle()
+  await tickHidden()
+  draw()
+  await raised
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
+})
+
+// Under another mod's band the band says nothing of a turn, and a turn the
+// main loop's events did not announce to the mod is told by the hint alone.
+test('the hint under the prompt saying a turn runs keeps the zero from clearing under a band another mod has', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick(3)
+  await footerHint(110, CYCLE, true)
+  const t = ticker()!
+  await tickUnseen(GRACE_SECONDS - 3)
+  expect(ran).toEqual([])
+  expect(toasts).toEqual(['/clear did not run: a turn is running'])
+  expect(t.cancelled).toBe(true)
+})
+
+// A picker such as /model's hides the band and the hint under the prompt
+// alike, and the engine holds a /clear run under it until it closes, with no
+// way to take it back (measured on 2.1.322). A zero with neither raised since
+// the tick before clears nothing: the mod knows only that nothing of its own
+// drew, so the toast names a picker as one cause of that.
+const COUNT_HIDDEN = '/clear did not run: neither the band nor the hint drew, as under a picker; the clear key returns with the band'
+
+const countHiddenAtZero = async () => {
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick(3)
+  await tickUnseen(3)
+  const t = ticker()!
+  await tickHidden(GRACE_SECONDS - 6)
+  return t
+}
+
+test('a zero with neither the band nor the hint under the prompt raised since the tick before runs no /clear, stops the count, and says so', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  const t = await countHiddenAtZero()
+  expect(ran).toEqual([])
+  expect(toasts).toEqual([COUNT_HIDDEN])
+  expect(t.cancelled).toBe(true)
+})
+
+test('after a zero nothing drew at, the band drawn again offers the clear key with no count, and a press clears', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  await countHiddenAtZero()
+  toasts = []
+  const row = await keys()
+  expect(bandWords(row)).toEqual(['/clear now'])
+  await findButton(row).props.onPress()
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
+})
+
+test('after a zero nothing drew at, the next turn\'s end counts again and clears at its zero', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  await countHiddenAtZero()
+  toasts = []
+  await keys()
+  await turnComplete()
+  expect(bandWords(await keys())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS}s`])
+  await tick(GRACE_SECONDS)
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
+})
+
+// A survey is a question to the person, and the engine draws it whoever has
+// the band (measured). What the band said of one during the count stands at
+// its zero once another mod takes the band: nothing else tells the mod a
+// survey is up.
+test('a survey above the prompt at zero keeps the /clear from running and a toast says so, also when another mod took the band after the survey drew', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  const cases: [typeof tick, string][] = [
+    [tick, '/clear did not run: a survey is waiting above the prompt'],
+    [tickUnseen, '/clear did not run: a survey was waiting above the prompt when the band last drew'],
+  ]
+  for (const [count, said] of cases) {
+    arm(); percent = 80; toasts = []
+    await band()
+    await turnComplete()
+    const t = ticker()!
+    await band({ hasSurvey: true })
+    await count(GRACE_SECONDS)
+    expect(ran).toEqual([])
+    expect(toasts).toEqual([said])
+    expect(t.cancelled).toBe(true)
+  }
+})
+
+// What the band said of a survey is good for the count it was said in: only
+// a band raised again takes it back, and under another mod's band none is.
+test('a survey the band last drew declines one zero, not the next count\'s', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(3)
+  await band({ hasSurvey: true })
+  await tickUnseen(GRACE_SECONDS - 3)
+  expect(ran).toEqual([])
+  expect(toasts).toEqual(['/clear did not run: a survey was waiting above the prompt when the band last drew'])
+  toasts = []
+  await turnComplete()
+  await tickUnseen(GRACE_SECONDS)
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([CLEAR_UNSEEN])
+})
+
+test('a survey the band drew before the count began, under a band taken since, does not stop the /clear', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await band({ hasSurvey: true })
+  await turnComplete()
+  await tickUnseen(GRACE_SECONDS)
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([CLEAR_UNSEEN])
+})
+
+// The engine's question dialog takes the prompt's place, the band's with it:
+// while one is open the band is not raised and the dialog is, at every redraw
+// (measured on 2.1.322, a plugin's question asked while idle; a /clear run
+// under it is not refused).
+const DIALOG_DRAWN = { type: 'engine', ref: 2 }
+const dialog = () => hooks['ui.render:AskUserQuestion']?.($, { surface: 'terminal', props: { tool: 'AskUserQuestion', questions: [] } }, async () => DIALOG_DRAWN)
+const tickUnderDialog = async (n = 1) => { for (let i = 0; i < n; i++) { await tickHidden(); await dialog() } }
+
+test('a question dialog open at zero keeps the /clear from running and a toast says so; one answered before zero changes nothing', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick(5)
+  const t = ticker()!
+  await tickUnderDialog(GRACE_SECONDS - 5)
+  expect(ran).toEqual([])
+  expect(toasts).toEqual(['/clear did not run: a question is waiting for an answer'])
+  expect(t.cancelled).toBe(true)
+  toasts = []
+  await turnComplete()
+  await tickUnderDialog(5)
+  await tick(GRACE_SECONDS - 5)
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
+  // the dialog itself draws as the engine's
+  expect(await dialog()).toBe(DIALOG_DRAWN)
+})
+
+// The band is not raised while a dialog is open (measured), so a band raised
+// after a dialog says the dialog is gone.
+test('a question answered inside the count\'s last second, the band raised again after it, does not stop the /clear', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  await dialog()
+  await band()
+  await tickHidden()
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
+})
+
+// The zero's reads take a cs process's time, and the band's redraw comes
+// 5 to 19 ms after the tick (measured): a redraw that was late by the tick
+// before can land inside them.
+test('a band raised while the zero tick reads is a count seen: the /clear runs and no toast says otherwise', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 2)
+  await tickHidden()
+  let answer!: () => void
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => {
+    if (argv[1] !== '-vet-session') return run(argv, init)
+    await new Promise<void>(resolve => { answer = resolve })
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  try {
+    const zero = tickHidden()
+    await settle()
+    await band()
+    answer()
+    await zero
+  } finally {
+    $.process.run = run
+  }
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
+})
+
+// A question that opens while the zero reads is what waits on the person,
+// whatever else drew: the zero says the question, not the band and hint unseen.
+test('a question dialog raised while the zero tick reads, nothing else raised, is said as the question', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 2)
+  await tickHidden()
+  let answer!: () => void
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => {
+    if (argv[1] !== '-vet-session') return run(argv, init)
+    await new Promise<void>(resolve => { answer = resolve })
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  try {
+    const zero = tickHidden()
+    await settle()
+    await dialog()
+    answer()
+    await zero
+  } finally {
+    $.process.run = run
+  }
+  expect(ran).toEqual([])
+  expect(toasts).toEqual(['/clear did not run: a question is waiting for an answer'])
+})
+
+test('a conversation that is no longer the lead at zero clears nothing and says so', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  files['/work/.cs/local/state'] = 'claude_session_id: uuid-other\n'
+  await tick(GRACE_SECONDS)
+  expect(ran).toEqual([])
+  expect(toasts).toEqual(["/clear did not run: this conversation is no longer the session's lead"])
+  expect(ticker()).toBeUndefined()
 })
 
 test('a prompt entering the session stops the countdown and passes through', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  await band()
+  await keys()
   await turnComplete()
   await tick(2)
   const t = ticker()!
   expect(await promptSubmit('one more thing')).toEqual({ text: 'one more thing' })
   expect(t.cancelled).toBe(true)
-  expect(JSON.stringify(await band())).not.toMatch(/"in -?\d+s"/)
+  expect(JSON.stringify(await keys())).not.toMatch(/"in -?\d+s"/)
   expect(ran).toEqual([])
   // the next turn ending restarts it from the top
   await turnComplete()
-  expect(JSON.stringify(await band())).toContain(`"in ${GRACE_SECONDS}s"`)
+  expect(JSON.stringify(await keys())).toContain(`"in ${GRACE_SECONDS}s"`)
 })
 
 test('pressing the clear button mid-countdown stops the ticker before it clears', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  await band()
+  await keys()
   await turnComplete()
   await tick(2)
   const t = ticker()!
-  await findButton(await band()).props.onPress()
+  await findButton(await keys()).props.onPress()
   expect(t.cancelled).toBe(true)
   expect(ran).toEqual([{ command: 'clear', args: '' }])
 })
 
-test('a countdown reaching zero while a turn runs or a survey holds the band clears nothing and stops', async () => {
+test('a countdown reaching zero while the band draws a turn running or a survey clears nothing, stops, and says which', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  for (const props of [{ isWorking: true }, { hasSurvey: true }]) {
+  const cases: [BandProps, string][] = [
+    [{ isWorking: true }, '/clear did not run: a turn is running'],
+    [{ hasSurvey: true }, '/clear did not run: a survey is waiting above the prompt'],
+  ]
+  for (const [props, said] of cases) {
+    toasts = []
     await band()
     await turnComplete()
     const t = ticker()!
@@ -1055,6 +1468,7 @@ test('a countdown reaching zero while a turn runs or a survey holds the band cle
     await tick(GRACE_SECONDS)
     expect(ran).toEqual([])
     expect(t.cancelled).toBe(true)
+    expect(toasts).toEqual([said])
   }
 })
 
@@ -1066,6 +1480,7 @@ test('a countdown reaching zero re-checks the handoff: one consumed meanwhile cl
   files[HANDOFF] = UNCONSUMED.replace('status: unconsumed', 'status: consumed')
   await tick(GRACE_SECONDS)
   expect(ran).toEqual([])
+  expect(toasts).toEqual(['/clear did not run: the handoff is no longer armed'])
 })
 
 test('with the forcing off, or outside the lead, an armed handoff starts no countdown and prompt.submit passes through', async () => {
@@ -1083,7 +1498,7 @@ test('with the forcing off, or outside the lead, an armed handoff starts no coun
 test('a prompt arriving while the zero tick is still checking the handoff wins: nothing clears', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  await band()
+  await keys()
   await turnComplete()
   await tick(GRACE_SECONDS - 1)
   const zero = tick()
@@ -1093,7 +1508,7 @@ test('a prompt arriving while the zero tick is still checking the handoff wins: 
   // and a press racing the zero tick clears once, not twice
   await turnComplete()
   await tick(GRACE_SECONDS - 1)
-  const button = findButton(await band())
+  const button = findButton(await keys())
   const zero2 = tick()
   await button.props.onPress()
   await zero2
@@ -1103,19 +1518,19 @@ test('a prompt arriving while the zero tick is still checking the handoff wins: 
 test('a /clear run from anywhere else ends the countdown, so no timer outlives the conversation', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  await band()
+  await keys()
   await turnComplete()
   const t = ticker()!
   const e = { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }
   expect(await hooks['command.run:clear']($, e, async () => ({ text: '' }))).toEqual({ text: '' })
   expect(t.cancelled).toBe(true)
-  expect(JSON.stringify(await band())).not.toMatch(/"in -?\d+s"/)
+  expect(JSON.stringify(await keys())).not.toMatch(/"in -?\d+s"/)
 })
 
 test('a rejected /clear at zero shows a toast and clears nothing else', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  await band()
+  await keys()
   await turnComplete()
   await fireAfter() // the handoff pane's open, spent
   $.command.run = async () => { throw new Error('no session') }
@@ -1123,6 +1538,26 @@ test('a rejected /clear at zero shows a toast and clears nothing else', async ()
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
   expect(toasts).toEqual(['/clear did not run: Error: no session'])
   expect(ran).toEqual([])
+})
+
+test('a read that throws at zero ends the count and a toast says the /clear did not run', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  const t = ticker()!
+  const exists = $.fs.exists
+  $.fs.exists = async () => { throw new Error('EIO') }
+  try {
+    await tickHidden()
+  } finally {
+    $.fs.exists = exists
+  }
+  expect(t.cancelled).toBe(true)
+  expect(toasts).toEqual(['/clear did not run: Error: EIO'])
+  expect(ran).toEqual([])
+  expect(JSON.stringify(await keys())).not.toMatch(/"in -?\d+s"/)
 })
 
 // The SessionStart hook's own rule (_handoff_is_unconsumed): the frontmatter
@@ -1138,7 +1573,7 @@ test('isUnconsumed follows the hook: unclosed frontmatter, or a status after it,
 test('a tick that lands while the zero tick is still reading does not push the count negative or clear twice', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  await band()
+  await keys()
   await turnComplete()
   await tick(GRACE_SECONDS - 1)
   const t = ticker()!
@@ -1146,7 +1581,7 @@ test('a tick that lands while the zero tick is still reading does not push the c
   const second = t.fn()
   await first; await second
   expect(ran).toEqual([{ command: 'clear', args: '' }])
-  expect(JSON.stringify(await band())).not.toContain('"in -')
+  expect(JSON.stringify(await keys())).not.toContain('"in -')
 })
 
 
@@ -1180,7 +1615,7 @@ test('a conversation met at load is forced whatever it started at; one born of a
   await turnComplete()
   expect(timers).toHaveLength(2)
   // a reload forgets: the conversation it meets next is adopted, whatever it reads
-  register(on as any, OPTIONS)
+  register(on as any)
   sessionId = 'uuid-reloaded'
   files['/work/.cs/local/state'] = 'claude_session_id: uuid-reloaded\n'
   percent = 95
@@ -1241,7 +1676,7 @@ test('a conversation after /clear reapplies the session color once', async () =>
 test('a /clear after a plugin reload reapplies the session color once', async () => {
   await band()
   // The harness captures hooks by matcher without the engine's On overloads.
-  register(on as any, OPTIONS)
+  register(on as any)
   await clearRun()
   sessionId = 'uuid-next'
   await band()
@@ -1335,10 +1770,11 @@ test('a new conversation id with no /clear seen in this process is a resume: ado
 test('the /clear the mod runs itself marks the successor as /clear-born too, so a wake past the threshold is not forced', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  await band()
+  await keys()
   await turnComplete()
   await fireAfter() // the handoff pane's open, spent
-  await findButton(await band()).props.onPress()
+  await findButton(await keys()).props.onPress()
+  await fireAfter() // the footer's redraw for the count, spent
   expect(ran).toEqual([{ command: 'clear', args: '' }])
   files = { '/work/.cs/local/state': 'claude_session_id: uuid-next\n' }
   sessionId = 'uuid-next'
@@ -1389,13 +1825,14 @@ test('resuming a conversation that was once judged adopts it afresh: the old jud
 test('a /clear the mod runs itself that is rejected leaves no birth behind: a later /resume past the threshold is forced', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
-  await band()
+  await keys()
   await turnComplete()
   await fireAfter() // the handoff pane's open, spent
   $.command.run = async () => { throw new Error('no session') }
   await tick(GRACE_SECONDS)
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
   expect(toasts).toEqual(['/clear did not run: Error: no session'])
+  await fireAfter() // the redraw the count's last tick asked for, spent
   files = { '/work/.cs/local/state': 'claude_session_id: uuid-resumed\n' }
   sessionId = 'uuid-resumed'
   percent = 72
@@ -1424,7 +1861,7 @@ test('a typed /clear that the engine refuses leaves no birth behind either', asy
 const wrapButton = (tree: any) => buttons(tree).find((b: any) => b.props.action === 'strip:jump2')
 test('at the threshold the band adds a second button on strip:jump2 that reads as the wrap key, after the rotate key', async () => {
   percent = 40
-  const tree = await band()
+  const tree = await keys()
   expect(buttons(tree)).toHaveLength(2)
   expect(buttons(tree)[0].props.action).toBe('strip:jump1')
   const button = wrapButton(tree)
@@ -1439,18 +1876,18 @@ test('at the threshold the band adds a second button on strip:jump2 that reads a
 test('pressing 2 asks before /wrap, and only the yes runs it', async () => {
   percent = 40
   answer = WRAP_YES
-  await wrapButton(await band()).props.onPress()
+  await wrapButton(await keys()).props.onPress()
   expect(asks).toEqual([{ question: WRAP_QUESTION, options: { header: 'Wrap', options: [WRAP_YES, 'Not now'] } }])
   expect(ran).toEqual([{ command: 'wrap', args: '' }])
 
   answer = 'Not now'
-  await wrapButton(await band()).props.onPress()
+  await wrapButton(await keys()).props.onPress()
   expect(asks).toHaveLength(2)
   expect(ran).toHaveLength(1)
 
   // dismissed, or a `-p` run with nobody to ask: nothing runs and nothing is said
   answer = new Error('dismissed')
-  await wrapButton(await band()).props.onPress()
+  await wrapButton(await keys()).props.onPress()
   expect(ran).toHaveLength(1)
   expect(toasts).toEqual([])
 })
@@ -1459,7 +1896,7 @@ test('a /wrap the answer runs that the engine refuses is said once', async () =>
   percent = 40
   answer = WRAP_YES
   $.command.run = async () => { throw new Error('no session') }
-  await wrapButton(await band()).props.onPress()
+  await wrapButton(await keys()).props.onPress()
   $.command.run = async (args: any) => { ran.push(args); return { text: '' } }
   expect(toasts).toEqual(['/wrap did not run: Error: no session'])
   expect(ran).toEqual([])
@@ -1473,20 +1910,22 @@ test('a /wrap the answer runs that the engine refuses is said once', async () =>
 // A summary written any other way proves nothing.
 const WRAPPED = '/work/.cs/local/wrapped'
 const turnStart = (text: string) => hooks['turn.start']($, { text, turnId: `turn-${text.length}` }, async (e: any) => ({ turnId: e.turnId }))
+// A main-loop turn from its start to its end: the keys draw again once it is over.
+const turn = async (text: string) => { await turnStart(text); await turnComplete() }
 
 test('a finished wrap hides the wrap key until a turn starts from a prompt', async () => {
   percent = 40
-  await turnStart('please wrap up')
+  await turn('please wrap up')
   files[WRAPPED] = 'uuid-lead\n'
-  expect(wrapButton(await band())).toBeUndefined()
-  expect(findButton(await band()).props.action).toBe('strip:jump1')
+  expect(wrapButton(await keys())).toBeUndefined()
+  expect(findButton(await keys()).props.action).toBe('strip:jump1')
 
-  await turnStart('')
-  expect(wrapButton(await band())).toBeUndefined()
+  await turn('')
+  expect(wrapButton(await keys())).toBeUndefined()
 
-  await turnStart('next thing')
+  await turn('next thing')
   expect(files[WRAPPED]).toBe('')
-  expect(wrapButton(await band())).toBeDefined()
+  expect(wrapButton(await keys())).toBeDefined()
 })
 
 // Work queued behind the wrap starts its own turn, and a second wrap that fails
@@ -1494,12 +1933,12 @@ test('a finished wrap hides the wrap key until a turn starts from a prompt', asy
 test('queued work, or a second wrap that fails, brings the key back', async () => {
   percent = 40
   files[WRAPPED] = 'uuid-lead\n'
-  await turnStart('and then fix the tests')
-  expect(wrapButton(await band())).toBeDefined()
+  await turn('and then fix the tests')
+  expect(wrapButton(await keys())).toBeDefined()
 
   files[WRAPPED] = 'uuid-lead\n'
-  await turnStart('/wrap')
-  expect(wrapButton(await band())).toBeDefined()
+  await turn('/wrap')
+  expect(wrapButton(await keys())).toBeDefined()
 })
 
 test('while git tracks the control files, a prompt leaves the wrap marker as git has it', async () => {
@@ -1515,17 +1954,17 @@ test('while git tracks the control files, a prompt leaves the wrap marker as git
 test('a summary with no wrap marker, or a marker naming another conversation, keeps the wrap key', async () => {
   percent = 40
   files['/work/.cs/summary.md'] = '# Session Summary\n'
-  expect(wrapButton(await band())).toBeDefined()
+  expect(wrapButton(await keys())).toBeDefined()
   files[WRAPPED] = 'uuid-teammate\n'
-  expect(wrapButton(await band())).toBeDefined()
+  expect(wrapButton(await keys())).toBeDefined()
   await turnStart('x')
   expect(files[WRAPPED]).toBe('uuid-teammate\n')
 })
 
 test('an armed handoff draws the clear key alone: no wrap key', async () => {
   arm(); percent = 90
-  expect(buttons(await band())).toHaveLength(1)
-  expect(wrapButton(await band())).toBeUndefined()
+  expect(buttons(await keys())).toHaveLength(1)
+  expect(wrapButton(await keys())).toBeUndefined()
 })
 
 // The engine refuses a tree with a Button under an inline element (measured
@@ -1533,16 +1972,33 @@ test('an armed handoff draws the clear key alone: no wrap key', async () => {
 // and the whole band vanishes with it.
 function buttonsUnderText(tree: any, inText = false): number {
   if (!tree || typeof tree !== 'object') return 0
+  // A list of children the fixture's h kept nested, as a map's result is.
+  if (Array.isArray(tree)) return tree.reduce((n: number, c: any) => n + buttonsUnderText(c, inText), 0)
   if (tree.type === 'Button' && inText) return 1
   const inline = inText || tree.type === 'Text'
   return (tree.children ?? []).reduce((n: number, c: any) => n + buttonsUnderText(c, inline), 0)
 }
 
-test('no button is ever nested in a Text, armed or not', async () => {
+test('no button is ever nested in a Text, armed or not, above the prompt or under it', async () => {
+  // The count sees a Button under a Text through a nested list of children.
+  expect(buttonsUnderText({ type: 'Text', props: {}, children: [[{ type: 'Button', props: {}, children: [] }]] })).toBe(1)
+  files[WIDTH] = 'uuid-lead 60 4242\n'
   percent = 40
-  expect(buttonsUnderText(await band())).toBe(0)
+  queueTasks(2)
+  const sites = async () => {
+    const above = await band()
+    const right = await footerMode(110)
+    const inline = await footerHint(64)
+    expect([above, right, inline].map(tree => buttons(tree).length)).toEqual([1, 2, 2])
+    return [above, right, inline].map(tree => buttonsUnderText(tree))
+  }
+  await band()
+  await settleTimers()
+  expect(await sites()).toEqual([0, 0, 0])
   arm()
-  expect(buttonsUnderText(await band())).toBe(0)
+  const armed = [await band(), await footerMode(110), await footerHint(64)]
+  expect(armed.map(tree => buttons(tree).length)).toEqual([0, 1, 1])
+  expect(armed.map(tree => buttonsUnderText(tree))).toEqual([0, 0, 0])
 })
 
 // The contract lets a held key repeat on keydown, and a digit with no button
@@ -1574,16 +2030,16 @@ const startGrace = async () => {
 test('the band\'s count ramps: session colour past ten seconds, amber from ten to five, crit red under five', async () => {
   envVars.CS_TERM_BG_RGB = '252;247;229'
   await startGrace()
-  let count = countText(await band())
+  let count = countText(await keys())
   expect(count.props).toMatchObject({ bold: true, color: 'rgb(220,38,38)' })
   await tick(9) // 11 s left
-  expect(countText(await band()).props.color).toBe('rgb(220,38,38)')
+  expect(countText(await keys()).props.color).toBe('rgb(220,38,38)')
   await tick(1) // 10
-  expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
+  expect(countText(await keys()).props.color).toBe('rgb(180,83,9)')
   await tick(5) // 5
-  expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
+  expect(countText(await keys()).props.color).toBe('rgb(180,83,9)')
   await tick(1) // 4
-  count = countText(await band())
+  count = countText(await keys())
   expect(textOf(count)).toBe('in 4s')
   expect(count.props.color).toBe('rgb(215,0,21)')
 })
@@ -1593,22 +2049,22 @@ test('on a dark terminal the ramp takes the bar\'s dark inks', async () => {
   envVars.CS_TERM_THEME = 'dark'
   files['/work/.cs/local/state'] = 'claude_session_color: cyan\nclaude_session_id: uuid-lead\n'
   await startGrace()
-  expect(countText(await band()).props.color).toBe('rgb(8,145,178)')
+  expect(countText(await keys()).props.color).toBe('rgb(8,145,178)')
   await tick(10)
-  expect(countText(await band()).props.color).toBe('rgb(251,191,36)')
+  expect(countText(await keys()).props.color).toBe('rgb(251,191,36)')
   await tick(6)
-  expect(countText(await band()).props.color).toBe('rgb(255,69,58)')
+  expect(countText(await keys()).props.color).toBe('rgb(255,69,58)')
 })
 
 test('a session with no colour, or one outside the palette, keeps the band\'s own ink until the amber', async () => {
   files['/work/.cs/local/state'] = 'claude_session_color: chartreuse\nclaude_session_id: uuid-lead\n'
   await startGrace()
-  expect(countText(await band()).props.color).toBeUndefined()
+  expect(countText(await keys()).props.color).toBeUndefined()
   files['/work/.cs/local/state'] = 'claude_session_id: uuid-lead\n'
-  expect(countText(await band()).props.color).toBeUndefined()
+  expect(countText(await keys()).props.color).toBeUndefined()
   await tick(10)
   // no measured background and no theme: the light amber, as the bar picks
-  expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
+  expect(countText(await keys()).props.color).toBe('rgb(180,83,9)')
 })
 
 
@@ -1636,7 +2092,7 @@ test('a handoff armed after the /clear, in the same process, is toasted in its t
   files[HANDOFF] = '---\nparent: uuid-two\nstatus: unconsumed\n---\n\n## 1. Next Step\n\nShip it.\n'
   sessionId = 'uuid-two'; percent = 10
   files['/work/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-two\n'
-  await band(); await turnComplete(); await fireAfter()
+  await keys(); await turnComplete(); await fireAfter()
   expect(toasts).toEqual(['next step: Run the secrets suites solo.', 'next step: Ship it.'])
 })
 
@@ -1645,7 +2101,7 @@ test('a count that ends before its timer fires, or a handoff with no next step, 
   await promptSubmit()
   await fireAfter()
   expect(toasts).toEqual([])
-  register(on as any, OPTIONS)
+  register(on as any)
   arm(); files[HANDOFF] = '---\nparent: uuid-lead\nstatus: unconsumed\n---\n\nNo heading here.\n'
   await band(); await turnComplete(); await fireAfter()
   expect(ticker()).toBeDefined()
@@ -1658,10 +2114,10 @@ test('no path of the mod opens, closes or lists a pane', async () => {
   await startGrace(); await fireAfter()
   await promptSubmit()
   await turnComplete(); await fireAfter()
-  await findButton(await band()).props.onPress()
+  await findButton(await keys()).props.onPress()
   await hooks['command.run:clear']($, { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }, async () => ({ text: '' }))
-  register(on as any, OPTIONS); arm()
-  await band(); await turnComplete(); await tick(GRACE_SECONDS)
+  register(on as any); arm()
+  await keys(); await turnComplete(); await tick(GRACE_SECONDS)
   expect(ran.filter(r => r.command === 'clear')).toHaveLength(2)
   expect(panes).toEqual([])
   expect(hooks['ui.render:Pane']).toBeUndefined()
@@ -1996,21 +2452,20 @@ test('the start key is gone while the queue is armed or draining, and while it i
   expect(queueKey(await band()).props.label).toBe('\u25a4 run 1 queued task')
 })
 
-test('past the threshold the start key comes after the rotate and wrap keys, a dim middle dot before it', async () => {
+test('past the threshold the start key stands alone on the band, and the rotate and wrap keys under the prompt', async () => {
   percent = 40
   queueTasks(3)
   const tree = await band()
-  expect(buttons(tree).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap', 'cs-queue'])
-  const body = bandBody(tree)
-  const at = body.indexOf(queueKey(tree))
-  expect(body[at - 1]).toEqual({ type: 'Text', props: { dimColor: true }, children: [' \u00b7 '] })
+  expect(buttons(tree).map((b: any) => b.props.key)).toEqual(['cs-queue'])
+  expect(bandBody(tree)).toEqual([queueKey(tree)])
   expect(buttonsUnderText(tree)).toBe(0)
+  expect(buttons(await footerHint()).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap'])
 })
 
 test('an armed handoff draws the clear key alone, whatever is queued', async () => {
   arm()
   queueTasks(2)
-  expect(buttons(await band()).map((b: any) => b.props.key)).toEqual(['cs-rotate'])
+  expect(buttons(await keys()).map((b: any) => b.props.key)).toEqual(['cs-rotate'])
 })
 
 test('a teammate conversation, or one cs did not launch, gets no start key', async () => {
@@ -2178,7 +2633,7 @@ test('a gate whose pid is dead, or a record past its gate, draws no band', async
   expect(await band({ isWorking: true })).toBe(DRAWN)
 })
 
-test('with the rotation keys up, the gate word is the band\'s last word, dim, across the spacer at the right edge, and both keys stay', async () => {
+test('with the rotation keys up, the gate word is the band\'s last word, dim, across the spacer at the right edge, and both keys stay under the prompt', async () => {
   livePids.add('4242')
   nowMs = NOW * 1000
   percent = 40
@@ -2186,7 +2641,7 @@ test('with the rotation keys up, the gate word is the band\'s last word, dim, ac
   record(running('gate', { gate_started: NOW - 3 }))
   await watchTick()
   const tree = await band()
-  expect(buttons(tree)).toHaveLength(2)
+  expect(buttons(await footerHint())).toHaveLength(2)
   const body = bandBody(tree)
   expect(body.at(-1)).toMatchObject({ type: 'Text', props: { dimColor: true }, children: ['finishing fix-auth · gate 3s'] })
   expect(body.at(-2)).toMatchObject({ type: 'Box', props: { key: 'cs-spacer', flexGrow: 1 }, children: [] })
@@ -2320,9 +2775,7 @@ test('a conversation with one prompt draws no rail', async () => {
   transcript(LINEAR.slice(0, 2))
   percent = 40
   await turnComplete()
-  const tree = await band()
-  expect(rail(tree)).toEqual([])
-  expect(words(tree)).toEqual(['   '])
+  expect(await band()).toBe(DRAWN)
 })
 
 test('the transcript is read again only when its size or mtime changed', async () => {
@@ -2398,35 +2851,28 @@ test('a session\'s own claude-config whose link dangles, its vault locked, still
 })
 
 test('past the width budget the oldest prompts collapse into one dim …N run at the left', async () => {
-  register(on as any, UNCAPPED)
-  envVars.HOME = '/home'
-  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
-  percent = 40
+  register(on as any)
+  Object.assign(envVars, UNCAPPED)
   const many = [prompt('u1', null, 'p1')]
   for (let i = 2; i <= 30; i++) many.push(reply(`a${i - 1}`, `u${i - 1}`), prompt(`u${i}`, `a${i - 1}`, `p${i}`))
   transcript(many)
   await turnComplete()
-  // The two-column inset + `ctrl+x 1 rotate   2 wrap` (24) + `   ` (3) + rail: 35 columns leave 6 cells
-  // for 30 ticks, so 28 collapse into `…28`, a cell, and two ticks follow.
-  const glyphs = rail(await band({ bodyColumns: 35 }))
+  // After the two-column inset 8 columns leave 6 cells for 30 ticks, so 28
+  // collapse into `…28`, a cell, and two ticks follow.
+  const glyphs = rail(await band({ bodyColumns: 8 }))
   expect(glyphs).toEqual(['\u202628', '\u2502', '\u2503'])
-  expect(tickButtons(await band({ bodyColumns: 35 })).map((b: any) => b.props.key)).toEqual(['cs-rail-28'])
-  expect(texts(await band({ bodyColumns: 35 })).find((t: any) => textOf(t) === '\u202628').props).toEqual({ dimColor: true })
-  expect(bandLine(await band({ bodyColumns: 35 }), 35)).toBe('  ctrl+x 1 rotate   2 wrap   \u202628 \u2502\u2503')
+  expect(tickButtons(await band({ bodyColumns: 8 })).map((b: any) => b.props.key)).toEqual(['cs-rail-28'])
+  expect(texts(await band({ bodyColumns: 8 })).find((t: any) => textOf(t) === '\u202628').props).toEqual({ dimColor: true })
+  expect(bandLine(await band({ bodyColumns: 8 }), 8)).toBe('  \u202628 \u2502\u2503')
   // A cell fewer folds one more: the cell after the run is the run's to keep.
-  expect(bandLine(await band({ bodyColumns: 34 }), 34)).toBe('  ctrl+x 1 rotate   2 wrap   \u202629 \u2503')
+  expect(bandLine(await band({ bodyColumns: 7 }), 7)).toBe('  \u202629 \u2503')
   // Wide enough, every tick draws.
   expect(rail(await band({ bodyColumns: 110 }))).toHaveLength(30)
-  // The rail keeps its least, `…29 ┃` and the three cells before it: at 33
-  // columns the shared prefix goes first, and the bars take the cells it left.
-  expect(bandLine(await band({ bodyColumns: 33 }), 33)).toBe('  1 rotate   2 wrap   …23 ││││││┃')
-  // The actions outrank it: where even their keys cannot stand beside that
-  // least, they take the whole line and the rail goes.
-  expect(bandLine(await band({ bodyColumns: 14 }), 14)).toBe('  1 rotate   2')
 })
 
 test('the prompt being read is the on-screen row drawn highest, the earliest on ties; a first null report leaves nothing, a later one removes the report; placeholder is ignored', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   await drawRow('placeholder', 'say four', { first: 0, last: 1, of: 2 })
@@ -2448,7 +2894,8 @@ test('the prompt being read is the on-screen row drawn highest, the earliest on 
 })
 
 test('a report that moves the read prompt redraws the band from a timer, never from the render itself', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   await band()
@@ -2460,7 +2907,8 @@ test('a report that moves the read prompt redraws the band from a timer, never f
 })
 
 test('a tick\'s press scrolls the transcript to the prompt\'s row; a refusal marks the tick dotted and is toasted once a session', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   await drawRow('u1', 'say one', { first: 0, last: 1, of: 2 })
@@ -2526,7 +2974,8 @@ test('bare /cs, blank or spaces, goes to the next hook untouched and returns its
 })
 
 test('rows drawn where the band is not the lead\'s, or under a survey, redraw once at most: the read tick settles even when the rail is not drawn', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   const pending = () => timers.filter(t => t.kind === 'after' && !t.cancelled).length
@@ -2550,7 +2999,8 @@ test('rows drawn where the band is not the lead\'s, or under a survey, redraw on
 })
 
 test('with no prompt row left in the viewport, the read tick stays on the prompt last read, not the newest', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   await drawRow('u2', 'say two', { first: 0, last: 1, of: 2 })
@@ -2564,7 +3014,8 @@ test('with no prompt row left in the viewport, the read tick stays on the prompt
 })
 
 test('a prompt whose row has not been drawn is matched by its text only when that text is its alone', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript([
     prompt('u1', null, 'continue'), reply('a1', 'u1'),
     prompt('u2', 'a1', 'continue'), reply('a2', 'u2'),
@@ -2614,9 +3065,8 @@ test('a line too narrow for any tick, with nothing else to say, draws nothing', 
 })
 
 test('the rail ends in the line\'s last cell across the spacer from the words, as upright bars, and the read prompt stands before it', async () => {
-  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
   transcript(LINEAR)
-  percent = 80
+  queueTasks(2)
   await turnComplete()
   const tree = await band()
   const kids = bandBody(tree)
@@ -2624,10 +3074,10 @@ test('the rail ends in the line\'s last cell across the spacer from the words, a
   expect(texts(kids[kids.length - 2]).includes(gapLabel(tree))).toBe(true)
   expect(boxes(tree).filter((b: any) => b.props.flexGrow !== undefined).map((b: any) => b.props)).toEqual([{ key: 'cs-spacer', flexGrow: 1 }])
   expect(rail(tree)).toEqual(['│', '│', '│', '┃'])
-  // 108 cells after the inset: `ctrl+x 1 rotate   2 wrap` (24), three cells, the name sized to
-  // `#3 say three` (12), three cells and the bars (4) leave 62 between the zones; the name is padded on its left.
+  // 108 cells after the inset: `▤ run 2 queued tasks` (20), three cells, the name sized to
+  // `#3 say three` (12), three cells and the bars (4) leave 66 between the zones; the name is padded on its left.
   expect(textOf(gapLabel(tree))).toBe(' #4 say four')
-  expect(bandLine(tree, 110)).toBe(`  ctrl+x 1 rotate   2 wrap${' '.repeat(66)}#4 say four   │││┃`)
+  expect(bandLine(tree, 110)).toBe(`  ▤ run 2 queued tasks${' '.repeat(70)}#4 say four   │││┃`)
 })
 
 test('the focus ring never lands on a rail tick: the keyboard route is /cs', async () => {
@@ -2641,7 +3091,8 @@ test('the focus ring never lands on a rail tick: the keyboard route is /cs', asy
 const gapLabel = (tree: any) => texts(tree).find((t: any) => t.props.italic && t.props.color === 'subtle')
 
 test('before the bars the band names the prompt being read, light gray italic, whether or not words stand before them', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   const tree = await band()
@@ -2711,7 +3162,8 @@ test('the gap\'s prompt is cut to the gap with an ellipsis; a gap under ten cell
 })
 
 test('a rail past its budget takes the whole gap: no prompt is named beside a collapsed run', async () => {
-  register(on as any, UNCAPPED)
+  register(on as any)
+  Object.assign(envVars, UNCAPPED)
   const many = [prompt('u1', null, 'p1')]
   for (let i = 2; i <= 30; i++) many.push(reply(`a${i - 1}`, `u${i - 1}`), prompt(`u${i}`, `a${i - 1}`, `p${i}`))
   transcript(many)
@@ -2761,7 +3213,6 @@ test('the gap\'s prompt is measured and cut in cells: wide characters take two, 
 })
 
 test('the right edge keeps its margins: three cells after the actions, three between the status words and the name, three between the name and the bars', async () => {
-  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
   transcript(LINEAR)
   await turnComplete()
   const margins = (tree: any) => {
@@ -2771,14 +3222,14 @@ test('the right edge keeps its margins: three cells after the actions, three bet
     return [statusBox.props.marginLeft, labelBox?.props.marginLeft, railBox.props.marginLeft]
   }
   expect(margins(await band())).toEqual([0, 0, 3])
-  percent = 80
+  queueTasks(2)
   expect(margins(await band())).toEqual([3, 0, 3])
   files['/work/.cs/local/mail/new/one.json'] = '{}'
   expect(margins(await band())).toEqual([3, 3, 3])
   delete files['/work/.cs/local/mail/new/one.json']
   // No room to name a prompt: the bars alone, three cells after the actions.
   expect(margins(await band({ bodyColumns: 40 }))).toEqual([3, undefined, 0])
-  expect(bandLine(await band({ bodyColumns: 40 }), 40)).toBe(`  ctrl+x 1 rotate   2 wrap${' '.repeat(10)}│││┃`)
+  expect(bandLine(await band({ bodyColumns: 40 }), 40)).toBe(`  ▤ run 2 queued tasks${' '.repeat(14)}│││┃`)
 })
 
 // ---------------------------------------------------------------------------
@@ -2919,8 +3370,7 @@ test('a cs that fails, cannot start, or prints a record the band cannot read dra
   ])
 })
 
-test('the features word leads the right edge before the rail, yields to a running gate, and the key words leave the rail where it stood', async () => {
-  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
+test('the features word leads the right edge before the rail, yields to a running gate, and the keys under the prompt take none of the line', async () => {
   featureDir('fix-auth')
   porcelain(feature('fix-auth', 3, 'ready'))
   transcript(LINEAR)
@@ -2932,11 +3382,8 @@ test('the features word leads the right edge before the rail, yields to a runnin
   expect(bandLine(tree, 110)).toBe(`  ${' '.repeat(60)}1 feature · fix-auth ready    #4 say four   │││┃`)
   percent = 80
   tree = await band()
-  const order = bandBody(tree).map((k: any) => k.type === 'Button' ? k.props.key : k.type === 'Text' ? textOf(k) : texts(k).map(textOf).join(''))
-  expect(order.slice(0, 8)).toEqual(['ctrl+x', '1', 'cs-rotate', '   ', '2', 'cs-wrap', '', 'cs-features'])
-  // `ctrl+x 1 rotate   2 wrap` (24) and three cells come out of the spacer's 60: the bars stay in their column.
-  expect(textOf(gapLabel(tree))).toBe(' #4 say four')
-  expect(bandLine(tree, 110)).toBe(`  ctrl+x 1 rotate   2 wrap${' '.repeat(36)}1 feature · fix-auth ready    #4 say four   │││┃`)
+  expect(bandLine(tree, 110)).toBe(`  ${' '.repeat(60)}1 feature · fix-auth ready    #4 say four   │││┃`)
+  expect(buttons(await footerHint()).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap'])
   percent = undefined
   queueTasks(1)
   tree = await band()
@@ -3115,18 +3562,16 @@ test('tasks queued while the queue runs, or while a turn runs, draw a queue word
   expect(await band()).toBe(DRAWN)
 })
 
-test('the queue word stands at the left after the key words, a dim middle dot between them, and draws no right edge', async () => {
+test('the queue word stands at the left, alone past the threshold too, and draws no right edge', async () => {
   queueTasks(2)
   files['/work/.cs/local/queue.state'] = 'armed\n'
   expect(restingWords(await band())).toEqual(['▤ queue 2 running'])
   percent = 40
   const tree = await band()
-  expect(buttons(tree).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap'])
-  expect(restingWords(tree)).toEqual(['   ', ' · ', '▤ queue 2 running'])
-  expect(bandBody(tree).map((k: any) => k.props.key ?? textOf(k))).toEqual(['cs-rotate', '   ', 'cs-wrap', ' · ', '▤ queue 2 running'])
+  expect(buttons(tree)).toEqual([])
+  expect(bandBody(tree).map((k: any) => k.props.key ?? textOf(k))).toEqual(['▤ queue 2 running'])
   expect(boxes(tree).filter((b: any) => ['cs-spacer', 'cs-status'].includes(b.props.key))).toEqual([])
-  // No chord bound: `rotate   wrap` (13), the dot's three cells and the word (17).
-  expect(bandLine(tree, 110)).toBe('  rotate   wrap · ▤ queue 2 running')
+  expect(bandLine(tree, 110)).toBe('  ▤ queue 2 running')
 })
 
 test('the queue glyph takes the status line\'s amber, light on a dark terminal and dark on a light one, on the start key and the queue word alike', async () => {
@@ -3145,8 +3590,8 @@ test('the queue glyph takes the status line\'s amber, light on a dark terminal a
 // twelve tab-separated fields a record, the value ninth and its source tenth.
 const PORCELAIN = readFileSync(new URL('../../../tests/fixtures/config-porcelain.txt', import.meta.url), 'utf8')
 const SETTINGS_ARGV = ['/opt/cs/bin/cs', '-config', 'list', '--porcelain']
-// The golden with <key>'s record carrying <value> from <source>, or without the record.
-const porcelainWith = (key: string, value?: string, source?: string) => PORCELAIN.split('\n').flatMap((line: string) => {
+// The golden (or <base>) with <key>'s record carrying <value> from <source>, or without the record.
+const porcelainWith = (key: string, value?: string, source?: string, base = PORCELAIN) => base.split('\n').flatMap((line: string) => {
   const fields = line.split('\t')
   if (fields[0] !== key) return [line]
   if (value === undefined || source === undefined) return []
@@ -3178,18 +3623,18 @@ test('the golden\'s session CS_STATUSLINE_CTX_WARN=50 moves the band from the 40
   answerSettings(PORCELAIN)
   await sessionStart(); await settle()
   percent = 49
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
   percent = 50
-  expect(findButton(await band())).toBeDefined()
+  expect(findButton(await keys())).toBeDefined()
 })
 
 test('a settings file\'s CS_ROTATE_BUTTON_CTX moves the band alone', async () => {
   answerSettings(porcelainWith('CS_ROTATE_BUTTON_CTX', '55', 'machine'))
-  await turnStart('go'); await settle()
+  await turn('go'); await settle()
   percent = 54
-  expect(await band()).toBe(DRAWN)
+  expect(await keys()).toBe(HINT_DRAWN)
   percent = 55
-  expect(findButton(await band())).toBeDefined()
+  expect(findButton(await keys())).toBeDefined()
 })
 
 test('a settings file\'s CS_ROTATE_FORCE_CTX=off, read as the turn started, stops the rotation its end would force', async () => {
@@ -3237,7 +3682,7 @@ test('a background a settings file pins outranks the dark theme the launch measu
   expect(await queueAmber()).toBe('rgb(180,83,9)')
   await startGrace()
   await tick(10)
-  expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
+  expect(countText(await keys()).props.color).toBe('rgb(180,83,9)')
 })
 
 // The loader drops the launch's measured background when a file pins the
@@ -3267,7 +3712,7 @@ test('the count\'s amber takes a settings file\'s theme over the launch\'s', asy
   await sessionStart(); await settle()
   await startGrace()
   await tick(10)
-  expect(countText(await band()).props.color).toBe('rgb(180,83,9)')
+  expect(countText(await keys()).props.color).toBe('rgb(180,83,9)')
 })
 
 test('an answer that moves a setting redraws the band; the same answer again does not', async () => {
@@ -3330,7 +3775,7 @@ test('an encrypted session counts its mail behind .cs/private', async () => {
   expect(restingWords(await band())).toEqual(['mail 1'])
 })
 
-test('the mail word comes last, after the queue and key words, and never under a survey or in a teammate', async () => {
+test('the mail word comes last, after the queue word, and never under a survey or in a teammate', async () => {
   queueTasks(2)
   files['/work/.cs/local/queue.state'] = 'armed\n'
   files[`${MAIL}/new/1-a.json`] = '{}'
@@ -3344,7 +3789,7 @@ test('the mail word comes last, after the queue and key words, and never under a
   expect(await band()).toBe(DRAWN)
 })
 
-test('the queue word stands at the left and the mail word before the rail at the right edge, and the key words take their cells from the spacer', async () => {
+test('the queue word stands at the left and the mail word before the rail at the right edge, and the keys under the prompt take none of the line', async () => {
   transcript(LINEAR)
   await turnComplete()
   queueTasks(2)
@@ -3357,10 +3802,7 @@ test('the queue word stands at the left and the mail word before the rail at the
   expect(textOf(gapLabel(tree))).toBe(' #4 say four')
   expect(bandLine(tree, 110)).toBe(`  ▤ queue 2 running${' '.repeat(63)}mail 1    #4 say four   │││┃`)
   percent = 80
-  // No chord bound: `rotate   wrap` (13) and the dot's three cells come out of the spacer.
-  const keyed = await band()
-  expect(textOf(gapLabel(keyed))).toBe(' #4 say four')
-  expect(bandLine(keyed, 110)).toBe(`  rotate   wrap · ▤ queue 2 running${' '.repeat(47)}mail 1    #4 say four   │││┃`)
+  expect(bandLine(await band(), 110)).toBe(`  ▤ queue 2 running${' '.repeat(63)}mail 1    #4 say four   │││┃`)
 })
 
 test('the mail word counts neither a stray file nor a directory in new/', async () => {
@@ -3371,8 +3813,9 @@ test('the mail word counts neither a stray file nor a directory in new/', async 
 })
 
 // ---------------------------------------------------------------------------
-// The band's /config rows: cs.bandPrompt picks the prompt it names (the newest,
-// or the one being read), cs.bandBars the most bars before older prompts fold.
+// cs's prompt-bar settings: CS_BAND_PROMPTS draws the bars, CS_BAND_PROMPT
+// picks the prompt the band names (the newest, or the one being read), and
+// CS_BAND_BARS the most bars before older prompts fold.
 
 test('by default the band names the newest prompt and draws its bar thick, wherever the reader is; a scroll redraws nothing', async () => {
   transcript(LINEAR)
@@ -3387,8 +3830,8 @@ test('by default the band names the newest prompt and draws its bar thick, where
   expect(rail(tree)).toEqual(['│', '│', '│', '┃'])
 })
 
-test('with cs.bandPrompt read the band names the prompt being read and draws its bar thick', async () => {
-  register(on as any, { ...OPTIONS, bandPrompt: 'read' })
+test('with CS_BAND_PROMPT=read the band names the prompt being read and draws its bar thick', async () => {
+  envVars.CS_BAND_PROMPT = 'read'
   transcript(LINEAR)
   await turnComplete()
   await drawRow('u2', 'say two', { first: 0, last: 1, of: 2 })
@@ -3397,7 +3840,7 @@ test('with cs.bandPrompt read the band names the prompt being read and draws its
   expect(rail(tree)).toEqual(['│', '┃', '│', '│'])
 })
 
-test('at most cs.bandBars bars draw; older prompts fold into …N and the prompt is still named', async () => {
+test('at most CS_BAND_BARS bars draw, 10 when unset; older prompts fold into …N and the prompt is still named', async () => {
   const many = [prompt('u1', null, 'p1')]
   for (let i = 2; i <= 30; i++) many.push(reply(`a${i - 1}`, `u${i - 1}`), prompt(`u${i}`, `a${i - 1}`, `p${i}`))
   transcript(many)
@@ -3407,7 +3850,8 @@ test('at most cs.bandBars bars draw; older prompts fold into …N and the prompt
   // `…20`, its cell and ten bars are 14 cells; the name is as wide as the widest prompt a drawn bar can swap in.
   expect(textOf(gapLabel(tree))).toBe('#30 p30')
   expect(boxes(tree).find((b: any) => (b.children ?? []).flat(Infinity).includes(gapLabel(tree))).props.width).toBe(7)
-  register(on as any, { ...OPTIONS, bandBars: 3 })
+  register(on as any)
+  envVars.CS_BAND_BARS = '3'
   transcript(many, 2)
   await turnComplete()
   tree = await band()
@@ -3416,27 +3860,21 @@ test('at most cs.bandBars bars draw; older prompts fold into …N and the prompt
   expect(boxes(tree).filter((b: any) => b.props.display === 'none')).toHaveLength(2)
 })
 
-test('/config refuses a band value the band cannot draw, where it is typed, and passes every other row', async () => {
-  const set = (key: string, value: unknown, plugin = 'cs') => hooks['config.set']($,
-    { key, value, previous: 10, provider: { plugin, tier: 'user' }, origin: { kind: 'composer' } },
-    async (e: any) => ({ value: e.value }))
-  for (const value of [0, -2, 2.5]) {
-    expect(await set('cs.bandBars', value)).toEqual({ deny: `cs.bandBars is the most bars the band draws, a whole number of 1 or more; got ${value}` })
-  }
-  expect(await set('cs.bandPrompt', 'first')).toEqual({ deny: 'cs.bandPrompt is latest or read; got first' })
-  expect(await set('cs.bandPrompts', 'yes')).toEqual({ deny: 'cs.bandPrompts is on or off; got yes' })
-  expect(await set('cs.bandPrompts', true)).toEqual({ value: true })
-  expect(await set('cs.bandBars', 4)).toEqual({ value: 4 })
-  expect(await set('cs.bandPrompt', 'read')).toEqual({ value: 'read' })
-  expect(await set('other.bandBars', 0, 'other')).toEqual({ value: 0 })
-  expect(await set('theme', 'dark', 'engine')).toEqual({ value: 'dark' })
+test('/config has no row of the band\'s: the prompt bars are three cs settings, which /cs lists', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
+  expect(manifest.userConfig).toBeUndefined()
+  expect(PORCELAIN.split('\n').filter((l: string) => l.startsWith('CS_BAND_')).map((l: string) => l.split('\t').slice(0, 6))).toEqual([
+    ['CS_BAND_PROMPTS', 'Prompt bars', 'Prompt bars', 'flag', '-', 'off'],
+    ['CS_BAND_PROMPT', 'Prompt bars', 'Named prompt', 'choice', 'latest,read', 'latest'],
+    ['CS_BAND_BARS', 'Prompt bars', 'Most bars', 'text', '-', '10'],
+  ])
 })
 
-test('a bad band value already stored draws no bars and says so once; the rest of the mod still runs', async () => {
-  expect(() => register(on as any, { ...OPTIONS, bandBars: 0 })).not.toThrow()
+test('a CS_BAND_BARS or CS_BAND_PROMPT the band cannot draw leaves it without bars and says so once a value; the rest of the band still runs', async () => {
+  envVars.CS_BAND_BARS = '0'
   transcript(LINEAR)
   await turnComplete()
-  percent = 80
+  files[`${MAIL}/new/1-a.json`] = '{}'
   // A teammate's band, like any the mod stays silent in, says nothing.
   sessionId = 'uuid-teammate'
   await band()
@@ -3444,21 +3882,57 @@ test('a bad band value already stored draws no bars and says so once; the rest o
   sessionId = 'uuid-lead'
   const tree = await band()
   expect(rail(tree)).toEqual([])
-  expect(buttons(tree).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap'])
+  expect(restingWords(tree)).toEqual(['mail 1'])
   await band()
-  expect(toasts).toEqual(['the band draws no prompt bars: cs.bandBars is the most bars the band draws, a whole number of 1 or more; got 0. Set it in /config.'])
+  expect(toasts).toEqual(['the band draws no prompt bars: CS_BAND_BARS is a whole number of 1 or more; got 0. /cs shows where it is set.'])
+  for (const bars of ['-2', '2.5', 'ten']) {
+    envVars.CS_BAND_BARS = bars
+    expect(rail(await band())).toEqual([])
+    await band()
+    expect(toasts.at(-1)).toBe(`the band draws no prompt bars: CS_BAND_BARS is a whole number of 1 or more; got ${bars}. /cs shows where it is set.`)
+  }
+  delete envVars.CS_BAND_BARS
+  envVars.CS_BAND_PROMPT = 'first'
+  expect(rail(await band())).toEqual([])
+  expect(toasts.at(-1)).toBe('the band draws no prompt bars: CS_BAND_PROMPT is latest or read; got first. /cs shows where it is set.')
+  expect(toasts).toHaveLength(5)
+  delete envVars.CS_BAND_PROMPT
+  expect(rail(await band())).toEqual(['│', '│', '│', '┃'])
+  expect(toasts).toHaveLength(5)
+  // With the bars off a bad value is said all the same.
+  envVars.CS_BAND_PROMPTS = '0'
+  envVars.CS_BAND_BARS = 'none'
+  expect(rail(await band())).toEqual([])
+  expect(toasts.slice(5)).toEqual(['the band draws no prompt bars: CS_BAND_BARS is a whole number of 1 or more; got none. /cs shows where it is set.'])
 })
 
-test('by plugin.json\'s defaults the band draws no prompt bars and names no prompt; its other words still draw', async () => {
-  const manifest = JSON.parse(readFileSync(new URL('../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
-  const defaults = Object.fromEntries(Object.entries(manifest.userConfig).map(([field, spec]: [string, any]) => [field, spec.default]))
-  expect(defaults).toEqual({ bandPrompts: false, bandPrompt: 'latest', bandBars: 10 })
-  register(on as any, defaults)
+test('a settings file turns the prompt bars on, picks their prompt and turns them off again, each from the next prompt, with no reload', async () => {
+  delete envVars.CS_BAND_PROMPTS
   transcript(LINEAR)
   await turnComplete()
-  expect(await band()).toBe(DRAWN)
-  percent = 80
+  files[`${MAIL}/new/1-a.json`] = '{}'
+  expect(rail(await band())).toEqual([])
+  answerSettings(porcelainWith('CS_BAND_PROMPT', 'read', 'machine', porcelainWith('CS_BAND_PROMPTS', '1', 'session')))
+  await turnStart('go'); await settle()
+  await drawRow('u2', 'say two', { first: 0, last: 1, of: 2 })
+  expect(rail(await band())).toEqual(['│', '┃', '│', '│'])
+  answerSettings(porcelainWith('CS_BAND_PROMPTS', '0', 'session'))
+  await turnStart('again'); await settle()
   const tree = await band()
+  expect(rail(tree)).toEqual([])
+  expect(restingWords(tree)).toEqual(['mail 1'])
+  expect(toasts).toEqual([])
+})
+
+test('by cs\'s defaults the band draws no prompt bars and names no prompt; its other words still draw', async () => {
+  delete envVars.CS_BAND_PROMPTS
+  answerSettings(PORCELAIN)
+  await sessionStart(); await settle()
+  transcript(LINEAR)
+  await turnComplete()
+  expect(await keys()).toBe(HINT_DRAWN)
+  percent = 80
+  const tree = await keys()
   expect(rail(tree)).toEqual([])
   expect(gapLabel(tree)).toBeUndefined()
   expect(buttons(tree).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap'])
@@ -3466,7 +3940,7 @@ test('by plugin.json\'s defaults the band draws no prompt bars and names no prom
 })
 
 test('with the prompt bars off, a scroll redraws nothing, whichever prompt the band would name', async () => {
-  register(on as any, { ...READING, bandPrompts: false })
+  Object.assign(envVars, READING, { CS_BAND_PROMPTS: '0' })
   transcript(LINEAR)
   await turnComplete()
   await band()
@@ -3527,25 +4001,25 @@ const bandScenes: [string, () => void | Promise<void>, { isWorking?: boolean; ha
   ['rail', async () => { transcript(LINEAR); await turnComplete() }],
   ['narrow rail', async () => { transcript(LINEAR); await turnComplete() }, { bodyColumns: 21 }],
   ['mixed row', async () => { percent = 40; queueTasks(2); files['/work/.cs/local/mail/new/one.json'] = '{}'; transcript(LINEAR); await featuresTurn() }],
-  ['unbound', () => { percent = 40; delete files[KEYS] }],
-  ['different prefixes', () => { percent = 40; bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+w 2': 'strip:jump2' }) }],
+  ['filter chat on', () => { percent = 40; enableFilterChat(); files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n' }],
 ]
 
+// Each scene's band above the prompt and its keys under it, the keys as they
+// stand in the hint's place.
 for (const [name, arrange, props] of bandScenes) {
-  test(`band drawing snapshot: ${name}`, async () => {
-    bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
+  test(`band and keys drawing snapshot: ${name}`, async () => {
     await arrange()
-    expect(JSON.stringify(bandSnapshot(await band(props)))).toMatchSnapshot()
+    expect(JSON.stringify({ band: bandSnapshot(await band(props)), keys: bandSnapshot(await footerHint()) })).toMatchSnapshot()
   })
 }
 
 // A design tool outside cs draws the band by calling drawBand with a view it spells out
-// by hand. Each view here is that fixture for one state, and must draw the
-// tree the handler draws from the same state's facts.
+// by hand, and the keys under the prompt by calling drawFooterKeys. Each view
+// here is that fixture for one state: its band entries must draw the tree the
+// handler draws from the same state's facts, and its footer entries the keys.
 const noPress = () => {}
 const noJump = async () => {}
 const OWN = 'rgb(220,38,38)'
-const KEYED = { 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' }
 const CHORDS = { 'strip:jump1': 'ctrl+x 1', 'strip:jump2': 'ctrl+x 2' }
 // The queue glyph's amber on a light terminal, or one that says nothing of its background.
 const AMBER = 'rgb(180,83,9)'
@@ -3573,18 +4047,18 @@ const bandViews: (readonly [string, () => void | Promise<void>, { isWorking?: bo
   ['mail', () => { files['/work/.cs/local/mail/new/one.json'] = '{}' }, {}, view({ entries: buildBandEntries({ ...quiet, mail: 1 }) })],
   ['features', async () => { featureDir('fix-auth'); porcelain(feature('fix-auth', 3, 'ready')); await featuresTurn() }, {}, view({ entries: buildBandEntries({ ...quiet, featured: { label: '1 feature · fix-auth ready', onPress: noPress } }) })],
   ['survey', async () => { await gateRuns() }, { hasSurvey: true }, view({ entries: buildBandEntries({ ...quiet, gate: 'finishing fix-auth · gate 3s' }) })],
-  ['no chords', () => { percent = 40; delete files[KEYS] }, {}, view({ chords: {}, entries: buildBandEntries({ ...quiet, rotating: true, wrapping: true }) })],
   ...railViews('rail of four', async () => { transcript(LINEAR); await turnComplete() }, FOUR),
   ...railViews('rail of thirty', async () => { thirtyPrompts(); await turnComplete() }, THIRTY),
   ['rail with no room for a tick', async () => { transcript(LINEAR); await turnComplete() }, { bodyColumns: 5 }, view({ bodyColumns: 5, rail: railOf(FOUR) })],
 ]
 
 for (const [name, arrange, props, fixture] of bandViews) {
-  test(`drawBand draws the handler's band from a fixture view: ${name}`, async () => {
-    bindKeys(KEYED)
+  test(`drawBand and drawFooterKeys draw the handler's band and keys from a fixture view: ${name}`, async () => {
     await arrange()
     const drawn = JSON.stringify(bandSnapshot(await band(props)))
-    expect(JSON.stringify(bandSnapshot(drawBand(fixture, { Box: 'Box', Text: 'Text', Button: 'Button' } as any)))).toBe(drawn)
+    expect(JSON.stringify(bandSnapshot(drawBand({ ...fixture, entries: entriesAt(fixture.entries, 'band') }, EL)))).toBe(drawn)
+    const under = entriesAt(fixture.entries, 'footer')
+    expect(JSON.stringify(bandSnapshot(under.length === 0 ? HINT_DRAWN : drawFooterKeys(under, EL)))).toBe(JSON.stringify(bandSnapshot(await footerHint())))
   })
 }
 
@@ -4064,7 +4538,7 @@ test('a band with no words and no room for a tick draws nothing', async () => {
 
 test('band entries keep the drawn rotate and wrap labels in order', async () => {
   percent = 40
-  const drawnLabels = buttons(await band()).map(button => button.props.label)
+  const drawnLabels = buttons(await keys()).map(button => button.props.label)
   const press = () => {}
   const entries = buildBandEntries({ rotating: true, armed: false, wrapping: true, waiting: 0, queued: 0, queueRunning: false, queueInk: AMBER, mail: 0, rotate: press, wrap: press, queue: press })
   expect(entries.map(entry => entry.label)).toEqual(drawnLabels)
@@ -4081,54 +4555,44 @@ test('the filter chat key toggles this session, answers no chord, and colours it
   enableFilterChat()
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
   percent = 40
-  const tree = await band()
+  const tree = await keys()
   expect(filterChatKey(tree)?.props.label).toBe('filter chat ○')
   expect(buttons(tree).find(button => button.props.label === 'filter chat ○')?.props.key).toBe('cs-filter-chat')
   expect(filterChatKey(tree).props.action).toBeUndefined()
-  expect(words(tree)).toEqual(['ctrl+x', '1', '   ', '2', ' · ', '○'])
+  expect(bandWords(tree)).toEqual(['rotate', ' · ', 'wrap', ' · ', 'filter chat ○'])
   await filterChatKey(tree).props.onPress()
   expect(runs.map(run => run.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work'], ['/opt/cs/bin/cs', 'work', '-config', 'set', 'CS_FILTER_CHAT', '1']])
-  const on = await band()
+  const on = await keys()
   expect(filterChatKey(on).props.label).toBe('filter chat ●')
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
   expect(texts(filterChatKey(on)).map(text => [textOf(text), text.props.color])).toEqual([['●', GREEN]])
   expect(ran).toEqual([])
   expect(invalidated).toEqual(['ui.render'])
   await filterChatKey(on).props.onPress()
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=0\n')
   expect(ran).toEqual([])
   expect(invalidated).toEqual(['ui.render', 'ui.render'])
-})
-
-test('the band shares the prefix of bound chords and leaves unbound labels unkeyed', async () => {
-  enableFilterChat()
-  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
-  percent = 40
-  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
-  expect(bandWords(await band())).toEqual(['ctrl+x', '1', 'rotate', '   ', '2', 'wrap', ' · ', 'filter chat ○'])
-  bindKeys({ 'ctrl+x 2': 'strip:jump2' })
-  expect(bandWords(await band())).toEqual(['rotate', '   ', 'ctrl+x', '2', 'wrap', ' · ', 'filter chat ○'])
 })
 
 test('a filter chat press refuses a session whose control files are tracked', async () => {
   enableFilterChat()
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
   runResult = tracked
-  await filterChatKey(await band()).props.onPress()
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  await filterChatKey(await keys()).props.onPress()
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
   expect(written).toEqual({})
   expect(runs.map(run => run.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work']])
   expect(toasts).toEqual([`no rotation in this session: ${TRACKED}`])
   expect(invalidated).toEqual(['ui.render'])
   runResult = VETTED
-  await filterChatKey(await band()).props.onPress()
+  await filterChatKey(await keys()).props.onPress()
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=0\n')
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-  await filterChatKey(await band()).props.onPress()
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
+  await filterChatKey(await keys()).props.onPress()
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ●')
 })
 
 // A prompt clears the handoff's refusal so its toast says it again, but cs's
@@ -4140,52 +4604,52 @@ test('a refused session keeps the filter chat key off across prompts, whichever 
   runResult = tracked
   await startSession()
   expect(runs.map(run => run.argv)).toEqual([['/opt/cs/bin/cs', '-vet-session', '/work']])
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
   await promptSubmit()
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-  await filterChatKey(await band()).props.onPress()
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
+  await filterChatKey(await keys()).props.onPress()
   await promptSubmit()
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
   runResult = VETTED
-  await filterChatKey(await band()).props.onPress()
+  await filterChatKey(await keys()).props.onPress()
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=0\n')
-  await filterChatKey(await band()).props.onPress()
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  await filterChatKey(await keys()).props.onPress()
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ●')
 })
 
 test('a filter chat press survives clearing the conversation and loading the band again', async () => {
   enableFilterChat()
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
-  await filterChatKey(await band()).props.onPress()
+  await filterChatKey(await keys()).props.onPress()
   sessionId = 'uuid-next'
   files['/work/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
-  register(on as any, OPTIONS)
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  register(on as any)
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ●')
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
   for (const content of ['', 'CS_FILTER_CHAT=0\n', 'CS_FILTER_CHAT_X=1\n', 'CS_FILTER_CHAT=1\nCS_FILTER_CHAT=0\n', 'CS_FILTER_CHAT=yes\n', ' CS_FILTER_CHAT=1\n', 'CS_FILTER_CHAT=1\r\n']) {
     files['/work/.cs/local/config'] = content
-    expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+    expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
   }
   delete files['/work/.cs/local/config']
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-  await filterChatKey(await band()).props.onPress()
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
+  await filterChatKey(await keys()).props.onPress()
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ●')
 })
 
 test('a cs write that fails toasts cs\'s words, keeps the setting and allows another press', async () => {
   enableFilterChat()
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ●')
   nextRuns = [VETTED, { exitCode: 2, stdout: '', stderr: 'warming up\nError: not changed\n' }]
-  await filterChatKey(await band()).props.onPress()
+  await filterChatKey(await keys()).props.onPress()
   expect(invalidated).toEqual(['ui.render'])
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ●')
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
   expect(toasts).toEqual(['filter chat update failed: Error: not changed'])
-  await filterChatKey(await band()).props.onPress()
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  await filterChatKey(await keys()).props.onPress()
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
   expect(invalidated).toEqual(['ui.render', 'ui.render'])
 })
 
@@ -4200,7 +4664,7 @@ for (const [name, env, seeded, label] of [
   enableFilterChat()
   Object.assign(envVars, env)
   Object.assign(files, seeded)
-  expect(filterChatKey(await band()).props.label).toBe(label)
+  expect(filterChatKey(await keys()).props.label).toBe(label)
 })
 
 test('duplicate filter chat presses both wait until the one write is ready', async () => {
@@ -4217,7 +4681,7 @@ test('duplicate filter chat presses both wait until the one write is ready', asy
     return run(argv, init)
   }
   try {
-    const key = filterChatKey(await band())
+    const key = filterChatKey(await keys())
     let duplicateFinished = false
     const press = key.props.onPress().then(() => files['/work/.cs/local/config'])
     const duplicate = key.props.onPress().then(() => {
@@ -4227,11 +4691,11 @@ test('duplicate filter chat presses both wait until the one write is ready', asy
     await settle()
     expect(duplicateFinished).toBe(false)
     expect(writes).toEqual([['/opt/cs/bin/cs', 'work', '-config', 'set', 'CS_FILTER_CHAT', '1']])
-    expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+    expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
     expect(invalidated).toEqual([])
     finish()
     expect(await Promise.all([press, duplicate])).toEqual(['CS_FILTER_CHAT=1\n', 'CS_FILTER_CHAT=1\n'])
-    expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+    expect(filterChatKey(await keys()).props.label).toBe('filter chat ●')
     expect(invalidated).toEqual(['ui.render'])
     expect(ran).toEqual([])
   } finally {
@@ -4247,8 +4711,8 @@ test('a non-session redraw does not discover the filter chat command', async () 
   let listed = 0
   $.command.list = async () => { listed++; return list() }
   try {
-    expect(await band()).toBe(DRAWN)
-    expect(await band()).toBe(DRAWN)
+    expect(await keys()).toBe(HINT_DRAWN)
+    expect(await keys()).toBe(HINT_DRAWN)
     expect(listed).toBe(0)
     expect(runs).toEqual([])
   } finally {
@@ -4259,18 +4723,18 @@ test('a non-session redraw does not discover the filter chat command', async () 
 test('the filter chat key draws idle and mid-turn, follows command availability and the band ownership gates', async () => {
   enableFilterChat()
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-  expect(filterChatKey(await band({ isWorking: true })).props.label).toBe('filter chat ○')
-  expect(filterChatKey(await band({ hasSurvey: true }))).toBeUndefined()
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await keys({ isWorking: true })).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await keys({ hasSurvey: true }))).toBeUndefined()
   sessionId = 'uuid-teammate'
-  expect(filterChatKey(await band())).toBeUndefined()
+  expect(filterChatKey(await keys())).toBeUndefined()
   sessionId = 'uuid-lead'
   arm()
-  expect(buttons(await band()).map(button => button.props.key)).toEqual(['cs-rotate'])
+  expect(buttons(await keys()).map(button => button.props.key)).toEqual(['cs-rotate'])
   delete files[MARKER]
   for (const command of [undefined, { name: 'filter-chat', source: 'user' }, { name: 'filter-chat', source: 'plugin', plugin: 'another-plugin' }]) {
     availableCommands = command === undefined ? [] : [command]
-    expect(await band()).toBe(DRAWN)
+    expect(await keys()).toBe(HINT_DRAWN)
   }
   expect(ran).toEqual([{ command: 'color', args: 'red' }, { command: 'color', args: 'red' }])
 })
@@ -4278,14 +4742,14 @@ test('the filter chat key draws idle and mid-turn, follows command availability 
 test('filter chat state stays with its session across registration and stale button presses', async () => {
   enableFilterChat()
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
-  const stale = filterChatKey(await band())
+  const stale = filterChatKey(await keys())
   await stale.props.onPress()
-  register(on as any, OPTIONS)
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  register(on as any)
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ●')
   await stale.props.onPress()
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
   expect(ran).toEqual([])
-  await filterChatKey(await band()).props.onPress()
+  await filterChatKey(await keys()).props.onPress()
   sessionId = 'uuid-next'
   cwdPath = '/other'
   existing.add('/other/.cs/local')
@@ -4293,22 +4757,22 @@ test('filter chat state stays with its session across registration and stale but
   realPaths['/home/.claude-sessions/other'] = '/other'
   files['/other/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
   files['/other/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
-  register(on as any, OPTIONS)
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  register(on as any)
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
 })
 
 test('a companion filter chat file change appears on the next redraw without reloading', async () => {
   enableFilterChat()
-  const stale = filterChatKey(await band())
+  const stale = filterChatKey(await keys())
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ●')
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
   await stale.props.onPress()
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=0\n')
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
   expect(ran).toEqual([])
 })
 
@@ -4328,12 +4792,12 @@ test('an unreadable filter chat file leaves the band visible and reports each re
   }
   try {
     for (let redraw = 0; redraw < 2; redraw++) {
-      expect(buttons(await band()).map(button => button.props.label)).toEqual(['rotate', 'wrap', 'filter chat ○'])
+      expect(buttons(await keys()).map(button => button.props.label)).toEqual(['rotate', 'wrap', 'filter chat ○'])
     }
     expect(logs).toEqual(['the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/config) failed: EACCES'])
     error = 'cs: $.fs.read(/ENOENT/.cs/local/config) failed: EISDIR'
-    expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-    expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
+    expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
+    expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
     expect(logs).toEqual([
       'the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/config) failed: EACCES',
       'the filter chat setting could not be read: cs: $.fs.read(/ENOENT/.cs/local/config) failed: EISDIR',
@@ -4352,9 +4816,9 @@ test('filter chat presses use the local directory even when private storage exis
   existing.add('/work/.cs/private')
   files['/work/.cs/private/config'] = 'CS_FILTER_CHAT=1\n'
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
-  expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
-  await filterChatKey(await band()).props.onPress()
-  await filterChatKey(await band()).props.onPress()
+  expect(filterChatKey(await keys()).props.label).toBe('filter chat ○')
+  await filterChatKey(await keys()).props.onPress()
+  await filterChatKey(await keys()).props.onPress()
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=0\n')
   expect(files['/work/.cs/private/config']).toBe('CS_FILTER_CHAT=1\n')
   expect(ran).toEqual([])
@@ -4434,4 +4898,674 @@ test('no toast, notice or command reply the mod hands the engine starts with its
     .map(entry => typeof entry === 'function' ? (entry as (...args: string[]) => string)('x', 'x', 'x') : entry)
     .concat(['merging', 'landed', 'refused', 'retired'].map(step => finishToast({ id: 'x', pid: 1, task: 'x', sha: 'x', step })))
   expect(lines.filter(line => line.startsWith('cs:'))).toEqual([])
+})
+
+// The keys under the prompt. Measured on Claude Code 2.1.322: a status line of
+// 82 cells left the keys their place at the notice's right from 87 columns
+// and not at 86, one of 95 cells from 100 and not at 99; bypass permissions,
+// the widest notice, kept its 48 cells clear of the three keys' 29 from 80.
+const THREE_KEYS = 29
+const route = (columns: number | undefined, statusWidth: number | undefined, modesCells: number | undefined, keysCells: number, hint: string | undefined = CYCLE, fullscreen = true) =>
+  keysRoute({ columns, fullscreen, statusWidth, modesCells, hint, keysCells })
+test('the keys go to the notice\'s right only where the status line, the mode labels and the notice leave them room', () => {
+  expect(route(87, 82, 0, THREE_KEYS)).toBe('notice-right')
+  expect(route(86, 82, 0, THREE_KEYS)).toBe('inline')
+  expect(route(100, 95, 0, THREE_KEYS)).toBe('notice-right')
+  expect(route(99, 95, 0, THREE_KEYS)).toBe('inline')
+  // The notice binds where the status line is short.
+  expect(route(80, 60, 0, THREE_KEYS)).toBe('notice-right')
+  expect(route(79, 60, 0, THREE_KEYS)).toBe('inline')
+  // Mode labels at the status line's right take their cells from the same row.
+  expect(route(100, 60, 35, THREE_KEYS)).toBe('notice-right')
+  expect(route(99, 60, 35, THREE_KEYS)).toBe('inline')
+  // Fewer keys need less of the notice's row, never less of the status line's.
+  expect(route(68, 60, 0, 17)).toBe('notice-right')
+  expect(route(67, 60, 0, 17)).toBe('inline')
+  expect(route(64, 60, 0, 6)).toBe('inline')
+  // The main screen clips what hangs under the mode labels, at any width.
+  expect(route(200, 60, 0, THREE_KEYS, CYCLE, false)).toBe('inline')
+})
+
+test('a status line width nobody recorded, or mode labels another mod draws over, send the keys inline; a row too narrow for them there, a hint a person reads, or a footer nobody measured, to the band', () => {
+  expect(route(200, undefined, 0, THREE_KEYS)).toBe('inline')
+  expect(route(200, 60, undefined, THREE_KEYS)).toBe('inline')
+  // The widest notice without its hint, the indent and the engine's ` · ` are 29 cells; two stay free.
+  expect(route(60, undefined, 0, THREE_KEYS)).toBe('inline')
+  expect(route(59, undefined, 0, THREE_KEYS)).toBe('band')
+  expect(route(59, 20, 0, THREE_KEYS)).toBe('band')
+  expect(route(200, undefined, 0, THREE_KEYS, '1 shell')).toBe('band')
+  expect(route(undefined, 60, 0, THREE_KEYS)).toBe('band')
+  expect(route(undefined, undefined, 0, THREE_KEYS)).toBe('band')
+  // Until the hint's site draws, the hint is taken for the cycle hint.
+  expect(route(60, undefined, 0, THREE_KEYS, undefined)).toBe('inline')
+  expect(route(80, 60, 0, THREE_KEYS, undefined)).toBe('notice-right')
+})
+
+// The hints are the ones Claude Code 2.1.322 handed the hint's site; the
+// widths beside the labelled ones are the notices it drew (auto 38, accept
+// edits 41, plan 37, bypass permissions 48), never under-counted.
+test('the notice is as wide as the hint in it says, the widest where the hint names no label', () => {
+  for (const hint of [CYCLE, 'auto mode on (shift+tab to cycle)', 'accept edits on (shift+tab to cycle)', 'plan mode on (shift+tab to cycle)', 'bypass permissions on (shift+tab to cycle)']) expect([hint, isCycleHint(hint)]).toEqual([hint, true])
+  for (const hint of ['1 shell', '? for shortcuts', 'manual mode on', '', '(shift+tab to cycle) · 1 shell', '1 shell (shift+tab to cycle)', '2 shells on (shift+tab to cycle)', 'esc to interrupt']) expect([hint, isCycleHint(hint)]).toEqual([hint, false])
+  expect(noticeCells(undefined)).toBe(48)
+  expect(noticeCells(CYCLE)).toBe(48)
+  expect(noticeCells('bypass permissions on (shift+tab to cycle)')).toBe(48)
+  expect(noticeCells('accept edits on (shift+tab to cycle)')).toBe(42)
+  expect(noticeCells('auto mode on (shift+tab to cycle)')).toBe(39)
+  expect(noticeCells('plan mode on (shift+tab to cycle)')).toBe(39)
+  // `  ⏵⏵ bypass permissions on · 1 shell` is 37 cells.
+  expect(noticeCells('1 shell')).toBe(37)
+  expect(noticeCells('')).toBe(30)
+})
+
+test('the status line\'s record gives a width only for this conversation and this Claude Code, in the one shape cs-statusline writes', () => {
+  expect(STATUS_WIDTH).toBe('.cs/local/statusline-width')
+  expect(parseStatusWidth('uuid-lead 82 4242\n', 'uuid-lead', '4242')).toBe(82)
+  expect(parseStatusWidth('uuid-lead 0 4242\n', 'uuid-lead', '4242')).toBe(0)
+  expect(parseStatusWidth('uuid-old 82 4242\n', 'uuid-lead', '4242')).toBeUndefined()
+  // The bar of another Claude Code on this conversation, in a terminal of another width.
+  expect(parseStatusWidth('uuid-lead 82 4243\n', 'uuid-lead', '4242')).toBeUndefined()
+  // Two of them alive: cs-statusline writes no width.
+  expect(parseStatusWidth('uuid-lead - 4242 4243\n', 'uuid-lead', '4242')).toBeUndefined()
+  for (const text of ['', '82\n', 'uuid-lead\n', 'uuid-lead 82\n', 'uuid-lead 82 4242 1\n', 'uuid-lead -3 4242\n', 'uuid-lead 8e1 4242\n', 'uuid-lead  82 4242\n', 'uuid-lead 82 4242\nuuid-lead 90 4242\n', 'uuid-lead 12345 4242\n', 'uuid-lead 82 42x2\n']) {
+    expect([text, parseStatusWidth(text, 'uuid-lead', '4242')]).toEqual([text, undefined])
+  }
+})
+
+test('the mode labels are counted as the footer joins them, cs-filter-chat\'s once while it is on whether or not the hook sees it', () => {
+  expect(FILTER_CHAT_MODE).toBe(filterChatLabels.mode)
+  expect(modesWidth([], false)).toBe(0)
+  expect(modesWidth(['focus'], false)).toBe(5)
+  expect(modesWidth(['focus', 'memory paused'], false)).toBe(21)
+  expect(modesWidth([], true)).toBe(36)
+  expect(modesWidth([FILTER_CHAT_MODE], true)).toBe(36)
+  expect(modesWidth(['focus'], true)).toBe(44)
+})
+
+test('every entry has one site: the rotate, clear, countdown, wrap and filter chat keys under the prompt, the rest on the band', () => {
+  const all = buildBandEntries({ ...quiet, featured: { label: '1 feature · fix-auth ready', onPress: noPress }, countdown: { seconds: 18, ink: OWN }, rotating: true, armed: true, wrapping: true, filterChat: { on: true, onPress: noPress }, waiting: 2, gate: 'finishing fix-auth · gate 3s', queued: 2, mail: 1 })
+  expect(entriesAt(all, 'footer').map(entry => entry.key)).toEqual(['cs-rotate', 'cs-countdown', 'cs-wrap', 'cs-filter-chat'])
+  expect(entriesAt(all, 'band').map(entry => entry.key)).toEqual(['cs-queue', 'cs-features', 'cs-gate', 'cs-queued', 'cs-mail'])
+  expect(() => entriesAt([{ key: 'cs-weather', kind: 'word', label: 'sunny' }], 'band')).toThrow('cs: cs-weather has no site')
+})
+
+test('the keys\' width is what the row draws: a middle dot between keys, a space before the count', () => {
+  expect(keysWidth(entriesAt(buildBandEntries({ ...quiet, rotating: true, wrapping: true, filterChat: { on: false, onPress: noPress } }), 'footer'))).toBe(THREE_KEYS)
+  expect(keysWidth(entriesAt(buildBandEntries({ ...quiet, rotating: true, armed: true, countdown: { seconds: 18, ink: OWN } }), 'footer'))).toBe('/clear now in 18s'.length)
+  expect(keysWidth([])).toBe(0)
+})
+
+// The record is trusted for the pid it names, so a mod that cannot learn its
+// own Claude Code's trusts none; the pid is asked for once.
+test('the mod asks which Claude Code it runs in from a timer, three times at most, and trusts no record until it knows', async () => {
+  files[WIDTH] = 'uuid-lead 57 4242\n'
+  percent = 40
+  let pidRuns = 0
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => { if (argv[0] === '/bin/sh') pidRuns++; return run(argv, init) }
+  try {
+    // A render starts no process: the engine aborts one whose render it supersedes.
+    await band()
+    expect(pidRuns).toBe(0)
+    expect(await footerMode()).toBe(MODES_DRAWN)
+    await settleTimers()
+    expect(pidRuns).toBe(1)
+    expect(sitesWithKeys(await pass())).toEqual(['mode'])
+    expect(pidRuns).toBe(1)
+    reload()
+    claudePid = new Error('spawn EPERM')
+    for (let draws = 0; draws < 5; draws++) expect(sitesWithKeys(await pass())).toEqual(['hint'])
+    expect(pidRuns).toBe(4)
+    // An answer on a later ask is taken.
+    reload()
+    await band()
+    await fireAfter()
+    expect(pidRuns).toBe(5)
+    claudePid = '4242'
+    expect(sitesWithKeys(await pass())).toEqual(['mode'])
+    expect(pidRuns).toBe(6)
+    expect(runs).toEqual([])
+  } finally {
+    $.process.run = run
+  }
+})
+
+const absoluteBoxes = (tree: any) => boxes(tree).filter((b: any) => b.props.position === 'absolute')
+test('with room the keys draw at the right end of the notice\'s row from the mode labels\' site, and the hint stays the engine\'s', async () => {
+  files[WIDTH] = 'uuid-lead 82 4242\n'
+  percent = 40
+  expect(await band()).toBe(DRAWN)
+  await settleTimers()
+  const tree = await footerMode(87)
+  // The engine's own labels stay; the keys hang one row down from a box of no width, flush right.
+  expect(tree.children[0]).toBe(MODES_DRAWN)
+  const [holder] = boxes(tree).filter((b: any) => b.props.width === 0)
+  expect(holder.props).toEqual({ width: 0, height: 1 })
+  expect(absoluteBoxes(tree).map((b: any) => b.props)).toEqual([{ position: 'absolute', right: 0, top: 1 }])
+  expect(buttons(absoluteBoxes(tree)[0]).map((b: any) => [b.props.key, b.props.action])).toEqual([['cs-rotate', 'strip:jump1'], ['cs-wrap', 'strip:jump2']])
+  expect(buttonsUnderText(tree)).toBe(0)
+  expect(await footerHint(87)).toBe(HINT_DRAWN)
+})
+
+test('without room there the keys stand in the hint\'s place, and the mode labels stay the engine\'s', async () => {
+  files[WIDTH] = 'uuid-lead 82 4242\n'
+  percent = 40
+  await band()
+  expect(await footerMode(86)).toBe(MODES_DRAWN)
+  const tree = await footerHint(86)
+  expect(bandWords(tree)).toEqual(['rotate', ' · ', 'wrap'])
+  expect(buttonsUnderText(tree)).toBe(0)
+  expect(absoluteBoxes(tree)).toEqual([])
+})
+
+test('a record of another conversation or another Claude Code, an unreadable one, or none sends the keys inline at any width', async () => {
+  percent = 40
+  // The mod has learned it runs in Claude Code 4242: its own record takes the keys to the notice's right.
+  files[WIDTH] = 'uuid-lead 20 4242\n'
+  await band()
+  await settleTimers()
+  expect(sitesWithKeys(await pass({ columns: 200 }))).toEqual(['mode'])
+  for (const record of ['uuid-old 20 4242\n', 'uuid-lead 20 4243\n', 'uuid-lead - 4242 4243\n', 'wide\n', undefined]) {
+    if (record === undefined) delete files[WIDTH]
+    else files[WIDTH] = record
+    expect([record, sitesWithKeys(await pass({ columns: 200 }))]).toEqual([record, ['hint']])
+  }
+})
+
+test('a footer too narrow for the keys inline draws the engine\'s own at both sites', async () => {
+  percent = 40
+  await band()
+  // `rotate · wrap` is 13 cells: 44 columns hold it after the widest notice, 43 do not.
+  expect(buttons(await footerHint(44))).toHaveLength(2)
+  expect(await footerHint(43)).toBe(HINT_DRAWN)
+  expect(await footerMode(43)).toBe(MODES_DRAWN)
+})
+
+test('with no key to show, both footer sites return the engine\'s own', async () => {
+  files[WIDTH] = 'uuid-lead 82 4242\n'
+  expect(await footerMode()).toBe(MODES_DRAWN)
+  expect(await footerHint()).toBe(HINT_DRAWN)
+  await band()
+  expect(await footerMode()).toBe(MODES_DRAWN)
+  expect(await footerHint()).toBe(HINT_DRAWN)
+  // Mail and a queue are the band's, and leave the footer alone.
+  files['/work/.cs/local/mail/new/one.json'] = '{}'
+  queueTasks(2)
+  expect(buttons(await band()).map((b: any) => b.props.key)).toEqual(['cs-queue'])
+  expect(await footerMode()).toBe(MODES_DRAWN)
+  expect(await footerHint()).toBe(HINT_DRAWN)
+})
+
+test('keys once drawn leave both sites when a survey takes the band, a turn starts, or the conversation is not the lead\'s', async () => {
+  files[WIDTH] = 'uuid-lead 82 4242\n'
+  percent = 40
+  const drawnAtBoth = async (props: Parameters<typeof band>[0]) => {
+    await band(props)
+    return [await footerMode(110), await footerHint(86)].map(tree => buttons(tree).length)
+  }
+  await band()
+  await settleTimers()
+  expect(await drawnAtBoth({})).toEqual([2, 2])
+  expect(await drawnAtBoth({ hasSurvey: true })).toEqual([0, 0])
+  expect(await footerMode(110)).toBe(MODES_DRAWN)
+  expect(await footerHint(86)).toBe(HINT_DRAWN)
+  expect(await drawnAtBoth({})).toEqual([2, 2])
+  expect(await drawnAtBoth({ isWorking: true })).toEqual([0, 0])
+  expect(await drawnAtBoth({})).toEqual([2, 2])
+  sessionId = 'uuid-teammate'
+  expect(await drawnAtBoth({})).toEqual([0, 0])
+})
+
+test('the keys are dim plain Buttons with dim separators; only the count and the filter chat dot are coloured', async () => {
+  enableFilterChat()
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
+  percent = 40
+  let tree = await keys()
+  expect(buttons(tree).map((b: any) => [b.props.key, b.props.plain, b.props.dimColor, b.props.hotkey])).toEqual([['cs-rotate', true, true, undefined], ['cs-wrap', true, true, undefined], ['cs-filter-chat', true, true, undefined]])
+  expect(texts(tree).filter((t: any) => t.props.color !== undefined).map((t: any) => [textOf(t), t.props.color])).toEqual([['●', GREEN]])
+  expect(texts(tree).filter((t: any) => textOf(t) === ' · ').map((t: any) => t.props)).toEqual([{ dimColor: true }, { dimColor: true }])
+  expect(buttonsUnderText(tree)).toBe(0)
+  await startGrace()
+  tree = await keys()
+  expect(texts(tree).filter((t: any) => t.props.color !== undefined).map((t: any) => [textOf(t), t.props])).toEqual([[`in ${GRACE_SECONDS}s`, { bold: true, color: OWN }]])
+  expect(buttonsUnderText(tree)).toBe(0)
+})
+
+test('a click on a key under the prompt does what its key on the band did', async () => {
+  files[WIDTH] = 'uuid-lead 82 4242\n'
+  percent = 40
+  await band()
+  await settleTimers()
+  await buttons(await footerMode(110)).find((b: any) => b.props.key === 'cs-wrap').props.onPress()
+  expect(asks.map(ask => ask.question)).toEqual([WRAP_QUESTION])
+  expect(ran).toEqual([{ command: 'wrap', args: '' }])
+  await buttons(await footerHint(86)).find((b: any) => b.props.key === 'cs-rotate').props.onPress()
+  expect(ran.at(-1)).toEqual({ command: 'rotate', args: '' })
+})
+
+test('filter chat on adds its mode label to the status line\'s row, and the keys leave the notice\'s right where the two no longer fit', async () => {
+  enableFilterChat()
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=1\n'
+  files[WIDTH] = 'uuid-lead 60 4242\n'
+  await band()
+  await settleTimers()
+  // 60 cells, the label's 36 and the margin's 5: the row holds them from 101 columns.
+  expect(buttons(await footerMode(101)).map((b: any) => b.props.label)).toEqual(['filter chat ●'])
+  expect(await footerHint(101)).toBe(HINT_DRAWN)
+  expect(await footerMode(100)).toBe(MODES_DRAWN)
+  expect(buttons(await footerHint(100)).map((b: any) => b.props.label)).toEqual(['filter chat ●'])
+  // The label is counted once when cs-filter-chat's rewrite reaches this hook.
+  expect(buttons(await footerMode(101, [FILTER_CHAT_MODE]))).toHaveLength(1)
+  // Off, the row is the status line's alone.
+  files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
+  await band()
+  expect(buttons(await footerMode(65)).map((b: any) => b.props.label)).toEqual(['filter chat ○'])
+})
+
+test('another mode label the footer shows takes the keys\' route with it, and both sites draw again', async () => {
+  files[WIDTH] = 'uuid-lead 60 4242\n'
+  percent = 40
+  await band()
+  await fireAfter()
+  invalidated = []
+  expect(buttons(await footerMode(80))).toHaveLength(2)
+  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toEqual([])
+  // `memory paused` is 13 cells: with the status line's 60 and the margin's 5 it needs 78 columns.
+  expect(buttons(await footerMode(77, ['memory paused']))).toHaveLength(0)
+  await fireAfter()
+  expect(invalidated).toEqual(['ui.render'])
+  expect(buttons(await footerHint(77))).toHaveLength(2)
+})
+
+// claude-errands draws its Codex line there, a tree as wide as its sessions' names.
+test('a tree another mod draws in the mode labels\' place sends the keys inline, since nothing says how wide it is', async () => {
+  files[WIDTH] = 'uuid-lead 60 4242\n'
+  percent = 40
+  await band()
+  await settleTimers()
+  expect(buttons(await footerMode(110))).toHaveLength(2)
+  const theirs = { type: 'Box', props: { flexDirection: 'row' }, children: [MODES_DRAWN, { type: 'Text', props: {}, children: ['2 Codex sessions'] }] }
+  expect(await footerMode(110, [], theirs)).toBe(theirs)
+  expect(buttons(await footerHint(110))).toHaveLength(2)
+  // The engine's own drawing back, the keys return to the notice's right.
+  expect(buttons(await footerMode(110))).toHaveLength(2)
+  expect(await footerHint(110)).toBe(HINT_DRAWN)
+})
+
+test('a footer that changed is drawn again once, and one that did not is left alone', async () => {
+  percent = 40
+  await band()
+  await band()
+  // One redraw for the keys, beside the timer that asks which Claude Code this is.
+  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toHaveLength(2)
+  await settleTimers()
+  expect(invalidated).toEqual(['ui.render'])
+  await band()
+  expect(timers.filter(t => t.kind === 'after' && !t.cancelled)).toEqual([])
+  percent = 10
+  await band()
+  await fireAfter()
+  expect(invalidated).toEqual(['ui.render', 'ui.render'])
+})
+
+// One pass over the three sites that can draw the keys, each handed what its
+// own event says of the screen, and again while any of them asks for a
+// redraw: what is on screen once the footer has settled.
+type Site = 'band' | 'mode' | 'hint'
+type Pass = { columns?: number; fullscreen?: boolean; hint?: string; modes?: string[]; modesDrawn?: unknown; working?: boolean; unmeasured?: Site[] }
+const pass = async (o: Pass = {}) => {
+  const fullscreen = o.fullscreen ?? true
+  const columns = (site: Site) => o.unmeasured?.includes(site) ? null : o.columns ?? 110
+  for (let redraws = 0; ; redraws++) {
+    const trees = {
+      band: await band({ isWorking: o.working ?? false, bodyColumns: o.columns ?? 110 }, 'terminal', viewOf(columns('band'), fullscreen) ?? null),
+      mode: await footerMode(columns('mode'), o.modes ?? [], o.modesDrawn ?? MODES_DRAWN, fullscreen),
+      hint: await footerHint(columns('hint'), o.hint ?? CYCLE, o.working ?? false, fullscreen),
+    }
+    if (timers.every(t => t.kind !== 'after' || t.cancelled)) return trees
+    if (redraws === 5) throw new Error(`the footer never settled: ${JSON.stringify(o)}`)
+    await fireAfter()
+  }
+}
+const KEY_NAMES = ['cs-rotate', 'cs-wrap', 'cs-filter-chat']
+const sitesWithKeys = (trees: Record<Site, unknown>) =>
+  (Object.keys(trees) as Site[]).filter(site => buttons(trees[site]).some((b: any) => KEY_NAMES.includes(b.props.key)))
+// A mod loaded afresh: what the sites learned of an earlier screen is gone.
+const reload = () => { for (const k of Object.keys(hooks)) delete hooks[k]; timers = []; register(on as any) }
+
+test('exactly one site draws the keys, whatever each site is told of the screen', async () => {
+  percent = 40
+  enableFilterChat()
+  const drew = new Set<Site>()
+  const everySite: Site[] = ['band', 'mode', 'hint']
+  const subsets = everySite.reduce<Site[][]>((sets, site) => [...sets, ...sets.map(set => [...set, site])], [[]])
+  for (const record of ['uuid-lead 57 4242\n', 'uuid-lead 139 4242\n', undefined]) {
+    if (record === undefined) delete files[WIDTH]
+    else files[WIDTH] = record
+    for (const columns of [40, 59, 60, 83, 84, 110, 180]) for (const fullscreen of [true, false]) for (const hint of [CYCLE, '1 shell', '? for shortcuts', ''])
+      for (const modes of [[], ['memory paused']]) for (const unmeasured of subsets) {
+        reload()
+        const sites = sitesWithKeys(await pass({ columns, fullscreen, hint, modes, unmeasured }))
+        if (sites.length !== 1) throw new Error(`${JSON.stringify({ record, columns, fullscreen, hint, modes, unmeasured })} drew the keys at ${JSON.stringify(sites)}`)
+        drew.add(sites[0])
+      }
+  }
+  // Each site takes its turn somewhere in the table, so the count above is not one site's alone.
+  expect([...drew].sort()).toEqual(['band', 'hint', 'mode'])
+})
+
+test('a footer too narrow for the keys, or one nobody measured, draws them on the band above the prompt, their chords spelled', async () => {
+  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
+  percent = 40
+  // `rotate · wrap` is 13 cells: 44 columns hold it after the widest notice, 43 do not.
+  let trees = await pass({ columns: 44 })
+  expect(sitesWithKeys(trees)).toEqual(['hint'])
+  expect(trees.band).toBe(DRAWN)
+  trees = await pass({ columns: 43 })
+  expect(sitesWithKeys(trees)).toEqual(['band'])
+  expect(words(trees.band)).toEqual(['ctrl+x', '1', '   ', '2'])
+  expect(buttons(trees.band).map((b: any) => [b.props.key, b.props.action])).toEqual([['cs-rotate', 'strip:jump1'], ['cs-wrap', 'strip:jump2']])
+  expect(trees.mode).toBe(MODES_DRAWN)
+  expect(trees.hint).toBe(HINT_DRAWN)
+  reload()
+  trees = await pass({ unmeasured: ['band', 'mode', 'hint'] })
+  expect(sitesWithKeys(trees)).toEqual(['band'])
+  expect(words(trees.band)).toEqual(['ctrl+x', '1', '   ', '2'])
+})
+
+// The band's line here is as wide as the footer (the engine's is a few cells
+// narrower: 105 of 110): the count holds its place on a line of 23 cells, and
+// only a narrower line drops it before the clear key's word.
+test('an armed handoff\'s clear key and its count draw on the band where the footer has no room for them', async () => {
+  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
+  await startGrace()
+  let trees = await pass({ columns: 40 })
+  expect(trees.mode).toBe(MODES_DRAWN)
+  expect(trees.hint).toBe(HINT_DRAWN)
+  expect(bandWords(trees.band)).toEqual(['ctrl+x', '1', '/clear now', '   ', `in ${GRACE_SECONDS}s`])
+  trees = await pass({ columns: 23 })
+  expect(sitesWithKeys(trees)).toEqual(['band'])
+  expect(bandLine(trees.band, 23)).toBe(`  1 /clear now   in ${GRACE_SECONDS}s`)
+  expect(bandLine((await pass({ columns: 22 })).band, 22)).toBe('  ctrl+x 1 /clear now')
+})
+
+// Measured on 2.1.322: on the main screen the engine clips what a mod hangs a
+// row under the mode labels, and the keys drew nowhere at 110 columns.
+test('on the main screen the keys never hang under the mode labels, whatever room the row has', async () => {
+  files[WIDTH] = 'uuid-lead 57 4242\n'
+  percent = 40
+  expect(sitesWithKeys(await pass({ columns: 110 }))).toEqual(['mode'])
+  expect(sitesWithKeys(await pass({ columns: 110, fullscreen: false }))).toEqual(['hint'])
+  expect(sitesWithKeys(await pass({ columns: 110 }))).toEqual(['mode'])
+  // A surface that has not said which layout it draws is not known to be fullscreen.
+  const unsaid = { surface: 'terminal', viewport: { columns: 110, rows: 35 }, props: { modes: [] } }
+  expect(await hooks['ui.render:SessionMode']($, unsaid, async () => MODES_DRAWN)).toBe(MODES_DRAWN)
+  expect(buttons(await footerHint(110))).toEqual([])
+  await fireAfter()
+  expect(buttons(await footerHint(110, CYCLE, false, false))).toHaveLength(2)
+})
+
+// Measured on 2.1.322: the hint is the cycle hint at rest, the mode's label
+// before it for a moment after shift+tab, and `1 shell` in its place once a
+// background shell runs.
+test('the keys stand in the hint\'s place only while the hint is the cycle hint, alone or after a mode\'s label', async () => {
+  percent = 40
+  for (const hint of [CYCLE, 'auto mode on (shift+tab to cycle)', 'accept edits on (shift+tab to cycle)', 'plan mode on (shift+tab to cycle)', 'bypass permissions on (shift+tab to cycle)']) {
+    const trees = await pass({ hint })
+    expect([hint, sitesWithKeys(trees)]).toEqual([hint, ['hint']])
+    expect(trees.band).toBe(DRAWN)
+  }
+  for (const hint of ['1 shell', '? for shortcuts', 'manual mode on', '', '(shift+tab to cycle) · 1 shell', '1 shell (shift+tab to cycle)', 'esc to interrupt']) {
+    const trees = await pass({ hint })
+    expect([hint, sitesWithKeys(trees)]).toEqual([hint, ['band']])
+    expect(trees.hint).toBe(HINT_DRAWN)
+  }
+})
+
+test('at the notice\'s right the keys clear a notice as wide as its hint makes it', async () => {
+  files[WIDTH] = 'uuid-lead 40 4242\n'
+  percent = 40
+  // Before the hint's site has drawn, the widest notice at rest: its 48 cells, the 13 of `rotate · wrap` and 3 between.
+  await band({}, 'terminal', viewOf(64))
+  await settleTimers()
+  expect(buttons(await footerMode(64))).toHaveLength(2)
+  reload()
+  await band({}, 'terminal', viewOf(63))
+  await settleTimers()
+  expect(await footerMode(63)).toBe(MODES_DRAWN)
+  // The cycle hint, bare or after the widest label, is that same notice.
+  for (const hint of [CYCLE, 'bypass permissions on (shift+tab to cycle)']) {
+    expect(sitesWithKeys(await pass({ columns: 64, hint }))).toEqual(['mode'])
+    expect(sitesWithKeys(await pass({ columns: 63, hint }))).toEqual(['hint'])
+  }
+  // A shorter label leaves the keys their place on a narrower row: 6 cells of indent and glyph, then the hint's 33.
+  expect(sitesWithKeys(await pass({ columns: 55, hint: 'auto mode on (shift+tab to cycle)' }))).toEqual(['mode'])
+  expect(sitesWithKeys(await pass({ columns: 54, hint: 'auto mode on (shift+tab to cycle)' }))).toEqual(['hint'])
+  // A pill follows a label the hint does not carry: 30 cells for the widest and its ` · `, then the pill's 7.
+  expect(sitesWithKeys(await pass({ columns: 53, hint: '1 shell' }))).toEqual(['mode'])
+  expect(sitesWithKeys(await pass({ columns: 52, hint: '1 shell' }))).toEqual(['band'])
+  const long = '3 shells · 2 local agents · esc to interrupt · ctrl+t to hide tasks'
+  expect(sitesWithKeys(await pass({ columns: 30 + long.length + 13 + 3, hint: long }))).toEqual(['mode'])
+  expect(sitesWithKeys(await pass({ columns: 30 + long.length + 13 + 2, hint: long }))).toEqual(['band'])
+})
+
+test('an evaluation of the band that throws leaves no key under the prompt', async () => {
+  files[WIDTH] = 'uuid-lead 57 4242\n'
+  percent = 40
+  expect(sitesWithKeys(await pass())).toEqual(['mode'])
+  const usage = $.session.usage
+  $.session.usage = async () => { throw new Error('usage unread') }
+  try {
+    await expect(band()).rejects.toThrow('usage unread')
+  } finally {
+    $.session.usage = usage
+  }
+  await fireAfter()
+  expect(invalidated.at(-1)).toBe('ui.render')
+  expect(await footerMode()).toBe(MODES_DRAWN)
+  expect(await footerHint()).toBe(HINT_DRAWN)
+  expect(sitesWithKeys(await pass())).toEqual(['mode'])
+})
+
+test('a turn the hint\'s site reports takes the rotate and wrap keys from under the prompt before the band draws again, and leaves filter chat', async () => {
+  files[WIDTH] = 'uuid-lead 57 4242\n'
+  enableFilterChat()
+  percent = 40
+  await band()
+  await settleTimers()
+  expect(buttons(await footerMode()).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap', 'cs-filter-chat'])
+  expect(await footerHint(110, CYCLE, true)).toBe(HINT_DRAWN)
+  expect(buttons(await footerMode()).map((b: any) => b.props.key)).toEqual(['cs-filter-chat'])
+  await fireAfter()
+  expect(invalidated.at(-1)).toBe('ui.render')
+  expect(await footerHint(110, CYCLE, false)).toBe(HINT_DRAWN)
+  expect(buttons(await footerMode()).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap', 'cs-filter-chat'])
+})
+
+test('a rotate or wrap key pressed once a turn runs does nothing but say so', async () => {
+  percent = 40
+  const [rotate, wrap] = buttons(await keys())
+  await footerHint(110, CYCLE, true)
+  await rotate.props.onPress()
+  await wrap.props.onPress()
+  expect(ran).toEqual([])
+  expect(asks).toEqual([])
+  expect(written['/work/.cs/local/cs.pressed']).toBeUndefined()
+  expect(toasts).toEqual(['/rotate did not run: a turn is running', '/wrap did not run: a turn is running'])
+  expect(toasts).toEqual([TOASTS.midTurn('/rotate'), TOASTS.midTurn('/wrap')])
+  await footerHint(110, CYCLE, false)
+  await rotate.props.onPress()
+  await wrap.props.onPress()
+  expect(ran).toEqual([{ command: 'rotate', args: '' }, { command: 'wrap', args: '' }])
+})
+
+test('a turn on the main loop runs from its start to its end, before any site draws it and while the band and the hint disagree', async () => {
+  percent = 40
+  const [rotate] = buttons(await keys())
+  await turnStart('go')
+  await rotate.props.onPress()
+  expect(toasts).toEqual([TOASTS.midTurn('/rotate')])
+  await footerHint(110, CYCLE, false)
+  await band()
+  await turnComplete({ agentId: 'agent-1' })
+  await rotate.props.onPress()
+  expect(toasts).toEqual([TOASTS.midTurn('/rotate'), TOASTS.midTurn('/rotate')])
+  await turnComplete()
+  await rotate.props.onPress()
+  expect(ran).toEqual([{ command: 'rotate', args: '' }])
+})
+
+// The band a render behind says idle while the hint says working, after a
+// load that heard no turn start: the turn stands at both, and the footer stops
+// asking to be drawn again.
+const disagree = async () => { for (let draws = 0; draws < 3; draws++) { await footerHint(110, CYCLE, true); await band(); await settleTimers() } }
+test('a mod loaded while a turn runs takes the turn from the site that draws it, and its end from the main loop', async () => {
+  percent = 40
+  await keys()
+  reload()
+  const [rotate] = buttons(await keys())
+  await disagree()
+  const settled = invalidated.length
+  await disagree()
+  expect(invalidated).toHaveLength(settled)
+  expect(buttons(await footerHint(110, CYCLE, true))).toEqual([])
+  await rotate.props.onPress()
+  expect(toasts).toEqual([TOASTS.midTurn('/rotate')])
+  await turnComplete()
+  await rotate.props.onPress()
+  expect(ran).toEqual([{ command: 'rotate', args: '' }])
+})
+
+// The press reads the turn as it lands, and again once cs has answered: a
+// turn started meanwhile without a prompt (a Stop hook's feedback) bumps no
+// press count.
+test('a /clear now key pressed once a turn runs, before any site draws the turn, does nothing but say so', async () => {
+  await startGrace()
+  const clear = findButton(await keys())
+  expect(clear.props.label).toBe('/clear now')
+  await promptSubmit()
+  await turnStart('keep going')
+  const asked = runs.length
+  await clear.props.onPress()
+  expect(ran).toEqual([])
+  expect(runs).toHaveLength(asked)
+  expect(toasts.filter(t => t.startsWith('/clear'))).toEqual([TOASTS.midTurn('/clear')])
+  await turnComplete()
+  let answered!: () => void
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => {
+    if (argv[1] !== '-vet-session') return run(argv, init)
+    await new Promise<void>(resolve => { answered = resolve })
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  try {
+    const pressed = clear.props.onPress()
+    await settle()
+    await turnStart('')
+    answered()
+    await pressed
+  } finally {
+    $.process.run = run
+  }
+  expect(ran).toEqual([])
+  expect(toasts.filter(t => t.startsWith('/clear'))).toEqual([TOASTS.midTurn('/clear'), TOASTS.midTurn('/clear')])
+  await turnComplete()
+  await clear.props.onPress()
+  expect(ran).toEqual([{ command: 'clear', args: '' }])
+})
+
+test('a turn a Stop hook starts with no prompt, before the band draws it, keeps the count\'s zero from clearing', async () => {
+  await startGrace()
+  await keys()
+  await tick(GRACE_SECONDS - 1)
+  await turnStart('')
+  await tick()
+  expect(ran).toEqual([])
+  expect(ticker()).toBeUndefined()
+  expect(toasts).toEqual([TOASTS.midTurn('/clear')])
+  // Nor does one that starts while the zero tick waits on cs.
+  await turnComplete()
+  await keys()
+  await tick(GRACE_SECONDS - 1)
+  let answered!: () => void
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => {
+    if (argv[1] !== '-vet-session') return run(argv, init)
+    await new Promise<void>(resolve => { answered = resolve })
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  try {
+    const zero = tick()
+    await settle()
+    await turnStart('')
+    answered()
+    await zero
+  } finally {
+    $.process.run = run
+  }
+  expect(ran).toEqual([])
+  expect(toasts).toEqual([TOASTS.midTurn('/clear'), TOASTS.midTurn('/clear')])
+})
+
+const footerClock = () => timers.find(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS && !t.cancelled)
+test('the status line\'s width is read on a clock only while it can move the keys, and a line that grows or shrinks moves them on the next read', async () => {
+  files[WIDTH] = 'uuid-lead 82 4242\n'
+  expect(footerClock()).toBeUndefined()
+  percent = 40
+  await band()
+  await fireAfter()
+  invalidated = []
+  expect(FOOTER_POLL_MS).toBe(2000)
+  expect(timers.filter(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS)).toHaveLength(1)
+  expect(buttons(await footerMode(90))).toHaveLength(2)
+  await footerClock()!.fn()
+  await fireAfter()
+  expect(invalidated).toEqual([])
+  // A turn ended and the context reading grew a digit.
+  files[WIDTH] = 'uuid-lead 86 4242\n'
+  await footerClock()!.fn()
+  await fireAfter()
+  expect(invalidated).toEqual(['ui.render'])
+  expect(await footerMode(90)).toBe(MODES_DRAWN)
+  expect(buttons(await footerHint(90))).toHaveLength(2)
+  // Still one clock: a shorter line would give the keys their place back.
+  expect(timers.filter(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS && !t.cancelled)).toHaveLength(1)
+  // No status line, however short, hangs the keys under the mode labels on a
+  // row too narrow for the notice and the keys, on the main screen, beside a
+  // pill, or by another mod's tree: nothing reads the record there.
+  const theirs = { type: 'Box', props: {}, children: [MODES_DRAWN] }
+  const offTheRight: Pass[] = [{ columns: 63 }, { fullscreen: false }, { columns: 52, hint: '1 shell' }, { modesDrawn: theirs }]
+  for (const screen of offTheRight) {
+    await pass(screen)
+    expect([screen, footerClock()]).toEqual([screen, undefined])
+    reads = []
+    await pass(screen)
+    expect(reads.filter(path => path === WIDTH)).toEqual([])
+    // Back on a row with room, the record is read at once and the clock runs again.
+    files[WIDTH] = 'uuid-lead 57 4242\n'
+    expect(sitesWithKeys(await pass())).toEqual(['mode'])
+    expect(footerClock()).toBeDefined()
+  }
+  percent = 10
+  await band()
+  expect(footerClock()).toBeUndefined()
+})
+
+test('a mod that cannot learn which Claude Code it runs in after three asks reads the width on no clock', async () => {
+  files[WIDTH] = 'uuid-lead 57 4242\n'
+  claudePid = new Error('spawn EPERM')
+  percent = 40
+  let pidRuns = 0
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => { if (argv[0] === '/bin/sh') pidRuns++; return run(argv, init) }
+  try {
+    for (let draws = 0; draws < 4; draws++) expect(sitesWithKeys(await pass())).toEqual(['hint'])
+    expect(pidRuns).toBe(3)
+    expect(footerClock()).toBeUndefined()
+    expect(sitesWithKeys(await pass())).toEqual(['hint'])
+    expect(footerClock()).toBeUndefined()
+    expect(pidRuns).toBe(3)
+  } finally {
+    $.process.run = run
+  }
 })

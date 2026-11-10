@@ -18,11 +18,14 @@ CS_DATE_REMINDER_DISABLE	Prompts	Date reminder	flagoff	-	off	now	applies at your
 CS_CLARIFY_DISABLE	Prompts	Clarifying questions	flagoff	-	off	now	applies at your next prompt	-	default	-	Asks Claude to question an unclear request instead of guessing; a leading ~ skips one prompt.
 CS_NARRATIVE_PROMPT_DISABLE	Prompts	Narrative line	flagoff	-	off	now	applies at your next prompt	-	default	-	Asks Claude, on each prompt, to note a finding in its narrative before it answers.
 CS_CTX_WARN_CTX	Rotation	Context warning %	text	-	40	now	applies when the next turn ends	-	default	-	Context use at which Claude tells you, once, that the conversation is filling up.
-CS_ROTATE_BUTTON_CTX	Rotation	Rotate button from %	text	-	the warn %	now	applies by your next prompt	-	default	-	Context use from which the band above the prompt shows the rotate key, Ctrl+X 1.
+CS_ROTATE_BUTTON_CTX	Rotation	Rotate button from %	text	-	the warn %	now	applies by your next prompt	-	default	-	Context use from which the rotate key, Ctrl+X 1, shows under the prompt or on the band above it.
 CS_ROTATE_NUDGE_CTX	Rotation	Rotation nudge %	text	-	60	now	applies when the next turn ends	-	default	-	Context use at which Claude suggests, once, writing a handoff and going on after /clear.
 CS_ROTATE_FORCE_CTX	Rotation	Rotate on its own past %	text	-	80	now	applies by your next prompt	-	default	session line 4: CS_ROTATE_FORCE_CTX=101: not off, 0 or a percentage from 1 to 100	Context use past which cs rotates by itself after a 20 second countdown you can stop.
 CS_NO_ROTATION_WAKE	Rotation	Wake after /clear	flagoff	-	off	/clear	applies at the next /clear or launch	-	default	-	After /clear on a handoff, the fresh conversation starts its next step without you typing.
 CS_ROTATION_KICK_DELAY	Rotation	Wake delay (s)	text	-	2	now	applies at the next rotation	-	default	-	Seconds between tries to wake the fresh conversation after /clear; 0 tries once.
+CS_BAND_PROMPTS	Prompt bars	Prompt bars	flag	-	off	now	applies by your next prompt	-	default	-	Draws a bar per prompt on the band above the prompt; a press on a bar scrolls the transcript to it.
+CS_BAND_PROMPT	Prompt bars	Named prompt	choice	latest,read	latest	now	applies by your next prompt	-	default	-	The prompt the band names and draws thick: latest, the newest, or read, the one at the top of the screen.
+CS_BAND_BARS	Prompt bars	Most bars	text	-	10	now	applies by your next prompt	-	default	-	The most prompt bars the band draws; the prompts past them fold into a count at either end.
 CS_REWRITE_PROVIDER	Rewriter (ctrl+g)	Provider	choice	claude,claude-api,openai,openai-api,gemini,gemini-api,grok,xai	claude	now	applies at the next ctrl+g	-	default	-	Who rewrites your prompt; an -api choice calls the vendor API in place of its CLI.
 CS_REWRITE_MODEL	Rewriter (ctrl+g)	Model	text	-	per provider	now	applies at the next ctrl+g	-	default	-	The model that rewrites your prompt, by the provider name for it; unset, the provider picks.
 CS_REWRITE_TIMEOUT	Rewriter (ctrl+g)	Timeout (s)	text	-	25	now	applies at the next ctrl+g	-	default	-	Seconds to wait for a rewrite before your prompt is left as you typed it.
@@ -32,7 +35,7 @@ CS_TERM_THEME	Terminal	Theme	choice	light,dark	detected	now	applies at the next 
 CS_TERM_BG_RGB	Terminal	Background r;g;b	text	-	detected	now	applies at the next repaint	-	default	-	Your terminal background colour, which the status line shades its capsules from.
 CS_NO_ITERM2	Terminal	iTerm2 features	flagoff	-	off	now+launch	the tab title, the bell bounce and the iTerm reads of the bar: now. The iTerm tmux path of the launch: the next launch.	-	default	-	Uses iTerm2 for the tab title, a dock bounce when a turn ends and the theme of your profile.
 CS_NERD_FONTS	Terminal	Nerd Font glyphs	flag	-	off	now	applies at the next cs command	-	default	-	Shows Nerd Font icons in cs banners and session lists; needs a Nerd Font in the terminal.
-CS_FILTER_CHAT	Terminal	Filter chat	flag	-	off	now+launch	/filter-chat and the band key: now. A change here or in a shell: the next launch.	-	default	-	Shows only your prompts and the replies from Claude in this session; the band key or /filter-chat flips it.
+CS_FILTER_CHAT	Terminal	Filter chat	flag	-	off	now+launch	/filter-chat and its key: now. A change here or in a shell: the next launch.	-	default	-	Shows only your prompts and the replies from Claude in this session; its key or /filter-chat flips it.
 CS_NO_MAIL_WAKE	Mail	Wake on mail	flagoff	-	off	now	applies when the next turn ends	-	session	-	Unread mail from another session takes a turn, so the exchange goes on without you typing.
 CS_MAIL_WAKE_MAX	Mail	Wakes in a row	text	-	5	now	applies when the next turn ends	-	default	-	How many turns mail may take in a row before it waits for a prompt from you.
 CS_NO_TASK_TOOLS	Launch	Task tools	flagoff	-	off	launch	applies at the next launch	-	default	-	Gives Claude its task list tools on every model, for rotation, the queue and handoffs.

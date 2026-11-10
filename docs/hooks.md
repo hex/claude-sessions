@@ -517,44 +517,135 @@ Verb lookup uses the installed `cs` found on `PATH`, falls back to `bin/cs`, and
 `mods/cs/` is a Claude Code function-hooks plugin: TypeScript that runs
 inside Claude Code's own process rather than a shell script it spawns. It adds
 one key to conversation rotation. Once the context window reaches 40% (the
-status bar's warn band, where the Stop hook gives its headroom notice), the band
-directly above the prompt draws `rotate`, pressed by Ctrl+X 1.
+status bar's warn band, where the Stop hook gives its headroom notice), the row
+under the prompt that carries the permission notice
+(`⏵⏵ auto mode on (shift+tab to cycle)`) draws `rotate` at its right end,
+pressed by Ctrl+X 1, where that row has room; otherwise it stands in the
+notice's text or on the band above the prompt, as the list of the keys'
+places says.
 `CS_ROTATE_BUTTON_CTX=<percent>`, kept with `cs -config set` or exported in the
-shell that launches cs, moves it; unset or not a number, the band follows the
+shell that launches cs, moves it; unset or not a number, the key follows the
 bar's own warn band (`CS_STATUSLINE_CTX_WARN`, 40 by default), read the same
-way. The band is one thin line above
+way.
+
+The keys under the prompt are, in order and each only when it applies,
+`rotate` (or `/clear now` once a handoff is armed, then `in Ns`, the armed
+handoff's count, a space after its key), `wrap` and `filter chat`, a dim `·`
+between them: `rotate · wrap · filter chat ○`. They are dim, as the hint
+beside them is; only the count and the filter chat key's dot take a colour.
+Under the prompt they add no row. Where they draw depends on what the footer
+has room for (measured on Claude Code 2.1.322). The band above the prompt,
+the mode labels and the hint are three places the mod draws from, and all
+three read one route, so the keys draw in exactly one of them:
+
+- At the right end of the notice's row, flush with the terminal's edge, when
+  three things hold. Claude Code draws its fullscreen layout: on the main
+  screen (`CLAUDE_CODE_NO_FLICKER=0`) it clips what a mod hangs under the mode
+  labels, and the keys never go there. The status line and any mode labels at
+  its right (`filter chat · /filter-chat to switch` while filter chat is on)
+  share one row: the terminal is at least the status line's width, the
+  labels' and 5 cells wide. And the row holds the notice, the keys and 3
+  cells, so the keys never cover the notice. The notice is as wide as the
+  hint in it says: 48 cells (bypass permissions, the widest) under
+  `(shift+tab to cycle)`, which is 80 columns for all three keys, and wider
+  under a pill such as `1 shell`, counted as 30 cells and the pill's own.
+- Otherwise in the notice's own text, in place of its `(shift+tab to cycle)`
+  hint and of nothing else: `⏵⏵ auto mode on · rotate · wrap · filter chat ○`.
+  Shift+Tab still cycles the mode. This needs the keys and 31 cells (60
+  columns for all three).
+- Otherwise on the band above the prompt, at its left, as before the keys had
+  a place under it: `ctrl+x 1 rotate   2 wrap · filter chat ○`. That is
+  where they draw on a terminal too narrow for the two places above; when
+  the notice's right has no room for them and the hint is anything but the
+  cycle hint (a pill such as `1 shell`, or `? for shortcuts` outside the
+  permission modes); and on a surface that has not reported its width. An
+  armed handoff's `/clear now` and its count are on the band then. There
+  the keys take the band's line, a few cells narrower than the terminal (105
+  of 110 columns, measured): the count holds its place on a line of 23 cells
+  or more, and a narrower line drops it before `/clear now` loses its word. A collapsed band (Ctrl+X Ctrl+A) hides the
+  keys and the count with the rest of it. In those two cases the count runs
+  unseen, and the `/clear` at its zero still runs.
+
+A turn takes `rotate`, `/clear now` and `wrap` away and leaves `filter chat`.
+The keys go as soon as the turn's start or any of the three places says a
+turn runs (measured: the first redraw after Enter, while the prompt's
+UserPromptSubmit hooks still run). A key pressed in that moment, while still
+drawn, by a click or its chord, toasts
+`cs: /rotate did not run: a turn is running` (or `/clear`, `/wrap`) and runs
+nothing. Once the key has left, Ctrl+X 1 or Ctrl+X 2 finds no Button to press,
+and Claude Code types the digit into the prompt (measured on 2.1.322). A `/clear now` press reads the turn again once
+`cs -vet-session` has answered it.
+If the band's own drawing fails, the keys leave the row under the prompt
+until it next succeeds.
+
+The mod learns the status line's width from
+[`.cs/local/statusline-width`](session-layout.md), which `cs-statusline`
+writes for the launched conversation whenever the line it prints changes
+width. The mod reads it when the band draws, and again every 2 seconds for
+as long as the width could move the keys: not on the main screen, nor while
+the row is too narrow for the notice and the keys whatever the status line
+does. The record names the Claude Code whose status line wrote it, and the
+mod takes a width only from its own. To know its own, the mod runs one
+process a load, `/bin/sh -c 'echo $PPID'`, whose parent is that Claude Code.
+It runs it from a timer once a draw first needs the width, since Claude Code
+aborts a process started inside a render it then replaces. With no answer the mod
+asks again at its next read of the width, three times a load at most, and
+then stops reading the width. The keys take the notice's text, or the band,
+whenever there is no such width:
+
+- no record for this conversation: a status line that was never cs's in it,
+  one turned off (`CS_STATUSLINE_DISABLE=1` removes the record), a session
+  whose control files git tracks;
+- a status line holding a character from outside ASCII that is not one of
+  its own glyphs, such as a conversation title in Chinese or with an emoji:
+  `cs-statusline` cannot tell how many cells that takes and records no width;
+- the conversation open in a second terminal: two status lines of different
+  widths share the file, so it carries no width while both run, or while a
+  process that took the pid of a Claude Code since closed runs;
+- a status-line wrapper that runs `cs-statusline` as its child without
+  setting `CS_STATUSLINE_PARENT`: the record names the wrapper, never this
+  Claude Code (see [statusline.md](statusline.md#data-sources-and-performance));
+- no room beside the status line: `CS_STATUSLINE_LAYOUT=band` fills its row
+  to the terminal's edge, unless `CS_STATUSLINE_COLS` holds the band at least
+  5 cells narrower than the terminal.
+
+A status line replaced by another program inside a conversation that already
+recorded a width leaves that record in place, and the keys are placed by it
+until the next conversation.
+
+The keys take the notice's text, or the band, too while a mod that loaded
+after cs draws a tree of its own where the mode labels go, since nothing
+says how wide that is. A mod that loaded before cs and does the same is one
+cs cannot see, and its content pushes the keys left by its own width: on a
+narrow terminal they then cover the end of the notice (measured with a mod
+written for the test). The event cs draws the mode labels' place from names
+no such mod, so cs cannot move the keys out of its way. Under the
+prompt the keys spell no chord: the row has no cells for one. A chord bound to a key's action
+still presses it, and so does a click.
+
+The band is one thin line above
 the prompt, two columns in where Claude Code draws its own footer, with a
 blank line above it, in two zones. At the left stand the
-actions, what a key or a press does now, and the queue's count; at the line's right edge stand the
+queue's start press or its count; at the line's right edge stand the
 words that say what the session is, then the prompt the rail names, then the
-rail of prompts, ending in the line's last cell. Items in a zone stand three cells apart; after the
-last key (a chord, or the armed handoff's count) a dim `·` stands in the middle of those three cells,
-parting the keys from the presses and words after it. The line's free
+rail of prompts, ending in the line's last cell. Items in a zone stand three cells apart. The line's free
 cells fall between the zones, never fewer than three, so the right edge holds
-still while the actions come and go. Where the keys'
-chords share a prefix (`ctrl+x 1`, `ctrl+x 2`) the prefix is spelled once,
-bold in the theme's `subtle` gray, and each key's own last word stands beside
-its label in the session's
-colour: `ctrl+x 1 rotate   2 wrap   #4 say four   │││┃` on the narrowest line
-that holds it. Chords that differ are spelled whole. In order, and each
-only when it applies, the actions are `rotate` (or `/clear now` once a
-handoff is armed, then `in Ns`, the armed handoff's count, which leaves the
-line before `/clear now` would shrink to its bare key), `wrap`, `filter chat`
-and the queue's start press, `▤ run N queued tasks` (`▤ run 1 queued task`
-for one), or in its place the queue count below: `ctrl+x 1 rotate   2 wrap · ▤ run 2 queued tasks`.
+still while the left comes and goes. The left holds the queue's start press,
+`▤ run N queued tasks` (`▤ run 1 queued task` for one), or in its place the
+queue count below: `▤ run 2 queued tasks   #4 say four   │││┃`.
 The queue's `▤` draws in the amber the status line gives its queue count. The right edge carries the features
 word, `finishing <task> · gate <elapsed>` while a `/finish` gate runs, and
 the mail count below. The band
 paints nothing else from the measured background (`CS_TERM_BG_RGB`) and reads no
-caps answer; only the amber of the count and of the queue's `▤` still read the
-measurement. The percentage itself stays on the status bar: the band does not
+caps answer; only the amber of the queue's `▤`, and of the count under the
+prompt, still read the measurement. The percentage itself stays on the status bar: the band does not
 repeat it.
 
-The rail draws only when the `/config` row `cs.bandPrompts` is on (it is
+The rail draws only when the cs setting `CS_BAND_PROMPTS` is on (it is
 off by default; see [configuration.md](configuration.md#band-settings)).
 It is one upright bar per prompt the person sent in this conversation: `│` dim, `┃` dim too for the prompt the band
 names (its heavier stroke marks it), `┆` dim for a prompt the engine refused to scroll to. The band names
-the newest prompt; with the `/config` row `cs.bandPrompt` set to `read` it
+the newest prompt; with the cs setting `CS_BAND_PROMPT` set to `read` it
 names the prompt being read instead (the prompt whose row stands highest on
 screen, from the engine's own on-screen reports of the transcript's rows)
 and follows the scroll (see
@@ -578,28 +669,24 @@ modification time moved, and only its live branch is listed: a `/rewind`
 drops the prompts it abandoned, a `/compact` keeps the earlier ones. Tool
 results, slash-command echoes, hook feedback, task notifications, a
 teammate's message and the interrupt the engine writes when you stop a turn
-are not prompts. The rail ends in the line's last cell, so the actions at
-the left never move it while the line has room for every bar. At
-most `cs.bandBars` bars draw (10 by default), in what the line leaves after
+are not prompts. The rail ends in the line's last cell, so the queue's press at
+the left never moves it while the line has room for every bar. At
+most `CS_BAND_BARS` bars draw (10 by default), in what the line leaves after
 the inset and the words, and the named bar always among them: the bars
 reach the newest prompt, or start at the named one when that prompt
 predates their reach. The older prompts collapse into one dim `…N` run at the rail's
 start, a cell before the first bar, and the newer into one dim `M…` run at
 its end, a cell after the last: `#7 step 7   …6 ┃││││ 3…` with the seventh
-of fourteen prompts named under `cs.bandPrompt` `read` and `cs.bandBars` at 5. The rail keeps its
+of fourteen prompts named under `CS_BAND_PROMPT` `read` and `CS_BAND_BARS` at 5. The rail keeps its
 least: the named bar alone, the older prompts folded into `…N` before it
 and the newer into `M…` after it, and three cells before that. The words fit what that leaves, so the queue count and the right edge's
-words drop, a right-edge word shortens, and the keys lose their words before the rail goes:
-`1 rotate   2 wrap · ▤ run 2 queued tasks   3 features · fix-auth…   …13 ┃`
-on a 75-column line with fourteen prompts, every action, the features word
-and `mail 1`: the mail word drops, the shared prefix goes and the features
-word shortens. A right-edge word never shortens past its head, the words
+words drop and a right-edge word shortens before the rail goes. A right-edge word never shortens past its head, the words
 before its first `·`, and `…` (`3 features…`): a cut into the head, such as
 `1…`, says nothing, so the word leaves instead and the band fits the line
 again without it. The queue's start button keeps its count whole when it
 shortens: `▤ run 12…` fits, and a cut into the count, such as `▤ run 1…`,
 would name another number, so the button cuts to `▤…` instead. The
-actions outrank the rail: where one would leave the line whole beside that
+start press outranks the rail: where it would leave the line whole beside that
 least, the words take the whole line, the rail draws in what they leave, and
 a line too narrow for any bar draws no rail. Three cells before the bars, and three cells after any
 word before it, the band names its prompt, `#N` and its first line (up to 80
@@ -660,59 +747,61 @@ repeat it.
 
 The mod queues `/color` when a conversation begins inside the running Claude Code, including after `/clear`, rotation, in-app `/resume`, or a context-limit fork; the command reapplies the session accent once the session is idle.
 
-The band's keys are chords, never a bare digit: a digit typed to answer a
+The rotate and wrap keys are chords, never a bare digit: a digit typed to answer a
 numbered question belongs to the prompt and to other mods. Each Button answers
 an engine action, `strip:jump1` for the rotate (or `/clear`) key and
 `strip:jump2` for the wrap key.
 The installer binds Ctrl+X 1 and Ctrl+X 2
 to them in `keybindings.json` (see
-[configuration.md](configuration.md#rotate-and-wrap-keys)). The band spells
-whatever chord that file's `Global` block binds to each action, as written
-there, a shared prefix bold in `subtle` gray and each key's own part bold in
-the session's colour, and nothing where none does; the Buttons still answer a click
-and Ctrl+X Tab. Claude Code re-reads `keybindings.json` while it runs, so a
+[configuration.md](configuration.md#rotate-and-wrap-keys)). A chord that
+file's `Global` block binds to an action presses its Button under the prompt
+as on the band. While a turn runs it reaches the mod only as long as the key
+is still drawn, when the rotate, `/clear now` and wrap presses say so and run
+nothing. The mod
+reads the file to spell the chords beside the keys where they draw on the
+band; the Buttons still answer a click. The band's focus (Ctrl+X Tab) does
+not reach under the prompt: it lands on the queue's start press, a features
+word that can be pressed, and the keys while they draw on the band. Claude Code re-reads `keybindings.json` while it runs, so a
 chord bound after launch works at once (measured on 2.1.292). An encrypted
 session launched before `keybindings.json` existed gets the file at its next
 launch.
 
-The filter chat key draws after wrap when cs-filter-chat advertises
-`/filter-chat`, while a turn runs too, with no survey or armed handoff; a band with no
-[cs-filter-chat](#cs-filter-chat-not-a-hook-script--a-claude-code-mod) loaded draws no filter chat key. The band reads the command
-list without running a status command. The key is a press, as the queue's
-start button is: it answers no chord, only a click and Ctrl+X Tab, and its
-label draws bare after the keys' dim `·`:
-`ctrl+x 1 rotate   2 wrap · filter chat ●`. On a line too narrow for every
-entry it never shortens: it leaves whole, after the queue's start button and
-before the chords.
+The filter chat key draws after wrap, under the prompt, when cs-filter-chat advertises
+`/filter-chat`, while a turn runs too, with no survey or armed handoff; with no
+[cs-filter-chat](#cs-filter-chat-not-a-hook-script--a-claude-code-mod) loaded the mod draws no filter chat key. The mod reads the command
+list without running a status command. The key is a press: it answers no
+chord, only a click, and its label follows the keys' dim `·`:
+`rotate · wrap · filter chat ●`.
 
 The key ends in a switch dot:
 `filter chat ●` while on, the dot in green, and `filter chat ○`
 while off, the dot in the line's ink. A
-press asks `cs -vet-session` before it writes, as the other band writers do.
+press asks `cs -vet-session` before it writes, as the mod's other writers do.
 A refusal leaves the setting alone and draws filter chat as off. The key reads
-`filter chat ●` only while the setting `CS_FILTER_CHAT` is `1`, and the band's
+`filter chat ●` only while the setting `CS_FILTER_CHAT` is `1`, and the mod's
 last `cs -vet-session` answer in this load was not a
-refusal. The band asks at session start in a cs session with `.cs/local`, and
+refusal. The mod asks at session start in a cs session with `.cs/local`, and
 at every step that acts on the control files, such as a press of the clear,
 rotate or filter chat key.
 A prompt does not clear a refusal. A vet that passes, or a reload, does.
-Before the band's first vet in a load, it reads the setting unvetted.
+Before the mod's first vet in a load, it reads the setting unvetted.
 An accepted press
 runs `cs <session> -config set CS_FILTER_CHAT 1` or `0`, the value flipped, then
-invalidates the band. The setting survives `/clear`, reload and resume. Filter
-chat is off by default. The band reads the setting as cs resolves it: the
+draws the band and the keys again. The setting survives `/clear`, reload and resume. Filter
+chat is off by default. The mod reads the setting as cs resolves it: the
 environment pins it, else the session's `.cs/local/config`, else this machine's
 file, the last `1` or `0` line of a file winning. Read errors say nothing of the
-setting; the band logs each distinct error except a missing file. Each failed
-write attempt toasts cs's last line, and every completed press invalidates the
-band, including a failed write.
+setting; the mod logs each distinct error except a missing file. Each failed
+write attempt toasts cs's last line, and every completed press draws the keys
+again, including a failed write.
 Duplicate presses wait for the same write and redraw.
 
 The Button's stable element key is `cs-filter-chat`; it carries no action.
 cs-filter-chat must hook `ui.press` with `{ plugin: 'cs', element: 'cs-filter-chat' }`, await
-`next(e)`, then read the setting the band's handler wrote with `cs <session> -config set
-CS_FILTER_CHAT`. The band sends no command. When `/filter-chat` changes the
-setting through the same `cs -config set`, the band reads the new value on its
+`next(e)`, then read the setting the key's handler wrote with `cs <session> -config set
+CS_FILTER_CHAT`. The matcher names no component, so it holds for the key under
+the prompt as it did on the band. The mod sends no command. When `/filter-chat` changes the
+setting through the same `cs -config set`, the mod reads the new value on its
 next redraw. Spike 3 measured immediate cross-plugin press hooks with
 no transcript rows, while command delivery queued until idle and host state
 reset on `/clear` and resume.
@@ -726,7 +815,7 @@ the conversation. Before it runs, the press writes the conversation id to
 the one-key rotation skips the task-archive question as a forced one does. The
 end of the main loop's next turn, whatever ended it, empties the file, and so
 does a run the engine refuses, so a `/rotate` typed later in the conversation
-asks as a manual one does. Beside it the band draws `wrap`. That key
+asks as a manual one does. Beside it stands `wrap`. That key
 runs `/wrap`, which distills memory, replaces `.cs/summary.md`, rotates the
 narrative and archives completed task rows: five Opus passes, two of them writing
 the memory entries and the summary, minutes and real tokens, so the
@@ -736,14 +825,14 @@ yes runs it; a dismissed dialog, and a `-p` run with nobody to ask, run nothing
 and say nothing. A wrap that finished leaves the key nothing to do: `/wrap`'s last
 pass writes `.cs/local/wrapped` with the id of the conversation it ran in
 (`CLAUDE_CODE_SESSION_ID`, so a teammate's wrap never marks the lead), and
-while it names this one the band draws the rotate key alone. The next turn
+while it names this one the rotate key stands without it. The next turn
 that starts from a prompt empties it and the wrap key comes back: queued work,
 a new request, or a second `/wrap` (which, if it fails a pass, leaves no marker
 of its own). A continuation turn, one started with no prompt as a Stop hook's
 feedback starts one, leaves it in place. A summary written any other way
 hides nothing, and a wrap that fails a pass
-skips the marker. Below the band the mod draws nothing, and it draws none of
-these keys while a turn runs or while a survey holds the band. While a turn
+skips the marker. The mod draws neither of these keys, nor the `/clear`
+key, while a turn runs or while a survey holds the band. While a turn
 runs, the filter chat key, the `/finish` gate word, the features word (with
 no press), the queue and mail counts and the rail still draw; under a survey
 only the gate word does. Its rotate, wrap and `/clear` keys run slash
@@ -753,7 +842,7 @@ only while no turn runs.
 
 The same button has a second state. Once the `rotate` skill has armed a
 handoff (`.cs/local/pending-handoff` names one, or `.cs/private/pending-handoff`
-in an encrypted session), the band draws
+in an encrypted session), the key reads
 `/clear now` whatever the context reads, alone
 (the wrap key hides: with a handoff armed the conversation has nothing left to
 do but the `/clear`), and
@@ -785,14 +874,25 @@ handoff already armed: an interrupted or errored turn, or a subagent's, starts
 nothing. The run is scheduled from a timer rather than from the turn's own
 hook, which the plugin contract refuses a command from. Once the rotate skill
 has armed its handoff, the next turn's end starts a 20-second grace: the
-band reads `ctrl+x 1 /clear now   in 20s`,
+keys read `/clear now in 20s`,
 redrawn once a second. The count wears the session's own colour while there
 is time, the status bar's amber from ten seconds and its crit red under five
 (the bar's inks, pinned against `bin/cs-statusline` by `tests/test_mod_rotate.sh`).
-At zero the mod runs the `/clear` itself, only if
-the band is idle at that moment (no turn running, no survey), the handoff still
-armed and this still the lead; otherwise the count stops and the button waits
-for you. Ctrl+X 1 during the count clears at once. A press while the mod's own `/clear` is
+At zero the mod runs the `/clear` itself if the handoff is still armed, this
+is still the lead, cs still trusts the session's control files, and nothing
+waits on you: no turn running, no question dialog open, no survey above the
+prompt, and the band or the hint under the prompt drawn since the count's
+tick before zero. Otherwise the count stops and a toast says
+why: `/clear did not run: a turn is running`, `a question is waiting for an
+answer`, `a survey is waiting above the prompt`, `the handoff is no longer
+armed`, `this conversation is no longer the session's lead` or `neither the
+band nor the hint drew, as under a picker; the clear key returns with the
+band`; cs's refusal
+of the session reads `no rotation in this session: <reason>`, toasted at that
+zero also when an earlier check said the same; a read that fails at zero
+reads `/clear did not run: <error>`. The clear key then waits for you where
+the mod's band is drawn; under a band another mod has taken there is none, so
+type `/clear`, or let the next turn's end start the count again. Ctrl+X 1 during the count clears at once. A press while the mod's own `/clear` is
 still running does nothing, so it cannot clear the conversation that `/clear` opened. Sending a prompt, from
 the composer or anywhere else a prompt enters the session, stops the count;
 the next turn's end starts it again from 20. A `/clear` from anywhere else
@@ -802,6 +902,54 @@ timer, because a timer started before a `/clear` keeps firing after one
 (measured). At zero the mod re-reads the handoff with the SessionStart hook's
 own rule (frontmatter opened and closed by `---`, `status: unconsumed`
 inside), so a truncated handoff is never cleared into.
+
+Another mod can take the band above the prompt. A mod loaded before this one
+that answers the band's render without passing it on keeps this mod's band
+from drawing, and this mod gets no notice of it. A picker such as `/model`'s
+takes the band's place the same way. The mod reads a band not drawn from its
+own band hook not having run since the count's last tick: each tick asks for
+a redraw, and the engine raises the band within 20 ms of one (measured on
+2.1.322). The count then runs unseen. The mod takes every key it put in the
+row under the prompt, the clear key and its count among them, since nothing
+would redraw them; they come back when its band is raised again.
+
+What happens at zero turns on the hint under the prompt, which the engine
+still raises under another mod's band (34 to 36 times a count) and not while
+a picker is open (none in 29 s with `/model`'s open; measured on 2.1.322). The
+engine holds a `/clear` run under a picker until the picker closes, and the
+mod has no way to take it back. When the engine raised neither the band nor
+the hint between the tick before zero and the end of the zero's checks, the
+count stops with no `/clear` and toasts `/clear did not run: neither the band
+nor the hint drew, as under a picker; the clear key returns with the band`.
+The mod knows only that nothing of its own drew, so the toast names a picker
+as a likeness, not a cause. When the picker closes the band draws again with
+the clear key and no count, and the next turn's end counts again. A picker
+opened in the count's last second, after that tick's redraw, still reads as a
+count seen: the `/clear` runs and the engine holds it until the picker
+closes. When the engine raised the hint and not the band, as under another
+mod's band, the mod runs the `/clear` on time and then toasts `the count to /clear
+reached zero unseen: the band above the prompt was not drawn; /clear has
+run`, whatever part of the count before that stood on screen. The toast
+follows the `/clear` because one shown before it leaves the screen with the
+conversation. The mod drops what the taken band last said of a turn; the
+main loop's turn events and the hint under the prompt say whether one runs.
+
+These limits come with a taken band. Only the band's render says a survey is
+up, so the mod does not see a survey the engine opens while another mod has
+the band, and the `/clear` runs under it, unless that mod passes the band on
+under a survey. What the band said of a survey lasts one count: a
+survey the band drew during the count, before another mod took the band,
+keeps that count's `/clear` from running even if you have dismissed it since
+(`/clear did not run: a survey was waiting above the prompt when the band
+last drew`), and the next count starts without it and clears on time,
+whether or not the survey is still up. A survey drawn before the count began,
+under a band taken since, is likewise not seen. The mod sees another plugin's question dialog either way, through the
+dialog's own render: the dialog takes the prompt's place, the engine does not
+raise the band while one is open, and it does not refuse a `/clear` run under
+one. A band raised after a dialog says the question is answered; under a
+taken band none is raised, so a question answered inside the count's last
+second still stops that zero. Whether the mod's own questions (the queue's, the wrap key's) reach that
+render is not measured.
 
 When the count starts, the mod toasts the handoff's next step once:
 `cs: next step: <line>`, the first non-empty line of the handoff's `Next Step`
@@ -847,8 +995,8 @@ rotations. Every render asks the engine for the conversation's id and context
 usage, reads the handoff marker (and the handoff it names), and lists the queue
 and the mailbox; once it has something to draw, the filter chat key included, it also checks
 that this is the lead (the sessions root and `.cs/local/state`), lists the
-engine's commands for `/filter-chat`, and reads `keybindings.json`, the
-session's colour and the filter chat setting's files. The band renders a handful of times per turn, not per keystroke.
+engine's commands for `/filter-chat`, and reads the
+session's colour, the filter chat setting's files and, with a key to draw, the status line's width record. The band renders a handful of times per turn, not per keystroke.
 
 
 `install.sh` deploys the mod's four files (`.claude-plugin/plugin.json`,
@@ -883,12 +1031,13 @@ in the checkout the way it does hooks, commands and skills.
 Two facts about the plugin runtime shape the code. A module reads the
 environment through `$.env.get` with a literal name, which `claude plugin
 validate` lists, so a render reads each variable it needs by name: the
-threshold's `CS_ROTATE_BUTTON_CTX` and `CS_STATUSLINE_CTX_WARN`, the inks'
+threshold's `CS_ROTATE_BUTTON_CTX` and `CS_STATUSLINE_CTX_WARN`, the prompt
+bars' `CS_BAND_PROMPTS`, `CS_BAND_PROMPT` and `CS_BAND_BARS`, the inks'
 `CS_TERM_BG_RGB` and `CS_TERM_THEME`, the filter chat key's `CS_FILTER_CHAT`
 and `XDG_CONFIG_HOME`, and `CLAUDE_CONFIG_DIR`, `HOME` and `CS_SESSIONS_ROOT`
 to find `keybindings.json`, the settings files and the sessions root. For the
-thresholds, the theme and the background, a value a settings file gives comes
-first unless the shell exports the key. The
+thresholds, the prompt bars, the theme and the background, a value a settings
+file gives comes first unless the shell exports the key. The
 defaults and the twelve ink triplets (the eight session colours, and amber and
 crit for a light and a dark terminal) are literals in `register.tsx` that
 `tests/test_mod_rotate.sh` pins to the status line's. The
@@ -1582,9 +1731,10 @@ passes Claude Code's own drawing through.
 
 The switch is per session:
 
-- `filter chat`, the cs band's key (see the band above), pressed by
-  a click, or by Enter once Ctrl+X Tab has focused the band, never a chord: this session
-  on or off. It shows during a turn too, and leaves the row to a survey or
+- `filter chat`, the cs mod's key under the prompt (see
+  [the keys above](#cs-not-a-hook-script--a-claude-code-mod)), pressed by
+  a click, never a chord: this session
+  on or off. It shows during a turn too, and yields to a survey or
   an armed handoff.
 - `/filter-chat` alone flips this session's switch: it reads the setting and
   writes the other value. `/filter-chat on` and `/filter-chat off` set it.
@@ -1599,7 +1749,7 @@ and no other session changes.
 
 The switch is the cs setting `CS_FILTER_CHAT`, so it lists in `cs -config list`
 and the `/cs` pane like any other, and survives `/clear`, a rotation, `--resume`
-and a relaunch in the session's `.cs/local/config`. `/filter-chat` and cs's band
+and a relaunch in the session's `.cs/local/config`. `/filter-chat` and cs's key
 write it through `cs <session> -config set`, `0` for off as the pane does, so it
 outranks a `1` in this machine's file. Both mods read it as cs resolves it, and
 neither trims a line:
@@ -1615,11 +1765,11 @@ neither trims a line:
   the one it logged last.
 
 cs-filter-chat keeps the value in a mirror it reads once per load, not at each
-draw. `/filter-chat` and the band key update it at once. A change from the `/cs`
+draw. `/filter-chat` and the key update it at once. A change from the `/cs`
 pane or a shell reaches the drawing at the next load, or at `/filter-chat status`.
 
 Every write asks cs first. `/filter-chat` runs `$CS_BIN -vet-session <cwd>` (10 s
-timeout), the same rule cs's band asks before its own writes:
+timeout), the same rule the cs mod asks before its own writes:
 
 - In a directory with no `.cs/local`, `/filter-chat` writes nothing, starts no
   process and replies `cs-filter-chat: this directory is not a cs session (no
@@ -1639,7 +1789,7 @@ timeout), the same rule cs's band asks before its own writes:
   process in the directory, and vets a flip to on that neither writer made before it turns
   filter chat on. `/filter-chat status` on an unchanged setting and the usage line
   start no process of their own.
-- A band press needs no second vet: cs-filter-chat reads the setting once cs's press
+- A press of the key needs no second vet: cs-filter-chat reads the setting once cs's press
   handler has finished, and cs vetted before it wrote.
 
 What it draws while on:

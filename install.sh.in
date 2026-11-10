@@ -1279,7 +1279,7 @@ else
     _tips_name=""
     case "$_tips_record:$_tips_state" in
         *:foreign)
-            info "Spinner tips: ~/.claude/settings.json names its own tipsFile ($_current_tips_file), and Claude Code reads one; cs's tip (turn on the band's prompt bars in /config) is left out"
+            info "Spinner tips: ~/.claude/settings.json names its own tipsFile ($_current_tips_file), and Claude Code reads one; cs's tip (turn on the band's prompt bars in /cs) is left out"
             ;;
         *:not-object)
             warn "Spinner tips: spinnerTipsOverride in ~/.claude/settings.json is not an object; left as it is, so cs's tip is not in Claude Code's tips"

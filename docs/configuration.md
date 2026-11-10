@@ -282,15 +282,23 @@ export CS_ROTATE_NUDGE_CTX="60"
 # (see hooks.md).
 export CS_STOP_VERDICT_WAIT="7"   # this is the default
 
-# Context percentage at which the cs mod's band draws its rotate key (Ctrl+X 1)
-# above the prompt (default: the status line's warn band, 40).
+# Context percentage at which the cs mod draws its rotate key (Ctrl+X 1)
+# under the prompt, or on the band above it where that row has no room
+# (default: the status line's warn band, 40).
 # The mod reads it from the launched process's environment.
 export CS_ROTATE_BUTTON_CTX="40"
 
+# The cs mod's prompt bars above the prompt (see Band settings below): a bar
+# per prompt, off by default; the prompt the band names, the newest (latest)
+# or the one being read (read); and the most bars it draws.
+export CS_BAND_PROMPTS="1"
+export CS_BAND_PROMPT="latest"   # latest | read
+export CS_BAND_BARS="10"         # this is the default
+
 # Forced rotation with grace (on at 80 unless set): once a turn ends with context
 # at or past this percentage the mod runs /rotate itself, once per
-# conversation, then counts the band down for 20 seconds and runs the /clear
-# that continues from the handoff. Pressing 1 clears at once; sending a
+# conversation, then counts down for 20 seconds beside its key and runs the /clear
+# that continues from the handoff. Pressing Ctrl+X 1 clears at once; sending a
 # prompt stops the countdown. On at 80 unless set; `off` or `0` disables it,
 # and a value that is not a number from 1 to 100 falls back to 80 rather than off. A
 # conversation born of a /clear that already starts past it is never forced
@@ -341,7 +349,7 @@ export CS_NO_TASK_TOOLS="1"
 
 # Launch without CLAUDE_CODE_ENABLE_FUNCTION_HOOKS, even when the shell
 # carries it. A cs launch exports it so the cs mod the installer deployed
-# (the band's Ctrl+X 1 rotate key, past 40% context by default) loads; the flag
+# (the Ctrl+X 1 rotate key, past 40% context by default) loads; the flag
 # also loads any other function-hooks plugin on the machine. Without this knob
 # cs keeps a value already in the shell (0 keeps function hooks off).
 export CS_NO_FUNCTION_HOOKS="1"
@@ -510,6 +518,9 @@ stays with its session.
 | `CS_NARRATIVE_KEEP_BYTES` | a byte count above 0, at most 15 digits | 65536 | when the next turn ends |
 | `CS_ROTATE_FORCE_CTX` | `off`, `0` or a percentage from 1 to 100 | 80 | by your next prompt |
 | `CS_ROTATE_BUTTON_CTX` | a whole number of 1 to 3 digits | the warn % | by your next prompt |
+| `CS_BAND_PROMPTS` | `1` (on) or `0` (off) | off | by your next prompt |
+| `CS_BAND_PROMPT` | `latest`, `read` | latest | by your next prompt |
+| `CS_BAND_BARS` | a whole number of 1 to 3 digits | 10 | by your next prompt |
 | `CS_NO_ROTATION_WAKE` | `1` (on) or `0` (off) | off | at the next `/clear` or launch |
 | `CS_ROTATION_KICK_DELAY` | seconds, 1 to 7 digits | 2 | at the next rotation |
 | `CS_REWRITE_PROVIDER` | `claude`, `claude-api`, `openai`, `openai-api`, `gemini`, `gemini-api`, `grok`, `xai` | claude | at the next ctrl+g |
@@ -521,7 +532,7 @@ stays with its session.
 | `CS_TERM_BG_RGB` | r;g;b, each 0 to 255 | detected | at the next repaint |
 | `CS_NO_ITERM2` | `1` (on) or `0` (off) | off | the tab title, the bell bounce and the status line's iTerm reads: now; the launch's iTerm tmux path: at the next launch |
 | `CS_NERD_FONTS` | `1` (on) or `0` (off) | off | at the next cs command |
-| `CS_FILTER_CHAT` | `1` (on) or `0` (off) | off | `/filter-chat` and the band key: now. Here or in a shell: the next launch |
+| `CS_FILTER_CHAT` | `1` (on) or `0` (off) | off | `/filter-chat` and its key: now. Here or in a shell: the next launch |
 | `CS_NO_TASK_TOOLS` | `1` (on) or `0` (off) | off | at the next launch |
 | `CS_NO_UPDATE_CHECK` | `1` (on) or `0` (off) | off | at the next launch |
 | `CS_NO_FUNCTION_HOOKS` | `1` (on) or `0` (off) | off | at the next launch; on, no mod loads, the cs panel included |
@@ -540,16 +551,17 @@ file instead, the one that session links:
 
 The two command keys sit in the `Chat` context, where Claude Code wants a
 `command:` binding (2.1.310 warns of one in any other named context), and the
-two band chords in `Global`, where the `cs` mod reads them.
+two key chords in `Global`, where Claude Code takes a chord for a mod's Button.
 
-Ctrl+X then R submits `/rotate`, and Ctrl+X then W submits `/wrap`, band or no
-band. Ctrl+X then 1 or 2 presses the `cs` mod's band above the
-prompt: 1 its rotate key, or its `/clear` after arming a handoff, and 2 its
-wrap key. The band has no key of its own, so a digit you type to answer a
-question never presses it; without these two chords it answers only a click or
-Ctrl+X Tab. Text you are typing stays in the prompt. Claude Code drops a Ctrl+X that gets no second
+Ctrl+X then R submits `/rotate`, and Ctrl+X then W submits `/wrap`, keys or no
+keys. Ctrl+X then 1 or 2 presses the `cs` mod's keys, under the prompt
+or on the band above it: 1 its rotate key, or its `/clear` after arming a handoff, and 2 its
+wrap key. The keys have no hotkey of their own, so a digit you type to answer a
+question never presses one; without these two chords they answer only a click,
+or Ctrl+X Tab where they draw on the band above the prompt.
+Text you are typing stays in the prompt. Claude Code drops a Ctrl+X that gets no second
 key within 3 seconds. The chords need no terminal setting. Ctrl+X 1 and
-Ctrl+X 2 reach the band only because Claude Code mounts no handler of its own
+Ctrl+X 2 reach the keys only because Claude Code mounts no handler of its own
 for `strip:jump1` and `strip:jump2` (measured on 2.1.291 and 2.1.292); a
 release that mounts one takes the chord from the band without a warning.
 
@@ -602,20 +614,24 @@ release that mounts one takes the chord from the band without a warning.
 
 ## Band settings
 
-Three rows of Claude Code's `/config` menu shape the cs mod's band above the
-prompt (the cs plugin's `userConfig`, stored by Claude Code in
-`settings.json`). A change reloads the mod.
+Three cs settings, in the `Prompt bars` group of `/cs`, shape the cs mod's
+band above the prompt. Change them in `/cs`, with `cs -config set`, or export
+them in the shell that launches cs (see [Settings file](#settings-file)). The
+mod reads cs's settings at session start and as each turn starts and ends, so
+a change in `/cs` or with `cs -config set` applies by your next prompt, with
+no reload.
 
-| Row | Values | Default | What it does |
-|-----|--------|---------|--------------|
-| `cs.bandPrompts` | on, off | off | Draws the rail: a bar per prompt and the name of one prompt before the bars; a press on a bar scrolls to its prompt. The band's other words draw either way. |
-| `cs.bandPrompt` | `latest`, `read` | `latest` | `latest` names the newest prompt and draws its bar thick. `read` names the prompt being read, the one whose row stands highest on screen, and follows your scroll. |
-| `cs.bandBars` | a whole number, 1 or more | `10` | The most prompt bars the band draws, the named prompt's always among them; older prompts fold into one `…N` run, and newer ones into one `M…` run when the named prompt is older than the bars reach. |
+| Setting | Values | Default | What it does |
+|---------|--------|---------|--------------|
+| `CS_BAND_PROMPTS` | `1` (on), `0` (off) | off | Draws the rail: a bar per prompt and the name of one prompt before the bars; a press on a bar scrolls to its prompt. The band's other words draw either way. |
+| `CS_BAND_PROMPT` | `latest`, `read` | `latest` | `latest` names the newest prompt and draws its bar thick. `read` names the prompt being read, the one whose row stands highest on screen, and follows your scroll. |
+| `CS_BAND_BARS` | a whole number, 1 or more | `10` | The most prompt bars the band draws, the named prompt's always among them; older prompts fold into one `…N` run, and newer ones into one `M…` run when the named prompt is older than the bars reach. |
 
-`/config` refuses a value the band cannot draw (a bar count under 1 or not
-whole), naming the row beside it. A bad value stored some other way, such
-as by editing `settings.json`, leaves the band without the rail and says so in
-one toast; the rest of the mod runs.
+`cs -config set` and `/cs` refuse a named prompt other than `latest` or
+`read`, and a bar count that is not a whole number of 1 to 3 digits, naming
+the setting. A value the band cannot draw, which can come from your shell or
+be a bar count of `0`, leaves the band without the rail and says so in one
+toast per value; the rest of the mod runs.
 
 ### Spinner tip
 
@@ -650,7 +666,7 @@ alone. To get cs's tips back, delete `~/.config/cs/tips-file` and run
 ## In-session switches
 
 Bare `/cs` (or `/cs-panel`) opens a pane of these switches and of cs's settings
-together: the `/config` rows of `cs`, `cs-update`, `cs-mermaid`, `cs-images` and `cs-filter-chat`, then every
+together: the `/config` rows of `cs-update`, `cs-mermaid`, `cs-images` and `cs-filter-chat`, then every
 setting `cs -config list` names. Type to filter the rows, then press Enter on
 one to open its choices under it: a new value, `Default` (which removes it from
 the file that holds it), or `Keep`; the scope line under the keys says which
@@ -691,7 +707,7 @@ for the syntax and bundled skill.
 
 Filter chat is off by default. While it is on, the chat shows what you type and
 what Claude answers, and nothing of the work between them. `/filter-chat`, or
-the band's `filter chat` key, switches it for this session: each runs
+the cs mod's `filter chat` key, switches it for this session: each runs
 `cs <session> -config set CS_FILTER_CHAT`. See [the filter chat mod](hooks.md#cs-filter-chat-not-a-hook-script--a-claude-code-mod).
 
 ## Environment variables cs sets for you

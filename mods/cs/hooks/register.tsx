@@ -1,11 +1,12 @@
 /* @jsxRuntime classic */
 /* @jsx h */
 /* @jsxFrag Fragment */
-// ABOUTME: cs mod: keys above the prompt: rotate past the threshold, wrap up, /clear once a handoff is armed, or start a queue nothing runs.
+// ABOUTME: cs mod: keys under the prompt, at the right of the permission notice: rotate past the threshold, wrap up, filter chat, and /clear with its countdown once a handoff is armed.
+// ABOUTME: Above the prompt a band: the key that starts a queue nothing runs, mail, the features word and the /finish gate, and the keys themselves where the footer has no safe place for them.
 // ABOUTME: A turn ending past CS_ROTATE_FORCE_CTX (default 80, off disables) runs /rotate itself, then counts down to the /clear (session colour, amber, crit); session.start writes a heartbeat for doctor.
 // ABOUTME: /queue adds a task to the session's walk-away queue through `cs -queue add`, at once even mid-turn; bare, it prints `cs -queue list`. /finish toasts its start and outcome and, while its gate runs, the band carries the elapsed time.
 // ABOUTME: The band carries a rail: one tick per prompt on the transcript's live branch (read after each turn), the one being read thick; a press or /cs next|prev|first|last|N scrolls the transcript to that prompt; bare /cs goes on to the cs panel.
-import type { On, EngineInterface, PluginOptions, RenderElement, RenderSurface } from 'claude-code'
+import type { On, EngineInterface, RenderElement, RenderSurface } from 'claude-code'
 
 declare const h: any
 declare const Fragment: any
@@ -176,7 +177,7 @@ export const ASKS = {
 
 export const TOASTS = {
   queued: (task: string) => `queued: ${cutTask(task)}`,
-  bandOption: (problem: string) => `the band draws no prompt bars: ${problem}. Set it in /config.`,
+  bandOption: (problem: string) => `the band draws no prompt bars: ${problem}. /cs shows where it is set.`,
   promptNotDrawn: 'that prompt is not on screen yet',
   scrollRefused: (deny: string) => deny,
   transcriptTail: () => `the transcript is over ${READ_CAP / 1024 / 1024} MiB; the rail lists the prompts of its tail`,
@@ -189,6 +190,14 @@ export const TOASTS = {
   finishFailed: (task: string, err: string) => `/finish${task === '' ? '' : ` ${task}`} did not run: ${err}`,
   pressedNotEmptied: (err: string) => `could not empty ${PRESSED}: ${err}`,
   wrapFailed: (err: string) => `/wrap did not run: ${err}`,
+  midTurn: (command: string) => `${command} did not run: a turn is running`,
+  countDisarmed: '/clear did not run: the handoff is no longer armed',
+  countNotLead: "/clear did not run: this conversation is no longer the session's lead",
+  countQuestion: '/clear did not run: a question is waiting for an answer',
+  countSurvey: '/clear did not run: a survey is waiting above the prompt',
+  countSurveyUnseen: '/clear did not run: a survey was waiting above the prompt when the band last drew',
+  clearUnseen: 'the count to /clear reached zero unseen: the band above the prompt was not drawn; /clear has run',
+  countHidden: '/clear did not run: neither the band nor the hint drew, as under a picker; the clear key returns with the band',
   queueNoBin: 'the launch did not say where cs is (CS_BIN); run cs -queue start from a shell in this session',
   queueModeUnknown: (how: string) => `'${how}' is not a way to run the queue; it is not started`,
   notCompacted: (reason: string) => `the conversation was not compacted (${reason}); the queue is not started`,
@@ -236,9 +245,35 @@ export const COMMANDS = {
 let left: number | undefined
 let ticker: { cancel: () => void } | undefined
 let bandIdle = false
-// Whether a turn was running when the band last drew: a queue started then
-// reaches its first stop without a prompt from the mod.
-let turnRunning = false
+// What the count's zero knows of the band, none of it from a render it may
+// never get. A mod loaded before this one can answer the band's render
+// without passing it on, and the engine's question dialog or a picker such
+// as /model's takes the band's place: each way the band's hook is not
+// reached (measured on 2.1.322). The hint under the prompt is still raised
+// under another mod's band and not under a picker (measured), and the engine
+// holds a /clear run under a picker until it closes.
+// Each tick asks for a redraw and the engine raises the band 5 to 19 ms later
+// (measured), so `bandDrawn`, `hintDrawn` and `dialogDrawn` say which was
+// raised since the last tick. `bandSurvey` is the band's own word on a
+// survey, as last heard since the count began: nothing else says one is up,
+// and a band taken since cannot take the word back, so it is good for that
+// count's zero and no later one. A reload resets none of the four: a
+// count's start and its first tick set each before a zero reads it, and a
+// reload leaves no key under the prompt for the first tick to take.
+let bandDrawn = false
+let hintDrawn = false
+let dialogDrawn = false
+let bandSurvey = false
+// Whether a turn runs, as each source last said it: the main loop's turn
+// events, and the band's and the hint's renders, which also tell a mod loaded
+// mid-turn. A turn runs while any says so, so two sites a render apart never
+// trade the answer back and forth, and a turn's end on the main loop clears
+// all three. A queue started mid-turn reaches its first stop without a prompt
+// from the mod.
+type Working = { turn: boolean; band: boolean; hint: boolean }
+const IDLE: Working = { turn: false, band: false, hint: false }
+let working = IDLE
+const turnRunning = () => working.turn || working.band || working.hint
 // The handoff whose next step the count has toasted, by its text: one toast
 // per armed handoff, so a count restarted for the same handoff (a prompt
 // stopped it, the next turn's end started it again) says nothing, and the
@@ -332,7 +367,7 @@ export function buildBandEntries(facts: BandFacts): BandEntry[] {
   // The grace follows the clear key whose press stops it.
   if (facts.countdown !== undefined) entries.push({ key: 'cs-countdown', kind: 'word', label: `in ${facts.countdown.seconds}s`, ink: { color: facts.countdown.ink } })
   if (facts.wrapping) entries.push({ key: 'cs-wrap', kind: 'chord', label: 'wrap', action: WRAP_ACTION, onPress: facts.wrap })
-  // The filter chat key and the queue have no chord: a click or Enter under the band's focus presses them.
+  // The filter chat key and the queue have no chord: a click presses them, and Enter under the band's focus the queue.
   // Its tail is a switch dot: ● in green while on, ○ in the line's ink while off.
   if (facts.filterChat !== undefined) entries.push({ key: 'cs-filter-chat', kind: 'press', label: facts.filterChat.on ? 'filter chat ●' : 'filter chat ○', onPress: facts.filterChat.onPress, ink: { tail: facts.filterChat.on ? '●' : '○', color: facts.filterChat.on ? FILTER_CHAT_ON : undefined } })
   if (facts.waiting > 0) entries.push({ key: 'cs-queue', kind: 'press', label: `${QUEUE_GLYPH} run ${facts.waiting} queued ${facts.waiting === 1 ? 'task' : 'tasks'}`, onPress: facts.queue, ink: { lead: QUEUE_GLYPH, color: facts.queueInk } })
@@ -389,42 +424,52 @@ let tailSaid = false
 // prompt is already scheduled.
 let drawnRead = -1
 let redrawPending = false
-// The band's /config rows (plugin.json userConfig), as this activation got
-// them: whether it draws the prompt bars at all (off by default), the prompt
-// it names, `latest` (the newest) or `read` (the one being read), and the
-// most bars it draws before the prompts past them fold into `…N` or `M…`. A
-// change reloads the plugin and register runs again. A stored value the band
-// cannot draw leaves it without bars (undefined), said once, and the rest of
-// the mod running: a throw from register would unload all of it.
-const CS_PLUGIN = 'cs'
+// cs's prompt-bar settings as the last band draw read them (readBandOptions):
+// whether it draws the bars at all, the prompt it names, `latest` (the
+// newest) or `read` (the one being read), and the most bars it draws before
+// the prompts past them fold into `…N` or `M…`. A value the band cannot draw
+// leaves it without bars (undefined) and the rest of the band running; the
+// lead's band says so once a value.
 type BandOptions = { prompts: boolean; prompt: 'latest' | 'read'; bars: number }
 let bandOptions: BandOptions | undefined
-let bandProblem: string | undefined
-let bandProblemSaid = false
+let bandProblemSaid: string | undefined
 let filterChatPressPending: Promise<void> | undefined
 let filterChatComplaint: string | undefined
 
-// What is wrong with a value for one of the band's rows, by field name;
-// undefined when the band can draw it, or the field is not the band's.
-function bandOptionProblem(field: string, value: unknown): string | undefined {
-  if (field === 'bandPrompts') return typeof value === 'boolean' ? undefined : `cs.bandPrompts is on or off; got ${String(value)}`
-  if (field === 'bandPrompt') return value === 'latest' || value === 'read' ? undefined : `cs.bandPrompt is latest or read; got ${String(value)}`
-  if (field === 'bandBars') {
-    return typeof value === 'number' && Number.isInteger(value) && value >= 1 ? undefined : `cs.bandBars is the most bars the band draws, a whole number of 1 or more; got ${String(value)}`
-  }
-  return undefined
-}
+// The keys under the prompt, as the band's last evaluation left them: the
+// footer's two sites are raised with neither the survey nor the handoff the
+// keys depend on, so the band, which is, decides for them. With the keys go
+// whether filter chat is on, which adds its label to the footer's modes, and
+// the width the status line last recorded.
+type Footer = { keys: BandEntry[]; filterChat: boolean; statusWidth: number | undefined }
+const NO_FOOTER: Footer = { keys: [], filterChat: false, statusWidth: undefined }
+let footer = NO_FOOTER
+// What the three sites last learned of the screen, each from its own event:
+// its width and layout from any of them, the mode labels from their site
+// (undefined while another mod draws a tree of its own in their place: what
+// it takes of the status line's row this mod cannot know), the hint from its
+// site (undefined until it first draws). The keys' one route is read from
+// this record and the footer's (routeNow), so the three sites agree on where
+// they draw, and a site that learns something new draws all three again.
+type Screen = { columns: number | undefined; fullscreen: boolean; modes: readonly string[] | undefined; hint: string | undefined }
+const NO_SCREEN: Screen = { columns: undefined, fullscreen: false, modes: [], hint: undefined }
+let screen = NO_SCREEN
+// The clock that reads the status line's width again while it can move the
+// keys, and whether a redraw for a changed footer is already scheduled.
+let footerWatch: { cancel: () => void } | undefined
+let footerRedraw = false
+let ownPid: string | undefined
+let pidAsks = 0
+let pidAsking = false
 
-export function register(on: On, options: PluginOptions) {
-  bandProblem = bandOptionProblem('bandPrompts', options.bandPrompts) ?? bandOptionProblem('bandPrompt', options.bandPrompt) ?? bandOptionProblem('bandBars', options.bandBars)
-  bandOptions = bandProblem === undefined
-    ? { prompts: options.bandPrompts as boolean, prompt: options.bandPrompt as BandOptions['prompt'], bars: options.bandBars as number }
-    : undefined
-  bandProblemSaid = false
+export function register(on: On) {
+  footer = NO_FOOTER; screen = NO_SCREEN; footerWatch = undefined; footerRedraw = false; ownPid = undefined; pidAsks = 0; pidAsking = false
+  bandOptions = undefined
+  bandProblemSaid = undefined
   filterChatPressPending = undefined
   filterChatComplaint = undefined
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; turnRunning = false; stepToastedFor = undefined; adopted = undefined; clearSeen = false; clearing = false; birth = undefined; startPercent = undefined; registered = false
+  left = undefined; ticker = undefined; bandIdle = false; working = IDLE; stepToastedFor = undefined; adopted = undefined; clearSeen = false; clearing = false; birth = undefined; startPercent = undefined; registered = false
   finishWatch = undefined; finishTurnOver = false; finishShown = new Set(); finishGate = undefined; finishProblemShown = false
   lastRefusal = undefined
   filterChatVetRefused = false
@@ -509,14 +554,6 @@ export function register(on: On, options: PluginOptions) {
     return {}
   })
 
-  // A /config row of the band's takes only a value the band can draw: a bad
-  // one is refused at the menu, where it is typed, not met at the next load.
-  on('config.set', async ($, e, next) => {
-    if (e.provider.plugin !== CS_PLUGIN) return next(e)
-    const problem = bandOptionProblem(e.key.slice(e.key.lastIndexOf('.') + 1), e.value)
-    return problem === undefined ? next(e) : { deny: problem }
-  })
-
   // The end of a turn is the one moment a rotation can be started for the
   // person: the answer is in, nothing runs. An aborted or errored turn is no
   // place to start one, and a subagent's turn ends in the same event. A
@@ -524,6 +561,7 @@ export function register(on: On, options: PluginOptions) {
   // whatever ended it, is where the press is over.
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
+      await changeFooter($, () => { working = IDLE })
       finishTurnOver = true
       await clearPressed($)
       await refreshRail($)
@@ -584,7 +622,10 @@ export function register(on: On, options: PluginOptions) {
   // A main-loop turn rereads cs's settings, so one changed while idle counts
   // from the next prompt, the rotation its end may force included.
   on('turn.start', async ($, e, next) => {
-    if (e.agentId === undefined) readSettingsLater($)
+    if (e.agentId === undefined) {
+      await changeFooter($, () => { working = { ...working, turn: true } })
+      readSettingsLater($)
+    }
     if (e.text !== '') await clearWrapped($)
     return next(e)
   })
@@ -612,81 +653,139 @@ export function register(on: On, options: PluginOptions) {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    bandDrawn = true
+    // The engine does not raise the band while a question dialog is open
+    // (measured): a band raised after one says the question is answered.
+    dialogDrawn = false
+    bandSurvey = e.props.hasSurvey
     const drawn = await next(e)
-    // The band draws in a new conversation before any of its turns end, so
-    // the birth is settled here: a later /resume is not mistaken for it.
-    await noteConversation($, await $.session.id())
-    // A survey owns the band; a running turn cannot be rotated out of.
-    turnRunning = e.props.isWorking
-    bandIdle = !e.props.hasSurvey && !e.props.isWorking
-    // The /finish gate's word draws mid-turn, since the gate runs inside one,
-    // whatever else the band has to say.
-    const gate = await gateWord($)
-    // The band draws on every redraw and asks cs nothing: it shows the last
-    // answer cs gave (sessionVetted), which every step that acts asks afresh.
-    // An armed handoff makes the rotation due at any context.
-    const handoff = lastRefusal === undefined && (await handoffArmed($))
-    const armed = bandIdle && handoff
-    const { context } = await $.session.usage()
-    const percent = context.percent
-    const due = handoff || (percent !== undefined && percent >= (await threshold($)))
-    let rotating = bandIdle && due
-    // Tasks queued and nothing running them, at any context, draw the start
-    // key; an armed handoff draws its clear key alone. Tasks queued that the
-    // start key does not offer (the queue runs them, a turn runs, or the
-    // clear key stands alone) are said, not pressed.
-    const queue = e.props.hasSurvey ? 0 : await queueLength($)
-    const queueStarted = queue > 0 && (await queueRunning($))
-    let waiting = !bandIdle || armed || queueStarted ? 0 : queue
-    let queued = waiting > 0 ? 0 : queue
-    // Mail from other sessions that `cs -msg` has not read yet.
-    let mail = e.props.hasSurvey ? 0 : await unreadMail($)
-    // The rail draws, once cs.bandPrompts turns it on, whenever the
-    // conversation has two prompts to move between, a turn running or not,
-    // under the same ownership as the keys; its bars draw not at all while a
-    // stored band row is bad, which the lead's band says once.
-    const bars = bandOptions?.bars
-    let railing = !e.props.hasSurvey && prompts.length > 1 && bandOptions?.prompts === true
-    if (bandProblem !== undefined && !bandProblemSaid && (await ownsRotation($))) {
-      bandProblemSaid = true
-      $.ui.toast(TOASTS.bandOption(bandProblem))
+    try {
+      // The band draws in a new conversation before any of its turns end, so
+      // the birth is settled here: a later /resume is not mistaken for it.
+      await noteConversation($, await $.session.id())
+      // A survey owns the band; a running turn cannot be rotated out of.
+      await noteScreen($, viewOf(e.viewport), { band: e.props.isWorking })
+      bandIdle = !e.props.hasSurvey && !e.props.isWorking
+      // The /finish gate's word draws mid-turn, since the gate runs inside one,
+      // whatever else the band has to say.
+      const gate = await gateWord($)
+      // The band draws on every redraw and asks cs nothing: it shows the last
+      // answer cs gave (sessionVetted), which every step that acts asks afresh.
+      // An armed handoff makes the rotation due at any context.
+      const handoff = lastRefusal === undefined && (await handoffArmed($))
+      const armed = bandIdle && handoff
+      const { context } = await $.session.usage()
+      const percent = context.percent
+      const due = handoff || (percent !== undefined && percent >= (await threshold($)))
+      let rotating = bandIdle && due
+      // Tasks queued and nothing running them, at any context, draw the start
+      // key; an armed handoff draws its clear key alone. Tasks queued that the
+      // start key does not offer (the queue runs them, a turn runs, or the
+      // clear key stands alone) are said, not pressed.
+      const queue = e.props.hasSurvey ? 0 : await queueLength($)
+      const queueStarted = queue > 0 && (await queueRunning($))
+      let waiting = !bandIdle || armed || queueStarted ? 0 : queue
+      let queued = waiting > 0 ? 0 : queue
+      // Mail from other sessions that `cs -msg` has not read yet.
+      let mail = e.props.hasSurvey ? 0 : await unreadMail($)
+      // The rail draws, once CS_BAND_PROMPTS turns it on, whenever the
+      // conversation has two prompts to move between, a turn running or not,
+      // under the same ownership as the keys; its bars draw not at all while a
+      // prompt-bar setting is bad, which the lead's band says once a value.
+      const read = await readBandOptions($)
+      bandOptions = 'problem' in read ? undefined : read
+      if (!('problem' in read)) bandProblemSaid = undefined
+      else if (read.problem !== bandProblemSaid && (await ownsRotation($))) {
+        bandProblemSaid = read.problem
+        $.ui.toast(TOASTS.bandOption(read.problem))
+      }
+      const bars = bandOptions?.bars
+      let railing = !e.props.hasSurvey && prompts.length > 1 && bandOptions?.prompts === true
+      // The features word leads what the session is, at the line's right; a
+      // running gate already names the feature it lands.
+      let featured = !e.props.hasSurvey && gate === undefined ? featuresWord : undefined
+      // The filter chat key draws mid-turn too: the switch works while a turn
+      // runs, and a reader wants it where it was. A survey or an armed handoff
+      // takes the row.
+      let filterChatEligible = !e.props.hasSurvey && !armed
+      if ((rotating || waiting > 0 || queued > 0 || mail > 0 || railing || featured || filterChatEligible) && !(await ownsRotation($))) { rotating = false; waiting = 0; queued = 0; mail = 0; railing = false; featured = undefined; filterChatEligible = false }
+      // The named tick is remembered on every path, drawn or not, so a row's
+      // report that moves nothing visible schedules no redraw.
+      const named = namedIndex()
+      drawnRead = named
+      const hasContent = rotating || waiting > 0 || queued > 0 || mail > 0 || gate !== undefined || railing || featured !== undefined
+      if (!hasContent && !filterChatEligible) { await postFooter($, [], false); return drawn }
+      // Listing /filter-chat reads availability without queuing a command or adding a status row.
+      const offersFilterChat = filterChatEligible && (await $.command.list()).some(command => command.name === 'filter-chat' && command.source === 'plugin' && command.plugin === 'cs-filter-chat')
+      if (!hasContent && !offersFilterChat) { await postFooter($, [], false); return drawn }
+      const wrapped = rotating && !armed && (await wrapFinished($))
+      const chords = await boundChords($)
+      const own = paletteColor(await sessionColor($))
+      const { Box, Text, Button } = await $.ui.resolve(e)
+      const wrapping = rotating && !armed && !wrapped
+      const finish = featured?.finish
+      const { bg, theme } = await themeAndBackground($)
+      const filterChat = offersFilterChat && !filterChatVetRefused && (await readFilterChat($))
+      const entries = buildBandEntries({
+        featured: featured === undefined ? undefined : { label: featured.label, onPress: finish === undefined || !bandIdle ? undefined : () => pressFinish($, finish) },
+        countdown: armed && left !== undefined ? { seconds: left, ink: await rampColor($, left) } : undefined,
+        rotating, armed, wrapping, waiting, gate, queued, queueRunning: queueStarted, mail,
+        queueInk: amberColor(bg, theme),
+        filterChat: offersFilterChat ? { on: filterChat, onPress: () => pressFilterChat($) } : undefined,
+        rotate: armed ? () => pressClear($) : () => pressRotate($),
+        wrap: () => askToWrap($),
+        queue: () => pressQueueStart($),
+      })
+      const rail = railing && bars !== undefined ? { prompts, named, denied, bars, jump: (i: number) => jumpTo($, i) } : undefined
+      await postFooter($, entriesAt(entries, 'footer'), filterChat)
+      // Where the footer cannot draw the keys they stay on the band, as before
+      // they had a place under the prompt.
+      return drawBand({ drawn, entries: routeNow() === 'band' ? entries : entriesAt(entries, 'band'), chords, own, bodyColumns: e.props.bodyColumns, surface: e.surface, rail }, { Box, Text, Button })
+    } catch (err) {
+      // An evaluation that throws takes the keys of the one before it from
+      // under the prompt: nothing vouches for them any more.
+      await clearFooter($)
+      throw err
     }
-    // The features word leads what the session is, at the line's right; a
-    // running gate already names the feature it lands.
-    let featured = !e.props.hasSurvey && gate === undefined ? featuresWord : undefined
-    // The filter chat key draws mid-turn too: the switch works while a turn
-    // runs, and a reader wants it where it was. A survey or an armed handoff
-    // takes the row.
-    let filterChatEligible = !e.props.hasSurvey && !armed
-    if ((rotating || waiting > 0 || queued > 0 || mail > 0 || railing || featured || filterChatEligible) && !(await ownsRotation($))) { rotating = false; waiting = 0; queued = 0; mail = 0; railing = false; featured = undefined; filterChatEligible = false }
-    // The named tick is remembered on every path, drawn or not, so a row's
-    // report that moves nothing visible schedules no redraw.
-    const named = namedIndex()
-    drawnRead = named
-    const hasContent = rotating || waiting > 0 || queued > 0 || mail > 0 || gate !== undefined || railing || featured !== undefined
-    if (!hasContent && !filterChatEligible) return drawn
-    // Listing /filter-chat reads availability without queuing a command or adding a status row.
-    const offersFilterChat = filterChatEligible && (await $.command.list()).some(command => command.name === 'filter-chat' && command.source === 'plugin' && command.plugin === 'cs-filter-chat')
-    if (!hasContent && !offersFilterChat) return drawn
-    const wrapped = rotating && !armed && (await wrapFinished($))
-    const chords = await boundChords($)
-    const own = paletteColor(await sessionColor($))
+  })
+
+  // The keys at the right end of the permission notice's row, where the status
+  // line leaves them room (keysRoute). SessionMode draws at the right end of
+  // the row above, the status line's: a box of no width there holds the keys
+  // one row down, flush right, and takes no row of its own (measured on
+  // 2.1.322; a tree drawn in the flow takes a third footer row once the
+  // status line is long).
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
+    const drawn = await next(e)
+    await noteScreen($, { ...viewOf(e.viewport), modes: drawn.type === 'engine' ? e.props.modes : undefined })
+    if (routeNow() !== 'notice-right') return drawn
     const { Box, Text, Button } = await $.ui.resolve(e)
-    const wrapping = rotating && !armed && !wrapped
-    const finish = featured?.finish
-    const { bg, theme } = await themeAndBackground($)
-    const entries = buildBandEntries({
-      featured: featured === undefined ? undefined : { label: featured.label, onPress: finish === undefined || !bandIdle ? undefined : () => pressFinish($, finish) },
-      countdown: armed && left !== undefined ? { seconds: left, ink: await rampColor($, left) } : undefined,
-      rotating, armed, wrapping, waiting, gate, queued, queueRunning: queueStarted, mail,
-      queueInk: amberColor(bg, theme),
-      filterChat: offersFilterChat ? { on: !filterChatVetRefused && await readFilterChat($), onPress: () => pressFilterChat($) } : undefined,
-      rotate: armed ? () => pressClear($) : () => pressRotate($),
-      wrap: () => askToWrap($),
-      queue: () => pressQueueStart($),
-    })
-    const rail = railing && bars !== undefined ? { prompts, named, denied, bars, jump: (i: number) => jumpTo($, i) } : undefined
-    return drawBand({ drawn, entries, chords, own, bodyColumns: e.props.bodyColumns, surface: e.surface, rail }, { Box, Text, Button })
+    return (
+      <Box flexDirection="row">
+        {drawn}
+        <Box width={0} height={1}>
+          <Box position="absolute" right={0} top={1}>{drawFooterKeys(liveKeys(), { Box, Text, Button })}</Box>
+        </Box>
+      </Box>
+    )
+  })
+
+  // The engine's question dialog draws as the engine's; the count's zero
+  // reads that one was up.
+  on('ui.render', { component: 'AskUserQuestion' }, async ($, e, next) => {
+    dialogDrawn = true
+    return next(e)
+  })
+
+  // Where they have no room there, the keys stand in the notice's row in
+  // place of its cycle hint: the engine keeps the notice and joins the two.
+  on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
+    hintDrawn = true
+    const drawn = await next(e)
+    await noteScreen($, { ...viewOf(e.viewport), hint: e.props.hint }, { hint: e.props.isWorking })
+    if (routeNow() !== 'inline') return drawn
+    const { Box, Text, Button } = await $.ui.resolve(e)
+    return drawFooterKeys(liveKeys(), { Box, Text, Button })
   })
 
   // A rail tick never takes the band's focus ring: the ring draws as an
@@ -700,7 +799,7 @@ export function register(on: On, options: PluginOptions) {
 
 // What the band's line is drawn from, as the AbovePrompt handler read it: the
 // engine's own tree, the entries, the bound chords by action, the session
-// colour, and the rail when cs.bandPrompts draws one.
+// colour, and the rail when CS_BAND_PROMPTS draws one.
 export type BandView = {
   drawn: RenderElement
   entries: BandEntry[]
@@ -926,7 +1025,7 @@ export function drawBand(v: BandView, el: BandElements): RenderElement {
   // otherwise (side by side, flat ticks run together into one line), each a
   // Button (the named one a Text, as dim as the rest: there is nowhere to
   // jump, and its heavier stroke alone marks it). It draws at most
-  // cs.bandBars bars in what the line leaves after the inset, the gaps and
+  // CS_BAND_BARS bars in what the line leaves after the inset, the gaps and
   // the words, always the named one among them (railTicks); the older prompts
   // collapse into one `…N` run, a cell before the first bar, and any newer
   // than the drawn bars into one `M…` run, a cell after the last. The named
@@ -938,7 +1037,7 @@ export function drawBand(v: BandView, el: BandElements): RenderElement {
   const drawnTick = (i: number) => ticks !== undefined && i >= ticks.from && i < ticks.to
   // Left of the rail, GAP cells before it so the `…N` run never reads as
   // the cut name's own `…`, the band names a prompt in what the line leaves:
-  // the newest or the one being read (cs.bandPrompt), or the one under the
+  // the newest or the one being read (CS_BAND_PROMPT), or the one under the
   // pointer. Too little left to name one names none.
   const railWidth = ticks === undefined ? 0 : railCells(ticks.prompts.length, ticks)
   const labelRoom = ticks === undefined ? 0 : budget - railWidth - GAP
@@ -1053,6 +1152,260 @@ export function sharedPrefix(chords: (string | undefined)[]): string | undefined
   const first = prefixes[0]
   return first !== undefined && prefixes.every(prefix => prefix === first) ? first : undefined
 }
+
+// Where each entry draws: on the band above the prompt, or among the keys in
+// the footer under it. The band builds one list (buildBandEntries); each site
+// draws its own part.
+export type Site = 'band' | 'footer'
+const SITES = new Map<string, Site>([
+  ['cs-rotate', 'footer'], ['cs-countdown', 'footer'], ['cs-wrap', 'footer'], ['cs-filter-chat', 'footer'],
+  ['cs-queue', 'band'], ['cs-queued', 'band'], ['cs-features', 'band'], ['cs-gate', 'band'], ['cs-mail', 'band'],
+])
+
+// The entries of one site, in the list's order.
+export function entriesAt<T extends BandEntry>(entries: T[], site: Site): T[] {
+  return entries.filter(entry => {
+    const at = SITES.get(entry.key)
+    if (at === undefined) throw new Error(`cs: ${entry.key} has no site`)
+    return at === site
+  })
+}
+
+// The status line's record of the line it last printed, under the session
+// directory: `<conversation id> <cells> <pid>`, the pid that of the Claude
+// Code whose status line it is (_record_width in bin/cs-statusline).
+export const STATUS_WIDTH = '.cs/local/statusline-width'
+// How often the record is read again while it can move the keys: the status
+// line repaints on its own, and a render hook runs again only for its own
+// inputs.
+export const FOOTER_POLL_MS = 2000
+
+// The cells of the line the status line of Claude Code `pid` last printed
+// for conversation `id`, from the record's text; undefined for a record of
+// another conversation (an earlier one's), of another Claude Code (the
+// conversation is open in a second terminal, of another width), of the two
+// at once (`<id> - <pid> <pid>`), or in any other shape.
+export function parseStatusWidth(text: string, id: string, pid: string): number | undefined {
+  const record = text.match(/^(\S+) (\d{1,4}) (\d+)\n?$/)
+  return record !== null && record[1] === id && record[3] === pid ? Number(record[2]) : undefined
+}
+
+// The label cs-filter-chat adds to the footer's modes while it is on. KEEP IN
+// SYNC with labels.mode in mods/cs-filter-chat/hooks/words.ts (the two mods
+// share no module; mods/cs/test pins the two against each other).
+export const FILTER_CHAT_MODE = 'filter chat · /filter-chat to switch'
+
+// The cells the footer's mode labels take at the right of the status line's
+// row, as the engine joins them. cs-filter-chat adds its label on the way to
+// the engine, so this mod's hook sees it or not by the order the two loaded
+// in: while filter chat is on the label is counted either way.
+export function modesWidth(modes: readonly string[], filterChat: boolean): number {
+  return cellWidth((filterChat && !modes.includes(FILTER_CHAT_MODE) ? [...modes, FILTER_CHAT_MODE] : modes).join(' & '))
+}
+
+// Between two footer keys; the clear key's countdown follows it after a space.
+const FOOTER_SEP = ' · '
+const footerGap = (entry: BandEntry) => (entry.key === 'cs-countdown' ? ' ' : FOOTER_SEP)
+
+// The cells the footer's keys take, as drawFooterKeys draws them.
+export function keysWidth(keys: BandEntry[]): number {
+  return cellWidth(keys.map((entry, index) => `${index > 0 ? footerGap(entry) : ''}${entry.label}`).join(''))
+}
+
+// Where the keys draw: at the right end of the notice's row, in the place of
+// the notice's hint, or on the band above the prompt. Measured on Claude Code
+// 2.1.322:
+// - at the notice's right the keys hang a row under the mode labels' site,
+//   which the engine draws only in the fullscreen layout: on the main screen
+//   it clips them away;
+// - there they take no row of their own only while the status line and the
+//   mode labels share the row above: the footer pads two cells a side and
+//   keeps one between the two, so `columns` must hold the status line's
+//   cells, the labels' and STATUS_MARGIN more;
+// - there they are painted over the row, so the row must also hold the
+//   notice (noticeCells), the keys and NOTICE_GAP, or they cover its end;
+// - inline they stand in the hint's place, so only where the hint is the
+//   cycle hint and nothing a person reads (isCycleHint), after the notice the
+//   engine keeps (the widest without its hint, with the indent and the
+//   engine's ` · `), and the row must hold both or it wraps.
+// A width nobody recorded leaves the second question open, as does a tree
+// another mod draws where the mode labels go, so the keys go inline, which
+// asks nothing of the status line's row. Where neither place is safe, or no
+// site has said how wide the footer is, they draw on the band.
+export type KeysRoute = 'notice-right' | 'inline' | 'band'
+export type RouteFacts = { columns: number | undefined; fullscreen: boolean; statusWidth: number | undefined; modesCells: number | undefined; hint: string | undefined; keysCells: number }
+const STATUS_MARGIN = 5
+const NOTICE_GAP = 3
+const INLINE_LEAD = 29
+const INLINE_MARGIN = 2
+export function keysRoute({ columns, fullscreen, statusWidth, modesCells, hint, keysCells }: RouteFacts): KeysRoute {
+  if (columns === undefined) return 'band'
+  if (fullscreen && statusWidth !== undefined && modesCells !== undefined && columns >= statusWidth + STATUS_MARGIN + modesCells && columns >= noticeCells(hint) + keysCells + NOTICE_GAP) return 'notice-right'
+  return (hint === undefined || isCycleHint(hint)) && columns >= INLINE_LEAD + keysCells + INLINE_MARGIN ? 'inline' : 'band'
+}
+
+// The hint the engine draws after the permission notice at rest, alone or,
+// for a moment after shift+tab, after the mode's label; a pill (`1 shell`)
+// takes its place, and outside those modes the hint is another line.
+const CYCLE_HINT = '(shift+tab to cycle)'
+const CYCLE_HINT_LABEL = /^[a-z][a-z ]* on $/
+export function isCycleHint(hint: string): boolean {
+  if (!hint.endsWith(CYCLE_HINT)) return false
+  const label = hint.slice(0, -CYCLE_HINT.length)
+  return label === '' || CYCLE_HINT_LABEL.test(label)
+}
+
+// The cells the notice takes of its row, from the hint the engine last drew
+// in it, which names the mode's label only for a moment after shift+tab. The
+// widest notice at rest is bypass permissions with the cycle hint: 48 cells,
+// assumed for the bare cycle hint and before any hint is seen. A hint that
+// carries its label follows the indent and the mode's glyph (NOTICE_INDENT at
+// the widest); any other follows a label it does not name, so the widest
+// label and the engine's ` · ` are counted before it (NOTICE_LABEL).
+const NOTICE_WIDEST = 48
+const NOTICE_INDENT = 6
+const NOTICE_LABEL = 30
+export function noticeCells(hint: string | undefined): number {
+  if (hint === undefined || hint === CYCLE_HINT) return NOTICE_WIDEST
+  return (isCycleHint(hint) ? NOTICE_INDENT : NOTICE_LABEL) + cellWidth(hint)
+}
+
+// The keys that draw under the prompt now: the band's last, less the ones a
+// running turn has no use for while the band's last still holds them.
+const IDLE_KEYS = new Set(['cs-rotate', 'cs-countdown', 'cs-wrap'])
+const liveKeys = () => (turnRunning() ? footer.keys.filter(entry => !IDLE_KEYS.has(entry.key)) : footer.keys)
+
+// What routes the keys now, but for the status line's width.
+function routeFacts(keys: BandEntry[]): Omit<RouteFacts, 'statusWidth'> {
+  return { columns: screen.columns, fullscreen: screen.fullscreen, modesCells: screen.modes === undefined ? undefined : modesWidth(screen.modes, footer.filterChat), hint: screen.hint, keysCells: keysWidth(keys) }
+}
+
+// The one route of the keys under the prompt, for all three sites; undefined
+// with no key to draw.
+function routeNow(): KeysRoute | undefined {
+  const keys = liveKeys()
+  return keys.length === 0 ? undefined : keysRoute({ ...routeFacts(keys), statusWidth: footer.statusWidth })
+}
+
+// Whether the status line's width can move the keys: not while even a status
+// line of no width would leave them off the notice's right.
+const statusWidthMatters = (keys: BandEntry[]) => keys.length > 0 && keysRoute({ ...routeFacts(keys), statusWidth: 0 }) === 'notice-right'
+
+// The footer's keys in one row, dim as the hint they stand beside: each key a
+// Button that keeps its action, so the chord bound to it still presses it,
+// and spells no chord, which the row has no cells for. A Button nested in a
+// Text is refused with its whole tree, so each separator stands beside it.
+export function drawFooterKeys(keys: BandEntry[], el: BandElements): RenderElement {
+  const { Box, Text, Button } = el
+  return (
+    <Box flexDirection="row">
+      {keys.flatMap((entry, index) => [
+        index > 0 && <Text dimColor>{footerGap(entry)}</Text>,
+        entry.kind === 'word'
+          ? <Text bold color={entry.ink !== undefined && 'color' in entry.ink ? entry.ink.color : undefined}>{entry.label}</Text>
+          : entry.kind === 'chord'
+            ? <Button key={entry.key} action={entry.action} plain dimColor label={entry.label} onPress={entry.onPress} />
+            : entry.ink !== undefined && 'tail' in entry.ink
+              ? <Button key={entry.key} plain dimColor label={entry.label} onPress={entry.onPress}>{entry.label.slice(0, -entry.ink.tail.length)}<Text color={entry.ink.color}>{entry.ink.tail}</Text></Button>
+              : <Button key={entry.key} plain dimColor label={entry.label} onPress={entry.onPress} />,
+      ])}
+    </Box>
+  )
+}
+
+// This Claude Code's pid, as its status line knows it: the status line is
+// Claude Code's child, and so is a process the mod runs (measured on 2.1.322:
+// both name one parent). The engine aborts a process started in a render it
+// then supersedes (measured: the first ask at launch), so the pid is asked
+// for from a timer, PID_ASKS times a load at most, and the width is read
+// again once it is known.
+const PID_ASKS = 3
+const pidUnknowable = () => ownPid === undefined && !pidAsking && pidAsks >= PID_ASKS
+function askClaudePid($: EngineInterface) {
+  if (ownPid !== undefined || pidAsking || pidAsks >= PID_ASKS) return
+  pidAsking = true
+  pidAsks++
+  $.clock.after(0, async () => {
+    try {
+      const said = (await $.process.run(['/bin/sh', '-c', 'echo $PPID'])).stdout.trim()
+      if (/^\d+$/.test(said)) ownPid = said
+    } catch {
+      // no answer: the next read of the width asks again
+    }
+    pidAsking = false
+    if (ownPid !== undefined) await followStatusWidth($)
+  })
+}
+
+// What this Claude Code's status line last recorded for this conversation;
+// undefined when it recorded nothing the mod can read, and until the mod
+// knows which Claude Code it runs in.
+async function readStatusWidth($: EngineInterface): Promise<number | undefined> {
+  if (ownPid === undefined) {
+    askClaudePid($)
+    return undefined
+  }
+  try {
+    return parseStatusWidth(await $.fs.read(`${await $.session.cwd()}/${STATUS_WIDTH}`), await $.session.id(), ownPid)
+  } catch {
+    return undefined // no record: this status line is not cs's, or has not drawn yet
+  }
+}
+
+// What the three sites draw of the keys: where, and which.
+const drawnSignature = () => JSON.stringify([routeNow(), liveKeys().map(entry => [entry.key, entry.label, 'ink' in entry ? entry.ink : undefined])])
+
+// One redraw for keys that changed, from a timer: the change is found inside
+// a render hook.
+function redrawFooter($: EngineInterface) {
+  if (footerRedraw) return
+  footerRedraw = true
+  $.clock.after(0, () => { footerRedraw = false; $.ui.invalidate('ui.render') })
+}
+
+// Applies `change` to what the keys are drawn from. The status line's width
+// is read when it starts to matter, when the band asks (`reread`: a turn's
+// end repaints the status line), and from then on a clock for as long as it
+// can move the keys; while it cannot, or the mod has given up asking which
+// Claude Code it runs in, it is neither read nor kept. The sites that drew
+// from what the change replaced draw again when it moves or changes the keys.
+async function changeFooter($: EngineInterface, change: () => void, reread = false) {
+  const before = drawnSignature()
+  change()
+  if (!statusWidthMatters(footer.keys) || pidUnknowable()) {
+    footerWatch?.cancel()
+    footerWatch = undefined
+    if (footer.statusWidth !== undefined) footer = { ...footer, statusWidth: undefined }
+  } else if (footerWatch === undefined || reread) {
+    footerWatch ??= $.clock.every(FOOTER_POLL_MS, () => followStatusWidth($))
+    const statusWidth = await readStatusWidth($)
+    footer = { ...footer, statusWidth }
+  }
+  if (drawnSignature() !== before) redrawFooter($)
+}
+
+// The band hands the footer its keys; their presses are taken as they come,
+// since a press reads the session afresh.
+const postFooter = ($: EngineInterface, keys: BandEntry[], filterChat: boolean) =>
+  changeFooter($, () => { footer = { keys, filterChat, statusWidth: footer.statusWidth } }, true)
+
+async function followStatusWidth($: EngineInterface) {
+  const statusWidth = await readStatusWidth($)
+  await changeFooter($, () => { footer = { ...footer, statusWidth } })
+}
+
+const clearFooter = ($: EngineInterface) => changeFooter($, () => { footer = NO_FOOTER })
+
+// What an event says of the screen: its width, and whether the layout is the
+// fullscreen one. An event with no viewport says nothing, and leaves what
+// another site learned standing.
+const viewOf = (viewport: { columns: number; isFullscreen?: boolean } | undefined): Partial<Screen> =>
+  viewport === undefined ? {} : { columns: viewport.columns, fullscreen: viewport.isFullscreen === true }
+
+// A site notes what its event says of the screen, and the hint's and the
+// band's whether a turn runs.
+const noteScreen = ($: EngineInterface, seen: Partial<Screen>, said: Partial<Working> = {}) =>
+  changeFooter($, () => { screen = { ...screen, ...seen }; working = { ...working, ...said } })
 
 // One `-features --porcelain` record, as _feature_readiness prints it.
 export type FeatureRecord = { task: string; ahead: number; untracked: number; lock: string; state: FeatureState }
@@ -1301,7 +1654,7 @@ function foldCells(folded: number): number {
   return folded > 0 ? `\u2026${folded}`.length + 1 : 0
 }
 
-// The prompt the band names: the newest, or the one being read (cs.bandPrompt).
+// The prompt the band names: the newest, or the one being read (CS_BAND_PROMPT).
 function namedIndex(): number {
   return bandOptions?.prompt === 'read' ? readIndex() : prompts.length - 1
 }
@@ -1609,11 +1962,17 @@ async function forceRotation($: EngineInterface) {
 // Counts the band down, one redraw a second (the contract folds calls past
 // ten a second). Each redraw re-reads the marker and the handoff: the count
 // must see the press and the prompt that stop it, so nothing here is cached.
-// At zero the /clear runs only where the band would draw the button: the band
-// idle, the handoff still armed, this the lead; otherwise the count stops and
-// the button stays for the person.
+// At zero the /clear runs if the handoff is still armed, this is the lead, cs
+// trusts the session, and nothing waits on the person once those reads are
+// done: no turn (a Stop hook's turn starts with no prompt to stop the count),
+// no question dialog, no survey, and the band or the hint under the prompt
+// raised since the tick before. Otherwise the count stops, a toast says why,
+// and the button stays where the band is drawn. A band not raised under a
+// hint that is (another mod has the band) stops nothing: the /clear runs, and
+// a toast then says the count reached zero unseen.
 function startCountdown($: EngineInterface) {
   left = GRACE_SECONDS
+  bandSurvey = false
   // From a timer: the count starts inside the turn's own hook.
   $.clock.after(0, () => toastNextStep($))
   ticker = $.clock.every(1000, async () => {
@@ -1621,16 +1980,70 @@ function startCountdown($: EngineInterface) {
     // lands while the zero tick is still reading leaves the count where it is.
     if (left === undefined || left <= 0) return
     left -= 1
+    const stale = !bandDrawn
+    if (left > 0) { bandDrawn = false; hintDrawn = false; dialogDrawn = false }
     $.ui.invalidate('ui.render')
-    if (left > 0) return
-    // The count holds at zero through the reads below: a prompt or a press
-    // landing meanwhile stops it (left becomes undefined), and this tick
-    // then does nothing, so nothing clears twice or behind a new turn.
-    const idle = bandIdle && (await handoffArmed($)) && (await ownsRotation($)) && (await sessionVetted($, await $.session.cwd()))
-    if (left !== 0) return
-    stopCountdown($)
-    if (idle) await clearAndContinue($).catch(err => $.ui.toast(TOASTS.clearFailed(String(err))))
+    // The keys under the prompt are what the band last put there, the count's
+    // seconds among them: a band not raised since the last tick vouches for
+    // none of them, and puts them back when it is raised again.
+    try {
+      if (stale) await clearFooter($)
+      if (left > 0) return
+      await countZero($)
+    } catch (err) {
+      // A read that throws at zero would leave the count there for good.
+      if (left !== 0) throw err
+      stopCountdown($)
+      $.ui.toast(TOASTS.clearFailed(String(err)))
+    }
   })
+}
+
+// The count holds at zero through the reads below: a prompt or a press
+// landing meanwhile stops it (left becomes undefined), and this tick then
+// does nothing, so nothing clears twice or behind a new turn.
+async function countZero($: EngineInterface) {
+  // What waits on the person already spares the reads, a cs process among
+  // them; it is read again once they are done.
+  const waiting = waitsOnPerson()
+  const armed = waiting === undefined && (await handoffArmed($))
+  const lead = armed && (await ownsRotation($))
+  const told = lastRefusal
+  const vetted = lead && (await sessionVetted($, await $.session.cwd()))
+  if (left !== 0) return
+  stopCountdown($)
+  // Read after the reads: a redraw late by a tick can raise the band during
+  // them. What kept a band from being raised is not known here.
+  const unseen = !bandDrawn
+  const refusal = waiting ?? (!armed ? TOASTS.countDisarmed : !lead ? TOASTS.countNotLead : waitsOnPerson() ?? (unseen && !hintDrawn ? TOASTS.countHidden : undefined))
+  if (refusal !== undefined) return $.ui.toast(refusal)
+  if (!vetted) {
+    // The vet toasts a refusal it has not said before; this zero says its
+    // own either way.
+    if (lastRefusal !== undefined && lastRefusal === told) $.ui.toast(TOASTS.noRotation(lastRefusal))
+    return
+  }
+  // Said once the /clear has run: a toast shown before it leaves the screen
+  // with the conversation (measured).
+  try {
+    await clearAndContinue($)
+  } catch (err) {
+    return $.ui.toast(TOASTS.clearFailed(String(err)))
+  }
+  if (unseen) $.ui.toast(TOASTS.clearUnseen)
+}
+
+// What waits on the person as the count reaches zero, as the toast that says
+// the /clear did not run; undefined when nothing does. What the band last
+// said of a turn counts only while the band is still drawn: a typed command
+// draws it as working for a moment (measured), and a band taken just then
+// would say so for good. The hint's word and the main loop's turn events
+// stand either way.
+function waitsOnPerson(): string | undefined {
+  if (working.turn || working.hint || (bandDrawn && working.band)) return TOASTS.midTurn('/clear')
+  if (dialogDrawn) return TOASTS.countQuestion
+  if (bandSurvey) return bandDrawn ? TOASTS.countSurvey : TOASTS.countSurveyUnseen
+  return undefined
 }
 
 function stopCountdown($: EngineInterface) {
@@ -1679,6 +2092,19 @@ export function nextStepLine(text: string): string | undefined {
     return first.length > NEXT_STEP_CHARS ? `${first.slice(0, NEXT_STEP_CHARS)}\u2026` : first
   }
   return undefined
+}
+
+// The prompt-bar settings, each read as threshold() reads its own; an empty
+// or unset value is its default. cs skips a file's value its check refuses,
+// so a bad value here comes from the environment, or is a bar count of 0,
+// which cs's whole-number check takes.
+async function readBandOptions($: EngineInterface): Promise<BandOptions | { problem: string }> {
+  const prompts = (fileValue('CS_BAND_PROMPTS') ?? await $.env.get("CS_BAND_PROMPTS"))?.trim()
+  const prompt = (fileValue('CS_BAND_PROMPT') ?? await $.env.get("CS_BAND_PROMPT"))?.trim() || 'latest'
+  const bars = (fileValue('CS_BAND_BARS') ?? await $.env.get("CS_BAND_BARS"))?.trim() || '10'
+  if (prompt !== 'latest' && prompt !== 'read') return { problem: `CS_BAND_PROMPT is latest or read; got ${prompt}` }
+  if (!/^\d+$/.test(bars) || Number(bars) < 1) return { problem: `CS_BAND_BARS is a whole number of 1 or more; got ${bars}` }
+  return { prompts: prompts === '1', prompt, bars: Number(bars) }
 }
 
 // The band's own threshold; without one it is the bar's warn band, read the way
@@ -1801,9 +2227,10 @@ async function sessionColor($: EngineInterface): Promise<string | undefined> {
 
 // The engine actions the rotate and wrap Buttons answer to. They carry no default
 // chord and no engine handler is mounted for them (measured on 2.1.291 and
-// 2.1.292), so the chord a person binds to one presses the Button. The band
-// depends on that: a Claude Code that mounts a handler for either action
-// takes Ctrl+X 1 or Ctrl+X 2 from the band without a word. KEEP IN SYNC with
+// 2.1.292), so the chord a person binds to one presses the Button, under the
+// prompt as above it (measured on 2.1.322). The keys depend on that: a Claude
+// Code that mounts a handler for either action takes Ctrl+X 1 or Ctrl+X 2
+// from them without a word. KEEP IN SYNC with
 // CS_ROTATE_WRAP_KEYS in lib/01-manifests.sh, which binds them.
 export const ROTATE_ACTION = 'strip:jump1'
 export const WRAP_ACTION = 'strip:jump2'
@@ -2001,8 +2428,11 @@ async function rotate($: EngineInterface) {
 // The rotate button's press. The skill ends by arming a marker in .cs/local,
 // so the press asks cs first, as the forced /rotate does before it runs. It
 // then names the conversation in PRESSED for the rotation to read; a run the
-// engine refuses runs no turn, so the press empties it again itself.
+// engine refuses runs no turn, so the press empties it again itself. A key
+// drawn before a turn started is still on screen for a moment once it runs,
+// and its chord is bound all along: that press runs nothing.
 async function pressRotate($: EngineInterface) {
+  if (turnRunning()) return $.ui.toast(TOASTS.midTurn('/rotate'))
   const cwd = await $.session.cwd()
   if (!(await sessionVetted($, cwd))) return
   await $.fs.write(`${cwd}/${PRESSED}`, `${await $.session.id()}\n`)
@@ -2062,6 +2492,7 @@ async function readWrapped($: EngineInterface): Promise<string> {
 // passes before the narrative rotation, so a key that may have been meant for
 // the composer opens the engine's own dialog rather than acting on the press.
 async function askToWrap($: EngineInterface) {
+  if (turnRunning()) return $.ui.toast(TOASTS.midTurn('/wrap'))
   let answer: string
   try {
     answer = await $.ui.ask(ASKS.wrap.question, { header: ASKS.wrap.header, options: ASKS.wrap.options })
@@ -2202,7 +2633,7 @@ async function offerToStart($: EngineInterface, bin: string, count: number) {
     $.ui.toast(TOASTS.queueStartExited(result.exitCode, tail))
     return
   }
-  if (turnRunning) return
+  if (turnRunning()) return
   try {
     await $.prompt.submit({ text: QUEUE_KICK })
   } catch (err) {
@@ -2213,14 +2644,18 @@ async function offerToStart($: EngineInterface, bin: string, count: number) {
 // The clear button's press: the /clear runs only once cs says it trusts the
 // session's control files, as at a countdown's zero. The press stops the count
 // before it asks, so the zero tick cannot clear while cs answers, and only the
-// latest press acts.
+// latest press acts. Like the rotate key's, a press once a turn runs runs
+// nothing, read again once cs answers: a turn started meanwhile with no
+// prompt (a Stop hook's feedback) moves no press count.
 async function pressClear($: EngineInterface) {
   if (clearing) return
+  if (turnRunning()) return $.ui.toast(TOASTS.midTurn('/clear'))
   if (ticker) stopCountdown($)
   const press = ++pressCount
   const vetted = await sessionVetted($, await $.session.cwd())
   if (press !== pressCount) return
   if (!vetted) return stopCountdown($)
+  if (turnRunning()) return $.ui.toast(TOASTS.midTurn('/clear'))
   await clearAndContinue($)
 }
 

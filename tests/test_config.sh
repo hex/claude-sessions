@@ -458,7 +458,7 @@ test_list_porcelain_equals_the_golden_record() {
     assert_eq "0" "$rc" "list --porcelain exits 0" || return 1
     assert_eq "" "$(cat "$TEST_TMPDIR/err")" "and says nothing on stderr" || return 1
     assert_eq "$(cat "$SCRIPT_DIR/fixtures/config-porcelain.txt")" "$out" "stdout is the golden record" || return 1
-    assert_eq "43" "$(printf '%s\n' "$out" | awk -F'\t' 'NF == 12' | wc -l | tr -d ' ')" "43 records of 12 fields" || return 1
+    assert_eq "46" "$(printf '%s\n' "$out" | awk -F'\t' 'NF == 12' | wc -l | tr -d ' ')" "46 records of 12 fields" || return 1
 }
 
 # A key that turns something off (*_NO_*, *_DISABLE) has an inverted edit
@@ -502,11 +502,11 @@ test_list_prints_the_table_and_the_skipped_lines() {
 Ignored in alpha/.cs/local/config
   line 4: CS_ROTATE_FORCE_CTX=101: not off, 0 or a percentage from 1 to 100" \
         "$(printf '%s\n' "$out" | sed -n '/^Ignored in /,$p')" "the skipped lines, file by file, at the end" || return 1
-    assert_eq "Status line|Prompts|Rotation|Rewriter (ctrl+g)|Terminal|Mail|Launch|Queue|Narrative|Ignored in ~/.config/cs/config|Ignored in alpha/.cs/local/config" \
-        "$(printf '%s\n' "$out" | grep '^[A-Z]' | paste -sd '|' -)" "the nine groups in table order, each once, then the two files' skips" || return 1
+    assert_eq "Status line|Prompts|Rotation|Prompt bars|Rewriter (ctrl+g)|Terminal|Mail|Launch|Queue|Narrative|Ignored in ~/.config/cs/config|Ignored in alpha/.cs/local/config" \
+        "$(printf '%s\n' "$out" | grep '^[A-Z]' | paste -sd '|' -)" "the ten groups in table order, each once, then the two files' skips" || return 1
     local rc=0
     out=$(cs_plain -config list) || rc=$?
-    assert_eq "0|Status line|Prompts|Rotation|Rewriter (ctrl+g)|Terminal|Mail|Launch|Queue|Narrative|Ignored in ~/.config/cs/config" \
+    assert_eq "0|Status line|Prompts|Rotation|Prompt bars|Rewriter (ctrl+g)|Terminal|Mail|Launch|Queue|Narrative|Ignored in ~/.config/cs/config" \
         "$rc|$(printf '%s\n' "$out" | grep '^[A-Z]' | paste -sd '|' -)" "outside any session: the machine's file alone" || return 1
 }
 
@@ -752,7 +752,7 @@ test_the_picker_gets_the_theme_from_a_file() {
 test_every_reader_loads_the_settings_before_its_first_read() {
     local keys f got read load bad=""
     keys=$(sed -n "/^_CS_CONFIG_SPEC=(/,/^)/s/^    '\(CS_[A-Z0-9_]*\)|.*/\1/p" "$REPO/lib/03-config.sh" | paste -sd'|' -)
-    assert_eq "43" "$(printf '%s\n' "$keys" | awk -F'|' '{ print NF }')" "the allow-list's 43 keys" || return 1
+    assert_eq "46" "$(printf '%s\n' "$keys" | awk -F'|' '{ print NF }')" "the allow-list's 46 keys" || return 1
     for f in "$REPO"/hooks/*.sh "$REPO"/bin/cs-statusline "$REPO"/bin/cs-subagent-statusline "$REPO"/bin/cs-secrets; do
         case "${f##*/}" in cs-config.sh|cs-shared.sh) continue ;; esac
         got=$(awk -v keys="$keys" '

@@ -4003,8 +4003,7 @@ count_render_forks() {  # json
     FORKS_RC=$?
     FORKS_OUT=$(cat "$TEST_TMPDIR/stdout.txt")
     FORKS=0
-    local line
-    while IFS= read -r line; do FORKS=$((FORKS + 1)); done < "$log"
+    while IFS= read -r _; do FORKS=$((FORKS + 1)); done < "$log"
 }
 
 # A lead Fable render with every optional stage live: a matching session id in
@@ -4681,12 +4680,247 @@ test_teammate_heartbeat_does_not_reset_the_lead_cadence() {
 
 run_test test_teammate_heartbeat_does_not_reset_the_lead_cadence
 
+# The render records the width in cells of the line it printed, beside the id
+# of the conversation it drew for and the pid of the Claude Code that ran it
+# (CS_STATUSLINE_PARENT stands in for it here): the cs mod draws its keys at
+# the right of the row under the bar only where the bar leaves them room. The
+# escapes take no cell, so the quiet line counts as its text alone; the layout
+# is named, since this suite draws the capsules unless a test says otherwise.
+test_render_records_the_width_of_the_line_it_printed() {
+    export CLAUDE_SESSION_NAME=widthsess CS_STATUSLINE_PARENT=4242
+    local dir="$CS_SESSIONS_ROOT/widthsess/.cs/local" out
+    mkdir -p "$dir"
+    printf 'claude_session_id: lead\n' > "$dir/state"
+    local input='{"session_id":"lead","model":{"id":"claude-opus-4-8","display_name":"Opus"},"effort":{"level":"high"},"context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}'
+    out=$(NO_COLOR=1 run_sl "$input")
+    assert_eq "widthsess · ✦ Opus high > ○ ctx 8%" "$out" "the plain line" || return 1
+    assert_eq "lead 34 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "the plain line's 34 cells are recorded" || return 1
+    out=$(CS_STATUSLINE_LAYOUT=quiet COLORTERM=truecolor run_sl "$input")
+    assert_output_contains_f "$out" "${ESC_}[" "the quiet line carries escapes" || return 1
+    assert_eq "lead 42 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "the quiet line's 42 cells are recorded, its escapes not counted" || return 1
+    assert_eq "statusline-width" "$(cd "$dir" && echo statusline-width*)" "the record is moved into place, and nothing is left beside it" || return 1
+}
+
+run_test test_render_records_the_width_of_the_line_it_printed
+
+# A line as wide as the last is not written again: the write is a fork, and
+# the bar repaints on every event. The file's inode tells a rewrite, since the
+# record is moved into place; a wider line moves it, so the check is sensitive.
+test_render_leaves_an_unchanged_width_record_alone() {
+    export CLAUDE_SESSION_NAME=samesess NO_COLOR=1 CS_STATUSLINE_PARENT=4242
+    local dir="$CS_SESSIONS_ROOT/samesess/.cs/local" first second third
+    mkdir -p "$dir"
+    printf 'claude_session_id: lead\n' > "$dir/state"
+    local input='{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}'
+    run_sl "$input" >/dev/null
+    first=$(ls -i "$dir/statusline-width" | awk '{print $1}')
+    run_sl "$input" >/dev/null
+    second=$(ls -i "$dir/statusline-width" | awk '{print $1}')
+    assert_eq "$first" "$second" "the same width is not written again" || return 1
+    run_sl "${input/8/18}" >/dev/null
+    third=$(ls -i "$dir/statusline-width" | awk '{print $1}')
+    assert_eq "lead 20 4242" "$(cat "$dir/statusline-width")" "a wider line is recorded" || return 1
+    [ "$third" != "$second" ] || { echo "  FAIL: a changed width should replace the record"; return 1; }
+}
+
+run_test test_render_leaves_an_unchanged_width_record_alone
+
+# Only the launched conversation records its line: a tmux teammate shares the
+# directory and draws a bar of its own, and the lead's mod would place the
+# lead's keys by the teammate's width. Nor does a teammate's render remove the
+# lead's record, even one that cannot say which conversation it draws for
+# (its bar turned off, stdin it cannot read): the record names the Claude
+# Code that wrote it, and a teammate in its own pane is another. A session
+# whose state names no conversation yet gets no record either, since the mod
+# trusts none.
+test_teammate_render_leaves_the_lead_width_record() {
+    export CLAUDE_SESSION_NAME=matesess NO_COLOR=1 CS_STATUSLINE_PARENT=4242
+    local dir="$CS_SESSIONS_ROOT/matesess/.cs/local"
+    mkdir -p "$dir"
+    printf 'claude_session_id: "lead"\n' > "$dir/state"
+    run_sl '{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}' >/dev/null
+    run_sl '{"session_id":"mate","model":{"display_name":"Sonnet"},"context_window":{"used_percentage":55},"workspace":{"current_dir":"/none"}}' >/dev/null
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width")" "the lead's record stands" || return 1
+    CS_STATUSLINE_SEGMENTS=none run_sl '{"session_id":"mate","context_window":{"used_percentage":55},"workspace":{"current_dir":"/none"}}' >/dev/null
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width")" "and stands when the teammate's bar prints no line" || return 1
+    CS_STATUSLINE_PARENT=4343 CS_STATUSLINE_DISABLE=1 run_sl '{"session_id":"mate","context_window":{"used_percentage":55},"workspace":{"current_dir":"/none"}}' >/dev/null
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "and when another Claude Code's bar is turned off" || return 1
+    (cd "$TEST_TMPDIR" && CS_STATUSLINE_PARENT=4343 run_sl 'not json') >/dev/null
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "and when another Claude Code's render cannot read its stdin" || return 1
+    : > "$dir/state"
+    rm "$dir/statusline-width"
+    run_sl '{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}' >/dev/null
+    assert_not_exists "$dir/statusline-width" "a state naming no conversation records nothing" || return 1
+}
+
+run_test test_teammate_render_leaves_the_lead_width_record
+
+# The record is true of the line on screen or it is gone: a run that prints no
+# line of this conversation's (the bar turned off, stdin it cannot read, no
+# segment to draw) removes the record a wider or narrower line left, and the
+# next line is recorded again. Each case starts from a record, so a run that
+# left it alone would fail.
+test_a_render_that_prints_no_line_removes_the_width_record() {
+    export CLAUDE_SESSION_NAME=gonesess NO_COLOR=1 CS_STATUSLINE_PARENT=4242
+    local dir="$CS_SESSIONS_ROOT/gonesess/.cs/local" out
+    local input='{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}'
+    mkdir -p "$dir"
+    printf 'claude_session_id: lead\n' > "$dir/state"
+    run_sl "$input" >/dev/null
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "a line is recorded" || return 1
+    out=$(CS_STATUSLINE_DISABLE=1 run_sl "$input")
+    assert_eq "" "$out" "the bar turned off prints nothing" || return 1
+    assert_not_exists "$dir/statusline-width" "and removes the record" || return 1
+    run_sl "$input" >/dev/null
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "the bar back on records its line again" || return 1
+    out=$(cd "$TEST_TMPDIR" && run_sl 'not json')
+    assert_eq "$(basename "$TEST_TMPDIR")" "$out" "stdin that is not JSON prints the directory's name" || return 1
+    assert_not_exists "$dir/statusline-width" "which is not the recorded line: the record goes" || return 1
+    run_sl "$input" >/dev/null
+    out=$(CS_STATUSLINE_SEGMENTS=none run_sl "$input")
+    assert_eq "" "$out" "no segment prints no line" || return 1
+    assert_not_exists "$dir/statusline-width" "and removes the record" || return 1
+}
+
+run_test test_a_render_that_prints_no_line_removes_the_width_record
+
+# The width counts one cell a character, which is true of ASCII and of the
+# glyphs the bar draws itself. A character from outside (a conversation's
+# title, a branch, a model's name) may take two cells or none, and bash has
+# no table to tell: such a line's width is unknown, and its record is removed
+# rather than written short. `漢字` would count 2 where it takes 4.
+test_a_line_with_a_character_of_unknown_width_is_not_recorded() {
+    export CLAUDE_SESSION_NAME=widesess NO_COLOR=1 CS_STATUSLINE_PARENT=4242
+    local dir="$CS_SESSIONS_ROOT/widesess/.cs/local" title out
+    mkdir -p "$dir"
+    printf 'claude_session_id: lead\n' > "$dir/state"
+    for title in $'\xe6\xbc\xa2\xe5\xad\x97' $'ship \xf0\x9f\x9a\x80' $'caf\xc3\xa9' $'e\xcc\x81'; do
+        run_sl '{"session_id":"lead","session_name":"plain","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}' >/dev/null
+        assert_eq "lead 16 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "an ASCII title is counted with the bar's own glyphs" || return 1
+        out=$(run_sl '{"session_id":"lead","session_name":"'"$title"'","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}')
+        assert_output_contains_f "$out" "$title" "the title is on the line" || return 1
+        assert_not_exists "$dir/statusline-width" "a line holding $title has no recorded width" || return 1
+    done
+}
+
+run_test test_a_line_with_a_character_of_unknown_width_is_not_recorded
+
+# Every character past ASCII that the script can print of its own is one the
+# width counts as a cell (_SL_NARROW): a glyph added to a segment and not to
+# that list would make every line that shows it a line of unknown width. The
+# glyphs are read from the script's code lines, written out or as \x bytes.
+test_every_glyph_the_bar_draws_is_one_the_width_counts() {
+    local glyphs missed
+    glyphs=$(perl -ne '
+        next if /^\s*#/;
+        s/\s#\s.*$//;
+        my @runs = /((?:\\x[0-9a-fA-F]{2}){2,})/g;
+        for my $run (@runs) { (my $hex = $run) =~ s/\\x//g; $_ .= " " . pack("H*", $hex) }
+        print "$1\n" while /([\xC2-\xF4][\x80-\xBF]+)/g;
+    ' "$SL" | LC_ALL=C sort -u)
+    assert_eq "21" "$(printf '%s\n' "$glyphs" | grep -c .)" "the script's code holds 21 glyphs past ASCII" || return 1
+    missed=$(
+        # shellcheck source=bin/cs-statusline
+        CS_STATUSLINE_LIB=1 . "$SL"
+        while IFS= read -r glyph; do
+            _known_cells "a${glyph}b" && [ "$_WIDTH" = 3 ] || printf ' %s' "$(printf '%s' "$glyph" | od -An -tx1 | tr -d ' \n')"
+        done <<< "$glyphs"
+    )
+    assert_eq "" "$missed" "each is counted as one cell (the bytes of any that is not)" || return 1
+    # shellcheck source=bin/cs-statusline
+    ( CS_STATUSLINE_LIB=1 . "$SL"; _known_cells $'a\xe6\xbc\xa2b' ) \
+        && { echo "  FAIL: a character from outside the list should have no known width"; return 1; }
+    # shellcheck source=bin/cs-statusline
+    ( CS_STATUSLINE_LIB=1 . "$SL"; _known_cells $'a\tb' ) \
+        && { echo "  FAIL: a control character should have no known width"; return 1; }
+    return 0
+}
+
+run_test test_every_glyph_the_bar_draws_is_one_the_width_counts
+
+# A conversation resumed in a second terminal has two Claude Codes drawing
+# its bar into one record, each as wide as its own terminal lets it be. The
+# second to draw marks the record shared, which gives the cs mod no width, and
+# neither rewrites it while the other lives (the inode tells a rewrite); the
+# one left when the other exits records its width again. This suite's shell
+# and a child it starts stand in for the two; a pid already reaped for one
+# that exited. The child reads a fifo this shell holds open, so it ends when
+# the test closes it, or with the suite if the suite is killed.
+_two_writers_case() {  # dir one two gone
+    local dir="$1" one="$2" two="$3" gone="$4" marked
+    local input='{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}'
+    CS_STATUSLINE_PARENT=$gone run_sl "$input" >/dev/null
+    CS_STATUSLINE_PARENT=$one run_sl "$input" >/dev/null
+    assert_eq "lead 18 $one" "$(cat "$dir/statusline-width")" "a writer that exited is replaced" || return 1
+    CS_STATUSLINE_PARENT=$two run_sl "${input/8/18}" >/dev/null
+    assert_eq "lead - $two $one" "$(cat "$dir/statusline-width")" "a second live writer marks the record shared, with no width" || return 1
+    marked=$(ls -i "$dir/statusline-width" | awk '{print $1}')
+    CS_STATUSLINE_PARENT=$one run_sl "$input" >/dev/null
+    CS_STATUSLINE_PARENT=$two run_sl "${input/8/18}" >/dev/null
+    CS_STATUSLINE_PARENT=$gone run_sl "$input" >/dev/null
+    assert_eq "lead - $two $one" "$(cat "$dir/statusline-width")" "the shared record stands" || return 1
+    assert_eq "$marked" "$(ls -i "$dir/statusline-width" | awk '{print $1}')" "and no render of either rewrites it" || return 1
+    printf 'lead - %s %s\n' "$gone" "$one" > "$dir/statusline-width"
+    CS_STATUSLINE_PARENT=$one run_sl "$input" >/dev/null
+    assert_eq "lead 18 $one" "$(cat "$dir/statusline-width")" "the writer left alone records its width again" || return 1
+}
+
+test_two_live_writers_share_the_width_record_without_trading_it() {
+    export CLAUDE_SESSION_NAME=twosess NO_COLOR=1
+    local dir="$CS_SESSIONS_ROOT/twosess/.cs/local" two gone rc=0 hold="$TEST_TMPDIR/hold"
+    mkdir -p "$dir"
+    printf 'claude_session_id: lead\n' > "$dir/state"
+    ( exit 0 ) & gone=$!
+    wait "$gone"
+    mkfifo "$hold"
+    cat "$hold" > /dev/null & two=$!
+    exec 4> "$hold"
+    _two_writers_case "$dir" "$$" "$two" "$gone" 4>&- || rc=1
+    exec 4>&-
+    wait "$two"
+    return "$rc"
+}
+
+run_test test_two_live_writers_share_the_width_record_without_trading_it
+
+# The record is written under a name of the writing process's own and moved
+# into place, so two renders never write one temporary file: an `mv` ahead on
+# PATH logs each source it is handed, and two renders that each write name two
+# different ones, neither left beside the record. A write the directory
+# refuses says nothing on stderr and leaves the record as it was; the refused
+# render draws one segment, so its width differs while its context stamp, at
+# the same value and clock, is not due.
+test_width_record_is_written_under_a_per_process_name() {
+    export CLAUDE_SESSION_NAME=tmpsess NO_COLOR=1 CS_STATUSLINE_PARENT=4242 CS_STATUSLINE_NOW=1000
+    local dir="$CS_SESSIONS_ROOT/tmpsess/.cs/local" err shim="$TEST_TMPDIR/mvlog" sources rc=0
+    local input='{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}'
+    mkdir -p "$dir" "$shim"
+    printf 'claude_session_id: lead\n' > "$dir/state"
+    printf '#!/bin/sh\nprintf "%%s\\n" "$1" >> "%s/sources"\nexec /bin/mv "$@"\n' "$shim" > "$shim/mv"
+    chmod +x "$shim/mv"
+    PATH="$shim:$PATH" run_sl "$input" >/dev/null
+    PATH="$shim:$PATH" run_sl "${input/8/18}" >/dev/null
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "both renders recorded their line" || return 1
+    sources=$(grep '/statusline-width' "$shim/sources" 2>/dev/null)
+    assert_eq "2" "$(printf '%s\n' "$sources" | grep -c .)" "each render moved one temporary file into place" || return 1
+    assert_eq "2" "$(printf '%s\n' "$sources" | sort -u | grep -c .)" "under a name of its own" || return 1
+    assert_eq "statusline-width" "$(cd "$dir" && echo statusline-width*)" "leaving no file of its own beside the record" || return 1
+    _deny_writes "$dir" || return 77
+    err=$(CS_STATUSLINE_SEGMENTS=ctx run_sl_stderr "${input/8/18}")
+    assert_eq "" "$err" "a refused write says nothing on stderr" || rc=1
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "and leaves the record as it was" || rc=1
+    _allow_writes "$dir"
+    return "$rc"
+}
+
+run_test test_width_record_is_written_under_a_per_process_name
+
 # While git tracks the session's control files the hooks mark the session under
 # ~/.cache/cs/tracked (hooks/cs-resolve.sh), and the render adds, changes and
 # removes nothing in .cs/local: neither the context stamp nor the limits stamp.
 # The control render, unmarked, writes both, so the check is sensitive.
 test_render_writes_nothing_into_a_tracked_control_directory() {
-    export CLAUDE_SESSION_NAME=trackedsess
+    export CLAUDE_SESSION_NAME=trackedsess CS_STATUSLINE_PARENT=4242
     local sess="$CS_SESSIONS_ROOT/trackedsess" porcelain
     local input='{"session_id":"lead","context_window":{"used_percentage":30},"rate_limits":{"five_hour":{"used_percentage":12,"resets_at":2000}},"workspace":{"current_dir":"/none"}}'
     mkdir -p "$sess/.cs/local"
@@ -4703,6 +4937,7 @@ test_render_writes_nothing_into_a_tracked_control_directory() {
     CS_STATUSLINE_NOW=1000 run_sl "$input" >/dev/null
     assert_eq "30" "$(cat "$sess/.cs/local/context-pct" 2>/dev/null)" "unmarked, the render stamps the context" || return 1
     assert_file_exists "$sess/.cs/local/limits" "and the limits" || return 1
+    assert_eq "lead 38 4242" "$(cat "$sess/.cs/local/statusline-width" 2>/dev/null)" "and the width of its 38-cell line of three capsules" || return 1
 }
 
 run_test test_render_writes_nothing_into_a_tracked_control_directory
