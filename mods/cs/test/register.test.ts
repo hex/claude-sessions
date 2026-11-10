@@ -10,7 +10,7 @@ import { labels as filterChatLabels } from '../../cs-filter-chat/hooks/words.ts'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, buildBandEntries, drawBand, fitBand, entriesAt, drawFooterKeys, footerRoute, parseStatusWidth, modesWidth, keysWidth, STATUS_WIDTH, FOOTER_POLL_MS, FILTER_CHAT_MODE, type BandView, parsePrompts, RAIL_TEXT_CHARS, DEFAULT_PERCENT, GRACE_SECONDS, NEXT_STEP_CHARS, WRAP_QUESTION, WRAP_YES, QUEUE_START, QUEUE_COMPACT, QUEUE_KICK, QUEUE_MODE_QUESTION, QUEUE_HERE, QUEUE_SUBAGENTS, QUEUE_WORKFLOWS, nextStepLine, isUnconsumed, TOASTS, LOGS, REPLIES, finishToast, parseFeatures, featuresWordOf } from '../hooks/register.tsx'
+import { register, buildBandEntries, drawBand, fitBand, entriesAt, drawFooterKeys, keysRoute, isCycleHint, noticeCells, parseStatusWidth, modesWidth, keysWidth, STATUS_WIDTH, FOOTER_POLL_MS, FILTER_CHAT_MODE, type BandView, parsePrompts, RAIL_TEXT_CHARS, DEFAULT_PERCENT, GRACE_SECONDS, NEXT_STEP_CHARS, WRAP_QUESTION, WRAP_YES, QUEUE_START, QUEUE_COMPACT, QUEUE_KICK, QUEUE_MODE_QUESTION, QUEUE_HERE, QUEUE_SUBAGENTS, QUEUE_WORKFLOWS, nextStepLine, isUnconsumed, TOASTS, LOGS, REPLIES, finishToast, parseFeatures, featuresWordOf } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -161,8 +161,13 @@ const OPTIONS = { CS_BAND_PROMPTS: '1' }
 const READING = { ...OPTIONS, CS_BAND_PROMPT: 'read' }
 const UNCAPPED = { ...OPTIONS, CS_BAND_BARS: '100' }
 const DRAWN = { type: 'Survey', props: {}, children: [] }
-const band = (props: Partial<{ isWorking: boolean; hasSurvey: boolean; bodyColumns: number }> = {}, surface = 'terminal') =>
-  hooks['ui.render:AbovePrompt']($, { surface, props: { isWorking: false, hasSurvey: false, bodyColumns: 110, ...props } }, async () => DRAWN)
+// What every terminal render event says of the screen (measured on 2.1.322):
+// the fullscreen layout, 110 columns wide unless a test says otherwise.
+type View = { columns: number; rows: number; isFullscreen: boolean } | undefined
+const viewOf = (columns: number | null, isFullscreen = true): View => columns === null ? undefined : { columns, rows: 35, isFullscreen }
+// `null` is an event with no viewport: a surface nobody has measured.
+const band = (props: Partial<{ isWorking: boolean; hasSurvey: boolean; bodyColumns: number }> = {}, surface = 'terminal', viewport: View | null = viewOf(110)) =>
+  hooks['ui.render:AbovePrompt']($, { surface, viewport: viewport ?? undefined, props: { isWorking: false, hasSurvey: false, bodyColumns: 110, ...props } }, async () => DRAWN)
 
 function buttons(tree: any): any[] {
   if (!tree || typeof tree !== 'object') return []
@@ -177,10 +182,11 @@ const findButton = (tree: any) => buttons(tree)[0]
 const MODES_DRAWN = { type: 'engine', ref: 1 }
 const HINT_DRAWN = { type: 'Hint', props: {}, children: [] }
 const WIDTH = '/work/.cs/local/statusline-width'
-const footerMode = (columns: number | undefined = 110, modes: string[] = [], drawn: unknown = MODES_DRAWN) =>
-  hooks['ui.render:SessionMode']($, { surface: 'terminal', viewport: columns === undefined ? undefined : { columns }, props: { modes } }, async () => drawn)
-const footerHint = (columns: number | undefined = 110) =>
-  hooks['ui.render:PromptHint']($, { surface: 'terminal', viewport: columns === undefined ? undefined : { columns }, props: { isDraft: false, isWorking: false, hint: '(shift+tab to cycle)' } }, async () => HINT_DRAWN)
+const CYCLE = '(shift+tab to cycle)'
+const footerMode = (columns: number | null = 110, modes: string[] = [], drawn: unknown = MODES_DRAWN, isFullscreen = true) =>
+  hooks['ui.render:SessionMode']($, { surface: 'terminal', viewport: viewOf(columns, isFullscreen), props: { modes } }, async () => drawn)
+const footerHint = (columns: number | null = 110, hint = CYCLE, isWorking = false, isFullscreen = true) =>
+  hooks['ui.render:PromptHint']($, { surface: 'terminal', viewport: viewOf(columns, isFullscreen), props: { isDraft: false, isWorking, hint } }, async () => HINT_DRAWN)
 // The keys under the prompt once the band above it has drawn: with no width
 // recorded they stand in the hint's place, and with no key the hint is the engine's.
 const keys = async (props: Parameters<typeof band>[0] = {}) => { await band(props); return footerHint() }
@@ -287,9 +293,10 @@ const restingWords = (tree: any): string[] => {
   return (tree.children ?? []).flatMap(restingWords)
 }
 
-// The footer's row has no cells for a chord: the keys draw as their words,
-// whatever keybindings.json binds, and keep the actions a chord presses.
-test('the keys spell no chord, bound or not, and keep the actions a chord presses', async () => {
+// The footer's row has no cells for a chord: under the prompt the keys draw
+// as their words, whatever keybindings.json binds, and keep the actions a
+// chord presses.
+test('under the prompt the keys spell no chord, bound or not, and keep the actions a chord presses', async () => {
   percent = 40
   const cases: (() => void)[] = [
     () => { delete files[KEYS] },
@@ -302,6 +309,64 @@ test('the keys spell no chord, bound or not, and keep the actions a chord presse
     expect(bandWords(tree)).toEqual(['rotate', ' · ', 'wrap'])
     expect(buttons(tree).map((b: any) => b.props.action)).toEqual(['strip:jump1', 'strip:jump2'])
   }
+})
+
+// Where the footer has no safe place for them the keys draw on the band, as
+// before they had one under the prompt: a footer nobody has measured is the
+// plainest such case. The engine draws a Button with no hotkey as its label
+// alone, so the band spells the key itself: the chord the person's
+// keybindings.json gives the Button's action, as written there, and nothing
+// when no chord presses it.
+const keysOnBand = (props: Parameters<typeof band>[0] = {}) => band(props, 'terminal', null)
+
+// Chords that share a prefix (`ctrl+x 1`, `ctrl+x 2`) spell the prefix once,
+// dim, and each Button's own key beside its label: `ctrl+x 1 rotate   2 wrap`.
+test('the band spells a shared chord prefix once and each Button\'s own key beside it', async () => {
+  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2', 'ctrl+x r': 'command:rotate' })
+  percent = 40
+  expect(words(await keysOnBand())).toEqual(['ctrl+x', '1', '   ', '2'])
+  arm()
+  expect(words(await keysOnBand())).toEqual(['ctrl+x', '1'])
+})
+
+test('chords with different prefixes are spelled whole, as slice 1 drew them', async () => {
+  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+w 2': 'strip:jump2' })
+  percent = 40
+  expect(words(await keysOnBand())).toEqual(['ctrl+x 1', '   ', 'ctrl+w 2'])
+})
+
+test('a chord bound elsewhere is spelled as the person wrote it', async () => {
+  bindKeys({ 'Ctrl+K 9': 'strip:jump1' })
+  percent = 40
+  const drawn = words(await keysOnBand())
+  expect(drawn).toEqual(['Ctrl+K', '9', '   '])
+  expect(drawn.join(' ')).not.toContain('ctrl+x')
+})
+
+test('with no chord bound the band draws no key, and the Buttons stay', async () => {
+  percent = 40
+  const cases: (() => void)[] = [
+    () => { delete files[KEYS] },
+    () => { files[KEYS] = '{ not json' },
+    () => { files[KEYS] = '[]' },
+    () => bindKeys({ 'ctrl+x 1': null, 'ctrl+x 2': 'command:wrap' }),
+    () => bindKeys({ 'ctrl+x 1': 'strip:jump1' }, 'Transcript'),
+  ]
+  for (const arrange of cases) {
+    arrange()
+    const tree = await keysOnBand()
+    expect(buttons(tree)).toHaveLength(2)
+    expect(words(tree).join(' ')).not.toContain('+')
+  }
+})
+
+test('CLAUDE_CONFIG_DIR names the keybindings.json the band reads, as it does for Claude Code', async () => {
+  envVars.CLAUDE_CONFIG_DIR = '/cfg'
+  bindKeys({ 'ctrl+x 1': 'strip:jump1' })
+  percent = 40
+  expect(words(await keysOnBand()).join(' ')).not.toContain('ctrl+x 1')
+  files['/cfg/keybindings.json'] = files[KEYS]
+  expect(words(await keysOnBand())).toEqual(['ctrl+x', '1', '   '])
 })
 
 test('the band draws no context gauge: the status bar already carries it', async () => {
@@ -4426,31 +4491,57 @@ test('no toast, notice or command reply the mod hands the engine starts with its
 // and not at 86, one of 95 cells from 100 and not at 99; bypass permissions,
 // the widest notice, kept its 48 cells clear of the three keys' 29 from 80.
 const THREE_KEYS = 29
-test('the keys go to the notice\'s right only where the status line, the mode labels and the widest notice leave them room', () => {
-  expect(footerRoute(87, 82, 0, THREE_KEYS)).toBe('notice-right')
-  expect(footerRoute(86, 82, 0, THREE_KEYS)).toBe('inline')
-  expect(footerRoute(100, 95, 0, THREE_KEYS)).toBe('notice-right')
-  expect(footerRoute(99, 95, 0, THREE_KEYS)).toBe('inline')
+const route = (columns: number | undefined, statusWidth: number | undefined, modesCells: number | undefined, keysCells: number, hint: string | undefined = CYCLE, fullscreen = true) =>
+  keysRoute({ columns, fullscreen, statusWidth, modesCells, hint, keysCells })
+test('the keys go to the notice\'s right only where the status line, the mode labels and the notice leave them room', () => {
+  expect(route(87, 82, 0, THREE_KEYS)).toBe('notice-right')
+  expect(route(86, 82, 0, THREE_KEYS)).toBe('inline')
+  expect(route(100, 95, 0, THREE_KEYS)).toBe('notice-right')
+  expect(route(99, 95, 0, THREE_KEYS)).toBe('inline')
   // The notice binds where the status line is short.
-  expect(footerRoute(80, 60, 0, THREE_KEYS)).toBe('notice-right')
-  expect(footerRoute(79, 60, 0, THREE_KEYS)).toBe('inline')
+  expect(route(80, 60, 0, THREE_KEYS)).toBe('notice-right')
+  expect(route(79, 60, 0, THREE_KEYS)).toBe('inline')
   // Mode labels at the status line's right take their cells from the same row.
-  expect(footerRoute(100, 60, 35, THREE_KEYS)).toBe('notice-right')
-  expect(footerRoute(99, 60, 35, THREE_KEYS)).toBe('inline')
+  expect(route(100, 60, 35, THREE_KEYS)).toBe('notice-right')
+  expect(route(99, 60, 35, THREE_KEYS)).toBe('inline')
   // Fewer keys need less of the notice's row, never less of the status line's.
-  expect(footerRoute(68, 60, 0, 17)).toBe('notice-right')
-  expect(footerRoute(67, 60, 0, 17)).toBe('inline')
-  expect(footerRoute(64, 60, 0, 6)).toBe('inline')
+  expect(route(68, 60, 0, 17)).toBe('notice-right')
+  expect(route(67, 60, 0, 17)).toBe('inline')
+  expect(route(64, 60, 0, 6)).toBe('inline')
+  // The main screen clips what hangs under the mode labels, at any width.
+  expect(route(200, 60, 0, THREE_KEYS, CYCLE, false)).toBe('inline')
 })
 
-test('a status line width nobody recorded, or a footer of unknown width, sends the keys inline; a row too narrow for them there draws none', () => {
-  expect(footerRoute(200, undefined, 0, THREE_KEYS)).toBe('inline')
-  expect(footerRoute(undefined, 60, 0, THREE_KEYS)).toBe('inline')
-  expect(footerRoute(undefined, undefined, 0, THREE_KEYS)).toBe('inline')
+test('a status line width nobody recorded, or mode labels another mod draws over, send the keys inline; a row too narrow for them there, a hint a person reads, or a footer nobody measured, to the band', () => {
+  expect(route(200, undefined, 0, THREE_KEYS)).toBe('inline')
+  expect(route(200, 60, undefined, THREE_KEYS)).toBe('inline')
   // The widest notice without its hint, the indent and the engine's ` · ` are 29 cells; two stay free.
-  expect(footerRoute(60, undefined, 0, THREE_KEYS)).toBe('inline')
-  expect(footerRoute(59, undefined, 0, THREE_KEYS)).toBe('hidden')
-  expect(footerRoute(59, 20, 0, THREE_KEYS)).toBe('hidden')
+  expect(route(60, undefined, 0, THREE_KEYS)).toBe('inline')
+  expect(route(59, undefined, 0, THREE_KEYS)).toBe('band')
+  expect(route(59, 20, 0, THREE_KEYS)).toBe('band')
+  expect(route(200, undefined, 0, THREE_KEYS, '1 shell')).toBe('band')
+  expect(route(undefined, 60, 0, THREE_KEYS)).toBe('band')
+  expect(route(undefined, undefined, 0, THREE_KEYS)).toBe('band')
+  // Until the hint's site draws, the hint is taken for the cycle hint.
+  expect(route(60, undefined, 0, THREE_KEYS, undefined)).toBe('inline')
+  expect(route(80, 60, 0, THREE_KEYS, undefined)).toBe('notice-right')
+})
+
+// The hints are the ones Claude Code 2.1.322 handed the hint's site; the
+// widths beside the labelled ones are the notices it drew (auto 38, accept
+// edits 41, plan 37, bypass permissions 48), never under-counted.
+test('the notice is as wide as the hint in it says, the widest where the hint names no label', () => {
+  for (const hint of [CYCLE, 'auto mode on (shift+tab to cycle)', 'accept edits on (shift+tab to cycle)', 'plan mode on (shift+tab to cycle)', 'bypass permissions on (shift+tab to cycle)']) expect([hint, isCycleHint(hint)]).toEqual([hint, true])
+  for (const hint of ['1 shell', '? for shortcuts', 'manual mode on', '', '(shift+tab to cycle) · 1 shell', '1 shell (shift+tab to cycle)', '2 shells on (shift+tab to cycle)', 'esc to interrupt']) expect([hint, isCycleHint(hint)]).toEqual([hint, false])
+  expect(noticeCells(undefined)).toBe(48)
+  expect(noticeCells(CYCLE)).toBe(48)
+  expect(noticeCells('bypass permissions on (shift+tab to cycle)')).toBe(48)
+  expect(noticeCells('accept edits on (shift+tab to cycle)')).toBe(42)
+  expect(noticeCells('auto mode on (shift+tab to cycle)')).toBe(39)
+  expect(noticeCells('plan mode on (shift+tab to cycle)')).toBe(39)
+  // `  ⏵⏵ bypass permissions on · 1 shell` is 37 cells.
+  expect(noticeCells('1 shell')).toBe(37)
+  expect(noticeCells('')).toBe(30)
 })
 
 test('the status line\'s record gives a width only for this conversation, in the one shape cs-statusline writes', () => {
@@ -4654,8 +4745,188 @@ test('a footer that changed is drawn again once, and one that did not is left al
   expect(invalidated).toEqual(['ui.render', 'ui.render'])
 })
 
+// One pass over the three sites that can draw the keys, each handed what its
+// own event says of the screen, and again while any of them asks for a
+// redraw: what is on screen once the footer has settled.
+type Site = 'band' | 'mode' | 'hint'
+type Pass = { columns?: number; fullscreen?: boolean; hint?: string; modes?: string[]; modesDrawn?: unknown; working?: boolean; unmeasured?: Site[] }
+const pass = async (o: Pass = {}) => {
+  const fullscreen = o.fullscreen ?? true
+  const columns = (site: Site) => o.unmeasured?.includes(site) ? null : o.columns ?? 110
+  for (let redraws = 0; ; redraws++) {
+    const trees = {
+      band: await band({ isWorking: o.working ?? false }, 'terminal', viewOf(columns('band'), fullscreen) ?? null),
+      mode: await footerMode(columns('mode'), o.modes ?? [], o.modesDrawn ?? MODES_DRAWN, fullscreen),
+      hint: await footerHint(columns('hint'), o.hint ?? CYCLE, o.working ?? false, fullscreen),
+    }
+    if (timers.every(t => t.kind !== 'after' || t.cancelled)) return trees
+    if (redraws === 5) throw new Error(`the footer never settled: ${JSON.stringify(o)}`)
+    await fireAfter()
+  }
+}
+const KEY_NAMES = ['cs-rotate', 'cs-wrap', 'cs-filter-chat']
+const sitesWithKeys = (trees: Record<Site, unknown>) =>
+  (Object.keys(trees) as Site[]).filter(site => buttons(trees[site]).some((b: any) => KEY_NAMES.includes(b.props.key)))
+// A mod loaded afresh: what the sites learned of an earlier screen is gone.
+const reload = () => { for (const k of Object.keys(hooks)) delete hooks[k]; timers = []; register(on as any) }
+
+test('exactly one site draws the keys, whatever each site is told of the screen', async () => {
+  percent = 40
+  enableFilterChat()
+  const drew = new Set<Site>()
+  const everySite: Site[] = ['band', 'mode', 'hint']
+  const subsets = everySite.reduce<Site[][]>((sets, site) => [...sets, ...sets.map(set => [...set, site])], [[]])
+  for (const record of ['uuid-lead 57\n', 'uuid-lead 139\n', undefined]) {
+    if (record === undefined) delete files[WIDTH]
+    else files[WIDTH] = record
+    for (const columns of [40, 59, 60, 83, 84, 110, 180]) for (const fullscreen of [true, false]) for (const hint of [CYCLE, '1 shell', '? for shortcuts', ''])
+      for (const modes of [[], ['memory paused']]) for (const unmeasured of subsets) {
+        reload()
+        const sites = sitesWithKeys(await pass({ columns, fullscreen, hint, modes, unmeasured }))
+        if (sites.length !== 1) throw new Error(`${JSON.stringify({ record, columns, fullscreen, hint, modes, unmeasured })} drew the keys at ${JSON.stringify(sites)}`)
+        drew.add(sites[0])
+      }
+  }
+  // Each site takes its turn somewhere in the table, so the count above is not one site's alone.
+  expect([...drew].sort()).toEqual(['band', 'hint', 'mode'])
+})
+
+test('a footer too narrow for the keys, or one nobody measured, draws them on the band above the prompt, their chords spelled', async () => {
+  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
+  percent = 40
+  // `rotate · wrap` is 13 cells: 44 columns hold it after the widest notice, 43 do not.
+  let trees = await pass({ columns: 44 })
+  expect(sitesWithKeys(trees)).toEqual(['hint'])
+  expect(trees.band).toBe(DRAWN)
+  trees = await pass({ columns: 43 })
+  expect(sitesWithKeys(trees)).toEqual(['band'])
+  expect(words(trees.band)).toEqual(['ctrl+x', '1', '   ', '2'])
+  expect(buttons(trees.band).map((b: any) => [b.props.key, b.props.action])).toEqual([['cs-rotate', 'strip:jump1'], ['cs-wrap', 'strip:jump2']])
+  expect(trees.mode).toBe(MODES_DRAWN)
+  expect(trees.hint).toBe(HINT_DRAWN)
+  reload()
+  trees = await pass({ unmeasured: ['band', 'mode', 'hint'] })
+  expect(sitesWithKeys(trees)).toEqual(['band'])
+  expect(words(trees.band)).toEqual(['ctrl+x', '1', '   ', '2'])
+})
+
+test('an armed handoff\'s clear key and its count draw on the band where the footer has no room for them', async () => {
+  await startGrace()
+  const trees = await pass({ columns: 40 })
+  expect(trees.mode).toBe(MODES_DRAWN)
+  expect(trees.hint).toBe(HINT_DRAWN)
+  expect(bandWords(trees.band)).toEqual(['/clear now', '   ', `in ${GRACE_SECONDS}s`])
+})
+
+// Measured on 2.1.322: on the main screen the engine clips what a mod hangs a
+// row under the mode labels, and the keys drew nowhere at 110 columns.
+test('on the main screen the keys never hang under the mode labels, whatever room the row has', async () => {
+  files[WIDTH] = 'uuid-lead 57\n'
+  percent = 40
+  expect(sitesWithKeys(await pass({ columns: 110 }))).toEqual(['mode'])
+  expect(sitesWithKeys(await pass({ columns: 110, fullscreen: false }))).toEqual(['hint'])
+  expect(sitesWithKeys(await pass({ columns: 110 }))).toEqual(['mode'])
+  // A surface that has not said which layout it draws is not known to be fullscreen.
+  const unsaid = { surface: 'terminal', viewport: { columns: 110, rows: 35 }, props: { modes: [] } }
+  expect(await hooks['ui.render:SessionMode']($, unsaid, async () => MODES_DRAWN)).toBe(MODES_DRAWN)
+  expect(buttons(await footerHint(110))).toEqual([])
+  await fireAfter()
+  expect(buttons(await footerHint(110, CYCLE, false, false))).toHaveLength(2)
+})
+
+// Measured on 2.1.322: the hint is the cycle hint at rest, the mode's label
+// before it for a moment after shift+tab, and `1 shell` in its place once a
+// background shell runs.
+test('the keys stand in the hint\'s place only while the hint is the cycle hint, alone or after a mode\'s label', async () => {
+  percent = 40
+  for (const hint of [CYCLE, 'auto mode on (shift+tab to cycle)', 'accept edits on (shift+tab to cycle)', 'plan mode on (shift+tab to cycle)', 'bypass permissions on (shift+tab to cycle)']) {
+    const trees = await pass({ hint })
+    expect([hint, sitesWithKeys(trees)]).toEqual([hint, ['hint']])
+    expect(trees.band).toBe(DRAWN)
+  }
+  for (const hint of ['1 shell', '? for shortcuts', 'manual mode on', '', '(shift+tab to cycle) · 1 shell', '1 shell (shift+tab to cycle)', 'esc to interrupt']) {
+    const trees = await pass({ hint })
+    expect([hint, sitesWithKeys(trees)]).toEqual([hint, ['band']])
+    expect(trees.hint).toBe(HINT_DRAWN)
+  }
+})
+
+test('at the notice\'s right the keys clear a notice as wide as its hint makes it', async () => {
+  files[WIDTH] = 'uuid-lead 40\n'
+  percent = 40
+  // Before the hint's site has drawn, the widest notice at rest: its 48 cells, the 13 of `rotate · wrap` and 3 between.
+  await band({}, 'terminal', viewOf(64))
+  expect(buttons(await footerMode(64))).toHaveLength(2)
+  reload()
+  await band({}, 'terminal', viewOf(63))
+  expect(await footerMode(63)).toBe(MODES_DRAWN)
+  // The cycle hint, bare or after the widest label, is that same notice.
+  for (const hint of [CYCLE, 'bypass permissions on (shift+tab to cycle)']) {
+    expect(sitesWithKeys(await pass({ columns: 64, hint }))).toEqual(['mode'])
+    expect(sitesWithKeys(await pass({ columns: 63, hint }))).toEqual(['hint'])
+  }
+  // A shorter label leaves the keys their place on a narrower row: 6 cells of indent and glyph, then the hint's 33.
+  expect(sitesWithKeys(await pass({ columns: 55, hint: 'auto mode on (shift+tab to cycle)' }))).toEqual(['mode'])
+  expect(sitesWithKeys(await pass({ columns: 54, hint: 'auto mode on (shift+tab to cycle)' }))).toEqual(['hint'])
+  // A pill follows a label the hint does not carry: 30 cells for the widest and its ` · `, then the pill's 7.
+  expect(sitesWithKeys(await pass({ columns: 53, hint: '1 shell' }))).toEqual(['mode'])
+  expect(sitesWithKeys(await pass({ columns: 52, hint: '1 shell' }))).toEqual(['band'])
+  const long = '3 shells · 2 local agents · esc to interrupt · ctrl+t to hide tasks'
+  expect(sitesWithKeys(await pass({ columns: 30 + long.length + 13 + 3, hint: long }))).toEqual(['mode'])
+  expect(sitesWithKeys(await pass({ columns: 30 + long.length + 13 + 2, hint: long }))).toEqual(['band'])
+})
+
+test('an evaluation of the band that throws leaves no key under the prompt', async () => {
+  files[WIDTH] = 'uuid-lead 57\n'
+  percent = 40
+  expect(sitesWithKeys(await pass())).toEqual(['mode'])
+  const usage = $.session.usage
+  $.session.usage = async () => { throw new Error('usage unread') }
+  try {
+    await expect(band()).rejects.toThrow('usage unread')
+  } finally {
+    $.session.usage = usage
+  }
+  await fireAfter()
+  expect(invalidated.at(-1)).toBe('ui.render')
+  expect(await footerMode()).toBe(MODES_DRAWN)
+  expect(await footerHint()).toBe(HINT_DRAWN)
+  expect(sitesWithKeys(await pass())).toEqual(['mode'])
+})
+
+test('a turn the hint\'s site reports takes the rotate and wrap keys from under the prompt before the band draws again, and leaves filter chat', async () => {
+  files[WIDTH] = 'uuid-lead 57\n'
+  enableFilterChat()
+  percent = 40
+  await band()
+  expect(buttons(await footerMode()).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap', 'cs-filter-chat'])
+  expect(await footerHint(110, CYCLE, true)).toBe(HINT_DRAWN)
+  expect(buttons(await footerMode()).map((b: any) => b.props.key)).toEqual(['cs-filter-chat'])
+  await fireAfter()
+  expect(invalidated.at(-1)).toBe('ui.render')
+  expect(await footerHint(110, CYCLE, false)).toBe(HINT_DRAWN)
+  expect(buttons(await footerMode()).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap', 'cs-filter-chat'])
+})
+
+test('a rotate or wrap key pressed once a turn runs does nothing but say so', async () => {
+  percent = 40
+  const [rotate, wrap] = buttons(await keys())
+  await footerHint(110, CYCLE, true)
+  await rotate.props.onPress()
+  await wrap.props.onPress()
+  expect(ran).toEqual([])
+  expect(asks).toEqual([])
+  expect(written['/work/.cs/local/cs.pressed']).toBeUndefined()
+  expect(toasts).toEqual(['/rotate did not run: a turn is running', '/wrap did not run: a turn is running'])
+  expect(toasts).toEqual([TOASTS.midTurn('/rotate'), TOASTS.midTurn('/wrap')])
+  await footerHint(110, CYCLE, false)
+  await rotate.props.onPress()
+  await wrap.props.onPress()
+  expect(ran).toEqual([{ command: 'rotate', args: '' }, { command: 'wrap', args: '' }])
+})
+
 const footerClock = () => timers.find(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS && !t.cancelled)
-test('while the keys draw, a status line that grows or shrinks moves them on the next read, and the clock stops with the keys', async () => {
+test('the status line\'s width is read on a clock only while it can move the keys, and a line that grows or shrinks moves them on the next read', async () => {
   files[WIDTH] = 'uuid-lead 82\n'
   expect(footerClock()).toBeUndefined()
   percent = 40
@@ -4666,15 +4937,33 @@ test('while the keys draw, a status line that grows or shrinks moves them on the
   expect(timers.filter(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS)).toHaveLength(1)
   expect(buttons(await footerMode(90))).toHaveLength(2)
   await footerClock()!.fn()
+  await fireAfter()
   expect(invalidated).toEqual([])
   // A turn ended and the context reading grew a digit.
   files[WIDTH] = 'uuid-lead 86\n'
   await footerClock()!.fn()
+  await fireAfter()
   expect(invalidated).toEqual(['ui.render'])
   expect(await footerMode(90)).toBe(MODES_DRAWN)
   expect(buttons(await footerHint(90))).toHaveLength(2)
-  await band()
-  expect(timers.filter(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS)).toHaveLength(1)
+  // Still one clock: a shorter line would give the keys their place back.
+  expect(timers.filter(t => t.kind === 'every' && t.ms === FOOTER_POLL_MS && !t.cancelled)).toHaveLength(1)
+  // No status line, however short, hangs the keys under the mode labels on a
+  // row too narrow for the notice and the keys, on the main screen, beside a
+  // pill, or by another mod's tree: nothing reads the record there.
+  const theirs = { type: 'Box', props: {}, children: [MODES_DRAWN] }
+  const offTheRight: Pass[] = [{ columns: 63 }, { fullscreen: false }, { columns: 52, hint: '1 shell' }, { modesDrawn: theirs }]
+  for (const screen of offTheRight) {
+    await pass(screen)
+    expect([screen, footerClock()]).toEqual([screen, undefined])
+    reads = []
+    await pass(screen)
+    expect(reads.filter(path => path === WIDTH)).toEqual([])
+    // Back on a row with room, the record is read at once and the clock runs again.
+    files[WIDTH] = 'uuid-lead 57\n'
+    expect(sitesWithKeys(await pass())).toEqual(['mode'])
+    expect(footerClock()).toBeDefined()
+  }
   percent = 10
   await band()
   expect(footerClock()).toBeUndefined()
