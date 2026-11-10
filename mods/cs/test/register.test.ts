@@ -153,12 +153,12 @@ const $ = {
   },
 }
 
-// The options the engine hands register, with the prompt bars turned on, as
-// most tests here are about them; plugin.json's defaults leave them off.
-const OPTIONS = { bandPrompts: true, bandPrompt: 'latest', bandBars: 10 }
+// cs's prompt-bar settings as the launch environment pins them, with the bars
+// turned on, as most tests here are about them; cs's defaults leave them off.
+const OPTIONS = { CS_BAND_PROMPTS: '1' }
 // The band following the reader's scroll, and drawing every bar that fits.
-const READING = { ...OPTIONS, bandPrompt: 'read' }
-const UNCAPPED = { ...OPTIONS, bandBars: 100 }
+const READING = { ...OPTIONS, CS_BAND_PROMPT: 'read' }
+const UNCAPPED = { ...OPTIONS, CS_BAND_BARS: '100' }
 const DRAWN = { type: 'Survey', props: {}, children: [] }
 const band = (props: Partial<{ isWorking: boolean; hasSurvey: boolean; bodyColumns: number }> = {}, surface = 'terminal') =>
   hooks['ui.render:AbovePrompt']($, { surface, props: { isWorking: false, hasSurvey: false, bodyColumns: 110, ...props } }, async () => DRAWN)
@@ -185,11 +185,11 @@ beforeEach(() => {
   sessionId = 'uuid-lead'
   // /work sits under the default sessions root by its own name, and the launch
   // said where cs is, as every cs launch does.
-  envVars = { HOME: '/home', CS_BIN: '/opt/cs/bin/cs' }
+  envVars = { HOME: '/home', CS_BIN: '/opt/cs/bin/cs', ...OPTIONS }
   cwdPath = '/work'
   realPaths = { '/work': '/work', '/home/.claude-sessions/work': '/work' }
   files = { '/work/.cs/local/state': 'claude_session_color: red\nclaude_session_id: uuid-lead\n' }
-  register(on as any, OPTIONS)
+  register(on as any)
 })
 
 test('the default threshold is the statusline warn band', () => {
@@ -1180,7 +1180,7 @@ test('a conversation met at load is forced whatever it started at; one born of a
   await turnComplete()
   expect(timers).toHaveLength(2)
   // a reload forgets: the conversation it meets next is adopted, whatever it reads
-  register(on as any, OPTIONS)
+  register(on as any)
   sessionId = 'uuid-reloaded'
   files['/work/.cs/local/state'] = 'claude_session_id: uuid-reloaded\n'
   percent = 95
@@ -1241,7 +1241,7 @@ test('a conversation after /clear reapplies the session color once', async () =>
 test('a /clear after a plugin reload reapplies the session color once', async () => {
   await band()
   // The harness captures hooks by matcher without the engine's On overloads.
-  register(on as any, OPTIONS)
+  register(on as any)
   await clearRun()
   sessionId = 'uuid-next'
   await band()
@@ -1645,7 +1645,7 @@ test('a count that ends before its timer fires, or a handoff with no next step, 
   await promptSubmit()
   await fireAfter()
   expect(toasts).toEqual([])
-  register(on as any, OPTIONS)
+  register(on as any)
   arm(); files[HANDOFF] = '---\nparent: uuid-lead\nstatus: unconsumed\n---\n\nNo heading here.\n'
   await band(); await turnComplete(); await fireAfter()
   expect(ticker()).toBeDefined()
@@ -1660,7 +1660,7 @@ test('no path of the mod opens, closes or lists a pane', async () => {
   await turnComplete(); await fireAfter()
   await findButton(await band()).props.onPress()
   await hooks['command.run:clear']($, { command: 'clear', args: '', origin: { kind: 'composer' }, presentation: { layout: 'main', columns: 80 } }, async () => ({ text: '' }))
-  register(on as any, OPTIONS); arm()
+  register(on as any); arm()
   await band(); await turnComplete(); await tick(GRACE_SECONDS)
   expect(ran.filter(r => r.command === 'clear')).toHaveLength(2)
   expect(panes).toEqual([])
@@ -2398,7 +2398,8 @@ test('a session\'s own claude-config whose link dangles, its vault locked, still
 })
 
 test('past the width budget the oldest prompts collapse into one dim …N run at the left', async () => {
-  register(on as any, UNCAPPED)
+  register(on as any)
+  Object.assign(envVars, UNCAPPED)
   envVars.HOME = '/home'
   bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
   percent = 40
@@ -2426,7 +2427,8 @@ test('past the width budget the oldest prompts collapse into one dim …N run at
 })
 
 test('the prompt being read is the on-screen row drawn highest, the earliest on ties; a first null report leaves nothing, a later one removes the report; placeholder is ignored', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   await drawRow('placeholder', 'say four', { first: 0, last: 1, of: 2 })
@@ -2448,7 +2450,8 @@ test('the prompt being read is the on-screen row drawn highest, the earliest on 
 })
 
 test('a report that moves the read prompt redraws the band from a timer, never from the render itself', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   await band()
@@ -2460,7 +2463,8 @@ test('a report that moves the read prompt redraws the band from a timer, never f
 })
 
 test('a tick\'s press scrolls the transcript to the prompt\'s row; a refusal marks the tick dotted and is toasted once a session', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   await drawRow('u1', 'say one', { first: 0, last: 1, of: 2 })
@@ -2526,7 +2530,8 @@ test('bare /cs, blank or spaces, goes to the next hook untouched and returns its
 })
 
 test('rows drawn where the band is not the lead\'s, or under a survey, redraw once at most: the read tick settles even when the rail is not drawn', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   const pending = () => timers.filter(t => t.kind === 'after' && !t.cancelled).length
@@ -2550,7 +2555,8 @@ test('rows drawn where the band is not the lead\'s, or under a survey, redraw on
 })
 
 test('with no prompt row left in the viewport, the read tick stays on the prompt last read, not the newest', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   await drawRow('u2', 'say two', { first: 0, last: 1, of: 2 })
@@ -2564,7 +2570,8 @@ test('with no prompt row left in the viewport, the read tick stays on the prompt
 })
 
 test('a prompt whose row has not been drawn is matched by its text only when that text is its alone', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript([
     prompt('u1', null, 'continue'), reply('a1', 'u1'),
     prompt('u2', 'a1', 'continue'), reply('a2', 'u2'),
@@ -2641,7 +2648,8 @@ test('the focus ring never lands on a rail tick: the keyboard route is /cs', asy
 const gapLabel = (tree: any) => texts(tree).find((t: any) => t.props.italic && t.props.color === 'subtle')
 
 test('before the bars the band names the prompt being read, light gray italic, whether or not words stand before them', async () => {
-  register(on as any, READING)
+  register(on as any)
+  Object.assign(envVars, READING)
   transcript(LINEAR)
   await turnComplete()
   const tree = await band()
@@ -2711,7 +2719,8 @@ test('the gap\'s prompt is cut to the gap with an ellipsis; a gap under ten cell
 })
 
 test('a rail past its budget takes the whole gap: no prompt is named beside a collapsed run', async () => {
-  register(on as any, UNCAPPED)
+  register(on as any)
+  Object.assign(envVars, UNCAPPED)
   const many = [prompt('u1', null, 'p1')]
   for (let i = 2; i <= 30; i++) many.push(reply(`a${i - 1}`, `u${i - 1}`), prompt(`u${i}`, `a${i - 1}`, `p${i}`))
   transcript(many)
@@ -3145,8 +3154,8 @@ test('the queue glyph takes the status line\'s amber, light on a dark terminal a
 // twelve tab-separated fields a record, the value ninth and its source tenth.
 const PORCELAIN = readFileSync(new URL('../../../tests/fixtures/config-porcelain.txt', import.meta.url), 'utf8')
 const SETTINGS_ARGV = ['/opt/cs/bin/cs', '-config', 'list', '--porcelain']
-// The golden with <key>'s record carrying <value> from <source>, or without the record.
-const porcelainWith = (key: string, value?: string, source?: string) => PORCELAIN.split('\n').flatMap((line: string) => {
+// The golden (or <base>) with <key>'s record carrying <value> from <source>, or without the record.
+const porcelainWith = (key: string, value?: string, source?: string, base = PORCELAIN) => base.split('\n').flatMap((line: string) => {
   const fields = line.split('\t')
   if (fields[0] !== key) return [line]
   if (value === undefined || source === undefined) return []
@@ -3371,8 +3380,9 @@ test('the mail word counts neither a stray file nor a directory in new/', async 
 })
 
 // ---------------------------------------------------------------------------
-// The band's /config rows: cs.bandPrompt picks the prompt it names (the newest,
-// or the one being read), cs.bandBars the most bars before older prompts fold.
+// cs's prompt-bar settings: CS_BAND_PROMPTS draws the bars, CS_BAND_PROMPT
+// picks the prompt the band names (the newest, or the one being read), and
+// CS_BAND_BARS the most bars before older prompts fold.
 
 test('by default the band names the newest prompt and draws its bar thick, wherever the reader is; a scroll redraws nothing', async () => {
   transcript(LINEAR)
@@ -3387,8 +3397,8 @@ test('by default the band names the newest prompt and draws its bar thick, where
   expect(rail(tree)).toEqual(['│', '│', '│', '┃'])
 })
 
-test('with cs.bandPrompt read the band names the prompt being read and draws its bar thick', async () => {
-  register(on as any, { ...OPTIONS, bandPrompt: 'read' })
+test('with CS_BAND_PROMPT=read the band names the prompt being read and draws its bar thick', async () => {
+  envVars.CS_BAND_PROMPT = 'read'
   transcript(LINEAR)
   await turnComplete()
   await drawRow('u2', 'say two', { first: 0, last: 1, of: 2 })
@@ -3397,7 +3407,7 @@ test('with cs.bandPrompt read the band names the prompt being read and draws its
   expect(rail(tree)).toEqual(['│', '┃', '│', '│'])
 })
 
-test('at most cs.bandBars bars draw; older prompts fold into …N and the prompt is still named', async () => {
+test('at most CS_BAND_BARS bars draw, 10 when unset; older prompts fold into …N and the prompt is still named', async () => {
   const many = [prompt('u1', null, 'p1')]
   for (let i = 2; i <= 30; i++) many.push(reply(`a${i - 1}`, `u${i - 1}`), prompt(`u${i}`, `a${i - 1}`, `p${i}`))
   transcript(many)
@@ -3407,7 +3417,8 @@ test('at most cs.bandBars bars draw; older prompts fold into …N and the prompt
   // `…20`, its cell and ten bars are 14 cells; the name is as wide as the widest prompt a drawn bar can swap in.
   expect(textOf(gapLabel(tree))).toBe('#30 p30')
   expect(boxes(tree).find((b: any) => (b.children ?? []).flat(Infinity).includes(gapLabel(tree))).props.width).toBe(7)
-  register(on as any, { ...OPTIONS, bandBars: 3 })
+  register(on as any)
+  envVars.CS_BAND_BARS = '3'
   transcript(many, 2)
   await turnComplete()
   tree = await band()
@@ -3416,24 +3427,18 @@ test('at most cs.bandBars bars draw; older prompts fold into …N and the prompt
   expect(boxes(tree).filter((b: any) => b.props.display === 'none')).toHaveLength(2)
 })
 
-test('/config refuses a band value the band cannot draw, where it is typed, and passes every other row', async () => {
-  const set = (key: string, value: unknown, plugin = 'cs') => hooks['config.set']($,
-    { key, value, previous: 10, provider: { plugin, tier: 'user' }, origin: { kind: 'composer' } },
-    async (e: any) => ({ value: e.value }))
-  for (const value of [0, -2, 2.5]) {
-    expect(await set('cs.bandBars', value)).toEqual({ deny: `cs.bandBars is the most bars the band draws, a whole number of 1 or more; got ${value}` })
-  }
-  expect(await set('cs.bandPrompt', 'first')).toEqual({ deny: 'cs.bandPrompt is latest or read; got first' })
-  expect(await set('cs.bandPrompts', 'yes')).toEqual({ deny: 'cs.bandPrompts is on or off; got yes' })
-  expect(await set('cs.bandPrompts', true)).toEqual({ value: true })
-  expect(await set('cs.bandBars', 4)).toEqual({ value: 4 })
-  expect(await set('cs.bandPrompt', 'read')).toEqual({ value: 'read' })
-  expect(await set('other.bandBars', 0, 'other')).toEqual({ value: 0 })
-  expect(await set('theme', 'dark', 'engine')).toEqual({ value: 'dark' })
+test('/config has no row of the band\'s: the prompt bars are three cs settings, which /cs lists', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
+  expect(manifest.userConfig).toBeUndefined()
+  expect(PORCELAIN.split('\n').filter((l: string) => l.startsWith('CS_BAND_')).map((l: string) => l.split('\t').slice(0, 6))).toEqual([
+    ['CS_BAND_PROMPTS', 'Prompt bars', 'Prompt bars', 'flag', '-', 'off'],
+    ['CS_BAND_PROMPT', 'Prompt bars', 'Named prompt', 'choice', 'latest,read', 'latest'],
+    ['CS_BAND_BARS', 'Prompt bars', 'Most bars', 'text', '-', '10'],
+  ])
 })
 
-test('a bad band value already stored draws no bars and says so once; the rest of the mod still runs', async () => {
-  expect(() => register(on as any, { ...OPTIONS, bandBars: 0 })).not.toThrow()
+test('a CS_BAND_BARS or CS_BAND_PROMPT the band cannot draw leaves it without bars and says so once a value; the rest of the band still runs', async () => {
+  envVars.CS_BAND_BARS = '0'
   transcript(LINEAR)
   await turnComplete()
   percent = 80
@@ -3446,14 +3451,45 @@ test('a bad band value already stored draws no bars and says so once; the rest o
   expect(rail(tree)).toEqual([])
   expect(buttons(tree).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap'])
   await band()
-  expect(toasts).toEqual(['the band draws no prompt bars: cs.bandBars is the most bars the band draws, a whole number of 1 or more; got 0. Set it in /config.'])
+  expect(toasts).toEqual(['the band draws no prompt bars: CS_BAND_BARS is a whole number of 1 or more; got 0. /cs shows where it is set.'])
+  for (const bars of ['-2', '2.5', 'ten']) {
+    envVars.CS_BAND_BARS = bars
+    expect(rail(await band())).toEqual([])
+    await band()
+    expect(toasts.at(-1)).toBe(`the band draws no prompt bars: CS_BAND_BARS is a whole number of 1 or more; got ${bars}. /cs shows where it is set.`)
+  }
+  delete envVars.CS_BAND_BARS
+  envVars.CS_BAND_PROMPT = 'first'
+  expect(rail(await band())).toEqual([])
+  expect(toasts.at(-1)).toBe('the band draws no prompt bars: CS_BAND_PROMPT is latest or read; got first. /cs shows where it is set.')
+  expect(toasts).toHaveLength(5)
+  delete envVars.CS_BAND_PROMPT
+  expect(rail(await band())).toEqual(['│', '│', '│', '┃'])
+  expect(toasts).toHaveLength(5)
 })
 
-test('by plugin.json\'s defaults the band draws no prompt bars and names no prompt; its other words still draw', async () => {
-  const manifest = JSON.parse(readFileSync(new URL('../.claude-plugin/plugin.json', import.meta.url), 'utf8'))
-  const defaults = Object.fromEntries(Object.entries(manifest.userConfig).map(([field, spec]: [string, any]) => [field, spec.default]))
-  expect(defaults).toEqual({ bandPrompts: false, bandPrompt: 'latest', bandBars: 10 })
-  register(on as any, defaults)
+test('a settings file turns the prompt bars on, picks their prompt and turns them off again, each from the next prompt, with no reload', async () => {
+  delete envVars.CS_BAND_PROMPTS
+  transcript(LINEAR)
+  await turnComplete()
+  percent = 80
+  expect(rail(await band())).toEqual([])
+  answerSettings(porcelainWith('CS_BAND_PROMPT', 'read', 'machine', porcelainWith('CS_BAND_PROMPTS', '1', 'session')))
+  await turnStart('go'); await settle()
+  await drawRow('u2', 'say two', { first: 0, last: 1, of: 2 })
+  expect(rail(await band())).toEqual(['│', '┃', '│', '│'])
+  answerSettings(porcelainWith('CS_BAND_PROMPTS', '0', 'session'))
+  await turnStart('again'); await settle()
+  const tree = await band()
+  expect(rail(tree)).toEqual([])
+  expect(buttons(tree).map((b: any) => b.props.key)).toEqual(['cs-rotate', 'cs-wrap'])
+  expect(toasts).toEqual([])
+})
+
+test('by cs\'s defaults the band draws no prompt bars and names no prompt; its other words still draw', async () => {
+  delete envVars.CS_BAND_PROMPTS
+  answerSettings(PORCELAIN)
+  await sessionStart(); await settle()
   transcript(LINEAR)
   await turnComplete()
   expect(await band()).toBe(DRAWN)
@@ -3466,7 +3502,7 @@ test('by plugin.json\'s defaults the band draws no prompt bars and names no prom
 })
 
 test('with the prompt bars off, a scroll redraws nothing, whichever prompt the band would name', async () => {
-  register(on as any, { ...READING, bandPrompts: false })
+  Object.assign(envVars, READING, { CS_BAND_PROMPTS: '0' })
   transcript(LINEAR)
   await turnComplete()
   await band()
@@ -4160,7 +4196,7 @@ test('a filter chat press survives clearing the conversation and loading the ban
   await filterChatKey(await band()).props.onPress()
   sessionId = 'uuid-next'
   files['/work/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
-  register(on as any, OPTIONS)
+  register(on as any)
   expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
   for (const content of ['', 'CS_FILTER_CHAT=0\n', 'CS_FILTER_CHAT_X=1\n', 'CS_FILTER_CHAT=1\nCS_FILTER_CHAT=0\n', 'CS_FILTER_CHAT=yes\n', ' CS_FILTER_CHAT=1\n', 'CS_FILTER_CHAT=1\r\n']) {
@@ -4280,7 +4316,7 @@ test('filter chat state stays with its session across registration and stale but
   files['/work/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
   const stale = filterChatKey(await band())
   await stale.props.onPress()
-  register(on as any, OPTIONS)
+  register(on as any)
   expect(filterChatKey(await band()).props.label).toBe('filter chat ●')
   await stale.props.onPress()
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
@@ -4293,7 +4329,7 @@ test('filter chat state stays with its session across registration and stale but
   realPaths['/home/.claude-sessions/other'] = '/other'
   files['/other/.cs/local/state'] = 'claude_session_color: red\nclaude_session_id: uuid-next\n'
   files['/other/.cs/local/config'] = 'CS_FILTER_CHAT=0\n'
-  register(on as any, OPTIONS)
+  register(on as any)
   expect(filterChatKey(await band()).props.label).toBe('filter chat ○')
   expect(files['/work/.cs/local/config']).toBe('CS_FILTER_CHAT=1\n')
 })

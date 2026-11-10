@@ -23,6 +23,9 @@ CS_ROTATE_NUDGE_CTX	Rotation	Rotation nudge %	text	-	60	now	applies when the nex
 CS_ROTATE_FORCE_CTX	Rotation	Rotate on its own past %	text	-	80	now	applies by your next prompt	-	default	session line 4: CS_ROTATE_FORCE_CTX=101: not off, 0 or a percentage from 1 to 100	Context use past which cs rotates by itself after a 20 second countdown you can stop.
 CS_NO_ROTATION_WAKE	Rotation	Wake after /clear	flagoff	-	off	/clear	applies at the next /clear or launch	-	default	-	After /clear on a handoff, the fresh conversation starts its next step without you typing.
 CS_ROTATION_KICK_DELAY	Rotation	Wake delay (s)	text	-	2	now	applies at the next rotation	-	default	-	Seconds between tries to wake the fresh conversation after /clear; 0 tries once.
+CS_BAND_PROMPTS	Prompt bars	Prompt bars	flag	-	off	now	applies by your next prompt	-	default	-	Draws a bar per prompt on the band above the prompt; a press on a bar scrolls the transcript to it.
+CS_BAND_PROMPT	Prompt bars	Named prompt	choice	latest,read	latest	now	applies by your next prompt	-	default	-	The prompt the band names and draws thick: latest, the newest, or read, the one at the top of the screen.
+CS_BAND_BARS	Prompt bars	Most bars	text	-	10	now	applies by your next prompt	-	default	-	The most prompt bars the band draws; the prompts past them fold into a count at either end.
 CS_REWRITE_PROVIDER	Rewriter (ctrl+g)	Provider	choice	claude,claude-api,openai,openai-api,gemini,gemini-api,grok,xai	claude	now	applies at the next ctrl+g	-	default	-	Who rewrites your prompt; an -api choice calls the vendor API in place of its CLI.
 CS_REWRITE_MODEL	Rewriter (ctrl+g)	Model	text	-	per provider	now	applies at the next ctrl+g	-	default	-	The model that rewrites your prompt, by the provider name for it; unset, the provider picks.
 CS_REWRITE_TIMEOUT	Rewriter (ctrl+g)	Timeout (s)	text	-	25	now	applies at the next ctrl+g	-	default	-	Seconds to wait for a rewrite before your prompt is left as you typed it.

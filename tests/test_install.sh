@@ -1165,7 +1165,7 @@ test_install_keeps_a_tips_file_the_user_named() {
     out=$(HOME="$home" bash "$INSTALL_SH" 2>&1 < /dev/null) || { echo "  FAIL: install.sh exited non-zero"; return 1; }
     assert_eq '{"tipsFile":"~/my-tips.json"}' \
         "$(jq -c .spinnerTipsOverride "$home/.claude/settings.json")" "spinnerTipsOverride after install" || return 1
-    assert_eq "Spinner tips: ~/.claude/settings.json names its own tipsFile (~/my-tips.json), and Claude Code reads one; cs's tip (turn on the band's prompt bars in /config) is left out" \
+    assert_eq "Spinner tips: ~/.claude/settings.json names its own tipsFile (~/my-tips.json), and Claude Code reads one; cs's tip (turn on the band's prompt bars in /cs) is left out" \
         "$(_tips_lines "$out")" "install's tips line" || return 1
 }
 
