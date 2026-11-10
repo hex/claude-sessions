@@ -196,7 +196,7 @@ export const TOASTS = {
   countQuestion: '/clear did not run: a question is waiting for an answer',
   countSurvey: '/clear did not run: a survey is waiting above the prompt',
   countSurveyUnseen: '/clear did not run: a survey was waiting above the prompt when the band last drew',
-  clearUnseen: 'the count to /clear ran unseen: another mod or a picker had the band above the prompt; /clear has run',
+  clearUnseen: 'the count to /clear reached zero unseen: the band above the prompt was not drawn; /clear has run',
   queueNoBin: 'the launch did not say where cs is (CS_BIN); run cs -queue start from a shell in this session',
   queueModeUnknown: (how: string) => `'${how}' is not a way to run the queue; it is not started`,
   notCompacted: (reason: string) => `the conversation was not compacted (${reason}); the queue is not started`,
@@ -648,6 +648,9 @@ export function register(on: On) {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     bandDrawn = true
+    // The engine does not raise the band while a question dialog is open
+    // (measured): a band raised after one says the question is answered.
+    dialogDrawn = false
     bandSurvey = e.props.hasSurvey
     const drawn = await next(e)
     try {
@@ -1959,7 +1962,7 @@ async function forceRotation($: EngineInterface) {
 // why, and the button stays for the person. A band not raised with no
 // question open (another mod has it, or a picker is up) stops nothing: the
 // /clear runs, behind a picker once it closes, and a toast then says the
-// count ran unseen.
+// count reached zero unseen.
 function startCountdown($: EngineInterface) {
   left = GRACE_SECONDS
   bandSurvey = false
@@ -1970,16 +1973,16 @@ function startCountdown($: EngineInterface) {
     // lands while the zero tick is still reading leaves the count where it is.
     if (left === undefined || left <= 0) return
     left -= 1
-    const unseen = !bandDrawn
+    const stale = !bandDrawn
     if (left > 0) { bandDrawn = false; dialogDrawn = false }
     $.ui.invalidate('ui.render')
     // The keys under the prompt are what the band last put there, the count's
     // seconds among them: a band not raised since the last tick vouches for
     // none of them, and puts them back when it is raised again.
     try {
-      if (unseen) await clearFooter($)
+      if (stale) await clearFooter($)
       if (left > 0) return
-      await countZero($, unseen)
+      await countZero($)
     } catch (err) {
       // A read that throws at zero would leave the count there for good.
       if (left !== 0) throw err
@@ -1992,7 +1995,7 @@ function startCountdown($: EngineInterface) {
 // The count holds at zero through the reads below: a prompt or a press
 // landing meanwhile stops it (left becomes undefined), and this tick then
 // does nothing, so nothing clears twice or behind a new turn.
-async function countZero($: EngineInterface, unseen: boolean) {
+async function countZero($: EngineInterface) {
   // What waits on the person already spares the reads, a cs process among
   // them; it is read again once they are done.
   const waiting = waitsOnPerson()
@@ -2002,6 +2005,9 @@ async function countZero($: EngineInterface, unseen: boolean) {
   const vetted = lead && (await sessionVetted($, await $.session.cwd()))
   if (left !== 0) return
   stopCountdown($)
+  // Read after the reads: a redraw late by a tick can raise the band during
+  // them. What kept a band from being raised is not known here.
+  const unseen = !bandDrawn
   const refusal = waiting ?? (!armed ? TOASTS.countDisarmed : !lead ? TOASTS.countNotLead : waitsOnPerson())
   if (refusal !== undefined) return $.ui.toast(refusal)
   if (!vetted) {

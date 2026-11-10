@@ -1088,11 +1088,11 @@ test('at zero the countdown runs /clear, once, and stops ticking', async () => {
 // then not reached, whatever the count's redraws ask for, and what the band
 // last said of a turn stays as it was. The toast follows the /clear: one shown
 // before it leaves the screen with the conversation (measured), and a /clear
-// the engine rejects has only its own to say. The toast names both things
-// measured to keep the band from being raised with no question open: another
-// mod's band, and a picker such as /model's, behind which the engine holds
-// the /clear until it closes.
-const CLEAR_UNSEEN = 'the count to /clear ran unseen: another mod or a picker had the band above the prompt; /clear has run'
+// the engine rejects has only its own to say. The toast says what the mod
+// knows, that its band was not drawn, and names no cause: another mod's band
+// and a picker such as /model's both keep it from being raised (measured),
+// and the mod cannot tell them apart.
+const CLEAR_UNSEEN = 'the count to /clear reached zero unseen: the band above the prompt was not drawn; /clear has run'
 const CLEAR = { command: 'clear', args: '' }
 
 test('a band another mod takes mid-turn does not stop the count: at zero /clear runs, once, and a toast then says the count ran unseen', async () => {
@@ -1240,6 +1240,51 @@ test('a question dialog open at zero keeps the /clear from running and a toast s
   expect(toasts).toEqual([])
   // the dialog itself draws as the engine's
   expect(await dialog()).toBe(DIALOG_DRAWN)
+})
+
+// The band is not raised while a dialog is open (measured), so a band raised
+// after a dialog says the dialog is gone.
+test('a question answered inside the count\'s last second, the band raised again after it, does not stop the /clear', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 1)
+  await dialog()
+  await band()
+  await tickUnseen()
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
+})
+
+// The zero's reads take a cs process's time, and the band's redraw comes
+// 5 to 19 ms after the tick (measured): a redraw that was late by the tick
+// before can land inside them.
+test('a band raised while the zero tick reads is a count seen: the /clear runs and no toast says otherwise', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 2)
+  await tickUnseen()
+  let answer!: () => void
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => {
+    if (argv[1] !== '-vet-session') return run(argv, init)
+    await new Promise<void>(resolve => { answer = resolve })
+    return { exitCode: 0, stdout: '', stderr: '' }
+  }
+  try {
+    const zero = tickUnseen()
+    await settle()
+    await band()
+    answer()
+    await zero
+  } finally {
+    $.process.run = run
+  }
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
 })
 
 test('a conversation that is no longer the lead at zero clears nothing and says so', async () => {
