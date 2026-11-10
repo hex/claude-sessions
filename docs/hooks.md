@@ -587,7 +587,8 @@ band, whenever there is no such width:
   its own glyphs, such as a conversation title in Chinese or with an emoji:
   `cs-statusline` cannot tell how many cells that takes and records no width;
 - the conversation open in a second terminal: two status lines of different
-  widths share the file, so it carries no width while both run;
+  widths share the file, so it carries no width while both run, or while a
+  process that took the pid of a Claude Code since closed runs;
 - a status-line wrapper that runs `cs-statusline` as its child without
   setting `CS_STATUSLINE_PARENT`: the record names the wrapper, never this
   Claude Code (see [statusline.md](statusline.md#data-sources-and-performance));
