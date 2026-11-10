@@ -195,8 +195,8 @@ export const TOASTS = {
   countNotLead: "/clear did not run: this conversation is no longer the session's lead",
   countQuestion: '/clear did not run: a question is waiting for an answer',
   countSurvey: '/clear did not run: a survey is waiting above the prompt',
-  countSurveyUnseen: '/clear did not run: a survey was waiting above the prompt when another mod took the band',
-  clearUnseen: 'another mod has the band above the prompt, so the count to /clear ran unseen; /clear ran on time',
+  countSurveyUnseen: '/clear did not run: a survey was waiting above the prompt when the band last drew',
+  clearUnseen: 'the count to /clear ran unseen: another mod or a picker had the band above the prompt; /clear has run',
   queueNoBin: 'the launch did not say where cs is (CS_BIN); run cs -queue start from a shell in this session',
   queueModeUnknown: (how: string) => `'${how}' is not a way to run the queue; it is not started`,
   notCompacted: (reason: string) => `the conversation was not compacted (${reason}); the queue is not started`,
@@ -246,8 +246,9 @@ let ticker: { cancel: () => void } | undefined
 let bandIdle = false
 // What the count's zero knows of the band, none of it from a render it may
 // never get. A mod loaded before this one can answer the band's render
-// without passing it on, and the engine's question dialog takes the band's
-// place: either way the band's hook is not reached (measured on 2.1.322).
+// without passing it on, and the engine's question dialog or a picker such
+// as /model's takes the band's place: each way the band's hook is not
+// reached (measured on 2.1.322).
 // Each tick asks for a redraw and the engine raises the band 5 to 19 ms later
 // (measured), so `bandDrawn` and `dialogDrawn` say which of the two was
 // raised since the last tick. `bandSurvey` is the band's own word on a
@@ -1953,9 +1954,10 @@ async function forceRotation($: EngineInterface) {
 // trusts the session, and nothing waits on the person once those reads are
 // done: no turn (a Stop hook's turn starts with no prompt to stop the count),
 // no question dialog, no survey. Otherwise the count stops, a toast says
-// why, and the button stays for the person. A band another mod has taken
-// stops nothing: the /clear runs on time, and a toast then says the count ran
-// unseen.
+// why, and the button stays for the person. A band not raised with no
+// question open (another mod has it, or a picker is up) stops nothing: the
+// /clear runs, behind a picker once it closes, and a toast then says the
+// count ran unseen.
 function startCountdown($: EngineInterface) {
   left = GRACE_SECONDS
   // From a timer: the count starts inside the turn's own hook.

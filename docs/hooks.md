@@ -898,13 +898,16 @@ inside), so a truncated handoff is never cleared into.
 
 Another mod can take the band above the prompt. A mod loaded before this one
 that answers the band's render without passing it on keeps this mod's band
-from drawing, and this mod gets no notice of it. It reads a taken band from its
+from drawing, and this mod gets no notice of it. A picker such as `/model`'s
+takes the band's place the same way. The mod reads a taken band from its
 own band hook not having run since the count's last tick: each tick asks for
 a redraw, and the engine raises the band within 20 ms of one (measured on
 2.1.322). The count then runs unseen. The mod takes the clear key and its
 count from the row under the prompt, where nothing would redraw them, runs
-the `/clear` on time, and then toasts `another mod has the band above the
-prompt, so the count to /clear ran unseen; /clear ran on time`. The toast
+the `/clear`, and then toasts `the count to /clear ran unseen: another mod or
+a picker had the band above the prompt; /clear has run`. Under another mod's
+band the `/clear` runs on time; the engine holds one behind a picker until
+the picker closes. The toast
 follows the `/clear` because one shown before it leaves the screen with the
 conversation. The mod drops what the taken band last said of a turn; the
 main loop's turn events and the hint under the prompt say whether one runs.
@@ -914,10 +917,11 @@ up, so the mod does not see a survey the engine opens while another mod has
 the band, and the `/clear` runs under it, unless that mod passes the band on
 under a survey. And a survey the band drew before another mod took it keeps
 the `/clear` from running even if you have dismissed it since: `/clear did
-not run: a survey was waiting above the prompt when another mod took the
-band`. The mod sees a question dialog either way, through the dialog's own
-render: the dialog takes the prompt's place, the engine does not raise the
-band while one is open, and it does not refuse a `/clear` run under one.
+not run: a survey was waiting above the prompt when the band last drew`. The mod sees another plugin's question dialog either way, through the
+dialog's own render: the dialog takes the prompt's place, the engine does not
+raise the band while one is open, and it does not refuse a `/clear` run under
+one. Whether the mod's own questions (the queue's, the wrap key's) reach that
+render is not measured.
 
 When the count starts, the mod toasts the handoff's next step once:
 `cs: next step: <line>`, the first non-empty line of the handoff's `Next Step`
