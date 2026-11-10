@@ -3466,6 +3466,11 @@ test('a CS_BAND_BARS or CS_BAND_PROMPT the band cannot draw leaves it without ba
   delete envVars.CS_BAND_PROMPT
   expect(rail(await band())).toEqual(['│', '│', '│', '┃'])
   expect(toasts).toHaveLength(5)
+  // With the bars off a bad value is said all the same.
+  envVars.CS_BAND_PROMPTS = '0'
+  envVars.CS_BAND_BARS = 'none'
+  expect(rail(await band())).toEqual([])
+  expect(toasts.slice(5)).toEqual(['the band draws no prompt bars: CS_BAND_BARS is a whole number of 1 or more; got none. /cs shows where it is set.'])
 })
 
 test('a settings file turns the prompt bars on, picks their prompt and turns them off again, each from the next prompt, with no reload', async () => {

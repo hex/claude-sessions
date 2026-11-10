@@ -628,8 +628,8 @@ no reload.
 `cs -config set` and `/cs` refuse a named prompt other than `latest` or
 `read`, and a bar count that is not a whole number of 1 to 3 digits, naming
 the setting. A value the band cannot draw, which can come from your shell or
-be a bar count of `0`, leaves the band without the rail while the bars are on
-and says so in one toast per value; the rest of the mod runs.
+be a bar count of `0`, leaves the band without the rail and says so in one
+toast per value; the rest of the mod runs.
 
 ### Spinner tip
 

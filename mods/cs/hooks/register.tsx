@@ -1660,19 +1660,16 @@ export function nextStepLine(text: string): string | undefined {
 }
 
 // The prompt-bar settings, each read as threshold() reads its own; an empty
-// or unset value is its default. The named prompt and the bar count are
-// judged only while the bars are on: off, the band draws nothing a bad value
-// could spoil. cs skips a file's value its check refuses, so a bad value here
-// comes from the environment, or is a bar count of 0, which cs's whole-number
-// check takes.
+// or unset value is its default. cs skips a file's value its check refuses,
+// so a bad value here comes from the environment, or is a bar count of 0,
+// which cs's whole-number check takes.
 async function readBandOptions($: EngineInterface): Promise<BandOptions | { problem: string }> {
   const prompts = (fileValue('CS_BAND_PROMPTS') ?? await $.env.get("CS_BAND_PROMPTS"))?.trim()
   const prompt = (fileValue('CS_BAND_PROMPT') ?? await $.env.get("CS_BAND_PROMPT"))?.trim() || 'latest'
   const bars = (fileValue('CS_BAND_BARS') ?? await $.env.get("CS_BAND_BARS"))?.trim() || '10'
-  if (prompts !== '1') return { prompts: false, prompt: 'latest', bars: 10 }
   if (prompt !== 'latest' && prompt !== 'read') return { problem: `CS_BAND_PROMPT is latest or read; got ${prompt}` }
   if (!/^\d+$/.test(bars) || Number(bars) < 1) return { problem: `CS_BAND_BARS is a whole number of 1 or more; got ${bars}` }
-  return { prompts: true, prompt, bars: Number(bars) }
+  return { prompts: prompts === '1', prompt, bars: Number(bars) }
 }
 
 // The band's own threshold; without one it is the bar's warn band, read the way
