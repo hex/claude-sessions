@@ -5106,3 +5106,22 @@ test('the status line\'s width is read on a clock only while it can move the key
   await band()
   expect(footerClock()).toBeUndefined()
 })
+
+test('a mod that cannot learn which Claude Code it runs in after three asks reads the width on no clock', async () => {
+  files[WIDTH] = 'uuid-lead 57 4242\n'
+  claudePid = new Error('spawn EPERM')
+  percent = 40
+  let pidRuns = 0
+  const run = $.process.run
+  $.process.run = async (argv: string[], init: any) => { if (argv[0] === '/bin/sh') pidRuns++; return run(argv, init) }
+  try {
+    for (let draws = 0; draws < 4; draws++) expect(sitesWithKeys(await pass())).toEqual(['hint'])
+    expect(pidRuns).toBe(3)
+    expect(footerClock()).toBeUndefined()
+    expect(sitesWithKeys(await pass())).toEqual(['hint'])
+    expect(footerClock()).toBeUndefined()
+    expect(pidRuns).toBe(3)
+  } finally {
+    $.process.run = run
+  }
+})

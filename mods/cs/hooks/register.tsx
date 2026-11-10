@@ -1281,6 +1281,7 @@ export function drawFooterKeys(keys: BandEntry[], el: BandElements): RenderEleme
 // for from a timer, PID_ASKS times a load at most, and the width is read
 // again once it is known.
 const PID_ASKS = 3
+const pidUnknowable = () => ownPid === undefined && !pidAsking && pidAsks >= PID_ASKS
 function askClaudePid($: EngineInterface) {
   if (ownPid !== undefined || pidAsking || pidAsks >= PID_ASKS) return
   pidAsking = true
@@ -1326,13 +1327,13 @@ function redrawFooter($: EngineInterface) {
 // Applies `change` to what the keys are drawn from. The status line's width
 // is read when it starts to matter, when the band asks (`reread`: a turn's
 // end repaints the status line), and from then on a clock for as long as it
-// can move the keys; while it cannot, it is neither read nor kept. The sites
-// that drew from what the change replaced draw again when it moves or changes
-// the keys.
+// can move the keys; while it cannot, or the mod has given up asking which
+// Claude Code it runs in, it is neither read nor kept. The sites that drew
+// from what the change replaced draw again when it moves or changes the keys.
 async function changeFooter($: EngineInterface, change: () => void, reread = false) {
   const before = drawnSignature()
   change()
-  if (!statusWidthMatters(footer.keys)) {
+  if (!statusWidthMatters(footer.keys) || pidUnknowable()) {
     footerWatch?.cancel()
     footerWatch = undefined
     if (footer.statusWidth !== undefined) footer = { ...footer, statusWidth: undefined }
