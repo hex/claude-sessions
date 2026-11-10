@@ -4879,19 +4879,33 @@ test_two_live_writers_share_the_width_record_without_trading_it() {
 run_test test_two_live_writers_share_the_width_record_without_trading_it
 
 # The record is written under a name of the writing process's own and moved
-# into place, so two renders never write one temporary file, and a write the
-# directory refuses says nothing on stderr. A directory left at the name every
-# render once shared would refuse that write: the record is written all the
-# same, and quietly.
+# into place, so two renders never write one temporary file: an `mv` ahead on
+# PATH logs each source it is handed, and two renders that each write name two
+# different ones, neither left beside the record. A write the directory
+# refuses says nothing on stderr and leaves the record as it was; the refused
+# render draws one segment, so its width differs while its context stamp, at
+# the same value and clock, is not due.
 test_width_record_is_written_under_a_per_process_name() {
-    export CLAUDE_SESSION_NAME=tmpsess NO_COLOR=1 CS_STATUSLINE_PARENT=4242
-    local dir="$CS_SESSIONS_ROOT/tmpsess/.cs/local" err
-    mkdir -p "$dir/statusline-width.tmp"
+    export CLAUDE_SESSION_NAME=tmpsess NO_COLOR=1 CS_STATUSLINE_PARENT=4242 CS_STATUSLINE_NOW=1000
+    local dir="$CS_SESSIONS_ROOT/tmpsess/.cs/local" err shim="$TEST_TMPDIR/mvlog" sources rc=0
+    local input='{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}'
+    mkdir -p "$dir" "$shim"
     printf 'claude_session_id: lead\n' > "$dir/state"
-    err=$(run_sl_stderr '{"session_id":"lead","context_window":{"used_percentage":8},"workspace":{"current_dir":"/none"}}')
-    assert_eq "" "$err" "the render says nothing on stderr" || return 1
-    assert_eq "lead 18 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "and records its line" || return 1
-    assert_eq "statusline-width statusline-width.tmp" "$(cd "$dir" && ls | grep '^statusline-width' | tr '\n' ' ' | sed 's/ $//')" "leaving no file of its own beside the record" || return 1
+    printf '#!/bin/sh\nprintf "%%s\\n" "$1" >> "%s/sources"\nexec /bin/mv "$@"\n' "$shim" > "$shim/mv"
+    chmod +x "$shim/mv"
+    PATH="$shim:$PATH" run_sl "$input" >/dev/null
+    PATH="$shim:$PATH" run_sl "${input/8/18}" >/dev/null
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "both renders recorded their line" || return 1
+    sources=$(grep '/statusline-width' "$shim/sources" 2>/dev/null)
+    assert_eq "2" "$(printf '%s\n' "$sources" | grep -c .)" "each render moved one temporary file into place" || return 1
+    assert_eq "2" "$(printf '%s\n' "$sources" | sort -u | grep -c .)" "under a name of its own" || return 1
+    assert_eq "statusline-width" "$(cd "$dir" && ls | grep '^statusline-width' | tr '\n' ' ' | sed 's/ $//')" "leaving no file of its own beside the record" || return 1
+    _deny_writes "$dir" || return 77
+    err=$(CS_STATUSLINE_SEGMENTS=ctx run_sl_stderr "${input/8/18}")
+    assert_eq "" "$err" "a refused write says nothing on stderr" || rc=1
+    assert_eq "lead 19 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "and leaves the record as it was" || rc=1
+    _allow_writes "$dir"
+    return "$rc"
 }
 
 run_test test_width_record_is_written_under_a_per_process_name
