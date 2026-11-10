@@ -252,7 +252,9 @@ let bandIdle = false
 // Each tick asks for a redraw and the engine raises the band 5 to 19 ms later
 // (measured), so `bandDrawn` and `dialogDrawn` say which of the two was
 // raised since the last tick. `bandSurvey` is the band's own word on a
-// survey, as last heard: nothing else says one is up.
+// survey, as last heard since the count began: nothing else says one is up,
+// and a band taken since cannot take the word back, so it is good for that
+// count's zero and no later one.
 let bandDrawn = false
 let dialogDrawn = false
 let bandSurvey = false
@@ -1960,6 +1962,7 @@ async function forceRotation($: EngineInterface) {
 // count ran unseen.
 function startCountdown($: EngineInterface) {
   left = GRACE_SECONDS
+  bandSurvey = false
   // From a timer: the count starts inside the turn's own hook.
   $.clock.after(0, () => toastNextStep($))
   ticker = $.clock.every(1000, async () => {

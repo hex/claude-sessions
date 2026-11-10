@@ -1183,6 +1183,36 @@ test('a survey above the prompt at zero keeps the /clear from running and a toas
   }
 })
 
+// What the band said of a survey is good for the count it was said in: only
+// a band raised again takes it back, and under another mod's band none is.
+test('a survey the band last drew declines one zero, not the next count\'s', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await turnComplete()
+  await tick(3)
+  await band({ hasSurvey: true })
+  await tickUnseen(GRACE_SECONDS - 3)
+  expect(ran).toEqual([])
+  expect(toasts).toEqual(['/clear did not run: a survey was waiting above the prompt when the band last drew'])
+  toasts = []
+  await turnComplete()
+  await tickUnseen(GRACE_SECONDS)
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([CLEAR_UNSEEN])
+})
+
+test('a survey the band drew before the count began, under a band taken since, does not stop the /clear', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await band()
+  await band({ hasSurvey: true })
+  await turnComplete()
+  await tickUnseen(GRACE_SECONDS)
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([CLEAR_UNSEEN])
+})
+
 // The engine's question dialog takes the prompt's place, the band's with it:
 // while one is open the band is not raised and the dialog is, at every redraw
 // (measured on 2.1.322, a plugin's question asked while idle; a /clear run
