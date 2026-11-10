@@ -163,6 +163,18 @@ SLEEP
     _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]\n["run","view","123","--log"]'
 }
 
+test_client_error_after_a_server_error_is_not_retried() {
+    _ci_fixture || return $?
+    _ci_reply '' 'HTTP 500: Internal Server Error (https://api.github.com/repos/example/repo/actions/runs/123)' 1
+    _ci_reply '' 'HTTP 404: Not Found (https://api.github.com/repos/example/repo/actions/runs/123)' 1
+    _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"success","steps":[{}],"databaseId":101}]'
+    _ci_wait 123
+    assert_eq 4 "$CI_RC" 'a 404 on the retry exits 4' || return 1
+    assert_eq 'retrying: gh run view 123 --json status,attempt,headSha,jobs failed: "HTTP 500: Internal Server Error (https://api.github.com/repos/example/repo/actions/runs/123)" (retry 1 of 2)' "$CI_OUT" 'only the server error is retried' || return 1
+    assert_eq 'ci_wait: gh run view 123 --json status,attempt,headSha,jobs failed: "HTTP 404: Not Found (https://api.github.com/repos/example/repo/actions/runs/123)"' "$CI_ERR" 'the 404 is quoted' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
 test_persistent_server_error_exits_four_after_two_retries() {
     _ci_fixture || return $?
     local error='HTTP 502: Bad Gateway (https://api.github.com/repos/example/repo/actions/runs/123)'
@@ -748,6 +760,7 @@ run_test test_failure_and_skipped_dependent_stop
 run_test test_cancellation_after_steps_is_a_failure
 run_test test_failed_gh_read_reports_stderr
 run_test test_server_error_on_a_read_is_retried
+run_test test_client_error_after_a_server_error_is_not_retried
 run_test test_persistent_server_error_exits_four_after_two_retries
 run_test test_invalid_interval_prints_usage_without_gh
 run_test test_unavailable_temp_directory_is_a_command_error

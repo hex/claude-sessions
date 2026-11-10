@@ -53,7 +53,7 @@ _gh() {
     while ! gh "$@" > "$scratch/response" 2> "$scratch/error"; do
         # Only reads are retried: a 5xx on a rerun does not prove the rerun did not start.
         if [ "$1 $2" = 'run view' ] && [ "$retries" -lt 2 ] &&
-            grep -Eq '(^|[^0-9A-Za-z])HTTP 5[0-9][0-9]([^0-9]|$)' "$scratch/error"; then
+            grep -q 'HTTP 5[0-9][0-9]' "$scratch/error"; then
             retries=$((retries + 1))
             printf 'retrying: gh %s failed: "%s" (retry %s of 2)\n' "$*" "$(cat "$scratch/error")" "$retries"
             sleep "$interval"
