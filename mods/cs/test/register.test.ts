@@ -4660,12 +4660,15 @@ test('without room there the keys stand in the hint\'s place, and the mode label
 
 test('a record of another conversation or another Claude Code, an unreadable one, or none sends the keys inline at any width', async () => {
   percent = 40
+  // The mod has learned it runs in Claude Code 4242: its own record takes the keys to the notice's right.
+  files[WIDTH] = 'uuid-lead 20 4242\n'
+  await band()
+  await settleTimers()
+  expect(sitesWithKeys(await pass({ columns: 200 }))).toEqual(['mode'])
   for (const record of ['uuid-old 20 4242\n', 'uuid-lead 20 4243\n', 'uuid-lead - 4242 4243\n', 'wide\n', undefined]) {
     if (record === undefined) delete files[WIDTH]
     else files[WIDTH] = record
-    await band()
-    expect(await footerMode(200)).toBe(MODES_DRAWN)
-    expect(buttons(await footerHint(200))).toHaveLength(2)
+    expect([record, sitesWithKeys(await pass({ columns: 200 }))]).toEqual([record, ['hint']])
   }
 })
 
@@ -4815,7 +4818,7 @@ const pass = async (o: Pass = {}) => {
   const columns = (site: Site) => o.unmeasured?.includes(site) ? null : o.columns ?? 110
   for (let redraws = 0; ; redraws++) {
     const trees = {
-      band: await band({ isWorking: o.working ?? false }, 'terminal', viewOf(columns('band'), fullscreen) ?? null),
+      band: await band({ isWorking: o.working ?? false, bodyColumns: o.columns ?? 110 }, 'terminal', viewOf(columns('band'), fullscreen) ?? null),
       mode: await footerMode(columns('mode'), o.modes ?? [], o.modesDrawn ?? MODES_DRAWN, fullscreen),
       hint: await footerHint(columns('hint'), o.hint ?? CYCLE, o.working ?? false, fullscreen),
     }
@@ -4870,12 +4873,19 @@ test('a footer too narrow for the keys, or one nobody measured, draws them on th
   expect(words(trees.band)).toEqual(['ctrl+x', '1', '   ', '2'])
 })
 
+// The band is as narrow as the footer: the count holds its place on it down to
+// 23 columns, and only a narrower band drops it before the clear key's word.
 test('an armed handoff\'s clear key and its count draw on the band where the footer has no room for them', async () => {
+  bindKeys({ 'ctrl+x 1': 'strip:jump1', 'ctrl+x 2': 'strip:jump2' })
   await startGrace()
-  const trees = await pass({ columns: 40 })
+  let trees = await pass({ columns: 40 })
   expect(trees.mode).toBe(MODES_DRAWN)
   expect(trees.hint).toBe(HINT_DRAWN)
-  expect(bandWords(trees.band)).toEqual(['/clear now', '   ', `in ${GRACE_SECONDS}s`])
+  expect(bandWords(trees.band)).toEqual(['ctrl+x', '1', '/clear now', '   ', `in ${GRACE_SECONDS}s`])
+  trees = await pass({ columns: 23 })
+  expect(sitesWithKeys(trees)).toEqual(['band'])
+  expect(bandLine(trees.band, 23)).toBe(`  1 /clear now   in ${GRACE_SECONDS}s`)
+  expect(bandLine((await pass({ columns: 22 })).band, 22)).toBe('  ctrl+x 1 /clear now')
 })
 
 // Measured on 2.1.322: on the main screen the engine clips what a mod hangs a
