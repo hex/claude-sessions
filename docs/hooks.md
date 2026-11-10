@@ -567,9 +567,10 @@ three read one route, so the keys draw in exactly one of them:
   unseen, and the `/clear` at its zero still runs.
 
 A turn takes `rotate`, `/clear now` and `wrap` away and leaves `filter chat`.
-The mod hears of a turn as it starts, before any of the three places draws
-again, so the keys go then; a key pressed once a turn runs, by a click or its
-chord, toasts `cs: /rotate did not run: a turn is running` (or `/clear`,
+The keys go as soon as the turn's start or any of the three places says a
+turn runs (measured: the first redraw after Enter, while the prompt's
+UserPromptSubmit hooks still run); a key pressed once a turn runs, by a click
+or its chord, toasts `cs: /rotate did not run: a turn is running` (or `/clear`,
 `/wrap`) and runs nothing. A `/clear now` press reads the turn again once
 `cs -vet-session` has answered it.
 If the band's own drawing fails, the keys leave the row under the prompt

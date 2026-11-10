@@ -1232,7 +1232,7 @@ export function noticeCells(hint: string | undefined): number {
 }
 
 // The keys that draw under the prompt now: the band's last, less the ones a
-// running turn has no use for when a footer site heard of the turn first.
+// running turn has no use for while the band's last still holds them.
 const IDLE_KEYS = new Set(['cs-rotate', 'cs-countdown', 'cs-wrap'])
 const liveKeys = () => (turnRunning() ? footer.keys.filter(entry => !IDLE_KEYS.has(entry.key)) : footer.keys)
 
