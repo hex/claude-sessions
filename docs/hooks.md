@@ -912,7 +912,7 @@ would redraw them; they come back when its band is raised again. At zero it
 runs the `/clear`, and then toasts `the count to /clear reached zero unseen:
 the band above the prompt was not drawn; /clear has run`. The toast names no
 cause: the mod cannot tell another mod's band from a picker. The mod toasts it when
-the engine raised no band between the count's last tick and the end of the
+the engine raised no band between the tick before zero and the end of the
 zero's checks, whatever part of the count before that stood on screen. Under
 another mod's band the `/clear` runs on time; the engine holds one behind a
 picker until the picker closes. The mod has no way to take a queued `/clear`
@@ -928,9 +928,9 @@ under a survey. What the band said of a survey lasts one count: a
 survey the band drew during the count, before another mod took the band,
 keeps that count's `/clear` from running even if you have dismissed it since
 (`/clear did not run: a survey was waiting above the prompt when the band
-last drew`), and the next count starts without it and clears on time. A
-survey drawn before the count began, under a band taken since, is likewise
-not seen. The mod sees another plugin's question dialog either way, through the
+last drew`), and the next count starts without it and clears on time,
+whether or not the survey is still up. A survey drawn before the count began,
+under a band taken since, is likewise not seen. The mod sees another plugin's question dialog either way, through the
 dialog's own render: the dialog takes the prompt's place, the engine does not
 raise the band while one is open, and it does not refuse a `/clear` run under
 one. A band raised after a dialog says the question is answered; under a

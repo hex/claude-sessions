@@ -1198,8 +1198,9 @@ test('the hint under the prompt saying a turn runs keeps the zero from clearing 
 })
 
 // A survey is a question to the person, and the engine draws it whoever has
-// the band (measured). What the band last said of one stands once another mod
-// takes the band: nothing else tells the mod a survey is up.
+// the band (measured). What the band said of one during the count stands at
+// its zero once another mod takes the band: nothing else tells the mod a
+// survey is up.
 test('a survey above the prompt at zero keeps the /clear from running and a toast says so, also when another mod took the band after the survey drew', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   const cases: [typeof tick, string][] = [

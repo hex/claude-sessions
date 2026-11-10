@@ -1961,7 +1961,7 @@ async function forceRotation($: EngineInterface) {
 // trusts the session, and nothing waits on the person once those reads are
 // done: no turn (a Stop hook's turn starts with no prompt to stop the count),
 // no question dialog, no survey. Otherwise the count stops, a toast says
-// why, and the button stays for the person. A band not raised with no
+// why, and the button stays where the band is drawn. A band not raised with no
 // question open (another mod has it, or a picker is up) stops nothing: the
 // /clear runs, behind a picker once it closes, and a toast then says the
 // count reached zero unseen.
