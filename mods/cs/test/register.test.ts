@@ -1069,20 +1069,40 @@ test('at zero the countdown runs /clear, once, and stops ticking', async () => {
 // A mod loaded before this one may answer the band's render without passing
 // it on (measured: a council run's band, a link prompt's). The mod's hook is
 // then not reached, whatever the count's redraws ask for, and what the band
-// last said of a turn stays as it was.
-const CLEAR_UNSEEN = 'another mod has the band above the prompt, so the count to /clear ran unseen; /clear runs now'
+// last said of a turn stays as it was. The toast follows the /clear: one shown
+// before it leaves the screen with the conversation (measured), and a /clear
+// the engine rejects has only its own to say.
+const CLEAR_UNSEEN = 'another mod has the band above the prompt, so the count to /clear ran unseen; /clear ran on time'
 const CLEAR = { command: 'clear', args: '' }
 
-test('a band another mod takes mid-turn does not stop the count: at zero /clear runs, once, and a toast says the count ran unseen', async () => {
+test('a band another mod takes mid-turn does not stop the count: at zero /clear runs, once, and a toast then says the count ran unseen', async () => {
   envVars.CS_ROTATE_FORCE_CTX = '70'
   arm(); percent = 80
   await band({ isWorking: true })
   await turnComplete()
   const t = ticker()!
-  await tickUnseen(GRACE_SECONDS)
+  let toastsAtClear: string[] | undefined
+  const run = $.command.run
+  $.command.run = async (args: any) => { toastsAtClear = [...toasts]; return run(args) }
+  try {
+    await tickUnseen(GRACE_SECONDS)
+  } finally {
+    $.command.run = run
+  }
   expect(ran).toEqual([CLEAR])
+  expect(toastsAtClear).toEqual([])
   expect(toasts).toEqual([CLEAR_UNSEEN])
   expect(t.cancelled).toBe(true)
+  // a /clear the engine rejects under another mod's band says only that
+  toasts = []
+  await turnComplete()
+  $.command.run = async () => { throw new Error('no session') }
+  try {
+    await tickUnseen(GRACE_SECONDS)
+  } finally {
+    $.command.run = run
+  }
+  expect(toasts).toEqual(['/clear did not run: Error: no session'])
 })
 
 test('a band another mod takes while the count runs changes nothing either, whether it last drew idle or a command running', async () => {
