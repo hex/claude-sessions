@@ -254,7 +254,9 @@ let bandIdle = false
 // raised since the last tick. `bandSurvey` is the band's own word on a
 // survey, as last heard since the count began: nothing else says one is up,
 // and a band taken since cannot take the word back, so it is good for that
-// count's zero and no later one.
+// count's zero and no later one. A reload resets none of the three: a
+// count's start and its first tick set each before a zero reads it, and a
+// reload leaves no key under the prompt for the first tick to take.
 let bandDrawn = false
 let dialogDrawn = false
 let bandSurvey = false
@@ -463,7 +465,7 @@ export function register(on: On) {
   filterChatPressPending = undefined
   filterChatComplaint = undefined
   // A (re)load has no countdown: the engine cancelled the old one's timers.
-  left = undefined; ticker = undefined; bandIdle = false; bandDrawn = false; dialogDrawn = false; bandSurvey = false; working = IDLE; stepToastedFor = undefined; adopted = undefined; clearSeen = false; clearing = false; birth = undefined; startPercent = undefined; registered = false
+  left = undefined; ticker = undefined; bandIdle = false; working = IDLE; stepToastedFor = undefined; adopted = undefined; clearSeen = false; clearing = false; birth = undefined; startPercent = undefined; registered = false
   finishWatch = undefined; finishTurnOver = false; finishShown = new Set(); finishGate = undefined; finishProblemShown = false
   lastRefusal = undefined
   filterChatVetRefused = false

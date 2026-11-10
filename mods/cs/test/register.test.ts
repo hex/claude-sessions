@@ -1153,12 +1153,48 @@ test('while another mod has the band the clear key and its count leave the row u
   await turnComplete()
   await tick()
   expect(bandWords(await footerHint())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS - 1}s`])
-  await tickUnseen(2)
+  // a tick whose redraw has not come yet leaves them: the band was raised since the tick before
+  await tickUnseen()
+  expect(bandWords(await footerHint())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS - 1}s`])
+  await tickUnseen()
   expect(await footerHint()).toBe(HINT_DRAWN)
   await tick()
   expect(bandWords(await footerHint())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS - 4}s`])
   expect(ran).toEqual([])
   expect(toasts).toEqual([])
+})
+
+test('a band raised whose draw is still pending at zero is a count seen', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick(GRACE_SECONDS - 2)
+  await tickUnseen()
+  let draw!: () => void
+  const raised = hooks['ui.render:AbovePrompt']($, { surface: 'terminal', viewport: viewOf(110), props: { isWorking: false, hasSurvey: false, bodyColumns: 110 } }, () => new Promise(resolve => { draw = () => resolve(DRAWN) }))
+  await settle()
+  await tickUnseen()
+  draw()
+  await raised
+  expect(ran).toEqual([CLEAR])
+  expect(toasts).toEqual([])
+})
+
+// Under another mod's band the band says nothing of a turn, and a turn the
+// main loop's events did not announce to the mod is told by the hint alone.
+test('the hint under the prompt saying a turn runs keeps the zero from clearing under a band another mod has', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick(3)
+  await footerHint(110, CYCLE, true)
+  const t = ticker()!
+  await tickUnseen(GRACE_SECONDS - 3)
+  expect(ran).toEqual([])
+  expect(toasts).toEqual(['/clear did not run: a turn is running'])
+  expect(t.cancelled).toBe(true)
 })
 
 // A survey is a question to the person, and the engine draws it whoever has
