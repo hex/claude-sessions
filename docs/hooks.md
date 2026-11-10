@@ -560,18 +560,20 @@ three read one route, so the keys draw in exactly one of them:
   cycle hint (a pill such as `1 shell`, or `? for shortcuts` outside the
   permission modes); and on a surface that has not reported its width. An
   armed handoff's `/clear now` and its count are on the band then. There
-  the keys take the band's line, as wide as the footer: the count holds its
-  place down to 23 columns, and a narrower band drops it before
-  `/clear now` loses its word. A collapsed band (Ctrl+X Ctrl+A) hides the
+  the keys take the band's line, a few cells narrower than the terminal (105
+  of 110 columns, measured): the count holds its place on a line of 23 cells
+  or more, and a narrower line drops it before `/clear now` loses its word. A collapsed band (Ctrl+X Ctrl+A) hides the
   keys and the count with the rest of it. In those two cases the count runs
   unseen, and the `/clear` at its zero still runs.
 
 A turn takes `rotate`, `/clear now` and `wrap` away and leaves `filter chat`.
 The keys go as soon as the turn's start or any of the three places says a
 turn runs (measured: the first redraw after Enter, while the prompt's
-UserPromptSubmit hooks still run); a key pressed once a turn runs, by a click
-or its chord, toasts `cs: /rotate did not run: a turn is running` (or `/clear`,
-`/wrap`) and runs nothing. A `/clear now` press reads the turn again once
+UserPromptSubmit hooks still run). A key pressed in that moment, while still
+drawn, by a click or its chord, toasts
+`cs: /rotate did not run: a turn is running` (or `/clear`, `/wrap`) and runs
+nothing. Once the key has left, Ctrl+X 1 or Ctrl+X 2 finds no Button to press,
+and Claude Code types the digit into the prompt (measured on 2.1.322). A `/clear now` press reads the turn again once
 `cs -vet-session` has answered it.
 If the band's own drawing fails, the keys leave the row under the prompt
 until it next succeeds.
@@ -753,8 +755,9 @@ The installer binds Ctrl+X 1 and Ctrl+X 2
 to them in `keybindings.json` (see
 [configuration.md](configuration.md#rotate-and-wrap-keys)). A chord that
 file's `Global` block binds to an action presses its Button under the prompt
-as on the band, and reaches the mod while a turn runs too (measured on
-2.1.322), when the rotate, `/clear now` and wrap presses say so and run nothing. The mod
+as on the band. While a turn runs it reaches the mod only as long as the key
+is still drawn, when the rotate, `/clear now` and wrap presses say so and run
+nothing. The mod
 reads the file to spell the chords beside the keys where they draw on the
 band; the Buttons still answer a click. The band's focus (Ctrl+X Tab) does
 not reach under the prompt: it lands on the queue's start press, a features
