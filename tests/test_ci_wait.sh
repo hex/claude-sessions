@@ -130,13 +130,63 @@ test_cancellation_after_steps_is_a_failure() {
 }
 
 test_failed_gh_read_reports_stderr() {
+    local error
+    for error in 'network unavailable' 'HTTP 404: Not Found (https://api.github.com/repos/example/repo/actions/runs/503)'; do
+        _ci_fixture || return $?
+        _ci_reply '' "$error" 1
+        _ci_wait 123
+        assert_eq 4 "$CI_RC" 'gh failure exits 4' || return 1
+        assert_eq '' "$CI_OUT" 'no verdict from a failed call' || return 1
+        assert_eq "ci_wait: gh run view 123 --json status,attempt,headSha,jobs failed: \"$error\"" "$CI_ERR" 'call and stderr quoted' || return 1
+        _ci_calls '["run","view","123","--json","status,attempt,headSha,jobs"]' || return 1
+    done
+}
+
+test_server_error_on_a_read_is_retried() {
     _ci_fixture || return $?
-    _ci_reply '' 'network unavailable' 1
+    CI_INTERVAL=7
+    cat > "$TEST_TMPDIR/fakebin/sleep" <<'SLEEP'
+#!/usr/bin/env bash
+set -euo pipefail
+jq -cn --args '$ARGS.positional' -- "$@" >> "$CI_FIXTURE/sleeps"
+SLEEP
+    chmod +x "$TEST_TMPDIR/fakebin/sleep"
+    _ci_reply '' 'failed to get run: HTTP 500 (https://api.github.com/repos/example/repo/actions/runs/123?exclude_pull_requests=true)' 1
+    _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"success","steps":[{}],"databaseId":101}]'
+    _ci_reply '' 'HTTP 503: Service Unavailable (https://api.github.com/repos/example/repo/actions/runs/123/logs)' 1
+    _ci_reply $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z job finished\n'
     _ci_wait 123
-    assert_eq 4 "$CI_RC" 'gh failure exits 4' || return 1
-    assert_eq '' "$CI_OUT" 'no verdict from a failed call' || return 1
-    assert_eq 'ci_wait: gh run view 123 --json status,attempt,headSha,jobs failed: "network unavailable"' "$CI_ERR" 'call and stderr quoted' || return 1
-    _ci_calls '["run","view","123","--json","status,attempt,headSha,jobs"]'
+    assert_eq 0 "$CI_RC" 'transient server errors do not end the wait' || return 1
+    assert_eq $'retrying: gh run view 123 --json status,attempt,headSha,jobs failed: "failed to get run: HTTP 500 (https://api.github.com/repos/example/repo/actions/runs/123?exclude_pull_requests=true)" (retry 1 of 2)\nsuccess\t1\tbash\nretrying: gh run view 123 --log failed: "HTTP 503: Service Unavailable (https://api.github.com/repos/example/repo/actions/runs/123/logs)" (retry 1 of 2)\nskipped tests: none' "$CI_OUT" 'each retry is announced before the verdict' || return 1
+    assert_eq '' "$CI_ERR" 'a recovered read has no error output' || return 1
+    assert_eq $'["7"]\n["7"]' "$(cat "$TEST_TMPDIR/sleeps")" 'each retry waits one poll interval' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]\n["run","view","123","--log"]'
+}
+
+test_client_error_after_a_server_error_is_not_retried() {
+    _ci_fixture || return $?
+    _ci_reply '' 'HTTP 500: Internal Server Error (https://api.github.com/repos/example/repo/actions/runs/123)' 1
+    _ci_reply '' 'HTTP 404: Not Found (https://api.github.com/repos/example/repo/actions/runs/123)' 1
+    _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"success","steps":[{}],"databaseId":101}]'
+    _ci_wait 123
+    assert_eq 4 "$CI_RC" 'a 404 on the retry exits 4' || return 1
+    assert_eq 'retrying: gh run view 123 --json status,attempt,headSha,jobs failed: "HTTP 500: Internal Server Error (https://api.github.com/repos/example/repo/actions/runs/123)" (retry 1 of 2)' "$CI_OUT" 'only the server error is retried' || return 1
+    assert_eq 'ci_wait: gh run view 123 --json status,attempt,headSha,jobs failed: "HTTP 404: Not Found (https://api.github.com/repos/example/repo/actions/runs/123)"' "$CI_ERR" 'the 404 is quoted' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]'
+}
+
+test_persistent_server_error_exits_four_after_two_retries() {
+    _ci_fixture || return $?
+    local error='HTTP 502: Bad Gateway (https://api.github.com/repos/example/repo/actions/runs/123)'
+    _ci_reply '' "$error" 1
+    _ci_reply '' "$error" 1
+    _ci_reply '' "$error" 1
+    _ci_wait 123
+    assert_eq 4 "$CI_RC" 'a server error on every try exits 4' || return 1
+    assert_eq "retrying: gh run view 123 --json status,attempt,headSha,jobs failed: \"$error\" (retry 1 of 2)
+retrying: gh run view 123 --json status,attempt,headSha,jobs failed: \"$error\" (retry 2 of 2)" "$CI_OUT" 'both retries are announced' || return 1
+    assert_eq "ci_wait: gh run view 123 --json status,attempt,headSha,jobs failed: \"$error\"" "$CI_ERR" 'the last failure is quoted' || return 1
+    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]'
 }
 
 test_invalid_interval_prints_usage_without_gh() {
@@ -275,13 +325,16 @@ test_skipped_job_without_a_cancelled_job_fails() {
 }
 
 test_failed_rerun_reports_stderr() {
-    _ci_fixture || return $?
-    _ci_cancelled_build 1
-    _ci_reply '' 'rerun denied' 1
-    _ci_wait 123
-    assert_eq 4 "$CI_RC" 'failed rerun exits 4' || return 1
-    assert_eq 'ci_wait: gh run rerun 123 --failed failed: "rerun denied"' "$CI_ERR" 'failed rerun names the call' || return 1
-    _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]'
+    local error
+    for error in 'rerun denied' 'HTTP 500: Internal Server Error (https://api.github.com/repos/example/repo/actions/runs/123/rerun-failed-jobs)'; do
+        _ci_fixture || return $?
+        _ci_cancelled_build 1
+        _ci_reply '' "$error" 1
+        _ci_wait 123
+        assert_eq 4 "$CI_RC" 'failed rerun exits 4' || return 1
+        assert_eq "ci_wait: gh run rerun 123 --failed failed: \"$error\"" "$CI_ERR" 'failed rerun names the call' || return 1
+        _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","rerun","123","--failed"]' || return 1
+    done
 }
 
 test_invalid_rerun_limits_print_usage() {
@@ -706,6 +759,9 @@ run_test test_pending_jobs_wait_until_every_conclusion_exists
 run_test test_failure_and_skipped_dependent_stop
 run_test test_cancellation_after_steps_is_a_failure
 run_test test_failed_gh_read_reports_stderr
+run_test test_server_error_on_a_read_is_retried
+run_test test_client_error_after_a_server_error_is_not_retried
+run_test test_persistent_server_error_exits_four_after_two_retries
 run_test test_invalid_interval_prints_usage_without_gh
 run_test test_unavailable_temp_directory_is_a_command_error
 run_test test_invalid_arguments_print_usage_without_gh
