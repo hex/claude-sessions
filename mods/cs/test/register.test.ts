@@ -1118,7 +1118,27 @@ test('a band another mod takes while the count runs changes nothing either, whet
     await tickUnseen(GRACE_SECONDS - 5)
     expect([last, ran]).toEqual([last, [CLEAR]])
     expect([last, toasts]).toEqual([last, [CLEAR_UNSEEN]])
+    // and the key the band last put under the prompt is not left there
+    expect([last, await footerHint()]).toEqual([last, HINT_DRAWN])
   }
+})
+
+// The keys under the prompt are what the band last put there, the count's
+// seconds among them: once another mod has the band nothing redraws them
+// (measured: `/clear now in 16s` stood through the count and after the /clear).
+test('while another mod has the band the clear key and its count leave the row under the prompt, and come back with the band', async () => {
+  envVars.CS_ROTATE_FORCE_CTX = '70'
+  arm(); percent = 80
+  await keys()
+  await turnComplete()
+  await tick()
+  expect(bandWords(await footerHint())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS - 1}s`])
+  await tickUnseen(2)
+  expect(await footerHint()).toBe(HINT_DRAWN)
+  await tick()
+  expect(bandWords(await footerHint())).toEqual(['/clear now', ' ', `in ${GRACE_SECONDS - 4}s`])
+  expect(ran).toEqual([])
+  expect(toasts).toEqual([])
 })
 
 // A survey is a question to the person, and the engine draws it whoever has
