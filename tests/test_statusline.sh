@@ -4699,7 +4699,7 @@ test_render_records_the_width_of_the_line_it_printed() {
     out=$(CS_STATUSLINE_LAYOUT=quiet COLORTERM=truecolor run_sl "$input")
     assert_output_contains_f "$out" "${ESC_}[" "the quiet line carries escapes" || return 1
     assert_eq "lead 42 4242" "$(cat "$dir/statusline-width" 2>/dev/null)" "the quiet line's 42 cells are recorded, its escapes not counted" || return 1
-    assert_eq "statusline-width" "$(cd "$dir" && ls | grep '^statusline-width')" "the record is moved into place, and nothing is left beside it" || return 1
+    assert_eq "statusline-width" "$(cd "$dir" && echo statusline-width*)" "the record is moved into place, and nothing is left beside it" || return 1
 }
 
 run_test test_render_records_the_width_of_the_line_it_printed
@@ -4821,15 +4821,18 @@ test_every_glyph_the_bar_draws_is_one_the_width_counts() {
     ' "$SL" | LC_ALL=C sort -u)
     assert_eq "21" "$(printf '%s\n' "$glyphs" | grep -c .)" "the script's code holds 21 glyphs past ASCII" || return 1
     missed=$(
-        CS_STATUSLINE_LIB=1; . "$SL"
+        # shellcheck source=bin/cs-statusline
+        CS_STATUSLINE_LIB=1 . "$SL"
         while IFS= read -r glyph; do
             _known_cells "a${glyph}b" && [ "$_WIDTH" = 3 ] || printf ' %s' "$(printf '%s' "$glyph" | od -An -tx1 | tr -d ' \n')"
         done <<< "$glyphs"
     )
     assert_eq "" "$missed" "each is counted as one cell (the bytes of any that is not)" || return 1
-    ( CS_STATUSLINE_LIB=1; . "$SL"; _known_cells $'a\xe6\xbc\xa2b' ) \
+    # shellcheck source=bin/cs-statusline
+    ( CS_STATUSLINE_LIB=1 . "$SL"; _known_cells $'a\xe6\xbc\xa2b' ) \
         && { echo "  FAIL: a character from outside the list should have no known width"; return 1; }
-    ( CS_STATUSLINE_LIB=1; . "$SL"; _known_cells $'a\tb' ) \
+    # shellcheck source=bin/cs-statusline
+    ( CS_STATUSLINE_LIB=1 . "$SL"; _known_cells $'a\tb' ) \
         && { echo "  FAIL: a control character should have no known width"; return 1; }
     return 0
 }
@@ -4902,7 +4905,7 @@ test_width_record_is_written_under_a_per_process_name() {
     sources=$(grep '/statusline-width' "$shim/sources" 2>/dev/null)
     assert_eq "2" "$(printf '%s\n' "$sources" | grep -c .)" "each render moved one temporary file into place" || return 1
     assert_eq "2" "$(printf '%s\n' "$sources" | sort -u | grep -c .)" "under a name of its own" || return 1
-    assert_eq "statusline-width" "$(cd "$dir" && ls | grep '^statusline-width' | tr '\n' ' ' | sed 's/ $//')" "leaving no file of its own beside the record" || return 1
+    assert_eq "statusline-width" "$(cd "$dir" && echo statusline-width*)" "leaving no file of its own beside the record" || return 1
     _deny_writes "$dir" || return 77
     err=$(CS_STATUSLINE_SEGMENTS=ctx run_sl_stderr "${input/8/18}")
     assert_eq "" "$err" "a refused write says nothing on stderr" || rc=1
