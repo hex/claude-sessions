@@ -145,10 +145,12 @@ intended cancellation, so do not use it for pull-request runs.
 It waits until the run completes and every job has a conclusion, then prints each
 job's conclusion, step count, and name. `CI_WAIT_INTERVAL` sets the poll interval
 in seconds, with a default of 30; use one or more digits.
-When a `gh run view` call fails with an HTTP 5xx, the script tries it twice more,
+When a `gh run view` call fails with an HTTP 5xx, or with a network error such as
+a TLS handshake timeout, a dropped connection (`unexpected EOF`, `connection reset
+by peer`), an I/O timeout or a failed DNS lookup, the script tries it twice more,
 one poll interval apart, and prints a `retrying:` line before each try; a third
 failure exits 4. The script never retries a failed `gh run rerun`, since a server
-error does not prove the rerun did not start.
+or network error does not prove the rerun did not start.
 
 The script reruns failed jobs only when at least one job has a `cancelled`
 conclusion and zero steps. Every other non-success job must have a `cancelled`
