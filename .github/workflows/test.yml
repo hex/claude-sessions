@@ -148,3 +148,12 @@ jobs:
       - name: Run TUI tests
         run: cargo test --manifest-path tui/Cargo.toml
 
+      # The release's Linux binary, built the way release.yml builds it: a
+      # static musl build that needs no apt package, since cs-tui has no C
+      # dependency. A push that breaks it fails here, before any tag.
+      - name: Build the Linux release binary (musl)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --release --manifest-path tui/Cargo.toml --target x86_64-unknown-linux-musl
+
