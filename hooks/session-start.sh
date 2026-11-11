@@ -201,6 +201,10 @@ fi
 # Skip on clear/compact since the session is already running
 if [ "$SOURCE" = "startup" ] || [ "$SOURCE" = "resume" ]; then
 
+# About twenty git calls follow: run the selected Xcode's git, not the stub
+# that looks it up on every call.
+command -v _cs_use_direct_git >/dev/null 2>&1 && _cs_use_direct_git
+
 # Shadow ref: crash recovery and push protection (worktree-tolerant)
 if git -C "$SESSION_DIR" rev-parse --git-dir >/dev/null 2>&1; then
     # Ensure legacy shadow refs are never pushed (refs/worktree/* never are)

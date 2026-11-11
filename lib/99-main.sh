@@ -564,6 +564,10 @@ main() {
     # a light canvas (colors were first set at startup, defaulting to dark).
     setup_palette
 
+    # Opening a session makes several git calls before claude starts: run the
+    # selected Xcode's git, not the stub that looks it up on every call.
+    _cs_use_direct_git
+
     # Define paths (resolve symlinks for adopted sessions so Claude Code
     # sees the original project path, preserving conversation continuity)
     if [ -L "$session_dir" ]; then

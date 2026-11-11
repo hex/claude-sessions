@@ -1507,12 +1507,12 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "69f1523b784fa43334e05f06a0496c96b8933b880e63eab2b2ad926c0c1edc7b  bin/cs"
+    "71c2d0b328138aa7d50359a7891f1a900bb924298c8fc98c5199bda03a23bec9  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "4cfed2e36463e06c222bf9ed3573a0d66c4ecff25000b5c9aa28a4da3bbc1e20  bin/cs-statusline"
     "324691a50519294a125520ee96e279bb02a08b1a4c2e4804cf9347c617521044  bin/cs-subagent-statusline"
     "12d9604997a1b72088df338d259fbb475c13c3bedb0b611d91d50ebbab2914c5  hooks/cs-resolve.sh"
-    "d11733860d6b7531cdc522fdf20e163c4821f9b5299c3eb1aab75e7ae149d0f2  hooks/cs-shared.sh"
+    "58a427956cf4b030c455383610f6d8965a829f92ea145d21c59b33c031664cc1  hooks/cs-shared.sh"
     "b7f47c3499f8a4288471c2f53ccbf2b8b2490c6a658f45b668236e4154a43342  hooks/cs-config.sh"
     "50d63ce0995e68fddd8503700c15f9585d11938c9cd3872a883146de7707c765  hooks/cs-iterm-tab.py"
     "21988bf58bb6fea15c6435445f4abc3a38f4c4a9a7db78c4ff4797650709ba3f  hooks/memory-index-guard.sh"
@@ -1521,8 +1521,8 @@ CS_PAYLOAD_SHA256=(
     "8be7cf198e9e950cb11eeb5d02231bb3e168aa078018495a1a8832186334bbc2  hooks/prompt-rewriter-vendor.sh"
     "293b6da5250820f2247d1ba122cf4c732f0e987bc80cb8e7fe3500917d4f373f  hooks/wrap-sweep.md"
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
-    "5ebd2dad6ee41950c1a60577b22f459f5b4a1d199afce389498100ea72a76ad6  hooks/session-start.sh"
-    "e1d127ff4b828a434a3ddc4b57e3274f2d3ac94a7675680e44fda6eedf006553  hooks/autosave-commits.sh"
+    "13dfafa0db3d8dde0c3151bda6888b3fbc211226fac8b89d1c74579e92cfc1c0  hooks/session-start.sh"
+    "9cb8108b4382926d91929703a73cfa07304de0e0f6f8fcc01004010d8cac1fd8  hooks/autosave-commits.sh"
     "6521b8a09d5c8045010996b76b4990a83c7135b410c2500ad53adb72f6443e00  hooks/stop-blocks.sh"
     "73733088a8a86b2f7c3b367e0f6fb699dbf428c3421f7cd6d4daa02eac4b60a2  hooks/stop-notices.sh"
     "a96c77d8f13d893e46116b7d61e517f72bba7f8e10b790517934004be21ae43a  hooks/session-end.sh"

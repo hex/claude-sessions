@@ -129,6 +129,28 @@ _cs_git_at() {  # dir, git arguments...
         -u LANGUAGE LC_ALL=C git -c core.fsmonitor= -C "$dir" "$@"
 }
 
+# On a Mac, /usr/bin/git is a stub that asks which Xcode is selected and starts
+# that Xcode's git, about 15 ms more per call than running it directly. A
+# process that makes several git calls (the session-start and autosave hooks,
+# a session's launch) calls this once, before its first git call: it asks
+# xcrun for the selected git and makes `git` run that for the rest of the
+# process, its subshells included. Asked on every run, never saved, so an
+# Xcode updated or switched under a running session is followed. git stays the
+# one on PATH when that is not /usr/bin/git (a git the person or a test put
+# first), when xcrun does not answer, and when its answer is not an executable
+# file. Calls through env, exec, xargs or timeout keep PATH's git. One
+# difference stays, accepted: the stub hands the programs git starts (hooks,
+# filters, aliases) SDKROOT, CPATH, LIBRARY_PATH and MANPATH, and the git run
+# directly hands them none.
+_cs_use_direct_git() {
+    [ "$(command -v git)" = /usr/bin/git ] || return 0
+    local found
+    found=$(xcrun -f git 2>/dev/null) || return 0
+    { [ -n "$found" ] && [ -f "$found" ] && [ -x "$found" ] && [ "$found" != /usr/bin/git ]; } || return 0
+    _CS_GIT="$found"
+    git() { "$_CS_GIT" "$@"; }
+}
+
 # The directory git's own search would take for the repository by its HEAD,
 # looking up from <dir>; fails when the search ends without one. git, asked
 # about a directory, takes the nearest directory at or above it that holds a
