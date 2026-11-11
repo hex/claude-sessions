@@ -64,6 +64,10 @@ if [ -z "$SESSION_DIR" ] || [ ! -d "$SESSION_DIR" ]; then
     exit 0
 fi
 
+# Several git calls follow: run the selected Xcode's git, not the stub that
+# looks it up on every call.
+command -v _cs_use_direct_git >/dev/null 2>&1 && _cs_use_direct_git
+
 # Check if session has git repo (worktree-tolerant: .git may be a file).
 # The resolved git dir is reused for the temp-index copy below; it can be
 # relative to SESSION_DIR, which is fine since the autosave cd's there.
