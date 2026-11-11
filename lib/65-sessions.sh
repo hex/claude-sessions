@@ -254,7 +254,7 @@ list_sessions() {
             hidden_archived=$((hidden_archived + 1))
             continue
         fi
-        sessions+=("$(basename "$dir")")
+        sessions+=("${dir##*/}")
     done < <(find "$SESSIONS_ROOT" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 | sort -z)
 
     if [ ${#sessions[@]} -eq 0 ]; then
@@ -263,11 +263,44 @@ list_sessions() {
         return 0
     fi
 
-    # Dump the keychain once; per-session counts are computed inline in the
-    # display loop. No associative array — bash 3.2 lacks `local -A`.
-    local keychain_dump=""
+    # Dump the keychain once and count every session's entries in one awk
+    # pass, as lines of '<session><TAB><count>' between newlines; the display
+    # loop looks a session up with a builtin match. No associative array —
+    # bash 3.2 lacks `local -A`.
+    local secret_counts=""
     if command -v cs-secrets >/dev/null 2>&1; then
-        keychain_dump=$(security dump-keychain 2>/dev/null | grep -o '"svce"<blob>="cs:[^"]*"' || true)
+        secret_counts=$(security dump-keychain 2>/dev/null \
+            | grep -o '"svce"<blob>="cs:[^"]*"' \
+            | awk '{ s = $0; sub(/^"svce"<blob>="cs:/, "", s); sub(/:.*$/, "", s); n[s]++ }
+                   END { for (s in n) printf "%s\t%d\n", s, n[s] }' || true)
+        secret_counts=$'\n'"$secret_counts"$'\n'
+    fi
+
+    # Each session's log, found once. Their mtimes come from one stat for all
+    # of them rather than one per session; log_mtimes[i] is the i-th session's.
+    local log_files=() logged=() log_mtimes=() mtime i=0 j=0 log_file
+    for session in "${sessions[@]}"; do
+        log_file="$SESSIONS_ROOT/$session/.cs/private/session.log"
+        # An encrypted session keeps its log behind .cs/private; every other
+        # one in .cs/local. Fall back to older locations for unmigrated sessions
+        [ ! -f "$log_file" ] && log_file="$SESSIONS_ROOT/$session/.cs/local/session.log"
+        [ ! -f "$log_file" ] && log_file="$SESSIONS_ROOT/$session/.cs/logs/session.log"
+        [ ! -f "$log_file" ] && log_file="$SESSIONS_ROOT/$session/logs/session.log"
+        log_files[i]=""
+        if [ -f "$log_file" ]; then
+            log_files[i]="$log_file"
+            logged+=("$i")
+        fi
+        i=$((i + 1))
+    done
+    if [ ${#logged[@]} -gt 0 ]; then
+        local logged_files=()
+        for i in "${logged[@]}"; do logged_files+=("${log_files[i]}"); done
+        j=0
+        while IFS= read -r mtime; do
+            log_mtimes[${logged[j]}]="$mtime"
+            j=$((j + 1))
+        done < <(get_files_mtimes "${logged_files[@]}")
     fi
 
     # Find max session name length for column alignment
@@ -283,18 +316,14 @@ list_sessions() {
     printf "${COMMENT}%-${max_len}s  %-16s  %s${NC}\n" "$(printf '%*s' "$max_len" '' | tr ' ' '-')" "----------------" "----------------"
 
     # Print sessions
+    i=0
     for session in "${sessions[@]}"; do
-        local session_dir="$SESSIONS_ROOT/$session"
         local created="-"
         local modified="-"
 
-        local log_file="$session_dir/.cs/private/session.log"
-        # An encrypted session keeps its log behind .cs/private; every other
-        # one in .cs/local. Fall back to older locations for unmigrated sessions
-        [ ! -f "$log_file" ] && log_file="$session_dir/.cs/local/session.log"
-        [ ! -f "$log_file" ] && log_file="$session_dir/.cs/logs/session.log"
-        [ ! -f "$log_file" ] && log_file="$session_dir/logs/session.log"
-        if [ -f "$log_file" ]; then
+        # Tested again here: a log can go after the pass above found it.
+        log_file="${log_files[i]}"
+        if [ -n "$log_file" ] && [ -f "$log_file" ]; then
             # Parse created timestamp using bash builtins (avoids forking head|grep|cut)
             local line started=""
             local lines_read=0
@@ -316,16 +345,20 @@ list_sessions() {
                 # Trim to YYYY-MM-DD HH:MM
                 created="${started%:*}"
             fi
-            modified=$(get_file_mtime "$log_file")
+            modified="${log_mtimes[i]:--}"
         fi
+        i=$((i + 1))
 
-        # Count this session's secrets from the one-time keychain dump. The
-        # trailing ':' keeps 'foo' from matching 'foobar' entries; grep -F so
-        # session names with '.'/'-' are matched literally.
-        local secret_count=0
-        if [ -n "$keychain_dump" ]; then
-            secret_count=$(printf '%s\n' "$keychain_dump" | grep -cF "\"cs:${session}:" || true)
-        fi
+        # This session's count from the one-time tally. The match takes the
+        # whole name between a newline and the tab, so 'foo' does not take
+        # 'foobar's entries.
+        local secret_count=0 rest
+        case "$secret_counts" in
+            *$'\n'"$session"$'\t'*)
+                rest="${secret_counts#*$'\n'"$session"$'\t'}"
+                secret_count="${rest%%$'\n'*}"
+                ;;
+        esac
 
         # Build secret indicator (accounts for display width in padding)
         local secret_indicator=""
@@ -338,7 +371,8 @@ list_sessions() {
         # Calculate padding (max_len - session length - indicator length)
         local pad_len=$((max_len - ${#session} - indicator_len))
         [ $pad_len -lt 0 ] && pad_len=0
-        local padding=$(printf '%*s' "$pad_len" '')
+        local padding
+        printf -v padding '%*s' "$pad_len" ''
 
         # Print with proper alignment
         if [ "$secret_count" -gt 0 ]; then

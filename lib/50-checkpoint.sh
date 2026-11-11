@@ -12,6 +12,30 @@ get_file_mtime() {
     fi
 }
 
+# Print each given file's mtime on its own line, in get_file_mtime's format,
+# with one stat for all of them. When that stat does not answer every file (one
+# gone since the caller looked), each file is asked alone, so a line never
+# lands beside the wrong file.
+get_files_mtimes() {
+    [ $# -gt 0 ] || return 0
+    local out="" line n=0 lines=()
+    out=$(stat -c "%y" "$@" 2>/dev/null) \
+        || out=$(stat -f "%Sm" -t "%Y-%m-%d %H:%M" "$@" 2>/dev/null) \
+        || out=""
+    while IFS= read -r line; do
+        lines+=("${line%%.*}")
+        n=$((n + 1))
+    done <<< "$out"
+    if [ -n "$out" ] && [ "$n" -eq $# ]; then
+        printf '%s\n' "${lines[@]}"
+        return 0
+    fi
+    local file
+    for file in "$@"; do
+        get_file_mtime "$file"
+    done
+}
+
 # Slugify a label for use as a filename segment
 _slugify_label() {
     echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g; s/--*/-/g; s/^-//; s/-$//' | cut -c1-40
