@@ -168,7 +168,44 @@ test_cs_open_runs_the_git_xcrun_names() {
     assert_eq "" "$(cat "$XCRUN_LOG")" "cs -list does not ask xcrun"
 }
 
+# Through xcrun's git, a call keeps what a call to PATH's git has: an argument
+# holding a space stays one argument, the exit status of a failing git comes
+# back, stdin reaches git, and git's stderr comes through.
+test_direct_git_keeps_arguments_status_stdin_and_stderr() {
+    _need_usr_bin_git || return $?
+    _fake_xcrun "$TEST_TMPDIR/xcode/git"
+    local repo="$TEST_TMPDIR/repo" out
+    git init -q "$repo"
+    out=$(cd "$repo" && _with_shared '_cs_use_direct_git
+        git rev-parse --sq-quote "a b" c
+        set +e; git rev-parse --verify nosuchref >/dev/null 2>&1; echo "rc=$?"; set -e
+        printf "x\n" | git hash-object --stdin
+        git rev-parse --verify nosuchref 2>&1 >/dev/null || true' 2>&1) || {
+        echo "  FAIL: the snippet failed: $out"; return 1; }
+    assert_eq " 'a b' 'c'
+rc=128
+587be6b4c3f93f93c489c0111bba5596147a26cb
+fatal: Needed a single revision" "$out" "arguments, exit status, stdin and stderr pass through" || return 1
+    assert_eq "4" "$(grep -c . "$GIT_LOG")" "all four calls ran xcrun's git"
+}
+
+# An xcrun that names a git but exits non-zero, or names /usr/bin/git itself,
+# leaves git as PATH's /usr/bin/git.
+test_direct_git_keeps_path_git_when_xcrun_fails_or_names_the_stub() {
+    _need_usr_bin_git || return $?
+    local out
+    _fake_xcrun "$TEST_TMPDIR/xcode/git"
+    printf '#!/bin/sh\necho "%s"\nexit 1\n' "$TEST_TMPDIR/xcode/git" > "$FAKEBIN/xcrun"
+    out=$(_with_shared '_cs_use_direct_git; type -t git' 2>&1) || { echo "  FAIL: $out"; return 1; }
+    assert_eq "file" "$out" "an xcrun that fails is not followed" || return 1
+    _fake_xcrun /usr/bin/git
+    out=$(_with_shared '_cs_use_direct_git; type -t git' 2>&1) || { echo "  FAIL: $out"; return 1; }
+    assert_eq "file" "$out" "an answer of /usr/bin/git defines nothing"
+}
+
 run_test test_direct_git_runs_the_git_xcrun_names
+run_test test_direct_git_keeps_arguments_status_stdin_and_stderr
+run_test test_direct_git_keeps_path_git_when_xcrun_fails_or_names_the_stub
 run_test test_autosave_runs_the_git_xcrun_names
 run_test test_session_start_runs_the_git_xcrun_names_on_resume_only
 run_test test_cs_open_runs_the_git_xcrun_names
