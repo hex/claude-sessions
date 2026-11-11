@@ -70,10 +70,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install musl-tools (Linux only)
-        if: contains(matrix.platform, 'linux')
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
       - name: Build cs-tui
         run: cargo build --release --manifest-path tui/Cargo.toml --target ${{ matrix.target }}
 
