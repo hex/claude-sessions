@@ -189,7 +189,7 @@ test_each_network_error_on_a_read_is_retried() {
     for cause in 'net/http: TLS handshake timeout' 'unexpected EOF' 'EOF' \
         'dial tcp 140.82.112.6:443: i/o timeout' 'read tcp 192.0.2.1:50000->140.82.112.6:443: read: connection reset by peer' \
         'dial tcp 140.82.112.6:443: connect: connection refused' 'dial tcp: lookup api.github.com: no such host' \
-        'context deadline exceeded (Client.Timeout exceeded while awaiting headers)' \
+        'context deadline exceeded' 'net/http: request canceled (Client.Timeout exceeded while awaiting headers)' \
         'dial tcp 140.82.112.6:443: connect: network is unreachable'; do
         _ci_fixture || return $?
         _ci_reply '' "failed to get run: Get \"https://api.github.com/repos/example/repo/actions/runs/123\": $cause" 1
