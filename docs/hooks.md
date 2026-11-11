@@ -7,7 +7,7 @@ The installer configures Claude Code hooks that enable session management featur
 | Skill | Behavior |
 |-------|----------|
 | [`prose-hygiene`](../skills/prose-hygiene/SKILL.md) | Judges a draft with a scoring rubric and reports its score. The caller controls revision and repeated scoring. |
-| [`/write-as-me`](../skills/write-as-me/SKILL.md) | Drafts in your voice using a writing profile. Its corpus contains typed transcript messages and supplementary writing from `.voice/sources/*.md`, included on each build. It leaves out side-agent notes, side checks, tagged pastes and prompts from test sessions, and `scripts/corpus-check.sh` counts any a built corpus still holds. |
+| [`/write-as-me`](../skills/write-as-me/SKILL.md) | Drafts in your voice using a writing profile. Its corpus contains typed transcript messages and supplementary writing from `.voice/sources/*.md`, included on each build. It leaves out side-agent notes, side checks, tagged pastes and prompts from test sessions, and `scripts/corpus-check.sh` counts any a built corpus still holds. A long PR description or issue reply comes as two or three lines, with the full text folded under a `Full description` summary that GitHub shows collapsed. |
 
 ## How a hook finds its session (`cs-resolve.sh`)
 
@@ -1460,9 +1460,9 @@ registers as a second name; nothing opens it unasked. Both run mid-turn too. The
 pane sits inline above the prompt on the main screen (tmux) and docks beside the
 transcript, 60 columns wide, in fullscreen from 110 columns.
 
-The rows come from two places. `Mods` lists the `/config` rows of `cs`,
-`cs-update`, `cs-mermaid`, `cs-images` and `cs-filter-chat` (`$.config.list()`, those five
-plugins by name, so another `cs-*` plugin's rows are not drawn). The five mods
+The rows come from two places. `Mods` lists the `/config` rows of
+`cs-update`, `cs-mermaid`, `cs-images` and `cs-filter-chat` (`$.config.list()`,
+cs's plugins by name, so another `cs-*` plugin's rows are not drawn). Those mods
 title each row `cs: ` and its label, so `/config` marks the row as cs's; under
 `Mods` the mark says nothing and the pane draws the label without it. Under
 them, cs's own settings come in

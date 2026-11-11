@@ -43,6 +43,10 @@
     {
       "id": "cs.images-pictures",
       "text": "ask Claude to explain something in pictures and the reply draws a diagram and one image beside it; /config's cs: Draw images in replies turns the drawing off"
+    },
+    {
+      "id": "cs.write-as-me-fold",
+      "text": "/write-as-me drafts a long PR description or issue reply as a short opener in your voice, with the full text folded under a Full description summary"
     }
   ]
 }
