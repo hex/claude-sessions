@@ -60,6 +60,71 @@ test_list_modified_time_with_gnu_stat_first_on_a_mac() {
         "the row shows the log's start and its mtime" || return 1
 }
 
+# Each row's MODIFIED is its own log's mtime, and a session with no log reads
+# '-' without shifting the times of the sessions listed after it. Run in both
+# stat dialects where this machine has both: the system stat, then GNU first.
+test_list_modified_time_belongs_to_its_own_row() {
+    local alpha gamma out rc=0 secs="" gnubin
+    alpha=$(create_test_session alpha)
+    create_test_session beta >/dev/null
+    gamma=$(create_test_session gamma)
+    printf '2020-01-02 03:04:05 - Session started\n' > "$alpha/.cs/local/session.log"
+    touch -t 202001020304.05 "$alpha/.cs/local/session.log"
+    printf '2021-02-03 04:05:06 - Session started\n' > "$gamma/.cs/local/session.log"
+    touch -t 202102030405.06 "$gamma/.cs/local/session.log"
+    _list_rows_match() {
+        assert_eq "0" "$rc" "cs -list exits 0; output: $out" || return 1
+        local rows
+        rows=$(printf '%s\n' "$out" | sed "s/$(printf '\033')\[[0-9;]*m//g" | grep -E '^(alpha|beta|gamma) ')
+        assert_eq "alpha    2020-01-02 03:04  2020-01-02 03:04$1
+beta     -                 -
+gamma    2021-02-03 04:05  2021-02-03 04:05$2" "$rows" "each row shows its own log's mtime"
+    }
+    # An empty keychain, so a real one on this machine cannot add a count.
+    mkdir -p "$TEST_TMPDIR/nokeys"
+    printf '#!/bin/sh\nexit 0\n' > "$TEST_TMPDIR/nokeys/security"; chmod +x "$TEST_TMPDIR/nokeys/security"
+    stat -c %y /dev/null >/dev/null 2>&1 && secs=yes
+    out=$(PATH="$TEST_TMPDIR/nokeys:$PATH" "$CS_BIN" -list 2>&1) || rc=$?
+    if [ -n "$secs" ]; then _list_rows_match ":05" ":06" || return 1
+    else _list_rows_match "" "" || return 1; fi
+    gnubin=$(_gnu_stat_first_dir) || return 0
+    printf '#!/bin/sh\nexit 0\n' > "$gnubin/security"; chmod +x "$gnubin/security"
+    rc=0
+    out=$(PATH="$gnubin:$PATH" "$CS_BIN" -list 2>&1) || rc=$?
+    _list_rows_match ":05" ":06" || return 1
+}
+
+# A session's secret count is the number of keychain entries under its own
+# name: 'alpha' does not take the entries of 'alphabet', and a session with
+# none shows no count.
+test_list_counts_each_sessions_own_secrets() {
+    local fakebin="$TEST_TMPDIR/fakebin" out rc=0 rows
+    create_test_session alpha >/dev/null
+    create_test_session alphabet >/dev/null
+    create_test_session beta >/dev/null
+    mkdir -p "$fakebin"
+    printf '#!/bin/sh\nexit 0\n' > "$fakebin/cs-secrets"
+    cat > "$fakebin/security" <<'EOF'
+#!/bin/sh
+cat <<'DUMP'
+keychain: "/Users/example/Library/Keychains/login.keychain-db"
+    "acct"<blob>="cs"
+    "svce"<blob>="cs:alpha:API_KEY"
+    "svce"<blob>="cs:alpha:DB_PASSWORD"
+    "svce"<blob>="cs:alphabet:TOKEN"
+    "svce"<blob>="other-app:alpha:KEY"
+DUMP
+EOF
+    chmod +x "$fakebin/cs-secrets" "$fakebin/security"
+    out=$(PATH="$fakebin:$PATH" "$CS_BIN" -list 2>&1) || rc=$?
+    assert_eq "0" "$rc" "cs -list exits 0; output: $out" || return 1
+    rows=$(printf '%s\n' "$out" | sed "s/$(printf '\033')\[[0-9;]*m//g" \
+        | sed -nE 's/^(alpha|alphabet|beta)( \([^ ]* ([0-9]+)\))? .*/\1=\3/p')
+    assert_eq "alpha=2
+alphabet=1
+beta=" "$rows" "each session counts only its own secrets"
+}
+
 # A non-session directory under the sessions root (editor config, an empty cs
 # artifact) must not be listed, so that -list and tab-completion agree on what a
 # session is.
@@ -126,6 +191,8 @@ echo ""
 
 run_test test_list_renders_sessions
 run_test test_list_modified_time_with_gnu_stat_first_on_a_mac
+run_test test_list_modified_time_belongs_to_its_own_row
+run_test test_list_counts_each_sessions_own_secrets
 run_test test_list_omits_non_session_directories
 run_test test_list_includes_a_legacy_session
 run_test test_list_runs_under_old_bash
