@@ -94,6 +94,43 @@ gamma    2021-02-03 04:05  2021-02-03 04:05$2" "$rows" "each row shows its own l
     _list_rows_match ":05" ":06" || return 1
 }
 
+# The listing reads every log's mtime with one stat. A stat that answers only
+# some of the files and fails, as when a log goes between the listing finding it
+# and reading it, still leaves each row with its own log's time: the stand-in
+# drops the last file's line from any call naming several files.
+test_list_modified_time_survives_a_stat_that_misses_a_file() {
+    local alpha beta fakebin="$TEST_TMPDIR/partialstat" real_stat out rc=0 rows secs=""
+    real_stat=$(command -v stat)
+    alpha=$(create_test_session alpha)
+    beta=$(create_test_session beta)
+    printf '2020-01-02 03:04:05 - Session started\n' > "$alpha/.cs/local/session.log"
+    touch -t 202001020304.05 "$alpha/.cs/local/session.log"
+    printf '2021-02-03 04:05:06 - Session started\n' > "$beta/.cs/local/session.log"
+    touch -t 202102030405.06 "$beta/.cs/local/session.log"
+    mkdir -p "$fakebin"
+    printf '#!/bin/sh\nexit 0\n' > "$fakebin/security"
+    cat > "$fakebin/stat" <<EOF
+#!/bin/bash
+files=0
+for a in "\$@"; do case "\$a" in /*) files=\$((files + 1)) ;; esac; done
+[ "\$files" -gt 1 ] || exec "$real_stat" "\$@"
+"$real_stat" "\$@" | sed '\$d'
+exit 1
+EOF
+    chmod +x "$fakebin/security" "$fakebin/stat"
+    "$real_stat" -c %y /dev/null >/dev/null 2>&1 && secs=yes
+    out=$(PATH="$fakebin:$PATH" "$CS_BIN" -list 2>&1) || rc=$?
+    assert_eq "0" "$rc" "cs -list exits 0; output: $out" || return 1
+    rows=$(printf '%s\n' "$out" | sed "s/$(printf '\033')\[[0-9;]*m//g" | grep -E '^(alpha|beta) ')
+    if [ -n "$secs" ]; then
+        assert_eq "alpha    2020-01-02 03:04  2020-01-02 03:04:05
+beta     2021-02-03 04:05  2021-02-03 04:05:06" "$rows" "each row keeps its own log's mtime"
+    else
+        assert_eq "alpha    2020-01-02 03:04  2020-01-02 03:04
+beta     2021-02-03 04:05  2021-02-03 04:05" "$rows" "each row keeps its own log's mtime"
+    fi
+}
+
 # A session's secret count is the number of keychain entries under its own
 # name: 'alpha' does not take the entries of 'alphabet', and a session with
 # none shows no count.
@@ -192,6 +229,7 @@ echo ""
 run_test test_list_renders_sessions
 run_test test_list_modified_time_with_gnu_stat_first_on_a_mac
 run_test test_list_modified_time_belongs_to_its_own_row
+run_test test_list_modified_time_survives_a_stat_that_misses_a_file
 run_test test_list_counts_each_sessions_own_secrets
 run_test test_list_omits_non_session_directories
 run_test test_list_includes_a_legacy_session
