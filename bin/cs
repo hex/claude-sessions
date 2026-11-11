@@ -1547,7 +1547,10 @@ _cs_git_at() {  # dir, git arguments...
 # Xcode updated or switched under a running session is followed. git stays the
 # one on PATH when that is not /usr/bin/git (a git the person or a test put
 # first), when xcrun does not answer, and when its answer is not an executable
-# file. Calls through env, exec, xargs or timeout keep PATH's git.
+# file. Calls through env, exec, xargs or timeout keep PATH's git. One
+# difference stays, accepted: the stub hands the programs git starts (hooks,
+# filters, aliases) SDKROOT, CPATH, LIBRARY_PATH and MANPATH, and the git run
+# directly hands them none.
 _cs_use_direct_git() {
     [ "$(command -v git)" = /usr/bin/git ] || return 0
     local found
