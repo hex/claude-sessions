@@ -321,8 +321,9 @@ list_sessions() {
         local created="-"
         local modified="-"
 
+        # Tested again here: a log can go after the pass above found it.
         log_file="${log_files[i]}"
-        if [ -n "$log_file" ]; then
+        if [ -n "$log_file" ] && [ -f "$log_file" ]; then
             # Parse created timestamp using bash builtins (avoids forking head|grep|cut)
             local line started=""
             local lines_read=0

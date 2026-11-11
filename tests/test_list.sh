@@ -131,13 +131,68 @@ beta     2021-02-03 04:05  2021-02-03 04:05" "$rows" "each row keeps its own log
     fi
 }
 
+# The listing finds a session's log wherever cs has kept it: .cs/private (an
+# encrypted session), .cs/local, .cs/logs, or logs/ in a pre-.cs/ session; and
+# .cs/private before .cs/local when both are there.
+test_list_reads_the_log_from_each_of_its_places() {
+    local root="$CS_SESSIONS_ROOT" out rc=0 rows
+    create_test_session enc >/dev/null
+    create_test_session loc >/dev/null
+    create_test_session old >/dev/null
+    mkdir -p "$root/enc/.cs/private" "$root/old/.cs/logs" "$root/pre/logs"
+    echo "# Session" > "$root/pre/CLAUDE.md"
+    printf '2020-01-01 01:01:00 - Session started\n' > "$root/enc/.cs/private/session.log"
+    printf '2029-09-09 09:09:00 - Session started\n' > "$root/enc/.cs/local/session.log"
+    printf '2020-02-02 02:02:00 - Session started\n' > "$root/loc/.cs/local/session.log"
+    printf '2020-03-03 03:03:00 - Session started\n' > "$root/old/.cs/logs/session.log"
+    printf '2020-04-04 04:04:00 - Session started\n' > "$root/pre/logs/session.log"
+    mkdir -p "$TEST_TMPDIR/nokeys"
+    printf '#!/bin/sh\nexit 0\n' > "$TEST_TMPDIR/nokeys/security"; chmod +x "$TEST_TMPDIR/nokeys/security"
+    out=$(PATH="$TEST_TMPDIR/nokeys:$PATH" "$CS_BIN" -list 2>&1) || rc=$?
+    assert_eq "0" "$rc" "cs -list exits 0; output: $out" || return 1
+    rows=$(printf '%s\n' "$out" | sed "s/$(printf '\033')\[[0-9;]*m//g" | grep -E '^(enc|loc|old|pre) ' | cut -c1-25)
+    assert_eq "enc      2020-01-01 01:01
+loc      2020-02-02 02:02
+old      2020-03-03 03:03
+pre      2020-04-04 04:04" "$rows" "each session's created time comes from its own log's place"
+}
+
+# A log that goes after the listing has found it, here deleted by the first
+# stat call, reads '-' for both times, and the sessions after it still print.
+test_list_survives_a_log_that_goes_mid_listing() {
+    local aa bb cc fakebin="$TEST_TMPDIR/vanish" real_stat out rc=0 rows
+    real_stat=$(command -v stat)
+    aa=$(create_test_session aa)
+    bb=$(create_test_session bb)
+    cc=$(create_test_session cc)
+    printf '2020-01-02 03:04:05 - Session started\n' > "$aa/.cs/local/session.log"
+    printf '2020-01-02 03:04:05 - Session started\n' > "$bb/.cs/local/session.log"
+    printf '2020-01-02 03:04:05 - Session started\n' > "$cc/.cs/local/session.log"
+    mkdir -p "$fakebin"
+    printf '#!/bin/sh\nexit 0\n' > "$fakebin/security"
+    cat > "$fakebin/stat" <<EOF
+#!/bin/sh
+rm -f "$bb/.cs/local/session.log"
+exec "$real_stat" "\$@"
+EOF
+    chmod +x "$fakebin/security" "$fakebin/stat"
+    out=$(PATH="$fakebin:$PATH" "$CS_BIN" -list 2>&1) || rc=$?
+    assert_eq "0" "$rc" "cs -list exits 0; output: $out" || return 1
+    rows=$(printf '%s\n' "$out" | sed "s/$(printf '\033')\[[0-9;]*m//g" | grep -E '^(aa|bb|cc) ' | cut -c1-25 | sed 's/ *$//')
+    assert_eq "aa       2020-01-02 03:04
+bb       -
+cc       2020-01-02 03:04" "$rows" "the gone log's row reads '-' and the rest still print" || return 1
+    assert_output_not_contains "$out" "No such file" "nothing is said about the gone log"
+}
+
 # A session's secret count is the number of keychain entries under its own
-# name: 'alpha' does not take the entries of 'alphabet', and a session with
-# none shows no count.
+# name: 'alpha' does not take the entries of 'alphabet', nor 'bet' those of
+# 'alphabet', and a session with none shows no count.
 test_list_counts_each_sessions_own_secrets() {
     local fakebin="$TEST_TMPDIR/fakebin" out rc=0 rows
     create_test_session alpha >/dev/null
     create_test_session alphabet >/dev/null
+    create_test_session bet >/dev/null
     create_test_session beta >/dev/null
     mkdir -p "$fakebin"
     printf '#!/bin/sh\nexit 0\n' > "$fakebin/cs-secrets"
@@ -156,9 +211,10 @@ EOF
     out=$(PATH="$fakebin:$PATH" "$CS_BIN" -list 2>&1) || rc=$?
     assert_eq "0" "$rc" "cs -list exits 0; output: $out" || return 1
     rows=$(printf '%s\n' "$out" | sed "s/$(printf '\033')\[[0-9;]*m//g" \
-        | sed -nE 's/^(alpha|alphabet|beta)( \([^ ]* ([0-9]+)\))? .*/\1=\3/p')
+        | sed -nE 's/^(alpha|alphabet|bet|beta)( \([^ ]* ([0-9]+)\))? .*/\1=\3/p')
     assert_eq "alpha=2
 alphabet=1
+bet=
 beta=" "$rows" "each session counts only its own secrets"
 }
 
@@ -230,6 +286,8 @@ run_test test_list_renders_sessions
 run_test test_list_modified_time_with_gnu_stat_first_on_a_mac
 run_test test_list_modified_time_belongs_to_its_own_row
 run_test test_list_modified_time_survives_a_stat_that_misses_a_file
+run_test test_list_reads_the_log_from_each_of_its_places
+run_test test_list_survives_a_log_that_goes_mid_listing
 run_test test_list_counts_each_sessions_own_secrets
 run_test test_list_omits_non_session_directories
 run_test test_list_includes_a_legacy_session
