@@ -188,7 +188,7 @@ test_each_network_error_on_a_read_is_retried() {
     local cause
     for cause in 'net/http: TLS handshake timeout' 'unexpected EOF' 'EOF' \
         'dial tcp 140.82.112.6:443: i/o timeout' 'read tcp 192.0.2.1:50000->140.82.112.6:443: read: connection reset by peer' \
-        'dial tcp 140.82.112.6:443: connect: connection refused' 'dial tcp: lookup api.github.com: no such host' \
+        'dial tcp 140.82.112.6:443: connect: connection refused' 'Bad Gateway' \
         'context deadline exceeded' 'net/http: request canceled (Client.Timeout exceeded while awaiting headers)' \
         'dial tcp 140.82.112.6:443: connect: network is unreachable'; do
         _ci_fixture || return $?
@@ -199,6 +199,18 @@ test_each_network_error_on_a_read_is_retried() {
         assert_eq 0 "$CI_RC" "a read failing with '$cause' is retried" || return 1
         assert_eq 1 "$(printf '%s\n' "$CI_OUT" | grep -c '^retrying: ')" "one retry for '$cause'" || return 1
     done
+}
+
+# A DNS lookup that fails is retried: gh prints its own two lines for it, not
+# the resolver's error (captured from gh 2.103.0 with GH_HOST=nohost.invalid).
+test_dns_failure_on_a_read_is_retried() {
+    _ci_fixture || return $?
+    _ci_reply '' $'error connecting to nohost.invalid\ncheck your internet connection or https://githubstatus.com' 1
+    _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"success","steps":[{}],"databaseId":101}]'
+    _ci_reply $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z job finished\n'
+    _ci_wait 123
+    assert_eq 0 "$CI_RC" 'a failed DNS lookup does not end the wait' || return 1
+    assert_eq 1 "$(printf '%s\n' "$CI_OUT" | grep -c '^retrying: ')" 'the read is retried once'
 }
 
 test_client_error_after_a_server_error_is_not_retried() {
@@ -801,6 +813,7 @@ run_test test_failed_gh_read_reports_stderr
 run_test test_server_error_on_a_read_is_retried
 run_test test_network_error_on_a_read_is_retried
 run_test test_each_network_error_on_a_read_is_retried
+run_test test_dns_failure_on_a_read_is_retried
 run_test test_client_error_after_a_server_error_is_not_retried
 run_test test_persistent_server_error_exits_four_after_two_retries
 run_test test_invalid_interval_prints_usage_without_gh

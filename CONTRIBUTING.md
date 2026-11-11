@@ -147,7 +147,8 @@ job's conclusion, step count, and name. `CI_WAIT_INTERVAL` sets the poll interva
 in seconds, with a default of 30; use one or more digits.
 When a `gh run view` call fails with an HTTP 5xx, or with a network error such as
 a TLS handshake timeout, a dropped connection (`unexpected EOF`, `connection reset
-by peer`), an I/O timeout or a failed DNS lookup, the script tries it twice more,
+by peer`), an I/O timeout, a failed DNS lookup (gh prints `error connecting to
+<host>`) or a proxy's `Bad Gateway`, the script tries it twice more,
 one poll interval apart, and prints a `retrying:` line before each try; a third
 failure exits 4. The script never retries a failed `gh run rerun`, since a server
 or network error does not prove the rerun did not start.
