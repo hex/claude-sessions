@@ -51,9 +51,11 @@ fi
 _gh() {
     local retries=0
     while ! gh "$@" > "$scratch/response" 2> "$scratch/error"; do
-        # Only reads are retried: a 5xx on a rerun does not prove the rerun did not start.
+        # Only reads are retried: a 5xx or a lost connection on a rerun does not
+        # prove the rerun did not start. A read is retried on a server error or
+        # on the errors gh prints when the connection to GitHub fails or drops.
         if [ "$1 $2" = 'run view' ] && [ "$retries" -lt 2 ] &&
-            grep -q 'HTTP 5[0-9][0-9]' "$scratch/error"; then
+            grep -qE 'HTTP 5[0-9][0-9]|TLS handshake timeout|unexpected EOF|: EOF$|i/o timeout|connection reset by peer|connection refused|no such host|Client\.Timeout exceeded|context deadline exceeded|network is unreachable' "$scratch/error"; then
             retries=$((retries + 1))
             printf 'retrying: gh %s failed: "%s" (retry %s of 2)\n' "$*" "$(cat "$scratch/error")" "$retries"
             sleep "$interval"

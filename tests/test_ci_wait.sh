@@ -163,6 +163,44 @@ SLEEP
     _ci_calls $'["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--json","status,attempt,headSha,jobs"]\n["run","view","123","--log"]\n["run","view","123","--log"]'
 }
 
+# A read that fails on the way to GitHub (a timed-out TLS handshake, a
+# connection cut mid-response) is retried like a server error. These two are
+# the errors gh printed on a loaded Mac.
+test_network_error_on_a_read_is_retried() {
+    _ci_fixture || return $?
+    local url='https://api.github.com/repos/example/repo/actions/runs/123?exclude_pull_requests=true'
+    _ci_reply '' "failed to get run: Get \"$url\": net/http: TLS handshake timeout" 1
+    _ci_reply '' "failed to get run: Get \"$url\": unexpected EOF" 1
+    _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"success","steps":[{}],"databaseId":101}]'
+    _ci_reply $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z job finished\n'
+    _ci_wait 123
+    assert_eq 0 "$CI_RC" 'network errors on a read do not end the wait' || return 1
+    assert_eq "retrying: gh run view 123 --json status,attempt,headSha,jobs failed: \"failed to get run: Get \"$url\": net/http: TLS handshake timeout\" (retry 1 of 2)
+retrying: gh run view 123 --json status,attempt,headSha,jobs failed: \"failed to get run: Get \"$url\": unexpected EOF\" (retry 2 of 2)
+success	1	bash
+skipped tests: none" "$CI_OUT" 'each retry is announced before the verdict' || return 1
+    assert_eq '' "$CI_ERR" 'a recovered read has no error output'
+}
+
+# Each network failure gh reports for a lost connection is retried once and
+# the wait goes on.
+test_each_network_error_on_a_read_is_retried() {
+    local cause
+    for cause in 'net/http: TLS handshake timeout' 'unexpected EOF' 'EOF' \
+        'dial tcp 140.82.112.6:443: i/o timeout' 'read tcp 192.0.2.1:50000->140.82.112.6:443: read: connection reset by peer' \
+        'dial tcp 140.82.112.6:443: connect: connection refused' 'dial tcp: lookup api.github.com: no such host' \
+        'context deadline exceeded (Client.Timeout exceeded while awaiting headers)' \
+        'dial tcp 140.82.112.6:443: connect: network is unreachable'; do
+        _ci_fixture || return $?
+        _ci_reply '' "failed to get run: Get \"https://api.github.com/repos/example/repo/actions/runs/123\": $cause" 1
+        _ci_run_json completed 1 '[{"name":"bash","status":"completed","conclusion":"success","steps":[{}],"databaseId":101}]'
+        _ci_reply $'bash\tUNKNOWN STEP\t2026-11-06T08:22:20Z job finished\n'
+        _ci_wait 123
+        assert_eq 0 "$CI_RC" "a read failing with '$cause' is retried" || return 1
+        assert_eq 1 "$(printf '%s\n' "$CI_OUT" | grep -c '^retrying: ')" "one retry for '$cause'" || return 1
+    done
+}
+
 test_client_error_after_a_server_error_is_not_retried() {
     _ci_fixture || return $?
     _ci_reply '' 'HTTP 500: Internal Server Error (https://api.github.com/repos/example/repo/actions/runs/123)' 1
@@ -326,7 +364,8 @@ test_skipped_job_without_a_cancelled_job_fails() {
 
 test_failed_rerun_reports_stderr() {
     local error
-    for error in 'rerun denied' 'HTTP 500: Internal Server Error (https://api.github.com/repos/example/repo/actions/runs/123/rerun-failed-jobs)'; do
+    for error in 'rerun denied' 'HTTP 500: Internal Server Error (https://api.github.com/repos/example/repo/actions/runs/123/rerun-failed-jobs)' \
+        'Post "https://api.github.com/repos/example/repo/actions/runs/123/rerun-failed-jobs": net/http: TLS handshake timeout'; do
         _ci_fixture || return $?
         _ci_cancelled_build 1
         _ci_reply '' "$error" 1
@@ -760,6 +799,8 @@ run_test test_failure_and_skipped_dependent_stop
 run_test test_cancellation_after_steps_is_a_failure
 run_test test_failed_gh_read_reports_stderr
 run_test test_server_error_on_a_read_is_retried
+run_test test_network_error_on_a_read_is_retried
+run_test test_each_network_error_on_a_read_is_retried
 run_test test_client_error_after_a_server_error_is_not_retried
 run_test test_persistent_server_error_exits_four_after_two_retries
 run_test test_invalid_interval_prints_usage_without_gh
