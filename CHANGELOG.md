@@ -20,6 +20,10 @@ All notable changes to cs are documented here. Release notes are also available 
 - `tests/ci_wait.sh` retries a `gh run view` read that fails on the network (a TLS handshake timeout, a dropped connection, gh's `error connecting to <host>`, a proxy's `Bad Gateway`) as it does an HTTP 5xx, so a busy machine no longer ends a CI wait early. A failed `gh run rerun` is still never retried.
 - The Linux `cs-tui` release binary builds without installing `musl-tools`. That apt step failed four times while Ubuntu's package archive was down, so v2026.11.6 has a tag and no published release. `cs-tui` needs no C toolchain for its static musl build, and CI now builds that binary on every push.
 
+## 2026.11.6
+
+Tagged and never published: its Linux `cs-tui` build failed while Ubuntu's package archive was down. Its changes ship in 2026.11.7.
+
 ## 2026.11.5
 
 ### Added
