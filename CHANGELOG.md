@@ -4,7 +4,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## 2026.11.6
+## 2026.11.7
 
 ### Features
 - The `cs` mod's `rotate`, `wrap` and `filter chat` keys moved from the band above the prompt to the row under it, at the right end of the permission notice: `⏵⏵ auto mode on (shift+tab to cycle)`, then `rotate · wrap · filter chat ○` at the terminal's edge. An armed handoff reads `/clear now in 20s` there. Under the prompt the keys add no row and spell no chord. They draw at the notice's right only in Claude Code's fullscreen layout, and only where the status line is short enough to share its row with them and the terminal holds the notice and the keys (80 columns for all three). Otherwise they stand in the notice's own text in place of `(shift+tab to cycle)`. Where neither place fits they draw on the band as before, chords spelled: under 60 columns, and while the hint is anything but the cycle hint (a pill such as `1 shell`, or `? for shortcuts`) unless the notice's right has room. To trust only its own status line's width, the mod runs `/bin/sh` once a load to learn which Claude Code it runs in. Ctrl+X 1 and Ctrl+X 2 still press them, and so does a click; Ctrl+X Tab, the band's focus, reaches them only on the band. A `rotate`, `/clear now` or `wrap` key pressed once a turn runs, while still drawn, by a click or its chord, toasts that it did not run. The queue's start button, the queue and mail counts, the features word, the `/finish` gate and the prompt bars stay on the band. `cs-statusline` records the width of the line it prints in `.cs/local/statusline-width`, which is how the mod knows whether the keys fit; it records none for a line holding a character it cannot measure (a title in Chinese or with an emoji) or for a conversation open in two terminals, and `CS_STATUSLINE_LAYOUT=band` fills the row: in each case the keys keep off the notice's right.
@@ -18,6 +18,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Other
 - `tests/ci_wait.sh` retries a `gh run view` read that fails on the network (a TLS handshake timeout, a dropped connection, gh's `error connecting to <host>`, a proxy's `Bad Gateway`) as it does an HTTP 5xx, so a busy machine no longer ends a CI wait early. A failed `gh run rerun` is still never retried.
+- The Linux `cs-tui` release binary builds without installing `musl-tools`. That apt step failed four times while Ubuntu's package archive was down, so v2026.11.6 has a tag and no published release. `cs-tui` needs no C toolchain for its static musl build, and CI now builds that binary on every push.
 
 ## 2026.11.5
 
