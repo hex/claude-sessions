@@ -2400,9 +2400,17 @@ _seg_logo() {
     _role chip
 }
 
-# The session name, bold, in primary ink.
+# The session name, bold, in primary ink. Claude Code reports the name claude
+# was given, where a feature session's '@' is a '+' (cs_claude_name in
+# lib/02-shared.sh), so that form of this session's own name shows as cs
+# spells it. Any other name Claude Code reports, such as one /rename set,
+# shows as it is. The lock marks the cs session, so it is looked up under
+# CLAUDE_SESSION_NAME whatever name shows; only a claude cs did not launch
+# falls back to the shown name.
 _seg_session() {
     local name="$SL_SESSION"
+    [ -n "${CLAUDE_SESSION_NAME:-}" ] && [ "$name" = "${CLAUDE_SESSION_NAME//@/+}" ] \
+        && name="$CLAUDE_SESSION_NAME"
     [ -n "$name" ] || name="${CLAUDE_SESSION_NAME:-}"
     if [ -z "$name" ]; then
         local dir="${SL_DIR:-$PWD}"
@@ -2410,7 +2418,7 @@ _seg_session() {
     fi
     _add "${name}" identity ink bold space
     _role chip
-    _session_encrypted "$name" || return 0
+    _session_encrypted "${CLAUDE_SESSION_NAME:-$name}" || return 0
     # The lock is a private-use glyph, so it waits on the same font consent as
     # the capsule caps; unconfirmed fonts get a word instead of a box.
     if _caps_wanted; then
