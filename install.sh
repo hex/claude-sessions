@@ -1516,7 +1516,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "37c4ee6901095a7d6d99fa06234ed661c56f8c748814a1b0ba1d6cdce0acbf82  bin/cs"
+    "80a19b44e4f4193497434b17e73874768adb51e9e4a00f02672046ecd99a6a65  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "4cfed2e36463e06c222bf9ed3573a0d66c4ecff25000b5c9aa28a4da3bbc1e20  bin/cs-statusline"
     "324691a50519294a125520ee96e279bb02a08b1a4c2e4804cf9347c617521044  bin/cs-subagent-statusline"
@@ -1532,7 +1532,7 @@ CS_PAYLOAD_SHA256=(
     "0d304935cf53b79ffa4fe35b1dc2eb7d64952f40f4bb632f642c494760e7ab9c  hooks/wrap-summary.md"
     "13dfafa0db3d8dde0c3151bda6888b3fbc211226fac8b89d1c74579e92cfc1c0  hooks/session-start.sh"
     "9cb8108b4382926d91929703a73cfa07304de0e0f6f8fcc01004010d8cac1fd8  hooks/autosave-commits.sh"
-    "6521b8a09d5c8045010996b76b4990a83c7135b410c2500ad53adb72f6443e00  hooks/stop-blocks.sh"
+    "2f512d72561533eeb096c47d2508207f3a74368b5c324fd2301fe61e300e737d  hooks/stop-blocks.sh"
     "73733088a8a86b2f7c3b367e0f6fb699dbf428c3421f7cd6d4daa02eac4b60a2  hooks/stop-notices.sh"
     "2f256672f347530bc6824c8bc2e6a9f0272dd08b1839e198eff0e1b3d5a787ae  hooks/session-end.sh"
     "81a13835a65f4b4b35bb87493da0df9848de68375ca7ab1525d2d5079cf52bf1  hooks/subagent-context.sh"
@@ -1552,7 +1552,7 @@ CS_PAYLOAD_SHA256=(
     "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
     "a999b85473187e2d79fa94f8e3f5532a4510939114032f692e2e9003a155f40b  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
-    "474bf684eb9238d9e763e41839b0ed18b0c67f6e1953fedaf7bf6c9afc474734  mods/cs/hooks/register.tsx"
+    "2c30d6aaa382e627f18be78b5c7c8e4556e30553c074760b9aeb0b71ead377d2  mods/cs/hooks/register.tsx"
     "cccf3b78360eead88706a93054b4de8535bd6644098e341eea204fb55c056037  mods/cs/tips.json"
     "2f8d4b45beddd0b27b050f1c2eb08ebb25552b4dea5f33b9398318a2ef636985  mods/cs-update/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs-update/hooks/hooks.json"

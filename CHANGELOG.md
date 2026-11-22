@@ -6,12 +6,17 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ## Unreleased
 
+### Added
+- After `/cs ` the prompt box's typeahead lists `next`, `prev`, `first` and `last`, and the prompts whose number or first line matches what you type, newest first. Taking a row writes the word or the prompt's number. The cs mod now needs Claude Code 2.1.292 or later.
+- `cs <base>@<feature>` copies into a new feature the ignored files that a `.worktreeinclude` in the base names, such as `.env`. The file reads as a `.gitignore` does, as it does for the worktrees Claude Code makes itself.
+
 ### Changed
 - `cs -encrypt` and every open of an encrypted session use `diskutil image` and `diskutil eject`, where they used the `hdiutil` verbs macOS now marks deprecated. cs asks for the vault password itself, once at each open and twice when encrypting (three prompts before), and passes it to `diskutil` on stdin. The terminal no longer shows the device table, the `created:` and `ejected` lines or the deprecation warnings; `diskutil`'s output shows only when a step fails. A vault an earlier cs built opens the same way: the open replaces the `pre-open` that cs wrote, and keeps it where `diskutil` has no `image` verbs. `cs -encrypt` needs those verbs.
 - The vault password prompt shows the session as the status line does, with `vault locked` beside it and a `password ›` row under it. A wrong password is asked for again, three times at most, and Ctrl-C at the prompt ends the open with no error line.
 - The list `cs -encrypt` ends on separates what is still in plaintext from before (prompt history, `.claude.json`, git history, backups) from the two files that always stay in plaintext, `.cs/summary.md` and `.cs/brief.md`.
 
 ### Fixes
+- The task queue no longer logs a task done and hands out the next one while a background agent or workflow from that task still runs. It waits for a turn that ends with none running. Needs a Claude Code that lists background work in the Stop hook's input.
 - Encrypting a session no longer loses its conversation. `cs -encrypt` left the transcripts in `~/.claude/projects/` while the encrypted session's Claude Code reads them from the vault, so the next open offered to continue and Claude Code answered `No conversation found with session ID`. `cs -encrypt` now moves the session's conversations into the vault, which also takes them out of plaintext.
 
 ## 2026.11.7

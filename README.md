@@ -57,7 +57,7 @@ The [statusline guide](docs/statusline.md) covers the quiet default layout, the 
 | Crash recovery | Saves edits to shadow git refs without adding normal branch commits. | [Autosave hook](docs/hooks.md#autosave-commitssh-posttooluse-on-writeedit) |
 | Conversation rotation | Hands work to a fresh conversation through `/rotate` and `/clear`. Past 40% context a `rotate` key and a `wrap` key show beside the permission notice under the prompt, or on the band above it where that row has no room. | [Rotation and queue hooks](docs/hooks.md#stop-blockssh-stop-filechanged-cwdchanged) |
 | Existing projects | `cs -adopt <name>` registers your project without moving it. | [Adoption](docs/commands.md#adopt-an-existing-project) |
-| Parallel worktrees | `cs <base>@<feature>` gives each feature its own checkout and session records. | [Worktrees](docs/commands.md#parallel-worktrees) |
+| Parallel worktrees | `cs <base>@<feature>` gives each feature its own checkout and session records, and copies the ignored files a `.worktreeinclude` names into it. | [Worktrees](docs/commands.md#parallel-worktrees) |
 | Remote control | `cs <name> --remote` serves a session for the Claude app or web. | [Remote control](docs/commands.md#remote-control) |
 | Resume launch | `cs <name> --resume` resumes without asking, or starts fresh with no recorded conversation. | [Launch answers](docs/commands.md#conversation-rotation-and-wrap) |
 | Task queue | Runs confirmed tasks at turn boundaries, with failure, context, and quota breakers. | [Queue behavior](docs/hooks.md#stop-blockssh-stop-filechanged-cwdchanged) |
@@ -65,7 +65,7 @@ The [statusline guide](docs/statusline.md) covers the quiet default layout, the 
 | Secrets | Uses the macOS keychain or encrypted files, with signed age exports for sync. | [Secrets guide](docs/secrets.md) |
 | Encrypted sessions | Keeps notes, transcripts, plans, and private state in a vault on macOS. | [Encrypted sessions](docs/session-layout.md#encrypted-sessions) |
 | Statusline | Shows session, git, model, context, queue, mail, and rate limits. | [Statusline guide](docs/statusline.md) |
-| Prompt rail | With the cs setting `CS_BAND_PROMPTS` on (in `/cs`, or `cs -config set CS_BAND_PROMPTS 1`), the band above the prompt draws a bar per prompt. A press on a bar, or `/cs next`, `prev`, `first`, `last` or a prompt number, scrolls the transcript to that prompt. | [cs mod band](docs/hooks.md#cs-not-a-hook-script--a-claude-code-mod) |
+| Prompt rail | With the cs setting `CS_BAND_PROMPTS` on (in `/cs`, or `cs -config set CS_BAND_PROMPTS 1`), the band above the prompt draws a bar per prompt. A press on a bar, or `/cs next`, `prev`, `first`, `last` or a prompt number, scrolls the transcript to that prompt. After `/cs `, typing a word lists the prompts whose first line holds it. | [cs mod band](docs/hooks.md#cs-not-a-hook-script--a-claude-code-mod) |
 | Prompt grounding | Adds matching files, recent commits, changes, and clarification guidance to code-work prompts. | [Scope hook](docs/hooks.md#scope-promptsh-userpromptsubmit) |
 | Prompt rewriting | Ctrl+G rewrites a draft in the composer for you to review before sending. | [Prompt rewriter](docs/hooks.md#prompt-rewritersh-not-a-hook--an-editor-shim) |
 | Writing skills | Judges prose or drafts from a writing profile. | [Skills](docs/hooks.md#skills) |

@@ -929,6 +929,26 @@ $RUN_MODE$SCOPE"
         elif [ -e "$QFAILED_FILE" ]; then
             TRIP="task_failed 1 1"
         fi
+        # Agents and workflows the session started in the background are still
+        # working, so this Stop is a pause and the turn they wake ends the
+        # task: nothing is popped or logged done until a Stop comes with none
+        # in flight. A shell command or a monitor does not hold the run, as a
+        # server left running never ends. Input without the field (an older
+        # Claude Code) counts none. A task that failed parks at once, agents
+        # or not, and its report is on disk by here, so a pause cannot lose
+        # it. Mail waits out the pause as it waits out the drain's own turns.
+        case "$TRIP" in
+            failures\ *|task_failed\ *) ;;
+            *)
+                BG_AGENTS=$(printf '%s' "$INPUT" | jq -r '[.background_tasks[]? | objects | select(.type == "subagent" or .type == "workflow")] | length' 2>/dev/null) || BG_AGENTS=0
+                case "$BG_AGENTS" in ''|*[!0-9]*) BG_AGENTS=0 ;; esac
+                if [ "$BG_AGENTS" -gt 0 ]; then
+                    jq -nc --arg m "cs task queue: $BG_AGENTS background agent$([ "$BG_AGENTS" = 1 ] || printf s) still running, so the task in progress is not logged done and the next one waits until none is." \
+                        '{decision:"approve", systemMessage:$m}'
+                    exit 0
+                fi
+                ;;
+        esac
         [ -z "$TRIP" ] || _qstate_write idle
         case "$TRIP" in
             failures\ *|task_failed\ *)

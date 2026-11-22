@@ -750,6 +750,94 @@ test_worktree_create_succeeds_with_untracked_base() {
     assert_dir "$CS_SESSIONS_ROOT/myproj@fix-auth" "worktree created" || return 1
 }
 
+# --- .worktreeinclude ---
+
+# A base whose .gitignore hides .cs/, an env file, a local/ directory and a
+# build log, with the given .worktreeinclude committed beside a README.
+_included_base() {  # name, .worktreeinclude lines...
+    local base_dir="$CS_SESSIONS_ROOT/$1"
+    shift
+    mkdir -p "$base_dir/.cs"/{memory,local} "$base_dir/local"
+    echo "# Project readme" > "$base_dir/README.md"
+    printf '.cs/\n.env\nlocal/\nbuild.log\n' > "$base_dir/.gitignore"
+    printf '%s\n' "$@" > "$base_dir/.worktreeinclude"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
+    printf 'A=1\n' > "$base_dir/.env"
+    printf '{"k":1}\n' > "$base_dir/local/s.json"
+    printf 'other\n' > "$base_dir/local/other.txt"
+    printf 'log\n' > "$base_dir/build.log"
+}
+
+test_worktree_create_carries_the_ignored_files_worktreeinclude_names() {
+    _included_base "inc" ".env" "local/*.json" "README.md" "notes.txt"
+    local base_dir="$CS_SESSIONS_ROOT/inc" wt="$CS_SESSIONS_ROOT/inc@task1"
+    printf 'mine\n' > "$base_dir/notes.txt"   # named, but git does not ignore it
+    local output status=0
+    output=$("$CS_BIN" "inc@task1" < /dev/null 2>&1) || status=$?
+    assert_eq "0" "$status" "the feature is created" || return 1
+    assert_eq "A=1" "$(cat "$wt/.env" 2>/dev/null)" "the named env file is copied" || return 1
+    assert_eq '{"k":1}' "$(cat "$wt/local/s.json" 2>/dev/null)" "a file a glob names is copied" || return 1
+    assert_eq "no" "$([ -e "$wt/local/other.txt" ] && echo yes || echo no)" "an ignored file no line names stays behind" || return 1
+    assert_eq "no" "$([ -e "$wt/build.log" ] && echo yes || echo no)" "an ignored file no line names stays behind" || return 1
+    assert_eq "no" "$([ -e "$wt/notes.txt" ] && echo yes || echo no)" "a named file git does not ignore is not copied" || return 1
+    assert_eq "" "$(git -C "$wt" status --porcelain)" "the feature starts with nothing changed or untracked" || return 1
+    assert_output_contains "$output" "Copied 2 ignored files that .worktreeinclude names" "the launch says what it copied" || return 1
+}
+
+test_worktree_create_without_worktreeinclude_copies_nothing() {
+    _included_base "noinc" ".env"
+    local base_dir="$CS_SESSIONS_ROOT/noinc" wt="$CS_SESSIONS_ROOT/noinc@task1"
+    (cd "$base_dir" && git rm -q .worktreeinclude && git commit -q -m drop)
+    cs_launch "noinc@task1"
+    assert_dir "$wt" "the feature is created" || return 1
+    assert_eq "no" "$([ -e "$wt/.env" ] && echo yes || echo no)" "no .worktreeinclude, no copy" || return 1
+}
+
+# The feature's branch can carry a link where the base has a directory: a copy
+# through it would write outside the worktree.
+test_worktree_create_copies_nothing_through_a_link_in_the_feature() {
+    _included_base "inclink" "local/*.json"
+    local base_dir="$CS_SESSIONS_ROOT/inclink" wt="$CS_SESSIONS_ROOT/inclink@task1"
+    local outside="$TEST_TMPDIR/outside-inclink" tmp="$TEST_TMPDIR/branch-inclink"
+    mkdir -p "$outside"
+    (cd "$base_dir" && git worktree add -q -b cs/task1 "$tmp" \
+        && ln -s "$outside" "$tmp/local" && git -C "$tmp" add -f local \
+        && git -C "$tmp" commit -q -m link && git worktree remove --force "$tmp") || return 1
+    local output status=0
+    output=$("$CS_BIN" "inclink@task1" < /dev/null 2>&1) || status=$?
+    assert_eq "0" "$status" "the feature is created" || return 1
+    assert_eq "no" "$([ -e "$outside/s.json" ] && echo yes || echo no)" "nothing is written through the link" || return 1
+    assert_output_contains "$output" "Not copied: local/s.json (the feature has a link on that path)" "the launch names the file it left" || return 1
+}
+
+# cs writes some of these files later (.claude/settings.local.json): through a
+# copied link the write would land on the base's own file.
+test_worktree_create_copies_no_link() {
+    _included_base "inclnk" ".env" "local/*.json"
+    local base_dir="$CS_SESSIONS_ROOT/inclnk" wt="$CS_SESSIONS_ROOT/inclnk@task1"
+    rm "$base_dir/.env" && ln -s "$base_dir/local/s.json" "$base_dir/.env"
+    local output status=0
+    output=$("$CS_BIN" "inclnk@task1" < /dev/null 2>&1) || status=$?
+    assert_eq "0" "$status" "the feature is created" || return 1
+    assert_eq "no" "$([ -e "$wt/.env" ] || [ -L "$wt/.env" ] && echo yes || echo no)" "a link is not copied" || return 1
+    assert_output_contains "$output" "Not copied: .env (a link)" "the launch names the link it left" || return 1
+    assert_eq '{"k":1}' "$(cat "$wt/local/s.json" 2>/dev/null)" "the files beside it are copied" || return 1
+}
+
+# A branch reused for the feature can track a file the base only ignores.
+test_worktree_create_keeps_a_file_the_feature_already_has() {
+    _included_base "inckeep" "local/*.json" ".cs/local/marker"
+    local base_dir="$CS_SESSIONS_ROOT/inckeep" wt="$CS_SESSIONS_ROOT/inckeep@task1"
+    local tmp="$TEST_TMPDIR/branch-inckeep"
+    printf 'base only\n' > "$base_dir/.cs/local/marker"
+    (cd "$base_dir" && git worktree add -q -b cs/task1 "$tmp" \
+        && mkdir -p "$tmp/local" && printf 'the branch\n' > "$tmp/local/s.json" && git -C "$tmp" add -f local/s.json \
+        && git -C "$tmp" commit -q -m tracked && git worktree remove --force "$tmp") || return 1
+    cs_launch "inckeep@task1"
+    assert_eq "the branch" "$(cat "$wt/local/s.json" 2>/dev/null)" "the feature's own file is kept" || return 1
+    assert_eq "no" "$([ -e "$wt/.cs/local/marker" ] && echo yes || echo no)" "cs's own records are not copied" || return 1
+}
+
 test_worktree_reopen_preserves_project_claude_md() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
     mkdir -p "$base_dir/.cs"/{memory,local}
@@ -2062,6 +2150,11 @@ run_test test_untracked_listing_renders_the_shared_fixture
 run_test test_printable_name_keeps_a_lead_byte_that_starts_no_c1_control
 run_test test_worktree_of_worktree_refused
 run_test test_worktree_create_succeeds_with_untracked_base
+run_test test_worktree_create_carries_the_ignored_files_worktreeinclude_names
+run_test test_worktree_create_without_worktreeinclude_copies_nothing
+run_test test_worktree_create_copies_nothing_through_a_link_in_the_feature
+run_test test_worktree_create_copies_no_link
+run_test test_worktree_create_keeps_a_file_the_feature_already_has
 run_test test_worktree_reopen_preserves_project_claude_md
 run_test test_worktree_reopen_refuses_a_symlinked_cs_local
 run_test test_worktree_creation_refuses_a_committed_cs_local_link
