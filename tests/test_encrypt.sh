@@ -25,6 +25,11 @@ verb=$1
 echo "$*" >> "$FAKE_DISKUTIL_LOG"
 case "$verb" in create|attach) pw=$(cat; printf .); pw=${pw%.}; printf '%s [%s bytes]\n' "$pw" "${#pw}" >> "$FAKE_DISKUTIL_LOG.stdin" ;; esac
 [ "$verb" = "${FAKE_DISKUTIL_FAIL:-}" ] && { echo "diskutil: $verb failed - stub" >&2; exit 1; }
+# The first $FAKE_DISKUTIL_WRONG attaches answer as the real one does to a wrong password.
+if [ "$verb" = "attach" ] && [ -n "${FAKE_DISKUTIL_WRONG:-}" ]; then
+    n=$(grep -c ' attach ' "$FAKE_DISKUTIL_LOG")
+    [ "$n" -le "$FAKE_DISKUTIL_WRONG" ] && { echo "Error: Incorrect passphrase"; exit 1; }
+fi
 # The verb named in $FAKE_DISKUTIL_HOLD never finishes by itself: it stays in
 # flight until something stops it, or until the log is gone, so a test that
 # fails leaves nothing running.
@@ -265,7 +270,9 @@ vault pw [8 bytes]" "$(cat "$FAKE_DISKUTIL_LOG.stdin")" "the password typed once
     assert_eq "conversation" "$(cat "$v/claude-config/projects/${proj##*/}/44444444-4444-4444-8444-444444444444.jsonl" 2>/dev/null)" \
         "the conversation moved to where the encrypted session's claude reads it" || return 1
     [ ! -e "$proj" ] || { echo "  FAIL: plaintext transcripts left at $proj"; return 1; }
-    assert_output_contains "$out" "New vault password for enc: " "cs asks for the new password" || return 1
+    assert_output_contains "$out" "enc  new vault" "cs names the session and what it is making" || return 1
+    assert_output_contains "$out" "    password › " "cs asks for the new password" || return 1
+    assert_output_contains "$out" "    again › " "and asks for it again" || return 1
     # shellcheck disable=SC2088  # cs prints the literal ~ path
     assert_output_contains "$out" "  - this session's lines in ~/.claude/history.jsonl" "lists what stays in plaintext" || return 1
     assert_output_not_contains "$out" "this session's transcripts in" "the transcripts are not on that list: they moved" || return 1
@@ -661,6 +668,55 @@ test_pre_open_shows_its_prompt_and_only_diskutil_errors() {
     assert_eq "1" "$rc" "a refused password stops the open" || return 1
     assert_eq "Vault password for enc: 
 cs: the vault did not open. diskutil said: diskutil: attach failed - stub" "$out" "what diskutil said" || return 1
+}
+
+# A wrong password is asked for again, three times at most; anything else
+# diskutil refuses ends the open at once (the test above).
+test_pre_open_asks_again_after_a_wrong_password() {
+    _encrypted_session enc || return 1
+    local out rc=0
+    out=$(cd "$CS_SESSIONS_ROOT/enc" && printf 'nope\n%s' "$VAULT_PW_LINE" | CS_ASSUME_TTY=1 FAKE_DISKUTIL_WRONG=1 .cs/local/pre-open 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the second password opens it" || return 1
+    assert_eq "Vault password for enc: 
+cs: wrong password.
+Vault password for enc: " "$out" "says it was wrong, asks again" || return 1
+    assert_eq "nope [4 bytes]
+vault pw [8 bytes]" "$(cat "$FAKE_DISKUTIL_LOG.stdin")" "each typed password reaches its own attach" || return 1
+    : > "$FAKE_DISKUTIL_LOG"
+    rc=0
+    out=$(cd "$CS_SESSIONS_ROOT/enc" && printf 'a\nb\nc\nd\n' | CS_ASSUME_TTY=1 FAKE_DISKUTIL_WRONG=9 .cs/local/pre-open 2>&1) || rc=$?
+    assert_eq "1" "$rc" "three wrong passwords stop the open" || return 1
+    assert_eq "Vault password for enc: 
+cs: wrong password.
+Vault password for enc: 
+cs: wrong password.
+Vault password for enc: 
+cs: three wrong passwords; the vault stays locked." "$out" "three asks, then the reason" || return 1
+    assert_eq "3" "$(grep -c ' attach ' "$FAKE_DISKUTIL_LOG")" "a fourth password is never read" || return 1
+}
+
+# Through cs, the hook draws the rows cs hands it: the session and what the
+# vault is, then the row that takes the password.
+test_open_draws_the_vault_prompt_cs_hands_the_hook() {
+    _encrypted_session enc || return 1
+    echo "plaintext" > "$CS_SESSIONS_ROOT/enc/.cs/local/session.log"
+    local out rc=0
+    out=$(printf 'nope\n%s' "$VAULT_PW_LINE" | FAKE_DISKUTIL_WRONG=1 FAKE_MOUNT_FLAG="$TEST_TMPDIR/mounted" CS_ASSUME_TTY=1 "$CS_BIN" enc 2>&1) || rc=$?
+    assert_eq "enc  vault locked
+    password › 
+    wrong password
+    password › " "$(printf '%s\n' "$out" | head -4)" "the session, what the vault is, the ask, the wrong-password row" || return 1
+}
+
+# Ctrl-C at the hook's prompt ends it with 130: cs ends the same way, with
+# no error line of its own.
+test_open_ends_quietly_when_the_pre_open_was_cancelled() {
+    _encrypted_session enc || return 1
+    printf '#!/bin/bash\nexit 130\n' > "$CS_SESSIONS_ROOT/enc/.cs/local/pre-open"
+    local out rc=0
+    out=$(_open enc 2>&1) || rc=$?
+    assert_eq "130" "$rc" "cs exits as a cancelled command does" || return 1
+    assert_eq "" "$out" "and prints nothing" || return 1
 }
 
 # A session an earlier cs encrypted carries the pre-open that cs wrote; the
@@ -1078,6 +1134,9 @@ run_test test_pre_open_refuses_a_leftover_mount_that_will_not_detach
 run_test test_pre_open_refuses_without_a_terminal
 run_test test_pre_open_attaches_with_a_prompt
 run_test test_pre_open_shows_its_prompt_and_only_diskutil_errors
+run_test test_pre_open_asks_again_after_a_wrong_password
+run_test test_open_draws_the_vault_prompt_cs_hands_the_hook
+run_test test_open_ends_quietly_when_the_pre_open_was_cancelled
 run_test test_open_replaces_a_pre_open_another_cs_wrote
 run_test test_open_keeps_an_earlier_pre_open_where_diskutil_has_no_image_verbs
 run_test test_open_that_stops_detaches_the_vault_it_mounted

@@ -8,6 +8,7 @@ All notable changes to cs are documented here. Release notes are also available 
 
 ### Changed
 - `cs -encrypt` and every open of an encrypted session use `diskutil image` and `diskutil eject`, where they used the `hdiutil` verbs macOS now marks deprecated. cs asks for the vault password itself, once at each open and twice when encrypting (three prompts before), and passes it to `diskutil` on stdin. The terminal no longer shows the device table, the `created:` and `ejected` lines or the deprecation warnings; `diskutil`'s output shows only when a step fails. A vault an earlier cs built opens the same way: the open replaces the `pre-open` that cs wrote, and keeps it where `diskutil` has no `image` verbs. `cs -encrypt` needs those verbs.
+- The vault password prompt shows the session as the status line does, with `vault locked` beside it and a `password ›` row under it. A wrong password is asked for again, three times at most, and Ctrl-C at the prompt ends the open with no error line.
 - The list `cs -encrypt` ends on separates what is still in plaintext from before (prompt history, `.claude.json`, git history, backups) from the two files that always stay in plaintext, `.cs/summary.md` and `.cs/brief.md`.
 
 ### Fixes
