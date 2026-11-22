@@ -94,6 +94,21 @@ _encrypt_read_secret() {  # prompt
     echo >&2
 }
 
+# What cs draws where it asks for a vault password: the session as the status
+# line shows it, then what the vault is, and under it the row that takes the
+# typing. The lock glyph shows only with Nerd Fonts: the plain one is missing
+# from common terminal fonts.
+_vault_prompt_head() {  # session_name, session_dir, what the vault is
+    local color="" lock=""
+    color=$(_read_local_state "$2/.cs/local/state" claude_session_color 2>/dev/null) || color=""
+    [ "${CS_NERD_FONTS:-}" = "1" ] && lock="$ICON_LOCK "
+    printf '%s  %b%s%s%b' "$(_session_pill "$1" "$color")" "$YELLOW" "$lock" "$3" "$NC"
+}
+
+_vault_prompt_ask() {  # label
+    printf '    %b%s%b %b›%b ' "$DIM" "$1" "$NC" "$GOLD" "$NC"
+}
+
 # cs asks for the password itself and hands it to diskutil on stdin: left to
 # ask, diskutil shows a dialog that offers to save the password in the
 # keychain. Only diskutil's errors are shown; its device table is not.
@@ -144,19 +159,33 @@ fi
 saved=""
 [ -t 0 ] && saved=$(stty -g 2>/dev/null) || true
 trap '[ -z "$saved" ] || stty "$saved" 2>/dev/null; echo >&2; exit 130' INT
-printf 'Vault password for %s: ' "${PWD##*/}" >&2
-password=""
-IFS= read -rs password || true
+# cs passes the rows to draw; run by hand, the hook asks in plain words.
+[ -z "${CS_VAULT_PROMPT_HEAD:-}" ] || printf '%s\n' "$CS_VAULT_PROMPT_HEAD" >&2
+ask=${CS_VAULT_PROMPT_ASK:-"Vault password for ${PWD##*/}: "}
+wrong=${CS_VAULT_PROMPT_WRONG:-"cs: wrong password."}
+tries=0
+while :; do
+    printf '%s' "$ask" >&2
+    password=""
+    IFS= read -rs password || true
+    echo >&2
+    if [ -z "$password" ]; then
+        echo "cs: no vault password entered." >&2
+        exit 1
+    fi
+    out=$(printf '%s' "$password" | diskutil image attach --stdinpassphrase --nobrowse --mountPoint "$mnt" "$container" 2>&1) && break
+    case "$out" in
+        *"Incorrect passphrase"*) ;;
+        *) echo "cs: the vault did not open. diskutil said: $out" >&2; exit 1 ;;
+    esac
+    tries=$((tries + 1))
+    if [ "$tries" -ge 3 ]; then
+        echo "cs: three wrong passwords; the vault stays locked." >&2
+        exit 1
+    fi
+    printf '%s\n' "$wrong" >&2
+done
 trap - INT
-echo >&2
-if [ -z "$password" ]; then
-    echo "cs: no vault password entered." >&2
-    exit 1
-fi
-if ! out=$(printf '%s' "$password" | diskutil image attach --stdinpassphrase --nobrowse --mountPoint "$mnt" "$container" 2>&1); then
-    echo "cs: the vault did not open. diskutil said: $out" >&2
-    exit 1
-fi
 EOF
 }
 
@@ -281,10 +310,11 @@ run_encrypt() {
     # cs asks once and hands the password to diskutil on stdin, for the
     # create and for the attach: it is never an argument, and diskutil is
     # never left to ask, which it does in a dialog offering the keychain.
-    _encrypt_read_secret "New vault password for $name: "
+    printf '%s\n' "$(_vault_prompt_head "$name" "$SESSIONS_ROOT/$name" 'new vault')" >&2
+    _encrypt_read_secret "$(_vault_prompt_ask 'password')"
     password=$CS_SECRET_REPLY
     [ -n "$password" ] || error "$name: no password entered; the session is unchanged."
-    _encrypt_read_secret "Again: "
+    _encrypt_read_secret "$(_vault_prompt_ask 'again')"
     again=$CS_SECRET_REPLY
     CS_SECRET_REPLY=""
     [ "$password" = "$again" ] || error "$name: the two passwords differ; the session is unchanged."

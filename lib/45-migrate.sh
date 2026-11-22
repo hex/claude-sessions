@@ -226,6 +226,9 @@ _harden_session_meta() {  # session_dir
 # carries the pid live_lock_pid reads from the session lock, empty when no
 # running process holds it, so the hook needs no lock rule of its own. The
 # open has not taken the lock yet, so the pid is the previous holder's.
+# A hook that asks for a vault password draws the rows cs hands it in
+# CS_VAULT_PROMPT_*. Exit 130 is Ctrl-C at the hook's prompt: the person
+# cancelled, so cs ends the same way and says nothing.
 _run_pre_open() {  # session_name, session_dir
     local hook="$2/.cs/local/pre-open" rc=0 lock_pid
     [ -e "$hook" ] || return 0
@@ -235,7 +238,12 @@ _run_pre_open() {  # session_name, session_dir
     [ -x "$hook" ] || error "$1: .cs/local/pre-open is not executable; chmod +x it, or remove it."
     _encrypt_refresh_pre_open "$2/.cs"
     lock_pid=$(live_lock_pid "$2/.cs")
-    (cd -- "$2" && CS_LIVE_LOCK_PID="$lock_pid" "$hook") || rc=$?
+    (cd -- "$2" && CS_LIVE_LOCK_PID="$lock_pid" \
+        CS_VAULT_PROMPT_HEAD="$(_vault_prompt_head "$1" "$2" 'vault locked')" \
+        CS_VAULT_PROMPT_ASK="$(_vault_prompt_ask 'password')" \
+        CS_VAULT_PROMPT_WRONG="$(printf '    %bwrong password%b' "$RED" "$NC")" \
+        "$hook") || rc=$?
+    [ "$rc" -ne 130 ] || exit 130
     [ "$rc" -eq 0 ] || error "$1: .cs/local/pre-open exited $rc; not opening the session."
     _arm_vault_detach "$2"
 }
