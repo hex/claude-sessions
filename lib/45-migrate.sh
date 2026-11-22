@@ -233,6 +233,7 @@ _run_pre_open() {  # session_name, session_dir
     # running anything a clone could have delivered.
     cs_assert_local_untracked "$2"
     [ -x "$hook" ] || error "$1: .cs/local/pre-open is not executable; chmod +x it, or remove it."
+    _encrypt_refresh_pre_open "$2/.cs"
     lock_pid=$(live_lock_pid "$2/.cs")
     (cd -- "$2" && CS_LIVE_LOCK_PID="$lock_pid" "$hook") || rc=$?
     [ "$rc" -eq 0 ] || error "$1: .cs/local/pre-open exited $rc; not opening the session."

@@ -266,7 +266,7 @@ if [ -f "$META_DIR/local/vault" ] && [ "${CS_RESOLVED_FROM:-env}" = "env" ] \
                     # A child with a recorded pid, so a reopen can stop it.
                     # Long after the open checked the session: the builtin
                     # test refuses a link planted here since.
-                    hdiutil detach "$mnt" >/dev/null 2>&1 &
+                    diskutil eject "$mnt" >/dev/null 2>&1 &
                     # Recorded only where cs keeps its own files: a .cs/local
                     # git tracks gets no pid ($ldir is empty then).
                     if [ -n "$ldir" ]; then

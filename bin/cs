@@ -8454,6 +8454,7 @@ _run_pre_open() {  # session_name, session_dir
     # running anything a clone could have delivered.
     cs_assert_local_untracked "$2"
     [ -x "$hook" ] || error "$1: .cs/local/pre-open is not executable; chmod +x it, or remove it."
+    _encrypt_refresh_pre_open "$2/.cs"
     lock_pid=$(live_lock_pid "$2/.cs")
     (cd -- "$2" && CS_LIVE_LOCK_PID="$lock_pid" "$hook") || rc=$?
     [ "$rc" -eq 0 ] || error "$1: .cs/local/pre-open exited $rc; not opening the session."
@@ -14370,7 +14371,7 @@ _encrypt_container_path() {  # session_name
 # Every precondition, checked before anything is written.
 _encrypt_refuse() {  # session_name
     local name="$1" dir meta sub container
-    [ "$(uname -s)" = "Darwin" ] || error "cs -encrypt needs macOS (hdiutil); Linux is not supported yet."
+    [ "$(uname -s)" = "Darwin" ] || error "cs -encrypt needs macOS (diskutil); Linux is not supported yet."
     case "$name" in
         *@*) error "$name: encrypt the base session, not a feature worktree." ;;
     esac
@@ -14439,14 +14440,32 @@ _encrypt_move_content() {  # session_name, meta_dir
 # no running session. Its pid check takes only a number without leading
 # zeros, as cs writes them: kill -0 reads 0 as the caller's process group,
 # which is always there, and the leftover loop would signal that group.
-_encrypt_write_pre_open() {  # meta_dir, container
-    local hook="$1/local/pre-open"
-    {
-        echo '#!/bin/bash'
-        echo '# Written by cs -encrypt: mounts this session vault, asking for its password at every open.'
-        echo 'set -euo pipefail'
-        printf 'container=%q\n' "$2"
-        cat <<'EOF'
+# Reads one line from the terminal without showing it, into CS_SECRET_REPLY.
+# read -s turns the terminal's echo off, and bash 3.2 leaves it off when
+# Ctrl-C ends the read, so the terminal's settings are put back first; the
+# exit runs cs's EXIT trap.
+_encrypt_read_secret() {  # prompt
+    CS_SECRET_SAVED_TTY=""
+    CS_SECRET_REPLY=""
+    [ -t 0 ] && CS_SECRET_SAVED_TTY=$(stty -g 2>/dev/null) || true
+    trap '[ -z "$CS_SECRET_SAVED_TTY" ] || stty "$CS_SECRET_SAVED_TTY" 2>/dev/null; echo >&2; exit 130' INT
+    printf '%s' "$1" >&2
+    IFS= read -rs CS_SECRET_REPLY || true
+    trap - INT
+    echo >&2
+}
+
+# cs asks for the password itself and hands it to diskutil on stdin: left to
+# ask, diskutil shows a dialog that offers to save the password in the
+# keychain. Only diskutil's errors are shown; its device table is not.
+CS_PRE_OPEN_MARK='# Written by cs -encrypt: mounts this session vault, asking for its password at every open.'
+
+_encrypt_pre_open_text() {  # container
+    echo '#!/bin/bash'
+    echo "$CS_PRE_OPEN_MARK"
+    echo 'set -euo pipefail'
+    printf 'container=%q\n' "$1"
+    cat <<'EOF'
 mkdir -p .cs/vault-mnt
 mnt=$(cd .cs/vault-mnt && pwd -P)
 mounted() { mount | grep -F " on $mnt (" >/dev/null; }
@@ -14472,8 +14491,8 @@ if mounted; then
         while alive "$pid" && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
     done
     rm -f .cs/local/vault-waiter.pid .cs/local/vault-detach.pid .cs/local/vault-holders
-    if mounted && ! hdiutil detach "$mnt"; then
-        echo "cs: the vault is still mounted from a conversation that ended, and it would not detach. Close whatever holds it, run: hdiutil detach $mnt" >&2
+    if mounted && ! diskutil eject "$mnt" >/dev/null; then
+        echo "cs: the vault is still mounted from a conversation that ended, and it would not detach. Close whatever holds it, run: diskutil eject $mnt" >&2
         exit 1
     fi
 fi
@@ -14481,10 +14500,54 @@ if ! { [ -t 0 ] || [ "${CS_ASSUME_TTY:-}" = "1" ]; }; then
     echo "cs: this session is encrypted and needs a terminal to ask for the vault password." >&2
     exit 1
 fi
-hdiutil attach -nobrowse -mountpoint "$mnt" "$container"
+# read -s turns the terminal's echo off, and bash 3.2 leaves it off when
+# Ctrl-C ends the read, so the terminal's settings are put back first.
+saved=""
+[ -t 0 ] && saved=$(stty -g 2>/dev/null) || true
+trap '[ -z "$saved" ] || stty "$saved" 2>/dev/null; echo >&2; exit 130' INT
+printf 'Vault password for %s: ' "${PWD##*/}" >&2
+password=""
+IFS= read -rs password || true
+trap - INT
+echo >&2
+if [ -z "$password" ]; then
+    echo "cs: no vault password entered." >&2
+    exit 1
+fi
+if ! out=$(printf '%s' "$password" | diskutil image attach --stdinpassphrase --nobrowse --mountPoint "$mnt" "$container" 2>&1); then
+    echo "cs: the vault did not open. diskutil said: $out" >&2
+    exit 1
+fi
 EOF
-    } > "$hook"
+}
+
+_encrypt_write_pre_open() {  # meta_dir, container
+    local hook="$1/local/pre-open"
+    _encrypt_pre_open_text "$2" > "$hook"
     chmod +x "$hook"
+}
+
+# The open runs the pre-open this cs writes, so a vault another version of cs
+# built opens the same way. Only a hook cs wrote is replaced, by its second
+# line: one written by hand for a vault set up by hand stays as it is.
+_encrypt_refresh_pre_open() {  # meta_dir
+    local hook="$1/local/pre-open" container text
+    [ -f "$1/local/vault" ] || return 0
+    [ "$(sed -n 2p "$hook" 2>/dev/null)" = "$CS_PRE_OPEN_MARK" ] || return 0
+    container=$(cat "$1/local/vault")
+    [ -n "$container" ] || return 0
+    text=$(_encrypt_pre_open_text "$container")
+    [ "$text" = "$(cat "$hook")" ] && return 0
+    # Where diskutil has no image verbs, the hook cs wrote before still opens
+    # the vault and this one would not, so that one stays.
+    diskutil image --help >/dev/null 2>&1 || return 0
+    # Made new, never written through: a link planted at the temporary name
+    # would carry the hook's text to wherever it points.
+    rm -f "$hook.$$" 2>/dev/null || true
+    ( set -C; printf '%s\n' "$text" > "$hook.$$" ) 2>/dev/null \
+        || error "${1%/.cs}: could not write .cs/local/pre-open.$$ to replace the pre-open cs wrote."
+    chmod +x "$hook.$$"
+    mv -f "$hook.$$" "$hook"
 }
 
 # .cs/local/vault-holders lists the pids whose life keeps the vault mounted:
@@ -14539,14 +14602,14 @@ _detach_opened_vault() {
     lock=$(live_lock_pid "$meta")
     [ -n "$lock" ] && [ "$lock" != "$$" ] && return 0
     mnt=$(_vault_mountpoint_if_mounted "$meta") || return 0
-    hdiutil detach "$mnt" >/dev/null 2>&1 && return 0
+    diskutil eject "$mnt" >/dev/null 2>&1 && return 0
     _vault_mountpoint_if_mounted "$meta" >/dev/null || return 0
-    warn "The vault is still mounted at $mnt; the next open detaches it, or run: hdiutil detach $mnt"
+    warn "The vault is still mounted at $mnt; the next open detaches it, or run: diskutil eject $mnt"
 }
 
 run_encrypt() {
     [ $# -eq 1 ] || error "Usage: cs -encrypt <name>"
-    local name="$1" meta container mnt sub taken=0
+    local name="$1" meta container mnt sub taken=0 password="" again="" out transcripts moved
     _encrypt_refuse "$name"
     meta="$SESSIONS_ROOT/$name/.cs"
     # Hold the session lock while the password prompts run, so an open in
@@ -14572,21 +14635,48 @@ run_encrypt() {
     mnt="$meta/vault-mnt"
     container=$(_encrypt_container_path "$name")
 
+    # Where Claude Code kept this session's conversations so far. Read before
+    # .cs/claude-config exists, after which the same call names the vault.
+    transcripts=$(_claude_project_dir "$SESSIONS_ROOT/$name")
+
+    # cs asks once and hands the password to diskutil on stdin, for the
+    # create and for the attach: it is never an argument, and diskutil is
+    # never left to ask, which it does in a dialog offering the keychain.
+    _encrypt_read_secret "New vault password for $name: "
+    password=$CS_SECRET_REPLY
+    [ -n "$password" ] || error "$name: no password entered; the session is unchanged."
+    _encrypt_read_secret "Again: "
+    again=$CS_SECRET_REPLY
+    CS_SECRET_REPLY=""
+    [ "$password" = "$again" ] || error "$name: the two passwords differ; the session is unchanged."
+    again=""
+
     mkdir -p "$(dirname "$container")"
-    info "Creating the encrypted container; hdiutil asks for the new password."
-    hdiutil create -size 50g -type SPARSEBUNDLE -fs APFS -encryption AES-256 \
-        -volname "cs-$name" "$container" \
-        || error "$name: hdiutil create failed; the session is unchanged."
+    out=$(printf '%s' "$password" | diskutil image create blank --encrypt --stdinpassphrase \
+        --format UDSB --size 50g --volumeName "cs-$name" --fs APFS "$container" 2>&1) \
+        || error "$name: diskutil could not create the vault; the session is unchanged. diskutil said: $out"
     mkdir -p "$mnt"
-    info "Mounting it; hdiutil asks for the password again."
-    if ! hdiutil attach -nobrowse -mountpoint "$mnt" "$container"; then
+    if ! out=$(printf '%s' "$password" | diskutil image attach --stdinpassphrase --nobrowse \
+        --mountPoint "$mnt" "$container" 2>&1); then
         rmdir "$mnt" 2>/dev/null || true
-        error "$name: hdiutil could not attach $container; the session is unchanged. Delete the container before retrying."
+        error "$name: diskutil could not attach $container; the session is unchanged. Delete the container before retrying. diskutil said: $out"
     fi
+    password=""
     # Spotlight indexing holds files open and turns a detach busy.
     touch "$mnt/.metadata_never_index"
 
+    moved=$(_encrypt_moves "$meta" | awk '{ printf " .cs/%s", $1 }')
     _encrypt_move_content "$name" "$meta"
+    # The conversations go last, so a .cs/ move that fails leaves them where
+    # Claude Code reads them. mv across volumes copies, then removes the
+    # source, and can stop in either half, so the vault stays mounted and
+    # the message says it may hold the only whole copy. A project dir that is
+    # a link is left alone: moving the link would move no conversation.
+    if [ -d "$transcripts" ] && [ ! -L "$transcripts" ]; then
+        mkdir -p "$mnt/claude-config/projects"
+        out=$(mv "$transcripts" "$mnt/claude-config/projects/" 2>&1) \
+            || error "$name: could not move the session's conversations ($transcripts) into the vault. Already moved:${moved:- nothing}. The vault is still mounted at .cs/vault-mnt and may hold the only whole copy of the conversations: copy back from .cs/vault-mnt/claude-config/projects/ whatever $transcripts is missing, then finish by hand or move the rest back, and detach it. mv said: $out"
+    fi
     for sub in $CS_VAULT_LINKS; do
         ln -s "vault-mnt/$sub" "$meta/$sub"
     done
@@ -14595,15 +14685,18 @@ run_encrypt() {
     ( CLAUDE_SESSION_META_DIR="$meta" _tag_mutate add encrypted ) \
         || error "$name: the vault is built but the encrypted tag could not be written; add it with cs $name -tag add encrypted."
 
-    hdiutil detach "$mnt" \
-        || error "$name: encrypted, but the vault would not detach; run hdiutil detach $mnt before opening it."
+    out=$(diskutil eject "$mnt" 2>&1) \
+        || error "$name: encrypted, but the vault would not detach; run diskutil eject $mnt before opening it. diskutil said: $out"
     info "$name is encrypted. Every open asks for the vault password; the vault detaches when the last conversation ends."
-    echo "cs could not move copies made before today; remove them by hand if they matter:"
-    echo "  - this session's transcripts in ~/.claude/projects/"
-    echo "  - its lines in ~/.claude/history.jsonl"
+    echo
+    echo "Still in plaintext from before today; remove them by hand if they matter:"
+    echo "  - this session's lines in ~/.claude/history.jsonl"
     echo "  - its project entries in ~/.claude.json and that file's backups"
-    echo "  - .cs/summary.md and .cs/brief.md, which stay plaintext"
+    echo "  - conversations started from another folder, such as a subfolder of the session, in ~/.claude/projects/"
+    echo "  - what else Claude Code kept for its conversations under ~/.claude (file-history/, tasks/, debug/, paste-cache/)"
     echo "  - git history of anything committed before, and backups or snapshots"
+    echo "Always in plaintext:"
+    echo "  - .cs/summary.md and .cs/brief.md"
 }
 search_sessions() {
     local query="" include_archived="" arg
