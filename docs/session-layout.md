@@ -316,15 +316,16 @@ for the password.
 - the bundle already exists
 - `.cs/README.md` has no frontmatter for the tag
 
-If moving the conversations fails, it unmounts the volume and stops with the
-session unchanged; delete the bundle before you retry. If a later move fails
+If moving the conversations fails, it stops with nothing under `.cs/` moved and
+leaves the volume mounted, since the volume may hold the only whole copy: put
+back what is missing, unmount it, and delete the bundle before you retry. If a later move fails
 partway, it stops, lists what moved and what did not, and
 leaves the volume mounted so you can finish by hand; until you unmount it,
 `cs -rm` and the picker's delete refuse to remove the session. When it finishes, it lists
 what is still in plaintext from before: the session's
 lines in `history.jsonl` under your Claude Code config dir (`$CLAUDE_CONFIG_DIR`,
 else `~/.claude`), its entries in `.claude.json` (inside `$CLAUDE_CONFIG_DIR`
-when you set it, else `~/.claude.json`) and that file's backups, git history, and backups. It lists `.cs/summary.md` and `.cs/brief.md` apart, as files that always stay in plaintext.
+when you set it, else `~/.claude.json`) and that file's backups, what else Claude Code kept for its conversations there (`file-history/`, `tasks/`, `debug/`, `paste-cache/`), git history, and backups. It lists `.cs/summary.md` and `.cs/brief.md` apart, as files that always stay in plaintext.
 
 ### Setting it up by hand
 

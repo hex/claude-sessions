@@ -156,7 +156,11 @@ _encrypt_refresh_pre_open() {  # meta_dir
     [ -n "$container" ] || return 0
     text=$(_encrypt_pre_open_text "$container")
     [ "$text" = "$(cat "$hook")" ] && return 0
-    printf '%s\n' "$text" > "$hook.$$"
+    # Made new, never written through: a link planted at the temporary name
+    # would carry the hook's text to wherever it points.
+    rm -f "$hook.$$"
+    ( set -C; printf '%s\n' "$text" > "$hook.$$" ) 2>/dev/null \
+        || error "${1%/.cs}: could not write .cs/local/pre-open.$$ to replace the pre-open cs wrote."
     chmod +x "$hook.$$"
     mv -f "$hook.$$" "$hook"
 }
@@ -277,15 +281,14 @@ run_encrypt() {
     # Spotlight indexing holds files open and turns a detach busy.
     touch "$mnt/.metadata_never_index"
 
-    # The conversations go first: a move that fails here has changed nothing
-    # in the session. mv across volumes removes the source only after the
-    # whole copy, so a failed one leaves every transcript where it was.
+    # The conversations go first, so a move that fails here has touched
+    # nothing under .cs/. mv across volumes copies, then removes the source,
+    # and can stop in either half, so the vault stays mounted: until the
+    # person has looked, it may hold the only whole copy.
     if [ -d "$transcripts" ]; then
         mkdir -p "$mnt/claude-config/projects"
-        if ! mv "$transcripts" "$mnt/claude-config/projects/" 2>/dev/null; then
-            diskutil eject "$mnt" >/dev/null 2>&1 || true
-            error "$name: could not move the session's conversations ($transcripts) into the vault; the session is unchanged. Delete $container before retrying."
-        fi
+        mv "$transcripts" "$mnt/claude-config/projects/" 2>/dev/null \
+            || error "$name: could not move the session's conversations ($transcripts) into the vault. Nothing under .cs/ has moved. The vault is still mounted at .cs/vault-mnt: copy back from .cs/vault-mnt/claude-config/projects/ whatever $transcripts is missing, then run diskutil eject $mnt and delete $container before retrying."
     fi
     _encrypt_move_content "$name" "$meta"
     for sub in $CS_VAULT_LINKS; do
@@ -303,6 +306,7 @@ run_encrypt() {
     echo "Still in plaintext from before today; remove them by hand if they matter:"
     echo "  - this session's lines in ~/.claude/history.jsonl"
     echo "  - its project entries in ~/.claude.json and that file's backups"
+    echo "  - what else Claude Code kept for its conversations under ~/.claude (file-history/, tasks/, debug/, paste-cache/)"
     echo "  - git history of anything committed before, and backups or snapshots"
     echo "Always in plaintext:"
     echo "  - .cs/summary.md and .cs/brief.md"
