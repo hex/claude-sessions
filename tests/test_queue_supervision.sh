@@ -105,6 +105,39 @@ test_drain_writes_lifecycle_events() {
     assert_output_contains "$(_inbox)" '"event":"drain_finished"' "finish recorded" || return 1
 }
 
+# A Stop that arrives while background agents the session started still work
+# is a pause: the task in progress is not done yet.
+_stop_turn_with_background() {  # task type
+    _stop_turn "$(jq -nc --arg t "$1" '{hook_event_name: "Stop", background_tasks: [{id: "t1", type: $t, status: "running", description: "side work"}]}')"
+}
+
+test_drain_waits_for_background_agents() {
+    _qs_session "bg"
+    _arm_queue "task one" "task two"
+    local out
+    out=$(_stop_turn) || return 1
+    assert_output_contains "$out" "starting a walk-away run" "armed turn injects first task" || return 1
+    out=$(_stop_turn_with_background subagent) || return 1
+    assert_output_contains "$out" "cs task queue: 1 background agent still running" "the pause is named" || return 1
+    assert_eq "2" "$(_qlen)" "nothing is popped while an agent runs" || return 1
+    assert_output_not_contains "$(_inbox)" '"event":"task_done"' "nothing is logged done while an agent runs" || return 1
+    out=$(_stop_turn_with_background workflow) || return 1
+    assert_eq "2" "$(_qlen)" "a running workflow holds the run too" || return 1
+    out=$(_stop_turn) || return 1
+    assert_output_contains "$out" "next task" "the run goes on once nothing is in flight" || return 1
+    assert_eq "1" "$(_qlen)" "the finished task is popped" || return 1
+}
+
+test_drain_goes_on_past_a_background_shell() {
+    _qs_session "bgsh"
+    _arm_queue "task one" "task two"
+    local out
+    out=$(_stop_turn) || return 1
+    out=$(_stop_turn_with_background shell) || return 1
+    assert_output_contains "$out" "next task" "a background shell command does not hold the run" || return 1
+    assert_eq "1" "$(_qlen)" "the finished task is popped" || return 1
+}
+
 test_task_text_with_quotes_survives_jq_append() {
     _qs_session "qq"
     _arm_queue 'fix the "flaky" test `now`' "second"
@@ -573,6 +606,8 @@ run_test test_failure_counter_recovers_from_garbage
 run_test test_failure_counter_ignores_a_stale_tmp
 run_test test_failure_counter_still_logs_to_session_log
 run_test test_drain_writes_lifecycle_events
+run_test test_drain_waits_for_background_agents
+run_test test_drain_goes_on_past_a_background_shell
 run_test test_task_text_with_quotes_survives_jq_append
 run_test test_failures_breaker_parks_the_drain
 run_test test_breaker_parks_the_drain_past_a_stale_state_tmp
