@@ -5568,28 +5568,34 @@ _path_goes_through_a_link() {  # root, relative path
 # Copies into a feature's checkout the base's files that its .worktreeinclude
 # names and git ignores (an env file, a local config), which a checkout never
 # carries. The file reads as a .gitignore does, as Claude Code reads it for
-# the worktrees it makes itself. A file the feature already has, cs's own
-# records, and a path that passes through a link in the feature are left.
-# Runs command-substituted with its caller, so every line it says goes to
-# stderr.
+# the worktrees it makes itself. Left where they are: a file the feature
+# already has, cs's own records, a link (cs writes some of these files later,
+# and a write through a copied link lands on the base's file), and a path
+# that passes through a link in the feature. One check-ignore answers for the
+# whole list. Runs command-substituted with its caller, so every line it says
+# goes to stderr.
 _worktree_carry_included() {  # base_dir wt_dir
     local base="$1" wt="$2" f dest copied=0
     [ -f "$base/.worktreeinclude" ] || return 0
     while IFS= read -r -d '' f; do
         case "$f" in */|.cs/*|CLAUDE.local.md) continue ;; esac
-        git -C "$base" check-ignore -q -- "$f" 2>/dev/null || continue
         dest="$wt/$f"
+        if [ -L "$base/$f" ]; then
+            warn "Not copied: $(_printable_name "$f") (a link)" >&2
+            continue
+        fi
         if _path_goes_through_a_link "$wt" "$f"; then
-            warn "Not copied: $f (the feature has a link on that path)" >&2
+            warn "Not copied: $(_printable_name "$f") (the feature has a link on that path)" >&2
             continue
         fi
         [ ! -e "$dest" ] || continue
-        if mkdir -p "${dest%/*}" && cp -pP "$base/$f" "$dest"; then
+        if mkdir -p "${dest%/*}" && cp -p "$base/$f" "$dest"; then
             copied=$((copied + 1))
         else
-            warn "Not copied: $f" >&2
+            warn "Not copied: $(_printable_name "$f")" >&2
         fi
-    done < <(git -C "$base" ls-files -z --others --ignored --exclude-from="$base/.worktreeinclude" 2>/dev/null)
+    done < <(git -C "$base" ls-files -z --others --ignored --exclude-from="$base/.worktreeinclude" \
+        | git -C "$base" check-ignore -z --stdin)
     [ "$copied" = 0 ] \
         || info "Copied $copied ignored file$([ "$copied" = 1 ] || printf s) that .worktreeinclude names" >&2
 }

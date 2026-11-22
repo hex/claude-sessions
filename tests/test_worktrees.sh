@@ -807,7 +807,35 @@ test_worktree_create_copies_nothing_through_a_link_in_the_feature() {
     output=$("$CS_BIN" "inclink@task1" < /dev/null 2>&1) || status=$?
     assert_eq "0" "$status" "the feature is created" || return 1
     assert_eq "no" "$([ -e "$outside/s.json" ] && echo yes || echo no)" "nothing is written through the link" || return 1
-    assert_output_contains "$output" "Not copied: local/s.json" "the launch names the file it left" || return 1
+    assert_output_contains "$output" "Not copied: local/s.json (the feature has a link on that path)" "the launch names the file it left" || return 1
+}
+
+# cs writes some of these files later (.claude/settings.local.json): through a
+# copied link the write would land on the base's own file.
+test_worktree_create_copies_no_link() {
+    _included_base "inclnk" ".env" "local/*.json"
+    local base_dir="$CS_SESSIONS_ROOT/inclnk" wt="$CS_SESSIONS_ROOT/inclnk@task1"
+    rm "$base_dir/.env" && ln -s "$base_dir/local/s.json" "$base_dir/.env"
+    local output status=0
+    output=$("$CS_BIN" "inclnk@task1" < /dev/null 2>&1) || status=$?
+    assert_eq "0" "$status" "the feature is created" || return 1
+    assert_eq "no" "$([ -e "$wt/.env" ] || [ -L "$wt/.env" ] && echo yes || echo no)" "a link is not copied" || return 1
+    assert_output_contains "$output" "Not copied: .env (a link)" "the launch names the link it left" || return 1
+    assert_eq '{"k":1}' "$(cat "$wt/local/s.json" 2>/dev/null)" "the files beside it are copied" || return 1
+}
+
+# A branch reused for the feature can track a file the base only ignores.
+test_worktree_create_keeps_a_file_the_feature_already_has() {
+    _included_base "inckeep" "local/*.json" ".cs/local/marker"
+    local base_dir="$CS_SESSIONS_ROOT/inckeep" wt="$CS_SESSIONS_ROOT/inckeep@task1"
+    local tmp="$TEST_TMPDIR/branch-inckeep"
+    printf 'base only\n' > "$base_dir/.cs/local/marker"
+    (cd "$base_dir" && git worktree add -q -b cs/task1 "$tmp" \
+        && mkdir -p "$tmp/local" && printf 'the branch\n' > "$tmp/local/s.json" && git -C "$tmp" add -f local/s.json \
+        && git -C "$tmp" commit -q -m tracked && git worktree remove --force "$tmp") || return 1
+    cs_launch "inckeep@task1"
+    assert_eq "the branch" "$(cat "$wt/local/s.json" 2>/dev/null)" "the feature's own file is kept" || return 1
+    assert_eq "no" "$([ -e "$wt/.cs/local/marker" ] && echo yes || echo no)" "cs's own records are not copied" || return 1
 }
 
 test_worktree_reopen_preserves_project_claude_md() {
@@ -2125,6 +2153,8 @@ run_test test_worktree_create_succeeds_with_untracked_base
 run_test test_worktree_create_carries_the_ignored_files_worktreeinclude_names
 run_test test_worktree_create_without_worktreeinclude_copies_nothing
 run_test test_worktree_create_copies_nothing_through_a_link_in_the_feature
+run_test test_worktree_create_copies_no_link
+run_test test_worktree_create_keeps_a_file_the_feature_already_has
 run_test test_worktree_reopen_preserves_project_claude_md
 run_test test_worktree_reopen_refuses_a_symlinked_cs_local
 run_test test_worktree_creation_refuses_a_committed_cs_local_link
