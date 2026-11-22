@@ -1041,17 +1041,17 @@ test_remote_release_leaves_the_files_of_a_later_open() {
 
 # A session cs --remote serves this way gets its vault detached by the
 # release once the server exits, as SessionEnd detaches it after claude.
-# hdiutil and mount are PATH stubs: mount reports the vault mounted until
-# hdiutil detaches it, and hdiutil logs every call.
+# diskutil and mount are PATH stubs: mount reports the vault mounted until
+# diskutil ejects it, and diskutil logs every call.
 test_remote_release_detaches_the_vault_its_open_mounted() {
     run_cs_ok demo --remote || return 1
     local meta="$CS_SESSIONS_ROOT/demo/.cs" stub="$TEST_TMPDIR/stub" mnt flag="$TEST_TMPDIR/mounted"
     mkdir -p "$stub" "$meta/vault-mnt"
     mnt="$(cd "$meta/vault-mnt" && pwd -P)"
-    cat > "$stub/hdiutil" << 'EOF'
+    cat > "$stub/diskutil" << 'EOF'
 #!/bin/sh
-echo "$*" >> "$FAKE_HDIUTIL_LOG"
-[ "$1" = detach ] && rm -f "$FAKE_MOUNT_FLAG"
+echo "$*" >> "$FAKE_DISKUTIL_LOG"
+[ "$1" = eject ] && rm -f "$FAKE_MOUNT_FLAG"
 exit 0
 EOF
     cat > "$stub/mount" << 'EOF'
@@ -1060,12 +1060,12 @@ EOF
 echo "/dev/disk3s1 on / (apfs, sealed, local, read-only, journaled)"
 EOF
     printf '#!/bin/sh\nexit 0\n' > "$meta/local/pre-open"
-    chmod +x "$stub/hdiutil" "$stub/mount" "$meta/local/pre-open"
+    chmod +x "$stub/diskutil" "$stub/mount" "$meta/local/pre-open"
     printf '%s\n' "$TEST_TMPDIR/demo.sparsebundle" > "$meta/local/vault"
     : > "$flag"
-    FAKE_MOUNT_FLAG="$flag" FAKE_HDIUTIL_LOG="$TEST_TMPDIR/hdiutil.log" FAKE_MNT="$mnt" PATH="$stub:$PATH" \
+    FAKE_MOUNT_FLAG="$flag" FAKE_DISKUTIL_LOG="$TEST_TMPDIR/diskutil.log" FAKE_MNT="$mnt" PATH="$stub:$PATH" \
         run_cs_ok demo --remote || return 1
-    assert_eq "detach $mnt" "$(cat "$TEST_TMPDIR/hdiutil.log" 2>/dev/null)" "the release detached the vault" || { cat "$TEST_TMPDIR/out"; return 1; }
+    assert_eq "eject $mnt" "$(cat "$TEST_TMPDIR/diskutil.log" 2>/dev/null)" "the release detached the vault" || { cat "$TEST_TMPDIR/out"; return 1; }
 }
 
 test_remote_inside_tmux_refuses_an_open_or_served_session_on_the_callers_terminal() {

@@ -171,7 +171,7 @@ removes anything, except the prompt hook's launch mark in `scope-prompt.trace`.
 | `vault` | The path of the container `cs -encrypt` built, written only by `cs -encrypt`. The SessionEnd hook unmounts the vault only when this file exists. |
 | `vault-holders` | Process ids of every `cs` run that mounted or joined this session's vault. The volume unmounts only when none of them and no session lock is alive. A `cs` that adds or drops its line takes turns with the others through `vault-holders.mutex.lock`. |
 | `vault-waiter.pid` | The background waiter the SessionEnd hook leaves to unmount the vault once the lead conversation's Claude Code exits. An open that finds the vault mounted with nothing alive behind it stops this waiter first. |
-| `vault-detach.pid` | The `hdiutil detach` that waiter started, so a reopen can stop an unmount in flight. |
+| `vault-detach.pid` | The `diskutil eject` that waiter started, so a reopen can stop an unmount in flight. |
 | `queue/` | The walk-away task queue (`cs -queue`): one file per task, staged in `queue.tmp/` and renamed into place so the drain never reads a torn entry. The drain hands out the lexically first file and records its name in `queue.current`. When that task's turn ends, the drain pops the file `queue.current` names by moving it aside, so a second drain that races it loses the rename. |
 | `queue.state` | Drain state machine for the queue: `idle`, `armed`, or `draining`. [Queue states and transitions](#queue-states-and-transitions) lists what writes and reads it. |
 | `queue.mode` | How a started run hands over its tasks: `subagents` or `workflow`; absent runs them in the conversation. Written by `cs -queue start` with a mode. Removed by `cs -queue start` without one, by `cs -queue clear`, and by the drain when the run finishes. A run that parks for any reason, or loses its pop, keeps it until the next `cs -queue start` or `cs -queue clear`. The open of a `cs -spawn`ed session arms the queue without touching this file, so that run hands over its tasks in whatever mode the file still holds. |
@@ -255,21 +255,35 @@ there.
 On macOS, `cs -encrypt <name>` sets this up for an existing session. Run it
 from a terminal, with the session closed. It:
 
-1. Creates an AES-256 encrypted sparse bundle at
-   `~/.local/share/cs/vaults/<name>.sparsebundle` with `hdiutil`, which asks
-   for a new password. The bundle grows as it fills, up to 50 GB. It lives
-   outside the session directory, so `cs -rm` never deletes it.
-2. Mounts it at `.cs/vault-mnt` (`hdiutil` asks for the password again) and
-   turns Spotlight indexing off for it.
-3. Moves `.cs/memory`, `.cs/plans`, the `.cs/local/` files listed under
+1. Asks for a new vault password, twice, and stops if the two differ or are
+   empty.
+2. Creates an AES-256 encrypted sparse bundle at
+   `~/.local/share/cs/vaults/<name>.sparsebundle` with `diskutil image create`.
+   The bundle grows as it fills, up to 50 GB. It lives outside the session
+   directory, so `cs -rm` never deletes it.
+3. Mounts it at `.cs/vault-mnt` with `diskutil image attach` and turns
+   Spotlight indexing off for it. cs passes the password to `diskutil` on
+   stdin both times, never as an argument, and shows `diskutil`'s output only
+   when a step fails.
+4. Moves the session's conversations from your Claude Code config dir
+   (`projects/<session path>/` under `$CLAUDE_CONFIG_DIR`, or `~/.claude`)
+   into the volume's `claude-config/projects/`, where the encrypted session's
+   Claude Code reads them, so the last conversation still resumes.
+5. Moves `.cs/memory`, `.cs/plans`, the `.cs/local/` files listed under
    `.cs/private` above, and `.cs/handoffs`, `.cs/checkpoints` and
    `.cs/narrative-archive` into the volume, then links the four names into it.
-4. Writes `.cs/local/pre-open` and `.cs/local/vault` (the bundle's path), tags
-   the session `encrypted`, and unmounts the volume.
+6. Writes `.cs/local/pre-open` and `.cs/local/vault` (the bundle's path), tags
+   the session `encrypted`, and unmounts the volume with `diskutil eject`.
 
-From then on every open asks for the password in the terminal. `pre-open`
-refuses to open the session without a terminal, because without one `hdiutil`
-shows a dialog that offers to save the password in the keychain. When the lead
+`cs -encrypt` and every later open need a macOS whose `diskutil` has the
+`image` verbs (checked on macOS 27.2). A vault that an earlier cs built with
+`hdiutil` opens the same way: each open replaces a `pre-open` that cs wrote
+with the current one, and leaves one written by hand alone.
+
+From then on every open asks for the password in the terminal: cs asks, and
+passes the answer to `diskutil image attach` on stdin. `pre-open` refuses to
+open the session without a terminal, because `diskutil`, left to ask, shows a
+dialog that offers to save the password in the keychain. When the lead
 conversation ends (not on `/clear` or `/resume`), the SessionEnd hook waits for
 Claude Code to exit and unmounts the volume, unless the session reopened in
 the meantime. The unmount is never forced: if something still holds the
@@ -302,13 +316,15 @@ for the password.
 - the bundle already exists
 - `.cs/README.md` has no frontmatter for the tag
 
-If a move fails partway, it stops, lists what moved and what did not, and
+If moving the conversations fails, it unmounts the volume and stops with the
+session unchanged; delete the bundle before you retry. If a later move fails
+partway, it stops, lists what moved and what did not, and
 leaves the volume mounted so you can finish by hand; until you unmount it,
 `cs -rm` and the picker's delete refuse to remove the session. When it finishes, it lists
-the copies it cannot reach: the session's transcripts in `projects/` and its
+what is still in plaintext from before: the session's
 lines in `history.jsonl` under your Claude Code config dir (`$CLAUDE_CONFIG_DIR`,
 else `~/.claude`), its entries in `.claude.json` (inside `$CLAUDE_CONFIG_DIR`
-when you set it, else `~/.claude.json`) and that file's backups, `.cs/summary.md` and `.cs/brief.md`, git history, and backups.
+when you set it, else `~/.claude.json`) and that file's backups, git history, and backups. It lists `.cs/summary.md` and `.cs/brief.md` apart, as files that always stay in plaintext.
 
 ### Setting it up by hand
 
