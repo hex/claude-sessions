@@ -267,6 +267,7 @@ vault pw" "$(cat "$FAKE_DISKUTIL_LOG.stdin")" "the password typed once reaches c
     assert_output_contains "$out" "New vault password for enc: " "cs asks for the new password" || return 1
     # shellcheck disable=SC2088  # cs prints the literal ~ path
     assert_output_contains "$out" "  - this session's lines in ~/.claude/history.jsonl" "lists what stays in plaintext" || return 1
+    # shellcheck disable=SC2088  # the literal ~ path cs printed before
     assert_output_not_contains "$out" "~/.claude/projects" "the transcripts are not on that list: they moved" || return 1
     assert_output_not_contains "$out" "Apple_APFS_Volume" "diskutil's device table is not shown" || return 1
     assert_output_not_contains "$out" "Disk ejected" "nor its eject line" || return 1
