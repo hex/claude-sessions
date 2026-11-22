@@ -655,7 +655,12 @@ and follows the scroll (see
 prompt's row is at the top. The band's focus ring never lands on a bar:
 the keyboard route is `/cs next` and `/cs prev`, which move one prompt from
 the prompt being read, and `/cs first`, `/cs last` and `/cs N`, which go to
-that prompt, all mid-turn too, for keybindings. A
+that prompt, all mid-turn too, for keybindings. After `/cs ` the prompt
+box's typeahead lists the four words a typed prefix starts, then up to eight
+prompts, newest first, whose number the typed word starts or whose first line
+holds it; taking a row writes the word or the number. That hook
+(`prompt.autocomplete`) needs Claude Code 2.1.292 or later, and an earlier
+one refuses the whole cs mod. A
 refusal is toasted once a session; a prompt no row has drawn since a resume
 toasts `cs: that prompt is not on screen yet` once. The prompts come from the
 session's transcript, `<slug>/<id>.jsonl` in the directory Claude Code writes

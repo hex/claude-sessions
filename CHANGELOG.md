@@ -7,6 +7,7 @@ All notable changes to cs are documented here. Release notes are also available 
 ## Unreleased
 
 ### Added
+- After `/cs ` the prompt box's typeahead lists `next`, `prev`, `first` and `last`, and the prompts whose number or first line matches what you type, newest first. Taking a row writes the word or the prompt's number. The cs mod now needs Claude Code 2.1.292 or later.
 - `cs <base>@<feature>` copies into a new feature the ignored files that a `.worktreeinclude` in the base names, such as `.env`. The file reads as a `.gitignore` does, as it does for the worktrees Claude Code makes itself.
 
 ### Changed
