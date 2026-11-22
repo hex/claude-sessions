@@ -10,7 +10,7 @@ import { labels as filterChatLabels } from '../../cs-filter-chat/hooks/words.ts'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, buildBandEntries, drawBand, fitBand, entriesAt, drawFooterKeys, keysRoute, isCycleHint, noticeCells, parseStatusWidth, modesWidth, keysWidth, STATUS_WIDTH, FOOTER_POLL_MS, FILTER_CHAT_MODE, type BandView, parsePrompts, RAIL_TEXT_CHARS, DEFAULT_PERCENT, GRACE_SECONDS, NEXT_STEP_CHARS, WRAP_QUESTION, WRAP_YES, QUEUE_START, QUEUE_COMPACT, QUEUE_KICK, QUEUE_MODE_QUESTION, QUEUE_HERE, QUEUE_SUBAGENTS, QUEUE_WORKFLOWS, nextStepLine, isUnconsumed, TOASTS, LOGS, REPLIES, finishToast, parseFeatures, featuresWordOf } from '../hooks/register.tsx'
+import { register, buildBandEntries, drawBand, fitBand, entriesAt, drawFooterKeys, keysRoute, isCycleHint, noticeCells, parseStatusWidth, modesWidth, keysWidth, STATUS_WIDTH, FOOTER_POLL_MS, FILTER_CHAT_MODE, type BandView, parsePrompts, promptRows, PROMPT_ROWS, RAIL_TEXT_CHARS, DEFAULT_PERCENT, GRACE_SECONDS, NEXT_STEP_CHARS, WRAP_QUESTION, WRAP_YES, QUEUE_START, QUEUE_COMPACT, QUEUE_KICK, QUEUE_MODE_QUESTION, QUEUE_HERE, QUEUE_SUBAGENTS, QUEUE_WORKFLOWS, nextStepLine, isUnconsumed, TOASTS, LOGS, REPLIES, finishToast, parseFeatures, featuresWordOf } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -5568,4 +5568,45 @@ test('a mod that cannot learn which Claude Code it runs in after three asks read
   } finally {
     $.process.run = run
   }
+})
+
+test('after /cs the typeahead offers the rail words a typed prefix starts, then the prompts whose number or first line holds it, newest first', () => {
+  const list = parsePrompts(`${LINEAR.join('\n')}\n`)
+  expect(promptRows(list, '/cs t', 4, 't')).toEqual([
+    { text: '3', label: '3', description: 'say three' },
+    { text: '2', label: '2', description: 'say two' },
+  ])
+  expect(promptRows(list, '/cs f', 4, 'f')).toEqual([
+    { text: 'first', label: 'first', description: 'the first prompt' },
+    { text: '4', label: '4', description: 'say four' },
+  ])
+  expect(promptRows(list, '/cs 2', 4, '2')).toEqual([{ text: '2', label: '2', description: 'say two' }])
+  expect(promptRows(list, '/cs  ONE', 5, 'ONE')).toEqual([{ text: '1', label: '1', description: 'say one' }])
+})
+
+test('the typeahead adds nothing outside the argument of /cs, past its first word, or with no prompts', () => {
+  const list = parsePrompts(`${LINEAR.join('\n')}\n`)
+  expect(promptRows(list, 'tell me t', 8, 't')).toEqual([])
+  expect(promptRows(list, '/cs next t', 9, 't')).toEqual([])
+  expect(promptRows(list, '/csx t', 5, 't')).toEqual([])
+  expect(promptRows(list, '/cs', 0, '/cs')).toEqual([])
+  expect(promptRows([], '/cs f', 4, 'f')).toEqual([])
+})
+
+test('the typeahead lists at most PROMPT_ROWS prompts, the newest', () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ uuid: `u${i + 1}`, text: `fix part ${i + 1}` }))
+  const rows = promptRows(many, '/cs fix', 4, 'fix')
+  expect(PROMPT_ROWS).toBe(8)
+  expect(rows.map(r => r.text)).toEqual(['12', '11', '10', '9', '8', '7', '6', '5'])
+})
+
+test('the prompt.autocomplete hook puts its rows after the ones it was handed, and hands an unrelated draft on untouched', async () => {
+  await sessionStart()
+  transcript(LINEAR)
+  await turnComplete()
+  const handed = { suggestions: [{ text: '#1' }] }
+  const ask = (text: string, token: string) =>
+    hooks['prompt.autocomplete']($, { text, cursor: text.length, token, start: text.length - token.length }, async () => handed)
+  expect(await ask('/cs fo', 'fo')).toEqual({ suggestions: [{ text: '#1' }, { text: '4', label: '4', description: 'say four' }] })
+  expect(await ask('say fo', 'fo')).toBe(handed)
 })
