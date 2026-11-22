@@ -5553,6 +5553,47 @@ confirm_clean_worktree_base() {
 # Create a linked git worktree of a base session as a sibling session dir.
 # The caller gates dirty base state via confirm_clean_worktree_base. Prints
 # the new worktree path.
+# Whether a component of the relative path, under the root, is a link.
+_path_goes_through_a_link() {  # root, relative path
+    local at="$1" rest="$2" part
+    while :; do
+        part=${rest%%/*}
+        at="$at/$part"
+        [ ! -L "$at" ] || return 0
+        [ "$part" != "$rest" ] || return 1
+        rest=${rest#*/}
+    done
+}
+
+# Copies into a feature's checkout the base's files that its .worktreeinclude
+# names and git ignores (an env file, a local config), which a checkout never
+# carries. The file reads as a .gitignore does, as Claude Code reads it for
+# the worktrees it makes itself. A file the feature already has, cs's own
+# records, and a path that passes through a link in the feature are left.
+# Runs command-substituted with its caller, so every line it says goes to
+# stderr.
+_worktree_carry_included() {  # base_dir wt_dir
+    local base="$1" wt="$2" f dest copied=0
+    [ -f "$base/.worktreeinclude" ] || return 0
+    while IFS= read -r -d '' f; do
+        case "$f" in */|.cs/*|CLAUDE.local.md) continue ;; esac
+        git -C "$base" check-ignore -q -- "$f" 2>/dev/null || continue
+        dest="$wt/$f"
+        if _path_goes_through_a_link "$wt" "$f"; then
+            warn "Not copied: $f (the feature has a link on that path)" >&2
+            continue
+        fi
+        [ ! -e "$dest" ] || continue
+        if mkdir -p "${dest%/*}" && cp -pP "$base/$f" "$dest"; then
+            copied=$((copied + 1))
+        else
+            warn "Not copied: $f" >&2
+        fi
+    done < <(git -C "$base" ls-files -z --others --ignored --exclude-from="$base/.worktreeinclude" 2>/dev/null)
+    [ "$copied" = 0 ] \
+        || info "Copied $copied ignored file$([ "$copied" = 1 ] || printf s) that .worktreeinclude names" >&2
+}
+
 create_worktree_session() {
     local base_dir="$1" base_name="$2" task="$3"
     local wt_dir="$SESSIONS_ROOT/$base_name@$task"
@@ -5610,6 +5651,7 @@ create_worktree_session() {
     # The checkout can carry a committed link or per-actor state from the
     # base's history; refuse before the state writes below go through it.
     cs_assert_local_untracked "$wt_dir"
+    _worktree_carry_included "$base_dir" "$wt_dir"
 
     if [ "$mode" = "ignored" ]; then
         bootstrap_worktree_meta "$wt_dir" "$base_name" "$task" "$base_dir"

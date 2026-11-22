@@ -57,7 +57,7 @@ The [statusline guide](docs/statusline.md) covers the quiet default layout, the 
 | Crash recovery | Saves edits to shadow git refs without adding normal branch commits. | [Autosave hook](docs/hooks.md#autosave-commitssh-posttooluse-on-writeedit) |
 | Conversation rotation | Hands work to a fresh conversation through `/rotate` and `/clear`. Past 40% context a `rotate` key and a `wrap` key show beside the permission notice under the prompt, or on the band above it where that row has no room. | [Rotation and queue hooks](docs/hooks.md#stop-blockssh-stop-filechanged-cwdchanged) |
 | Existing projects | `cs -adopt <name>` registers your project without moving it. | [Adoption](docs/commands.md#adopt-an-existing-project) |
-| Parallel worktrees | `cs <base>@<feature>` gives each feature its own checkout and session records. | [Worktrees](docs/commands.md#parallel-worktrees) |
+| Parallel worktrees | `cs <base>@<feature>` gives each feature its own checkout and session records, and copies the ignored files a `.worktreeinclude` names into it. | [Worktrees](docs/commands.md#parallel-worktrees) |
 | Remote control | `cs <name> --remote` serves a session for the Claude app or web. | [Remote control](docs/commands.md#remote-control) |
 | Resume launch | `cs <name> --resume` resumes without asking, or starts fresh with no recorded conversation. | [Launch answers](docs/commands.md#conversation-rotation-and-wrap) |
 | Task queue | Runs confirmed tasks at turn boundaries, with failure, context, and quota breakers. | [Queue behavior](docs/hooks.md#stop-blockssh-stop-filechanged-cwdchanged) |
