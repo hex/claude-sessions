@@ -476,7 +476,7 @@ test_encrypt_stops_on_a_failed_move_and_names_what_moved() {
 
 # pre-open runs from the session directory before every open. `mount` is a
 # stub that reports the vault mounted when FAKE_MOUNTED=1.
-_encrypted_session() {  # name -> leaves an encrypted session and a clean diskutil log
+_encrypted_session() {  # name -> leaves an encrypted session and clean diskutil logs
     _stubs
     _populated_session "$1"
     _encrypt "$1" >/dev/null 2>&1 || { echo "  FAIL: fixture encrypt failed"; return 1; }
@@ -489,6 +489,7 @@ EOF
     FAKE_MNT=$(cd "$CS_SESSIONS_ROOT/$1/.cs/vault-mnt" && pwd -P)
     export FAKE_MNT
     : > "$FAKE_DISKUTIL_LOG"
+    : > "$FAKE_DISKUTIL_LOG.stdin"
 }
 
 _pre_open() {  # name [env...] -> runs the hook from the session directory, as _run_pre_open does, with the password typed; cs's CS_LIVE_LOCK_PID goes in env
