@@ -14440,6 +14440,21 @@ _encrypt_move_content() {  # session_name, meta_dir
 # no running session. Its pid check takes only a number without leading
 # zeros, as cs writes them: kill -0 reads 0 as the caller's process group,
 # which is always there, and the leftover loop would signal that group.
+# Reads one line from the terminal without showing it, into CS_SECRET_REPLY.
+# read -s turns the terminal's echo off, and bash 3.2 leaves it off when
+# Ctrl-C ends the read, so the terminal's settings are put back first; the
+# exit runs cs's EXIT trap.
+_encrypt_read_secret() {  # prompt
+    CS_SECRET_SAVED_TTY=""
+    CS_SECRET_REPLY=""
+    [ -t 0 ] && CS_SECRET_SAVED_TTY=$(stty -g 2>/dev/null) || true
+    trap '[ -z "$CS_SECRET_SAVED_TTY" ] || stty "$CS_SECRET_SAVED_TTY" 2>/dev/null; echo >&2; exit 130' INT
+    printf '%s' "$1" >&2
+    IFS= read -rs CS_SECRET_REPLY || true
+    trap - INT
+    echo >&2
+}
+
 # cs asks for the password itself and hands it to diskutil on stdin: left to
 # ask, diskutil shows a dialog that offers to save the password in the
 # keychain. Only diskutil's errors are shown; its device table is not.
@@ -14485,9 +14500,15 @@ if ! { [ -t 0 ] || [ "${CS_ASSUME_TTY:-}" = "1" ]; }; then
     echo "cs: this session is encrypted and needs a terminal to ask for the vault password." >&2
     exit 1
 fi
+# read -s turns the terminal's echo off, and bash 3.2 leaves it off when
+# Ctrl-C ends the read, so the terminal's settings are put back first.
+saved=""
+[ -t 0 ] && saved=$(stty -g 2>/dev/null) || true
+trap '[ -z "$saved" ] || stty "$saved" 2>/dev/null; echo >&2; exit 130' INT
 printf 'Vault password for %s: ' "${PWD##*/}" >&2
 password=""
 IFS= read -rs password || true
+trap - INT
 echo >&2
 if [ -z "$password" ]; then
     echo "cs: no vault password entered." >&2
@@ -14517,9 +14538,12 @@ _encrypt_refresh_pre_open() {  # meta_dir
     [ -n "$container" ] || return 0
     text=$(_encrypt_pre_open_text "$container")
     [ "$text" = "$(cat "$hook")" ] && return 0
+    # Where diskutil has no image verbs, the hook cs wrote before still opens
+    # the vault and this one would not, so that one stays.
+    diskutil image --help >/dev/null 2>&1 || return 0
     # Made new, never written through: a link planted at the temporary name
     # would carry the hook's text to wherever it points.
-    rm -f "$hook.$$"
+    rm -f "$hook.$$" 2>/dev/null || true
     ( set -C; printf '%s\n' "$text" > "$hook.$$" ) 2>/dev/null \
         || error "${1%/.cs}: could not write .cs/local/pre-open.$$ to replace the pre-open cs wrote."
     chmod +x "$hook.$$"
@@ -14585,7 +14609,7 @@ _detach_opened_vault() {
 
 run_encrypt() {
     [ $# -eq 1 ] || error "Usage: cs -encrypt <name>"
-    local name="$1" meta container mnt sub taken=0 password="" again="" out transcripts
+    local name="$1" meta container mnt sub taken=0 password="" again="" out transcripts moved
     _encrypt_refuse "$name"
     meta="$SESSIONS_ROOT/$name/.cs"
     # Hold the session lock while the password prompts run, so an open in
@@ -14618,13 +14642,12 @@ run_encrypt() {
     # cs asks once and hands the password to diskutil on stdin, for the
     # create and for the attach: it is never an argument, and diskutil is
     # never left to ask, which it does in a dialog offering the keychain.
-    printf 'New vault password for %s: ' "$name" >&2
-    IFS= read -rs password || true
-    echo >&2
+    _encrypt_read_secret "New vault password for $name: "
+    password=$CS_SECRET_REPLY
     [ -n "$password" ] || error "$name: no password entered; the session is unchanged."
-    printf 'Again: ' >&2
-    IFS= read -rs again || true
-    echo >&2
+    _encrypt_read_secret "Again: "
+    again=$CS_SECRET_REPLY
+    CS_SECRET_REPLY=""
     [ "$password" = "$again" ] || error "$name: the two passwords differ; the session is unchanged."
     again=""
 
@@ -14642,16 +14665,18 @@ run_encrypt() {
     # Spotlight indexing holds files open and turns a detach busy.
     touch "$mnt/.metadata_never_index"
 
-    # The conversations go first, so a move that fails here has touched
-    # nothing under .cs/. mv across volumes copies, then removes the source,
-    # and can stop in either half, so the vault stays mounted: until the
-    # person has looked, it may hold the only whole copy.
-    if [ -d "$transcripts" ]; then
-        mkdir -p "$mnt/claude-config/projects"
-        mv "$transcripts" "$mnt/claude-config/projects/" 2>/dev/null \
-            || error "$name: could not move the session's conversations ($transcripts) into the vault. Nothing under .cs/ has moved. The vault is still mounted at .cs/vault-mnt: copy back from .cs/vault-mnt/claude-config/projects/ whatever $transcripts is missing, then run diskutil eject $mnt and delete $container before retrying."
-    fi
+    moved=$(_encrypt_moves "$meta" | awk '{ printf " .cs/%s", $1 }')
     _encrypt_move_content "$name" "$meta"
+    # The conversations go last, so a .cs/ move that fails leaves them where
+    # Claude Code reads them. mv across volumes copies, then removes the
+    # source, and can stop in either half, so the vault stays mounted and
+    # the message says it may hold the only whole copy. A project dir that is
+    # a link is left alone: moving the link would move no conversation.
+    if [ -d "$transcripts" ] && [ ! -L "$transcripts" ]; then
+        mkdir -p "$mnt/claude-config/projects"
+        out=$(mv "$transcripts" "$mnt/claude-config/projects/" 2>&1) \
+            || error "$name: could not move the session's conversations ($transcripts) into the vault. Already moved:${moved:- nothing}. The vault is still mounted at .cs/vault-mnt and may hold the only whole copy of the conversations: copy back from .cs/vault-mnt/claude-config/projects/ whatever $transcripts is missing, then finish by hand or move the rest back, and detach it. mv said: $out"
+    fi
     for sub in $CS_VAULT_LINKS; do
         ln -s "vault-mnt/$sub" "$meta/$sub"
     done
@@ -14667,6 +14692,7 @@ run_encrypt() {
     echo "Still in plaintext from before today; remove them by hand if they matter:"
     echo "  - this session's lines in ~/.claude/history.jsonl"
     echo "  - its project entries in ~/.claude.json and that file's backups"
+    echo "  - conversations started from another folder, such as a subfolder of the session, in ~/.claude/projects/"
     echo "  - what else Claude Code kept for its conversations under ~/.claude (file-history/, tasks/, debug/, paste-cache/)"
     echo "  - git history of anything committed before, and backups or snapshots"
     echo "Always in plaintext:"

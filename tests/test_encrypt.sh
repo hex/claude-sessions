@@ -8,8 +8,9 @@ source "$SCRIPT_DIR/test_lib.sh"
 
 # PATH stubs: uname answers $FAKE_UNAME; diskutil logs its argv, one call per
 # line, and fails the verb named in $FAKE_DISKUTIL_FAIL (create, attach or
-# eject). What create and attach read on stdin, the vault password, is kept in
-# $FAKE_DISKUTIL_LOG.stdin, one line per call.
+# eject, or --help for the probe `diskutil image --help`). What create and
+# attach read on stdin, the vault password, is kept in $FAKE_DISKUTIL_LOG.stdin
+# with its length in bytes, one line per call, so a stray newline shows.
 _stubs() {
     local d="$TEST_TMPDIR/stub"
     mkdir -p "$d"
@@ -22,7 +23,7 @@ EOF
 verb=$1
 [ "$1" = image ] && verb=$2
 echo "$*" >> "$FAKE_DISKUTIL_LOG"
-case "$verb" in create|attach) printf '%s\n' "$(cat)" >> "$FAKE_DISKUTIL_LOG.stdin" ;; esac
+case "$verb" in create|attach) pw=$(cat; printf .); pw=${pw%.}; printf '%s [%s bytes]\n' "$pw" "${#pw}" >> "$FAKE_DISKUTIL_LOG.stdin" ;; esac
 [ "$verb" = "${FAKE_DISKUTIL_FAIL:-}" ] && { echo "diskutil: $verb failed - stub" >&2; exit 1; }
 # The verb named in $FAKE_DISKUTIL_HOLD never finishes by itself: it stays in
 # flight until something stops it, or until the log is gone, so a test that
@@ -259,16 +260,15 @@ test_encrypt_builds_the_vault_and_detaches() {
     assert_eq "image create blank --encrypt --stdinpassphrase --format UDSB --size 50g --volumeName cs-enc --fs APFS $c
 image attach --stdinpassphrase --nobrowse --mountPoint $s/vault-mnt $c
 eject $s/vault-mnt" "$(cat "$FAKE_DISKUTIL_LOG")" "create, attach, then eject" || return 1
-    assert_eq "vault pw
-vault pw" "$(cat "$FAKE_DISKUTIL_LOG.stdin")" "the password typed once reaches create and attach on stdin" || return 1
+    assert_eq "vault pw [8 bytes]
+vault pw [8 bytes]" "$(cat "$FAKE_DISKUTIL_LOG.stdin")" "the password typed once reaches create and attach on stdin, with no newline" || return 1
     assert_eq "conversation" "$(cat "$v/claude-config/projects/${proj##*/}/44444444-4444-4444-8444-444444444444.jsonl" 2>/dev/null)" \
         "the conversation moved to where the encrypted session's claude reads it" || return 1
     [ ! -e "$proj" ] || { echo "  FAIL: plaintext transcripts left at $proj"; return 1; }
     assert_output_contains "$out" "New vault password for enc: " "cs asks for the new password" || return 1
     # shellcheck disable=SC2088  # cs prints the literal ~ path
     assert_output_contains "$out" "  - this session's lines in ~/.claude/history.jsonl" "lists what stays in plaintext" || return 1
-    # shellcheck disable=SC2088  # the literal ~ path cs printed before
-    assert_output_not_contains "$out" "~/.claude/projects" "the transcripts are not on that list: they moved" || return 1
+    assert_output_not_contains "$out" "this session's transcripts in" "the transcripts are not on that list: they moved" || return 1
     assert_output_not_contains "$out" "Apple_APFS_Volume" "diskutil's device table is not shown" || return 1
     assert_output_not_contains "$out" "Disk ejected" "nor its eject line" || return 1
 }
@@ -419,9 +419,9 @@ test_encrypt_refuses_a_readme_it_cannot_tag() {
     _assert_nothing_written enc || return 1
 }
 
-# The conversations move before anything under .cs/ does. When that move
-# fails the vault stays mounted, since it may hold the only whole copy, and
-# the session is not linked into it.
+# The conversations move after everything under .cs/. When that move fails
+# the vault stays mounted, since it may hold the only whole copy, the message
+# names what has moved, and the session is not linked into the vault.
 test_encrypt_stops_when_the_conversations_will_not_move() {
     [ "$(id -u)" != "0" ] || { echo "  SKIP: root ignores the permission that makes the move fail"; return 77; }
     _stubs
@@ -435,10 +435,10 @@ test_encrypt_stops_when_the_conversations_will_not_move() {
     chmod 755 "$CS_TRANSCRIPTS_DIR"
     c=$(_vault_path enc)
     assert_eq "1" "$rc" "non-zero exit" || return 1
-    assert_output_contains "$out" "enc: could not move the session's conversations ($proj) into the vault. Nothing under .cs/ has moved. The vault is still mounted at .cs/vault-mnt:" "says what moved and that the vault is mounted" || return 1
+    assert_output_contains "$out" "enc: could not move the session's conversations ($proj) into the vault. Already moved: .cs/memory .cs/plans .cs/local/session.log .cs/local/mail .cs/local/pending-handoff .cs/handoffs .cs/checkpoints .cs/narrative-archive. The vault is still mounted at .cs/vault-mnt and may hold the only whole copy of the conversations:" "names what moved and that the vault is mounted" || return 1
     assert_eq "conversation" "$(cat "$proj/44444444-4444-4444-8444-444444444444.jsonl")" "the conversation is where it was" || return 1
-    assert_eq "narrative" "$(cat "$s/memory/narrative.alice.md")" "memory untouched" || return 1
-    [ ! -L "$s/memory" ] && [ ! -e "$s/local/pre-open" ] || { echo "  FAIL: session changed"; return 1; }
+    assert_eq "narrative" "$(cat "$s/vault-mnt/memory/narrative.alice.md")" "memory is in the vault, as the message says" || return 1
+    [ ! -L "$s/memory" ] && [ ! -e "$s/local/pre-open" ] || { echo "  FAIL: the session was linked into the vault"; return 1; }
     assert_eq "image create blank --encrypt --stdinpassphrase --format UDSB --size 50g --volumeName cs-enc --fs APFS $c
 image attach --stdinpassphrase --nobrowse --mountPoint $s/vault-mnt $c" "$(cat "$FAKE_DISKUTIL_LOG")" "no eject: the vault stays mounted" || return 1
 }
@@ -655,7 +655,7 @@ test_pre_open_shows_its_prompt_and_only_diskutil_errors() {
     out=$(_pre_open enc CS_ASSUME_TTY=1 2>&1) || rc=$?
     assert_eq "0" "$rc" "exit 0" || return 1
     assert_eq "Vault password for enc: " "$out" "the prompt, and no device table" || return 1
-    assert_eq "vault pw" "$(cat "$FAKE_DISKUTIL_LOG.stdin")" "the password reaches attach on stdin" || return 1
+    assert_eq "vault pw [8 bytes]" "$(cat "$FAKE_DISKUTIL_LOG.stdin")" "the password reaches attach on stdin, with no newline" || return 1
     rc=0
     out=$(_pre_open enc CS_ASSUME_TTY=1 FAKE_DISKUTIL_FAIL=attach 2>&1) || rc=$?
     assert_eq "1" "$rc" "a refused password stops the open" || return 1
@@ -675,8 +675,23 @@ test_open_replaces_a_pre_open_another_cs_wrote() {
     out=$(CLAUDE_CODE_BIN="$(_claude_snapshot)" _open enc "$VAULT_PW_LINE" 2>&1) || rc=$?
     assert_eq "0" "$rc" "the open reaches claude: $out" || return 1
     [ ! -e "$TEST_TMPDIR/earlier-hook-ran" ] || { echo "  FAIL: the earlier hook ran"; return 1; }
-    assert_eq "image attach --stdinpassphrase --nobrowse --mountPoint $FAKE_MNT $(_vault_path enc)" "$(cat "$FAKE_DISKUTIL_LOG")" "this cs's hook attached the vault" || return 1
+    assert_eq "image --help
+image attach --stdinpassphrase --nobrowse --mountPoint $FAKE_MNT $(_vault_path enc)" "$(cat "$FAKE_DISKUTIL_LOG")" "cs checked for the image verbs, then its hook attached the vault" || return 1
     [ -x "$hook" ] || { echo "  FAIL: the rewritten pre-open is not executable"; return 1; }
+}
+
+# Where diskutil has no image verbs, the hook an earlier cs wrote is the one
+# that still opens the vault, so the open runs it as it is.
+test_open_keeps_an_earlier_pre_open_where_diskutil_has_no_image_verbs() {
+    _encrypted_session enc || return 1
+    local hook="$CS_SESSIONS_ROOT/enc/.cs/local/pre-open" out rc=0
+    printf '#!/bin/bash\n%s\necho ran >> "%s"\n' \
+        "# Written by cs -encrypt: mounts this session vault, asking for its password at every open." \
+        "$TEST_TMPDIR/earlier-hook-ran" > "$hook"
+    out=$(FAKE_DISKUTIL_FAIL=--help CLAUDE_CODE_BIN="$(_claude_snapshot)" _open enc 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open reaches claude: $out" || return 1
+    assert_eq "ran" "$(cat "$TEST_TMPDIR/earlier-hook-ran" 2>/dev/null)" "the earlier hook ran" || return 1
+    assert_eq "image --help" "$(cat "$FAKE_DISKUTIL_LOG")" "cs asked diskutil for the image verbs and called nothing else" || return 1
 }
 
 # An open that stops before claude runs detaches the vault its pre-open
@@ -1064,6 +1079,7 @@ run_test test_pre_open_refuses_without_a_terminal
 run_test test_pre_open_attaches_with_a_prompt
 run_test test_pre_open_shows_its_prompt_and_only_diskutil_errors
 run_test test_open_replaces_a_pre_open_another_cs_wrote
+run_test test_open_keeps_an_earlier_pre_open_where_diskutil_has_no_image_verbs
 run_test test_open_that_stops_detaches_the_vault_it_mounted
 run_test test_open_that_stops_leaves_a_running_session_vault_mounted
 run_test test_open_that_stops_reads_the_lock_by_the_one_lock_rule

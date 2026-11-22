@@ -265,20 +265,24 @@ from a terminal, with the session closed. It:
    Spotlight indexing off for it. cs passes the password to `diskutil` on
    stdin both times, never as an argument, and shows `diskutil`'s output only
    when a step fails.
-4. Moves the session's conversations from your Claude Code config dir
+4. Moves `.cs/memory`, `.cs/plans`, the `.cs/local/` files listed under
+   `.cs/private` above, and `.cs/handoffs`, `.cs/checkpoints` and
+   `.cs/narrative-archive` into the volume.
+5. Moves the session's conversations from your Claude Code config dir
    (`projects/<session path>/` under `$CLAUDE_CONFIG_DIR`, or `~/.claude`)
    into the volume's `claude-config/projects/`, where the encrypted session's
-   Claude Code reads them, so the last conversation still resumes.
-5. Moves `.cs/memory`, `.cs/plans`, the `.cs/local/` files listed under
-   `.cs/private` above, and `.cs/handoffs`, `.cs/checkpoints` and
-   `.cs/narrative-archive` into the volume, then links the four names into it.
+   Claude Code reads them, so the last conversation still resumes. Then it
+   links the four names into the volume.
 6. Writes `.cs/local/pre-open` and `.cs/local/vault` (the bundle's path), tags
    the session `encrypted`, and unmounts the volume with `diskutil eject`.
 
-`cs -encrypt` and every later open need a macOS whose `diskutil` has the
-`image` verbs (checked on macOS 27.2). A vault that an earlier cs built with
-`hdiutil` opens the same way: each open replaces a `pre-open` that cs wrote
-with the current one, and leaves one written by hand alone.
+`cs -encrypt` needs a macOS whose `diskutil` has the `image` verbs (checked
+on macOS 27.2); without them it stops at the create step with the session
+unchanged. A vault that an earlier cs built with `hdiutil` opens the same
+way: each open replaces a `pre-open` that cs wrote with the current one,
+written from the path in `.cs/local/vault`, and leaves one written by hand
+alone. To move a bundle, change the path in that file, not in `pre-open`. Where
+`diskutil` has no `image` verbs, the open keeps the `pre-open` it finds.
 
 From then on every open asks for the password in the terminal: cs asks, and
 passes the answer to `diskutil image attach` on stdin. `pre-open` refuses to
@@ -316,13 +320,12 @@ for the password.
 - the bundle already exists
 - `.cs/README.md` has no frontmatter for the tag
 
-If moving the conversations fails, it stops with nothing under `.cs/` moved and
-leaves the volume mounted, since the volume may hold the only whole copy: put
-back what is missing, unmount it, and delete the bundle before you retry. If a later move fails
-partway, it stops, lists what moved and what did not, and
-leaves the volume mounted so you can finish by hand; until you unmount it,
+If a `.cs/` move fails partway, it stops, lists what moved and what did not, and
+leaves the volume mounted so you can finish by hand. The conversations move
+last: if that move fails, it lists what has moved and leaves the volume
+mounted, since the volume may then hold the only whole copy of them. Until you unmount it,
 `cs -rm` and the picker's delete refuse to remove the session. When it finishes, it lists
-what is still in plaintext from before: the session's
+what is still in plaintext from before: conversations started from another folder (a subfolder of the session, say) in `projects/` and the session's
 lines in `history.jsonl` under your Claude Code config dir (`$CLAUDE_CONFIG_DIR`,
 else `~/.claude`), its entries in `.claude.json` (inside `$CLAUDE_CONFIG_DIR`
 when you set it, else `~/.claude.json`) and that file's backups, what else Claude Code kept for its conversations there (`file-history/`, `tasks/`, `debug/`, `paste-cache/`), git history, and backups. It lists `.cs/summary.md` and `.cs/brief.md` apart, as files that always stay in plaintext.
