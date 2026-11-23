@@ -1539,8 +1539,8 @@ test_doctor_warns_on_a_retire_aside_whose_run_is_gone() {
     output=$("$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "Retire leftovers: $aside holds the session records of test-session@feat, set aside by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone" \
         "doctor should name the aside directory a killed retire left, hedging the pid" || return 1
-    assert_output_contains "$output" "The worktree is gone, and /finish feat cannot run again without it, so finish the retire by hand: fuse what is missing from $aside/cs into $CLAUDE_SESSION_META_DIR, delete $aside, then delete the branch the retire would have removed with: git -C \"$CLAUDE_SESSION_DIR\" branch -d cs/feat" \
-        "the row carries the fuse, the delete and the branch the retire left" || return 1
+    assert_output_contains "$output" "The worktree is gone, and /finish feat cannot run again without it, so finish the retire by hand: fuse what is missing from $aside/cs into $CLAUDE_SESSION_META_DIR, delete $aside, then run git -C \"$CLAUDE_SESSION_DIR\" worktree prune and delete the branch the retire would have removed with: git -C \"$CLAUDE_SESSION_DIR\" branch -d cs/feat" \
+        "the row carries the fuse, the delete, the prune and the branch the retire left" || return 1
     assert_dir "$aside" "doctor reports and never deletes" || return 1
     assert_output_contains "$output" "Complete with [1-9][0-9]* warning(s)\." "the warning is counted" || return 1
 }
