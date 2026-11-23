@@ -394,8 +394,13 @@ _warn_conversations_left_outside() {  # session_name, plain_dir
 
 # The pid of a claude Claude Code lists as running in the session (sessions/
 # <pid>.json in its config dir), writing its conversations outside the vault.
+# The file outlives a claude that was killed, and its pid can come to name
+# another process: Claude Code records the start time beside it, procStart,
+# as `LC_ALL=C TZ=UTC ps -o lstart= -p <pid>` prints it, so a file whose
+# start time is not the process's is skipped. Without a recorded start time,
+# or an answer from ps, the pid being alive is enough.
 _plain_claude_writer() {  # session_dir
-    local f pid resolved
+    local f pid resolved recorded started
     resolved=$(cd -- "$1" 2>/dev/null && pwd -P) || resolved=$1
     for f in "$(_plain_claude_config_dir)"/sessions/*.json; do
         [ -f "$f" ] || continue
@@ -403,6 +408,11 @@ _plain_claude_writer() {  # session_dir
         pid=${pid%.json}
         case "$pid" in ''|0*|*[!0-9]*) continue ;; esac
         kill -0 "$pid" 2>/dev/null || continue
+        recorded=$(sed -n 's/.*"procStart":"\([^"]*\)".*/\1/p' "$f" 2>/dev/null) || recorded=""
+        if [ -n "$recorded" ]; then
+            started=$(LC_ALL=C TZ=UTC "${CS_PS_BIN:-ps}" -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//; s/ *$//') || started=""
+            [ -z "$started" ] || [ "$started" = "$recorded" ] || continue
+        fi
         grep -qF -e "\"cwd\":\"$1\"" -e "\"cwd\":\"$resolved\"" "$f" 2>/dev/null || continue
         printf '%s\n' "$pid"
         return 0
