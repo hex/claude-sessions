@@ -1654,7 +1654,7 @@ $missing"
         local delete_flag=-d
         [ -z "$force" ] || delete_flag=-D
         local by_hand="Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch $delete_flag $branch"
-        local lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks)"
+        local lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $_CS_HAND_FUSE_LEAVES_OUT"
         local kept="The worktree still holds every session record the feature left uncommitted, so cs deleted the copy it made of them"
         if [ "$mode" = "ignored" ] && ! _worktree_is_checkout "$wt_dir"; then
             # The records moved out before the removal began, so $aside/cs
@@ -1683,7 +1683,7 @@ $remove_err${trashed:+$nl$trashed}"
             # git deletes what it can before it fails, so the copy can be
             # the only one of a record by now.
             [ "$spare" = 0 ] \
-                || error "git worktree remove failed for $wt_dir after deleting part of it, and $known. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
+                || error "git worktree remove failed for $wt_dir after deleting part of it, and $known. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, $_CS_HAND_FUSE_LEAVES_OUT, then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
 $remove_err${trashed:+$nl$trashed}"
             rm -rf "$aside"
         fi
@@ -1699,7 +1699,7 @@ $remove_err${trashed:+$nl$trashed}"
     fi
     _cs_unlock "$wt_dir/.cs/session.mutex.lock"
     ( fuse_session_records "$aside/cs" "$base_dir/.cs" "$task" ) \
-        || error "The worktree $wt_dir is removed, but its session records could not be fused into $base_dir/.cs: they are at $aside/cs. Fuse what is missing by hand, then delete that directory.${trashed:+$nl$trashed}"
+        || error "The worktree $wt_dir is removed, but its session records could not be fused into $base_dir/.cs: they are at $aside/cs. Fuse what is missing by hand, $_CS_HAND_FUSE_LEAVES_OUT, then delete that directory.${trashed:+$nl$trashed}"
     rm -rf "$aside"
     if [ -n "$force" ]; then
         git -C "$base_dir" branch -D "$branch" >/dev/null 2>&1 \
@@ -2605,6 +2605,14 @@ _fuse_walk_skips() {  # rel
     esac
     return 1
 }
+
+# What the messages that say to fuse a feature's records by hand tell the
+# reader to leave out, as a clause: the files _fuse_walk_skips passes over,
+# but the log, which the fuse appends to the base's, and the frontmatter of
+# a narrative the base holds too, which the fuse never appends. The copy of
+# a tracked feature's records has both: the sums under local/inherited, and
+# an empty frontmatter atop a narrative that has none (_stage_log_delta).
+_CS_HAND_FUSE_LEAVES_OUT="leaving out what cs keeps for itself (session.lock, session.mutex.lock, everything under local but session.log, whose lines go after the base's own, and the frontmatter that opens a narrative the base holds too, down to its second --- line)"
 
 # The files of a feature's .cs that fuse_session_records merges into the
 # same path of the base's by a rule of its own: the timeline, the narratives,

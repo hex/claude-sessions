@@ -6384,7 +6384,7 @@ $missing"
         local delete_flag=-d
         [ -z "$force" ] || delete_flag=-D
         local by_hand="Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch $delete_flag $branch"
-        local lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks)"
+        local lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $_CS_HAND_FUSE_LEAVES_OUT"
         local kept="The worktree still holds every session record the feature left uncommitted, so cs deleted the copy it made of them"
         if [ "$mode" = "ignored" ] && ! _worktree_is_checkout "$wt_dir"; then
             # The records moved out before the removal began, so $aside/cs
@@ -6413,7 +6413,7 @@ $remove_err${trashed:+$nl$trashed}"
             # git deletes what it can before it fails, so the copy can be
             # the only one of a record by now.
             [ "$spare" = 0 ] \
-                || error "git worktree remove failed for $wt_dir after deleting part of it, and $known. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
+                || error "git worktree remove failed for $wt_dir after deleting part of it, and $known. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, $_CS_HAND_FUSE_LEAVES_OUT, then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
 $remove_err${trashed:+$nl$trashed}"
             rm -rf "$aside"
         fi
@@ -6429,7 +6429,7 @@ $remove_err${trashed:+$nl$trashed}"
     fi
     _cs_unlock "$wt_dir/.cs/session.mutex.lock"
     ( fuse_session_records "$aside/cs" "$base_dir/.cs" "$task" ) \
-        || error "The worktree $wt_dir is removed, but its session records could not be fused into $base_dir/.cs: they are at $aside/cs. Fuse what is missing by hand, then delete that directory.${trashed:+$nl$trashed}"
+        || error "The worktree $wt_dir is removed, but its session records could not be fused into $base_dir/.cs: they are at $aside/cs. Fuse what is missing by hand, $_CS_HAND_FUSE_LEAVES_OUT, then delete that directory.${trashed:+$nl$trashed}"
     rm -rf "$aside"
     if [ -n "$force" ]; then
         git -C "$base_dir" branch -D "$branch" >/dev/null 2>&1 \
@@ -7335,6 +7335,14 @@ _fuse_walk_skips() {  # rel
     esac
     return 1
 }
+
+# What the messages that say to fuse a feature's records by hand tell the
+# reader to leave out, as a clause: the files _fuse_walk_skips passes over,
+# but the log, which the fuse appends to the base's, and the frontmatter of
+# a narrative the base holds too, which the fuse never appends. The copy of
+# a tracked feature's records has both: the sums under local/inherited, and
+# an empty frontmatter atop a narrative that has none (_stage_log_delta).
+_CS_HAND_FUSE_LEAVES_OUT="leaving out what cs keeps for itself (session.lock, session.mutex.lock, everything under local but session.log, whose lines go after the base's own, and the frontmatter that opens a narrative the base holds too, down to its second --- line)"
 
 # The files of a feature's .cs that fuse_session_records merges into the
 # same path of the base's by a rule of its own: the timeline, the narratives,
@@ -14579,7 +14587,7 @@ _doctor_retire_copy_row() {  # aside worktree_name pid
         || lead="Retire leftovers: $d was made by a /finish retire of $wt (pid $pid) to hold a copy of its session records, which this process cannot see; that retire is probably gone, and it copied none. Delete it with: rm -r \"$d\""
     local rerun="Then put back any tracked file that retire's removal deleted, which leaves every other file as it is, and run /finish $task in $base again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --"
     local by_hand="Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
-    local lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks)"
+    local lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $_CS_HAND_FUSE_LEAVES_OUT"
     if [ ! -d "$wt_dir" ]; then
         [ -z "$copied" ] || return 1
         _doctor_warn "$lead"
@@ -14595,7 +14603,7 @@ _doctor_retire_copy_row() {  # aside worktree_name pid
             1) known="The worktree no longer holds each of them as the copy does" ;;
             *) known="cs could not copy the worktree's session records again to compare" ;;
         esac
-        _doctor_warn "$lead $known, so the copy may be the only one: fuse into $base_dir/.cs by hand what $d/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, then delete $d. $rerun"
+        _doctor_warn "$lead $known, so the copy may be the only one: fuse into $base_dir/.cs by hand what $d/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, $_CS_HAND_FUSE_LEAVES_OUT, then delete $d. $rerun"
     elif [ -n "$copied" ]; then
         held="$d/cs holds"
         [ ! -d "$wt_dir/.cs" ] || held="$d/cs or $wt_dir/.cs holds"
@@ -14642,11 +14650,11 @@ _doctor_check_retire_asides() {
                 _doctor_warn "Retire leftovers: $d was made by a /finish retire of $wt (pid $pid), which this process cannot see; that retire is probably gone, and the directory holds no records. Delete it with rmdir"
             fi
         elif [ -d "$SESSIONS_ROOT/$wt" ] && ! _worktree_is_checkout "$SESSIONS_ROOT/$wt"; then
-            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. $SESSIONS_ROOT/$wt is no longer a git checkout, so /finish $task cannot run there again: fuse into $SESSIONS_ROOT/$base/.cs by hand what $d/cs holds and $SESSIONS_ROOT/$base/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), then delete $d and what is left of $SESSIONS_ROOT/$wt. Then run git -C \"$SESSIONS_ROOT/$base\" worktree prune and delete the branch with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
+            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. $SESSIONS_ROOT/$wt is no longer a git checkout, so /finish $task cannot run there again: fuse into $SESSIONS_ROOT/$base/.cs by hand what $d/cs holds and $SESSIONS_ROOT/$base/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $_CS_HAND_FUSE_LEAVES_OUT, then delete $d and what is left of $SESSIONS_ROOT/$wt. Then run git -C \"$SESSIONS_ROOT/$base\" worktree prune and delete the branch with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
         elif [ -d "$SESSIONS_ROOT/$wt" ]; then
             _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is still there, so move $d/cs back to $SESSIONS_ROOT/$wt/.cs by hand, delete the empty $d, and run /finish $task in $base again"
         else
-            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is gone, and /finish $task cannot run again without it, so finish the retire by hand: fuse what is missing from $d/cs into $SESSIONS_ROOT/$base/.cs, delete $d, then run git -C \"$SESSIONS_ROOT/$base\" worktree prune and delete the branch the retire would have removed with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
+            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is gone, and /finish $task cannot run again without it, so finish the retire by hand: fuse what is missing from $d/cs into $SESSIONS_ROOT/$base/.cs, $_CS_HAND_FUSE_LEAVES_OUT, delete $d, then run git -C \"$SESSIONS_ROOT/$base\" worktree prune and delete the branch the retire would have removed with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
         fi
     done
 }
