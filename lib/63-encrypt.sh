@@ -364,6 +364,9 @@ run_encrypt() {
     echo "  - conversations started from another folder, such as a subfolder of the session, in ~/.claude/projects/"
     echo "  - what else Claude Code kept for its conversations under ~/.claude (file-history/, tasks/, debug/, paste-cache/)"
     echo "  - git history of anything committed before, and backups or snapshots"
+    if [ -L "$transcripts" ]; then
+        echo "  - this session's conversations: $transcripts is a link, so cs left it, and the folder it points to, outside the vault"
+    fi
     echo "Always in plaintext:"
     echo "  - .cs/summary.md and .cs/brief.md"
 }
