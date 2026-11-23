@@ -971,19 +971,23 @@ _path_goes_through_a_link() {  # root, relative path
 
 # Writes to <out> the base's files that its .worktreeinclude names and git
 # ignores, each ended by a NUL; one check-ignore answers for the whole list.
-# Fails, leaving what git said in
-# _CS_WORKTREEINCLUDE_ERROR, when git cannot list them: an unreadable
-# .worktreeinclude would otherwise read as one that names nothing.
+# Leaves what git said in _CS_WORKTREEINCLUDE_GIT_SAID. Fails when git cannot
+# list them: an unreadable .worktreeinclude would otherwise read as one that
+# names nothing. Git lists the rest and exits 0 when it cannot read a
+# directory of the base, saying so for each.
 _worktree_included_list() {  # base_dir out
-    local base="$1" named status=0
-    _CS_WORKTREEINCLUDE_ERROR=""
+    local base="$1" named said status=0 nl=$'\n'
+    _CS_WORKTREEINCLUDE_GIT_SAID=""
     named=$(mktemp "${TMPDIR:-/tmp}/cs-worktreeinclude.XXXXXX") || return 1
-    if _CS_WORKTREEINCLUDE_ERROR=$(git -C "$base" ls-files -z --others --ignored \
+    if said=$(git -C "$base" ls-files -z --others --ignored \
             --exclude-from="$base/.worktreeinclude" 2>&1 > "$named"); then
+        _CS_WORKTREEINCLUDE_GIT_SAID=$said
         # check-ignore exits 1 when it names no path.
-        _CS_WORKTREEINCLUDE_ERROR=$(git -C "$base" check-ignore -z --stdin < "$named" 2>&1 > "$2") \
+        said=$(git -C "$base" check-ignore -z --stdin < "$named" 2>&1 > "$2") \
             || [ $? -eq 1 ] || status=1
+        [ -z "$said" ] || _CS_WORKTREEINCLUDE_GIT_SAID="${_CS_WORKTREEINCLUDE_GIT_SAID:+$_CS_WORKTREEINCLUDE_GIT_SAID$nl}$said"
     else
+        _CS_WORKTREEINCLUDE_GIT_SAID=$said
         status=1
     fi
     rm -f "$named"
@@ -1083,7 +1087,10 @@ create_worktree_session() {
         trap 'rm -f "$_CS_WORKTREEINCLUDE_LIST"' EXIT
         _worktree_included_list "$base_dir" "$_CS_WORKTREEINCLUDE_LIST" \
             || error "Could not list the files that $base_dir/.worktreeinclude names, so no feature was created:
-$_CS_WORKTREEINCLUDE_ERROR"
+$_CS_WORKTREEINCLUDE_GIT_SAID"
+        [ -z "$_CS_WORKTREEINCLUDE_GIT_SAID" ] \
+            || warn "git could not read every directory of $base_dir, so a file .worktreeinclude names in one of these is not copied:
+$_CS_WORKTREEINCLUDE_GIT_SAID" >&2
     fi
 
     if git -C "$base_dir" rev-parse -q --verify "refs/heads/$branch" >/dev/null 2>&1; then
