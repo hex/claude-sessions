@@ -1138,6 +1138,22 @@ test_open_leaves_no_cut_conversation_in_a_vault_without_room() {
     assert_output_contains "$out" "enc: could not copy the session's conversations from $proj into its vault. They are all still in $proj, whole, and the vault holds none of them. cp said: cp: " "names the whole copy" || return 1
 }
 
+test_encrypt_leaves_no_cut_conversation_in_a_vault_without_room() {
+    _stubs
+    _populated_session enc
+    local s="$CS_SESSIONS_ROOT/enc/.cs" id=44444444-4444-4444-8444-444444444444 out rc=0 proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$CS_SESSIONS_ROOT/enc")"
+    mkdir -p "$proj"
+    echo "conversation" > "$proj/$id.jsonl"
+    _vault_without_room
+    out=$(_encrypt enc 2>&1) || rc=$?
+    assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of the conversation" || return 1
+    assert_eq "conversation" "$(cat "$proj/$id.jsonl")" "the conversation outside is whole" || return 1
+    assert_eq "1" "$rc" "cs -encrypt stops: $out" || return 1
+    assert_output_contains "$out" "enc: could not copy the session's conversations ($proj) into the vault. They are all still there, whole, and the vault holds none of them. Already moved: .cs/memory .cs/plans .cs/local/session.log .cs/local/mail .cs/local/pending-handoff .cs/handoffs .cs/checkpoints .cs/narrative-archive. The vault is still mounted at .cs/vault-mnt; finish by hand or move those back, then detach it. cp said: cp: " "names the whole copy and what moved" || return 1
+    [ ! -L "$s/memory" ] && [ ! -e "$s/local/pre-open" ] || { echo "  FAIL: the session was linked into the vault"; return 1; }
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1379,6 +1395,7 @@ run_test test_open_moves_nothing_when_a_conversation_is_on_both_sides
 run_test test_open_moves_nothing_through_a_linked_conversations_folder
 run_test test_open_moves_nothing_while_a_claude_writes_outside_the_vault
 run_test test_open_leaves_no_cut_conversation_in_a_vault_without_room
+run_test test_encrypt_leaves_no_cut_conversation_in_a_vault_without_room
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
