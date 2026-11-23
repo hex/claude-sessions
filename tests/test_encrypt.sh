@@ -1179,6 +1179,21 @@ test_open_removes_a_copy_outside_that_the_vault_already_holds() {
     assert_file_contains "$vault/$other.jsonl" "still outside" "the conversation only outside moved in" || return 1
 }
 
+test_open_names_what_it_could_not_remove_outside_the_vault() {
+    [ "$(id -u)" != "0" ] || { echo "  SKIP: root ignores the permission that makes the removal fail"; return 77; }
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj vault out rc=0
+    proj=$(_plain_conversation enc "$id" "before the vault")
+    vault=$(_vault_projects enc)
+    chmod 555 "$CS_TRANSCRIPTS_DIR"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    chmod 755 "$CS_TRANSCRIPTS_DIR"
+    assert_eq "0" "$rc" "the open reaches claude: $out" || return 1
+    assert_file_contains "$vault/$id.jsonl" "before the vault" "the vault holds the whole conversation" || return 1
+    assert_output_contains "$out" "enc: the vault holds whole copies of this session's conversations, but cs could not remove them all from outside it. What is left in $proj is in plain text; remove it by hand. Removing it failed with: rmdir: " "names what is left outside" || return 1
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1422,6 +1437,7 @@ run_test test_open_moves_nothing_while_a_claude_writes_outside_the_vault
 run_test test_open_leaves_no_cut_conversation_in_a_vault_without_room
 run_test test_encrypt_leaves_no_cut_conversation_in_a_vault_without_room
 run_test test_open_removes_a_copy_outside_that_the_vault_already_holds
+run_test test_open_names_what_it_could_not_remove_outside_the_vault
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
