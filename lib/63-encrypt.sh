@@ -349,11 +349,12 @@ _move_conversations_into_vault() {  # plain_dir, vault_dir
         copied+=("$name")
     done
     if [ "${#copied[@]}" -gt 0 ]; then
-        out=$(mkdir -p "$2" 2>&1 && mkdir "$staging" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
+        out=$(mkdir -p "${2%/*}" 2>&1 && mkdir "$staging" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
         for name in "${copied[@]}"; do
             out=$(cp -pPR "$1/$name" "$staging/" 2>&1) \
                 || { _conversations_copy_stopped "$staging" "$out"; return 1; }
         done
+        out=$(mkdir -p "$2" 2>&1) || { _conversations_copy_stopped "$staging" "$out"; return 1; }
         for name in "${copied[@]}"; do
             out=$( { [ ! -d "$2/$name" ] || rmdir "$2/$name"; } 2>&1 && mv "$staging/$name" "$2/$name" 2>&1) \
                 || { _conversations_copy_stopped "$staging" "$out"; return 1; }
