@@ -5700,7 +5700,8 @@ _path_goes_through_a_link() {  # root, relative path
 }
 
 # Writes to <out> the base's files that its .worktreeinclude names and git
-# ignores, each ended by a NUL. Fails, leaving what git said in
+# ignores, each ended by a NUL; one check-ignore answers for the whole list.
+# Fails, leaving what git said in
 # _CS_WORKTREEINCLUDE_ERROR, when git cannot list them: an unreadable
 # .worktreeinclude would otherwise read as one that names nothing.
 _worktree_included_list() {  # base_dir out
@@ -5722,17 +5723,15 @@ _worktree_included_list() {  # base_dir out
 # Copies into a feature's checkout the base's files that its .worktreeinclude
 # names and git ignores (an env file, a local config), which a checkout never
 # carries. The file reads as a .gitignore does, as Claude Code reads it for
-# the worktrees it makes itself (_worktree_included_list). Left where they are: a file the feature
-# already has, cs's own records, .claude/settings.local.json (cs writes the
-# feature's, and the retire adds every permission rule it holds to the
-# base's, so a copy would hand the base back a rule it dropped meanwhile), a
-# link (cs writes some of these files later, and a write through a copied
-# link lands on the base's file), and a path that passes through a link in
-# the feature. One check-ignore answers for the
-# whole list. Runs command-substituted with its caller, so every line it says
-# goes to stderr.
-# Fails, having copied nothing, when git cannot list them
-# (_CS_WORKTREEINCLUDE_ERROR).
+# the worktrees it makes itself (_worktree_included_list). Left where they
+# are: a file the feature already has, cs's own records,
+# .claude/settings.local.json (cs writes the feature's, and the retire adds
+# every permission rule it holds to the base's, so a copy would hand the base
+# back a rule it dropped meanwhile), a link (cs writes some of these files
+# later, and a write through a copied link lands on the base's file), and a
+# path that passes through a link in the feature. Runs command-substituted
+# with its caller, so every line it says goes to stderr. Fails, having copied
+# nothing, when git cannot list them (_CS_WORKTREEINCLUDE_ERROR).
 _worktree_carry_included() {  # base_dir wt_dir
     local base="$1" wt="$2" f dest copied=0 list
     [ -f "$base/.worktreeinclude" ] || return 0
