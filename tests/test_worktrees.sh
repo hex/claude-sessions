@@ -2488,6 +2488,24 @@ test_integrate_carries_the_base_lines_of_a_log_the_feature_also_changed() {
     assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.landing-*')" "nothing set aside is left behind" || return 1
 }
 
+# A base line equal to the last line the feature committed is still the
+# base's own: the narrative holds it twice once the feature has landed.
+test_integrate_carries_a_base_line_equal_to_the_last_line_the_feature_committed() {
+    local base_dir wt sha narrative output status=0
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    printf '%s\n' "- feature note" "- done" >> "$wt/$narrative"
+    (cd "$wt" && git add "$narrative" && git commit -q -m "feature records") || { echo "  FAIL: fixture: the feature commits its narrative"; return 1; }
+    sha=$(git -C "$wt" rev-parse HEAD)
+    echo "- done" >> "$base_dir/$narrative"
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "the integrate lands: $output" || return 1
+    assert_eq "2" "$(grep -c -x -- '- done' "$base_dir/$narrative")" "the narrative holds the feature's '- done' and the base's" || return 1
+    assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.landing-*')" "nothing set aside is left behind" || return 1
+}
+
 # A directory to put first on PATH, holding a stand-in git that runs the
 # shell line given in place of a fast-forward and is git for everything else.
 _git_with_the_fast_forward_replaced() {  # shell line
@@ -2779,6 +2797,7 @@ run_test test_integrate_lands_over_base_session_records_it_does_not_touch
 run_test test_integrate_refuses_a_landing_that_overwrites_base_session_records
 run_test test_integrate_rechecks_session_records_the_gate_dirtied
 run_test test_integrate_carries_the_base_lines_of_a_log_the_feature_also_changed
+run_test test_integrate_carries_a_base_line_equal_to_the_last_line_the_feature_committed
 run_test test_integrate_puts_the_base_lines_back_when_the_landing_fails
 run_test test_integrate_puts_the_base_lines_back_when_the_landing_is_terminated
 run_test test_integrate_keeps_the_base_memory_pointers_a_feature_merge_dropped
