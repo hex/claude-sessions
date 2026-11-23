@@ -319,13 +319,19 @@ test_encrypt_builds_a_session_never_opened_on_this_machine() {
 
 # cs -encrypt reads the terminal's theme before it draws its rows, as an open
 # does: on a light terminal the new vault row takes the light palette's amber.
-# Nothing answers the pty's password prompt, so cs stops there.
+# Output goes to a pty, so cs draws in colour; the passwords come down a pipe,
+# so no terminal query reads them, and COLORFGBG names the light background.
 test_encrypt_prompt_follows_a_light_terminal() {
     _stubs
     _populated_session enc
-    local out light_amber
+    local run="$TEST_TMPDIR/encrypt-on-a-light-terminal" out light_amber
+    cat > "$run" <<EOF
+#!/bin/sh
+printf '%s%s' '$VAULT_PW_LINE' '$VAULT_PW_LINE' | COLORFGBG='0;15' CS_ASSUME_TTY=1 '$CS_BIN' -encrypt enc
+EOF
+    chmod +x "$run"
     light_amber=$(printf '\033[38;2;162;122;58m')
-    out=$(export COLORFGBG='0;15'; _pty_run "$CS_BIN" -encrypt enc 2>&1) || true
+    out=$(_pty_run "$run" 2>&1) || true
     assert_output_contains "$out" "${light_amber}new vault" "the new vault row is drawn in the light palette (output: $out)" || return 1
 }
 
