@@ -144,6 +144,30 @@ _tree_is_dirty() {
         || ! git -C "$1" diff --cached --quiet 2>/dev/null
 }
 
+# True when a checkout has uncommitted changes to tracked files outside .cs
+# (staged or unstaged). The conversation and its hooks write the session
+# records under .cs, and cs commits none of them, so a change there is no
+# sign of project work left unfinished.
+_project_tree_is_dirty() {
+    ! git -C "$1" diff --quiet -- . ':(exclude).cs' 2>/dev/null \
+        || ! git -C "$1" diff --cached --quiet -- . ':(exclude).cs' 2>/dev/null
+}
+
+# The files of a base checkout a landing would overwrite, given a file that
+# lists every path the landing changes, one per line: "untracked <path>" for
+# one git does not track there, "changed <path>" for a tracked one with
+# uncommitted changes, staged or not. git merge --ff-only refuses over either,
+# with a message that blames the wrong cause. Fails when git cannot list the
+# base's files.
+_landing_overwrites() {  # base_dir touched_file
+    [ -s "$2" ] || return 0
+    local untracked changed
+    untracked=$(git -C "$1" ls-files --others --exclude-standard) || return 1
+    changed=$(git -C "$1" diff --name-only HEAD) || return 1
+    [ -z "$untracked" ] || printf '%s\n' "$untracked" | { grep -Fxf "$2" || [ $? -eq 1 ]; } | sed 's/^/untracked /'
+    [ -z "$changed" ] || printf '%s\n' "$changed" | { grep -Fxf "$2" || [ $? -eq 1 ]; } | sed 's/^/changed /'
+}
+
 # The names `git ls-files -z` prints, read on stdin, one per line. A name may
 # hold any byte, so a backslash in one is written "\\" and a newline "\n":
 # each line stands for exactly one name, and printf's %b gives the name back.
@@ -1642,6 +1666,9 @@ _integrate_cleanup() {
     # cannot be removed must not abort the handler under set -e: the lock
     # below still has to be released.
     [ -n "${_INTEGRATE_GATE_LOG:-}" ] && { rm -f "$_INTEGRATE_GATE_LOG" 2>/dev/null || :; }
+    # The list of paths the landing changes is read before the gate and again
+    # after it, so every exit in between leaves it for this handler.
+    [ -n "${_INTEGRATE_TOUCHED:-}" ] && { rm -f "$_INTEGRATE_TOUCHED" 2>/dev/null || :; }
     # A lock already gone must not abort the handler under set -e: the path
     # still has to be forgotten below.
     [ -n "${_INTEGRATE_LOCK:-}" ] && { rm -r "$_INTEGRATE_LOCK" 2>/dev/null || :; }
@@ -1651,6 +1678,7 @@ _integrate_cleanup() {
     _INTEGRATE_LOCK=""
     _INTEGRATE_TMP=""
     _INTEGRATE_GATE_LOG=""
+    _INTEGRATE_TOUCHED=""
     return 0
 }
 
@@ -1728,7 +1756,7 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote [--ci-green]
     fi
     _finish_progress_write started
 
-    if _tree_is_dirty "$base_dir"; then
+    if _project_tree_is_dirty "$base_dir"; then
         error "Base session has uncommitted changes; commit them in $base_dir first"
     fi
     local git_dir common
@@ -1765,6 +1793,7 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote [--ci-green]
     _INTEGRATE_BASE_DIR="$base_dir"
     _INTEGRATE_TMP=""
     _INTEGRATE_GATE_LOG=""
+    _INTEGRATE_TOUCHED=""
     # EXIT alone is not enough: a TERM/INT'd bash skips the EXIT trap
     # (measured: exit 143, no cleanup), stranding the mutex and the temp.
     # Same shape as lib/75-launch.sh:112-113. Armed before the pid write: a
@@ -1881,25 +1910,33 @@ _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote ci_green g
 ${conflicts:-(none reported; see git -C \"$tmp\" status)}
 $advice"
     fi
-    # An untracked file in the base colliding with a path the merge touches
-    # passes _tree_is_dirty (tracked-only) and the temp merge itself, then
-    # aborts the ff-only landing with a message that blames the wrong cause.
-    # Caught here, before the gate spends any cost on a doomed landing.
-    local touched_file others_file collisions
-    touched_file=$(mktemp "${TMPDIR:-/tmp}/cs-touched.XXXXXX")
-    others_file=$(mktemp "${TMPDIR:-/tmp}/cs-untracked.XXXXXX")
-    git -C "$tmp" diff --name-only "$B" HEAD > "$touched_file"
-    git -C "$base_dir" ls-files --others --exclude-standard > "$others_file"
-    collisions=""
-    if [ -s "$touched_file" ] && [ -s "$others_file" ]; then
-        collisions=$(grep -Fxf "$touched_file" "$others_file" 2>/dev/null || true)
-    fi
-    rm -f "$touched_file" "$others_file"
+    # An untracked file in the base at a path the merge touches, or an
+    # uncommitted change to a session record the merge touches, passes
+    # _project_tree_is_dirty and the temp merge itself, then aborts the
+    # ff-only landing with a message that blames the wrong cause. Caught
+    # here, before the gate spends any cost on a doomed landing.
+    local overwrites entry collisions="" changed=""
+    _INTEGRATE_TOUCHED=$(mktemp "${TMPDIR:-/tmp}/cs-touched.XXXXXX")
+    git -C "$tmp" diff --name-only "$B" HEAD > "$_INTEGRATE_TOUCHED"
+    overwrites=$(_landing_overwrites "$base_dir" "$_INTEGRATE_TOUCHED") \
+        || { rmdir "$no_hooks"; error "Could not list the uncommitted files in $base_dir; base untouched"; }
+    while IFS= read -r entry; do
+        case "$entry" in
+            "untracked "*) collisions="$collisions${collisions:+$'\n'}${entry#untracked }" ;;
+            "changed "*) changed="$changed${changed:+$'\n'}${entry#changed }" ;;
+        esac
+    done <<< "$overwrites"
     if [ -n "$collisions" ]; then
         rmdir "$no_hooks"
         error "Untracked files in $base_dir collide with paths the feature adds; base untouched. Colliding paths:
 $collisions
 Move or delete these untracked files in $base_dir, then re-run /finish $task"
+    fi
+    if [ -n "$changed" ]; then
+        rmdir "$no_hooks"
+        error "Uncommitted changes in $base_dir are on paths the feature also changes, and landing would overwrite them; base untouched. Paths:
+$changed
+Commit them in $base_dir (cs never commits session records), then re-run /finish $task"
     fi
     # Submodules after the merge, so the gates see the MERGED gitlinks: a
     # feature that adds or bumps a submodule is otherwise gated against
@@ -1981,8 +2018,17 @@ Commit the generated output on the feature branch, then re-run /finish $task"
     if [ "$(git -C "$base_dir" rev-parse HEAD)" != "$B" ]; then
         error "Base $base_dir moved during the gates (was $B, now $(git -C "$base_dir" rev-parse --short HEAD)); re-run /finish $task"
     fi
-    if _tree_is_dirty "$base_dir" || git -C "$base_dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+    if _project_tree_is_dirty "$base_dir" || git -C "$base_dir" rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
         error "Base $base_dir changed during the gates (uncommitted changes or a merge in progress); commit or abort, then re-run /finish $task"
+    fi
+    # A session record or an untracked file written while the gate ran is in
+    # the way only when the landing changes that path.
+    overwrites=$(_landing_overwrites "$base_dir" "$_INTEGRATE_TOUCHED") \
+        || error "Could not list the uncommitted files in $base_dir; base untouched at $B"
+    if [ -n "$overwrites" ]; then
+        error "Base $base_dir changed during the gates on paths the feature also changes; base untouched at $B. Paths:
+$(printf '%s\n' "$overwrites" | sed 's/^[a-z]* //')
+Commit them in $base_dir (cs never commits session records), then re-run /finish $task"
     fi
     # Fast-forward BEFORE removing the temp: until then the merge commit is
     # reachable only from the temp's detached HEAD.
