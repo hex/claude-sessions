@@ -294,7 +294,8 @@ _plain_claude_project_dir() {  # session_dir
 
 # An empty folder holds nothing to move: Claude Code makes an empty memory/ in
 # every project folder, so the one outside and the one in the vault are no
-# clash, and the one outside is removed.
+# clash, and the one outside is removed. One in the vault makes way for a
+# folder of the same name from outside.
 _empty_real_dir() {  # path
     [ -d "$1" ] && [ ! -L "$1" ] && [ -z "$(ls -A -- "$1" 2>/dev/null)" ]
 }
@@ -432,6 +433,7 @@ _move_plain_conversations_at_open() {  # session_name, session_dir
         [ -e "$entry" ] || [ -L "$entry" ] || continue
         _empty_real_dir "$entry" && continue
         [ -e "$vault/${entry##*/}" ] || [ -L "$vault/${entry##*/}" ] || continue
+        _empty_real_dir "$vault/${entry##*/}" && continue
         _same_content "$entry" "$vault/${entry##*/}" && continue
         warn "$1: $entry is in the vault too, as .cs/claude-config/projects/${plain##*/}/${entry##*/}, so cs moved none of the conversations in $plain. Keep the copy you want in the vault, remove the other, then reopen."
         return 0
