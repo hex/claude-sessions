@@ -1259,14 +1259,14 @@ _retire_drop_copy() {
 
 # Whether a worktree still holds every record a tracked feature's retire
 # copied to <aside> (_capture_tracked_records): its .cs is there, and a copy
-# made now holds each file of that one byte for byte. Anything that stops
-# the second copy answers no.
+# made now holds each file of that one byte for byte. A second copy that
+# cannot be made holds none of them.
 _retire_copy_is_spare() {  # wt_dir base_meta task aside
     local again file status=0
     [ -d "$1/.cs" ] || return 1
     again=$(mktemp -d "${TMPDIR:-/tmp}/cs-retire-copy.XXXXXX") || return 1
-    _capture_tracked_records "$1" "$2" "$3" "$again" > /dev/null 2>&1 || status=1
-    while [ "$status" = 0 ] && IFS= read -r -d '' file; do
+    _capture_tracked_records "$1" "$2" "$3" "$again" > /dev/null 2>&1 || rm -rf "$again/cs"
+    while IFS= read -r -d '' file; do
         cmp -s "$file" "$again/cs/${file#"$4/cs/"}" || status=1
     done < <(find "$4/cs" -type f -print0 2>/dev/null)
     rm -rf "$again"
