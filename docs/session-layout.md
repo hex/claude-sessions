@@ -419,8 +419,10 @@ conflict-free:
   own version rather than conflicting. `/finish` then appends each feature
   pointer whose target neither the base index nor its memory archive names,
   once per target. When the feature merged the base in and so took its own
-  index over the base's, `/finish` lands the base's index with those
-  feature pointers appended, and says how many base pointers it kept.
+  index over the base's, `/finish` lands the feature's index with each base
+  pointer it lacks appended, and says how many. A base pointer stays out
+  when the landed tree has no such topic file, or the landed memory archive
+  holds the pointer: the feature deleted the topic or archived the pointer.
 
 cs counts each of these lines as present only as a whole line, so where an
 earlier append glued one onto the line before, cs appends it again on a line

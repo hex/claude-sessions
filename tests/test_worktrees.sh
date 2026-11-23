@@ -2435,10 +2435,10 @@ Commit them in $base_dir (cs leaves session records for you to commit), then re-
 
 # A feature that merged the base in keeps its own MEMORY.md (merge=ours), so
 # the pointers the base indexed meanwhile are missing from its copy, and the
-# landing takes that copy whole: the base is an ancestor. The landing keeps
-# the base's index and adds the feature's pointers to it.
+# landing takes that copy whole: the base is an ancestor. The landing adds
+# the base's pointers to it, their topics being in the landed tree.
 test_integrate_keeps_the_base_memory_pointers_a_feature_merge_dropped() {
-    local base_dir wt sha index=".cs/memory/MEMORY.md" base_index output status=0 topic
+    local base_dir wt sha index=".cs/memory/MEMORY.md" feature_index output status=0 topic
     base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
     cs_launch "myproj@fix-auth"
     wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
@@ -2450,18 +2450,18 @@ test_integrate_keeps_the_base_memory_pointers_a_feature_merge_dropped() {
         echo "- [Topic $topic](topic-$topic.md): the base's" >> "$base_dir/$index"
     done
     (cd "$base_dir" && git add .cs/memory && git commit -q -m "base topics")
-    base_index=$(cat "$base_dir/$index")
     (cd "$wt" && git merge -q --no-edit "$(git -C "$base_dir" symbolic-ref --short HEAD)" >/dev/null 2>&1) \
         || { echo "  FAIL: fixture: the feature merges the base in"; return 1; }
     assert_eq "0" "$(grep -c -F '(topic-a.md)' "$wt/$index")" "fixture: the feature's index lacks the base's first pointer" || return 1
     assert_eq "0" "$(grep -c -F '(topic-b.md)' "$wt/$index")" "fixture: the feature's index lacks the base's second pointer" || return 1
+    feature_index=$(cat "$wt/$index")
     sha=$(git -C "$wt" rev-parse HEAD)
     output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
     assert_eq "0" "$status" "the integrate lands: $output" || return 1
-    assert_eq "$base_index
-- [Topic f](topic-f.md): the feature's" "$(git -C "$base_dir" show "HEAD:$index")" "the landed index is the base's, then the feature's pointer" || return 1
-    assert_eq "MEMORY.md: kept 2 base pointer(s) the feature's copy lacked
-MEMORY.md: appended 1 pointer(s) from the feature (base lines kept)" "$(printf '%s\n' "$output" | grep -F 'MEMORY.md:')" "the integrate says what it did to the index" || return 1
+    assert_eq "$feature_index
+- [Topic a](topic-a.md): the base's
+- [Topic b](topic-b.md): the base's" "$(git -C "$base_dir" show "HEAD:$index")" "the landed index is the feature's, then the base's two pointers" || return 1
+    assert_eq "MEMORY.md: kept 2 base pointer(s) the feature's copy lacked" "$(printf '%s\n' "$output" | grep -F 'MEMORY.md:')" "the integrate says what it did to the index" || return 1
     assert_eq "" "$(git -C "$base_dir" status --porcelain -- .cs/memory)" "the index landed committed" || return 1
 }
 
