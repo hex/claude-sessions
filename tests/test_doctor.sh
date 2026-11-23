@@ -1603,6 +1603,32 @@ test_doctor_retire_copy_with_its_worktree_says_delete_it() {
     done
 }
 
+# The removal a retire runs deletes what it can before it fails or is killed,
+# so a worktree directory can outlive its .cs, or keep a .cs that lost a
+# record. The copy is then the only one of what is gone, and the row never
+# says to delete it unread.
+test_doctor_retire_copy_beside_a_worktree_that_lost_its_records_says_keep_it() {
+    local dead aside output holds wt="$CS_SESSIONS_ROOT/test-session@feat"
+    for holds in no-cs a-cs-without-the-record; do
+        rm -rf "$wt"
+        mkdir -p "$wt"
+        [ "$holds" = no-cs ] || mkdir "$wt/.cs"
+        sh -c 'exit 0' & dead=$!
+        wait "$dead"
+        aside="$CS_SESSIONS_ROOT/.retire-test-session@feat.$dead"
+        mkdir -p "$aside/cs/memory"
+        : > "$aside/copy"
+        echo "- a line nobody committed" > "$aside/cs/memory/narrative.alice.md"
+        output=$("$CS_BIN" -doctor 2>&1) || true
+        assert_output_contains "$output" "Retire leftovers: $aside holds a copy of the session records of test-session@feat, captured by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. The worktree no longer holds each of them as the copy does, so the copy may be the only one: fuse into $CS_SESSIONS_ROOT/test-session/.cs by hand what $aside/cs holds and neither $CS_SESSIONS_ROOT/test-session/.cs nor $CS_SESSIONS_ROOT/test-session@feat/.cs does, then delete $aside. If git still lists the worktree (git -C \"$CS_SESSIONS_ROOT/test-session\" worktree list), run /finish feat in test-session again; if not, delete what is left of $CS_SESSIONS_ROOT/test-session@feat and then the branch with: git -C \"$CS_SESSIONS_ROOT/test-session\" branch -d cs/feat" \
+            "a worktree with $holds: the row says to fuse what the copy alone holds before deleting it" || return 1
+        assert_output_not_contains "$output" "The worktree keeps its own .cs" \
+            "a worktree with $holds: the row does not say the worktree has its records" || return 1
+        assert_dir "$aside" "doctor reports and never deletes" || return 1
+        rm -rf "$aside"
+    done
+}
+
 # A /finish landing sets aside the lines the base's narrative and timeline
 # hold uncommitted, in $SESSIONS_ROOT/.landing-<base>@<task>.<pid>, and puts
 # them back once the feature's are in. Killed in between, it leaves the
@@ -1871,6 +1897,7 @@ run_test test_doctor_warns_on_a_retire_aside_whose_run_is_gone
 run_test test_doctor_retire_aside_with_its_worktree_says_move_the_records_back
 run_test test_doctor_empty_retire_aside_says_nothing_moved
 run_test test_doctor_retire_copy_with_its_worktree_says_delete_it
+run_test test_doctor_retire_copy_beside_a_worktree_that_lost_its_records_says_keep_it
 run_test test_doctor_warns_on_a_landing_aside_whose_run_is_gone
 run_test test_doctor_leaves_a_retire_aside_alone_while_its_run_lives
 run_test test_doctor_leaves_a_retire_aside_alone_when_its_pid_cannot_be_judged

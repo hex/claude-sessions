@@ -4882,6 +4882,8 @@ test_retire_tracked_mode_keeps_its_copy_when_the_removal_deleted_the_records() {
     assert_output_not_contains "$output" "nothing was fused or deleted" "the refusal does not say nothing was deleted" || return 1
     assert_output_contains "$output" "The copy cs made of them is at $aside/cs" "the refusal says where the records are" || return 1
     assert_file_not_contains "$base_dir/$narrative" "feature line $token" "the base narrative is untouched" || return 1
+    assert_output_contains "$("$CS_BIN" -doctor 2>&1)" "Retire leftovers: $aside holds a copy of the session records of myproj@fix-auth, captured by a /finish retire (pid ${aside##*.}), which this process cannot see; that retire is probably gone. The worktree no longer holds each of them as the copy does, so the copy may be the only one: fuse into $CS_SESSIONS_ROOT/myproj/.cs by hand what $aside/cs holds and neither $CS_SESSIONS_ROOT/myproj/.cs nor $CS_SESSIONS_ROOT/myproj@fix-auth/.cs does, then delete $aside. If git still lists the worktree (git -C \"$CS_SESSIONS_ROOT/myproj\" worktree list), run /finish fix-auth in myproj again; if not, delete what is left of $CS_SESSIONS_ROOT/myproj@fix-auth and then the branch with: git -C \"$CS_SESSIONS_ROOT/myproj\" branch -d cs/fix-auth" \
+        "cs -doctor names the copy and says to fuse what it alone holds" || return 1
 }
 
 run_test test_retire_tracked_mode_keeps_its_copy_when_the_removal_deleted_the_records
