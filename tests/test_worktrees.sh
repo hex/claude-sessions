@@ -2378,8 +2378,9 @@ test_integrate_lands_over_base_session_records_it_does_not_touch() {
 # A feature that committed a change to a record the base holds an uncommitted
 # change in cannot land when the record is not a log cs appends to: the
 # fast-forward would overwrite the base's change. The refusal names the path
-# before any gate runs. So does a narrative whose committed lines the base
-# rewrote: what it holds uncommitted is then not lines to put back.
+# before any gate runs. A narrative whose committed lines the base rewrote
+# is refused the same way: what it holds uncommitted is then not lines to
+# put back.
 test_integrate_refuses_a_landing_that_overwrites_base_session_records() {
     local base_dir wt sha narrative readme=".cs/README.md" head output status=0 line="the base's objective $RANDOM$RANDOM"
     base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }

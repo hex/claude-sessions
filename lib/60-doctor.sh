@@ -1117,8 +1117,9 @@ _doctor_check_retire_asides() {
 # /finish's landing sets aside the lines the base's narrative and timeline
 # hold uncommitted, in $SESSIONS_ROOT/.landing-<worktree>.<pid>, when the
 # feature changed those files too, and puts them back once the feature's are
-# in; a landing that exits puts them back first, so only one killed outright
-# leaves the directory. Its cs holds the lines, one file per record, and
+# in; a landing that exits puts them back first, so the directory outlives
+# only a landing killed outright, or one that could not put them back and
+# said so. Its cs holds the lines, one file per record, and
 # appears once all are copied: without it no record was touched. Reported
 # under the same rule as a retire's directory: only when the pid is gone.
 _doctor_check_landing_asides() {

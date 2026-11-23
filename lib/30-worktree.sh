@@ -1729,8 +1729,8 @@ _make_base_claude_dir() {  # base_dir
 # integrate_feature_worktree, including error's exit 1. Globals because an
 # EXIT trap runs after the function's locals are gone.
 _integrate_cleanup() {
-    # First, while the mutex is still held: a landing that ended between
-    # setting the base's log lines aside and putting them back.
+    # First, while the mutex is still held, settle a landing that ended
+    # between setting the base's log lines aside and putting them back.
     _integrate_put_logs_back || true
     if [ -n "${_INTEGRATE_TMP:-}" ]; then
         # Remove if present, then prune regardless: a directory gone with its
@@ -1791,8 +1791,8 @@ _integrate_set_logs_aside() {  # base_dir wt_name paths
 # gains its lines back, unless it ends with them already. Before that, each
 # log that is no longer what it was gets its whole copy back. Deletes the
 # directory when every log is settled; keeps it and says where it is when
-# one is not. Forgets the directory first, so the cleanup handler does
-# nothing after the landing, or an earlier pass of its own, settled it.
+# one is not. Forgets the directory first, so once a call has run, settled
+# or not, the cleanup handler's call does nothing.
 _integrate_put_logs_back() {
     local aside="${_INTEGRATE_CARRY:-}" base="${_INTEGRATE_BASE_DIR:-}" lines rel file landed="" status=0
     [ -n "$aside" ] || return 0
@@ -2197,8 +2197,9 @@ Commit them in $base_dir (cs leaves session records for you to commit), then re-
     # The fast-forward refuses over the lines the base's narrative and
     # timeline hold uncommitted where the feature changed those files too.
     # They are set aside, the files go back to the base's last commit, and
-    # the lines are put back once the feature's are in; any exit before
-    # that puts the files back as they were (_integrate_cleanup).
+    # the lines are put back once the feature's are in. An exit before the
+    # fast-forward puts the files back as they were, and one after it
+    # appends the lines (_integrate_cleanup).
     if [ -n "$carried" ]; then
         local -a logs=()
         while IFS= read -r entry; do logs+=("$entry"); done <<< "$carried"
