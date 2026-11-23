@@ -15582,20 +15582,22 @@ _conversations_copy_stopped() {  # staging_dir, what the tool said
 # outside only goes.
 # Returns 0 with nothing left outside; 1 with everything outside as it was;
 # 2 with whole copies in the vault and something outside that would not go.
-# CS_MOVED_ENTRIES names what reached the session's folder in the vault, and
-# CS_MOVE_ERROR holds what the tool that stopped said.
+# CS_MOVED_ENTRIES names what reached the session's folder in the vault,
+# CS_REMOVED_COPIES what only went from outside, and CS_MOVE_ERROR holds what
+# the tool that stopped said.
 _move_conversations_into_vault() {  # plain_dir, vault_dir
     local staging="${2%/*}.cs-moving.$$" entry name out
     local -a outside=() copied=()
     CS_MOVE_ERROR=""
     CS_MOVED_ENTRIES=""
+    CS_REMOVED_COPIES=""
     for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
         [ -e "$entry" ] || [ -L "$entry" ] || continue
         name=${entry##*/}
         outside+=("$name")
         _empty_real_dir "$entry" && continue
         if [ -e "$2/$name" ] || [ -L "$2/$name" ]; then
-            _empty_real_dir "$2/$name" || continue
+            _empty_real_dir "$2/$name" || { CS_REMOVED_COPIES="$CS_REMOVED_COPIES $name"; continue; }
         fi
         copied+=("$name")
     done
@@ -15695,7 +15697,12 @@ _move_plain_conversations_at_open() {  # session_name, session_dir
         2) _warn_conversations_left_outside "$1" "$plain" ;;
         *) error "_move_conversations_into_vault returned $rc for $plain" ;;
     esac
-    info "$1: moved this session's conversations from $plain into its vault."
+    case "$CS_MOVED_ENTRIES " in
+        " ") ;;
+        *".jsonl "*) info "$1: moved this session's conversations from $plain into its vault." ;;
+        *) info "$1: moved$CS_MOVED_ENTRIES from $plain into its vault." ;;
+    esac
+    [ -z "$CS_REMOVED_COPIES" ] || info "$1: removed from $plain what its vault already holds:$CS_REMOVED_COPIES."
 }
 
 run_encrypt() {
