@@ -1352,35 +1352,16 @@ ${wt_listing#*"$nl"}"
         locked=$(_locked_vault_link "$base_dir/.cs")
         [ -z "$locked" ] \
             || error "cannot fuse the worktree's records: $base_dir/.cs/$locked is locked. Mount it, then retry."
-        local conflicts entry merge="" blocked="" refusal="" removed="Nothing was removed. "
+        local conflicts refusal
         conflicts=$(_fuse_conflicts "$wt_dir/.cs" "$base_dir/.cs" "$task") \
             || error "Could not classify the session records in $wt_dir/.cs; nothing was removed"
-        while IFS= read -r entry; do
-            case "$entry" in
-                "conflict "*) merge="$merge${merge:+$'\n'}${entry#conflict }" ;;
-                "blocked "*) blocked="$blocked${blocked:+$'\n'}${entry#blocked }" ;;
-            esac
-        done <<< "$conflicts"
-        if [ -n "$merge" ]; then
-            refusal="The feature's session records hold files the record fuse cannot carry into $base_dir/.cs: the base holds a different file at the same path, or a file or a link out of the session where the path needs a directory, or the path needs a new directory named .cs, or the file is a link or a repository. Nothing was removed. Merge each into $base_dir/.cs by hand, or delete it from $wt_dir/.cs, then run /finish $task again:
-$merge"
-            removed=""
-        fi
-        # The feature's own README and summary go under .cs/features/<task>/,
-        # never into the base's .cs itself, so they are named under that path.
-        # The dispatch refuses a task name cs does not accept before the
-        # retire, so here the path is what blocks them.
-        if [ -n "$blocked" ]; then
-            refusal="$refusal${refusal:+$'\n'}The feature's own README and summary go to $base_dir/.cs/features/$task/, and cs cannot make that directory: the base holds a file, a dangling link or a link out of the session on the way to it. ${removed}Move that aside, or delete each from $wt_dir/.cs, then run /finish $task again:
-$blocked"
-        fi
+        refusal=$(printf '%s\n' "$conflicts" | _record_refusal_message "$wt_dir" "$base_dir" "$task" "$mode")
         [ -z "$refusal" ] || error "$refusal"
     fi
     # The base's own .cs/ bookkeeping is exempt: in tracked mode the integrate
     # that just landed this feature wrote a timeline event there, and removing
     # a worktree touches no base file, so that dirt is no reason to refuse.
-    if ! git -C "$base_dir" diff --quiet -- . ':(exclude).cs' 2>/dev/null \
-        || ! git -C "$base_dir" diff --cached --quiet -- . ':(exclude).cs' 2>/dev/null; then
+    if _project_tree_is_dirty "$base_dir"; then
         error "Base session has uncommitted changes; commit them in $base_dir first"
     fi
 
@@ -2212,9 +2193,17 @@ _inherited_sum() {  # feature_meta rel
 #            file
 # Fails when the record of the copy, or the file, cannot be read.
 _fuse_verdict() {  # feature_meta base_meta rel
-    local src="$1/$3" dst="$2/$3" was now
-    if [ -L "$src" ] || [ ! -f "$src" ]; then echo conflict; return 0; fi
+    local was
+    if [ -L "$1/$3" ] || [ ! -f "$1/$3" ]; then echo conflict; return 0; fi
     was=$(_inherited_sum "$1" "$3") || return 1
+    _record_verdict "$1" "$2" "$3" "$was"
+}
+
+# _fuse_verdict's answer for a file whose earlier copy has the record <was>
+# ("<cksum> <bytes>"), or none when the feature wrote the file itself.
+_record_verdict() {  # feature_meta base_meta rel was
+    local src="$1/$3" dst="$2/$3" was="$4" now
+    if [ -L "$src" ] || [ ! -f "$src" ]; then echo conflict; return 0; fi
     if [ -n "$was" ]; then
         now=$(cksum < "$src") || return 1
         if [ "$now" = "$was" ]; then echo skip; return 0; fi
@@ -2340,9 +2329,17 @@ _fuse_feature_dest() {  # feature_meta base_meta rel task
 #            directories on the way to features/<task>/ (_fuse_path_blocked)
 # Fails when the record of the copy, or the file, cannot be read.
 _fuse_feature_verdict() {  # feature_meta base_meta rel task
-    local src="$1/$3" was now
-    if [ -L "$src" ] || [ ! -f "$src" ]; then echo conflict; return 0; fi
+    local was
+    if [ -L "$1/$3" ] || [ ! -f "$1/$3" ]; then echo conflict; return 0; fi
     was=$(_inherited_sum "$1" "$3") || return 1
+    _prose_verdict "$1" "$2" "$3" "$4" "$was"
+}
+
+# _fuse_feature_verdict's answer for a file whose earlier copy has the record
+# <was>, or none when the feature wrote the file itself.
+_prose_verdict() {  # feature_meta base_meta rel task was
+    local src="$1/$3" was="$5" now
+    if [ -L "$src" ] || [ ! -f "$src" ]; then echo conflict; return 0; fi
     if [ -n "$was" ]; then
         now=$(cksum < "$src") || return 1
         if [ "$now" = "$was" ]; then echo skip; return 0; fi
@@ -2438,20 +2435,76 @@ _fuse_plan() {  # feature_meta base_meta out task
 # Retire refuses on any; the features screen counts them. Fails when the
 # classification fails.
 _fuse_conflicts() {  # feature_meta base_meta task
-    local plan entry out=""
+    local plan
     plan=$(mktemp "${TMPDIR:-/tmp}/cs-fuse-plan.XXXXXX") || return 1
     if ! _fuse_plan "$1" "$2" "$plan" "$3"; then
         rm -f "$plan"
         return 1
     fi
+    _plan_refusal_lines "$plan"
+    rm -f "$plan"
+}
+
+# The entries of a record plan (NUL-terminated "<verdict> <rel>") that refuse
+# a retire, one per line as "<verdict> .cs/<rel>", sorted, each name as a
+# message prints it (_printable_name).
+_plan_refusal_lines() {  # plan_file
+    local entry out=""
     while IFS= read -r -d '' entry; do
         case "$entry" in
-            "conflict "*|"blocked "*)
+            "conflict "*|"blocked "*|"deleted "*|"rewritten "*)
                 out="$out${entry%% *} .cs/$(_printable_name "${entry#* }")"$'\n' ;;
         esac
-    done < "$plan"
-    rm -f "$plan"
+    done < "$1"
     [ -z "$out" ] || printf '%s' "$out" | env LC_ALL=C sort
+}
+
+# The error a retire refuses with over the refusal lines on stdin
+# (_plan_refusal_lines), nothing when there are none. One paragraph per
+# verdict, each over its own list, and the first says nothing was removed.
+# <mode> is the feature's cs_mode: a tracked feature can commit a record to
+# carry it, an ignored one can only merge it by hand or delete it.
+_record_refusal_message() {  # wt_dir base_dir task mode
+    local wt_dir="$1" base_dir="$2" task="$3" mode="$4"
+    local entry deleted="" rewritten="" merge="" blocked="" refusal="" removed="Nothing was removed. " nl=$'\n'
+    while IFS= read -r entry; do
+        case "$entry" in
+            "deleted "*) deleted="$deleted${deleted:+$nl}${entry#deleted }" ;;
+            "rewritten "*) rewritten="$rewritten${rewritten:+$nl}${entry#rewritten }" ;;
+            "conflict "*) merge="$merge${merge:+$nl}${entry#conflict }" ;;
+            "blocked "*) blocked="$blocked${blocked:+$nl}${entry#blocked }" ;;
+        esac
+    done
+    if [ -n "$deleted" ]; then
+        refusal="The feature deletes session records git tracks, and the record fuse carries additions and edits only. ${removed}Restore each with git -C \"$wt_dir\" checkout HEAD -- <path>, or commit the deletion on cs/$task, then run /finish $task again:
+$deleted"
+        removed=""
+    fi
+    if [ -n "$rewritten" ]; then
+        refusal="$refusal${refusal:+$nl}The feature changes lines its last commit holds in a session record cs only appends to, so the record fuse cannot carry the change into $base_dir/.cs. ${removed}Commit the change on cs/$task, or put those lines back, then run /finish $task again:
+$rewritten"
+        removed=""
+    fi
+    if [ -n "$merge" ] && [ "$mode" = "ignored" ]; then
+        refusal="$refusal${refusal:+$nl}The feature's session records hold files the record fuse cannot carry into $base_dir/.cs: the base holds a different file at the same path, or a file or a link out of the session where the path needs a directory, or the path needs a new directory named .cs, or the file is a link or a repository. ${removed}Merge each into $base_dir/.cs by hand, or delete it from $wt_dir/.cs, then run /finish $task again:
+$merge"
+        removed=""
+    elif [ -n "$merge" ]; then
+        refusal="$refusal${refusal:+$nl}The feature's session records hold files the record fuse cannot carry into $base_dir/.cs: the base holds a different file at the same path, or a file or a link out of the session where the path needs a directory, or the path needs a new directory named .cs, or the file is a link, a repository or a file that changed type. ${removed}Commit each on cs/$task, or merge it into $base_dir/.cs by hand and undo it in $wt_dir, then run /finish $task again:
+$merge"
+        removed=""
+    fi
+    # The feature's own README and summary go under .cs/features/<task>/,
+    # never into the base's .cs itself, so they are named under that path.
+    # The dispatch refuses a task name cs does not accept before the
+    # retire, so here the path is what blocks them.
+    if [ -n "$blocked" ]; then
+        local remedy="Move that aside, or delete each from $wt_dir/.cs, then run /finish $task again:"
+        [ "$mode" = "ignored" ] || remedy="Move that aside, then run /finish $task again:"
+        refusal="$refusal${refusal:+$nl}The feature's own README and summary go to $base_dir/.cs/features/$task/, and cs cannot make that directory: the base holds a file, a dangling link or a link out of the session on the way to it. ${removed}$remedy
+$blocked"
+    fi
+    [ -z "$refusal" ] || printf '%s\n' "$refusal"
 }
 
 # Fuse session records from a worktree .cs into the base .cs (ignored mode:
