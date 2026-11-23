@@ -1079,7 +1079,10 @@ _doctor_pid_verdict() {  # pid (digits)
 # the base from there, deletes the directory and then the branch; a retire
 # killed anywhere in that run leaves the directory, and nothing else reads
 # it. Which step it reached shows in what is there: an empty directory means
-# nothing moved, and a missing worktree means /finish cannot run again. Only
+# nothing moved, and a missing worktree means /finish cannot run again. For
+# a feature whose repo tracks .cs the retire copies the records it will fuse
+# and marks the directory with a file named copy first: beside a worktree,
+# which then still has its own .cs, such a directory is only deleted. Only
 # a directory whose retire is gone is reported: a live one is a retire in
 # progress, and one cs cannot judge gets no remedy. The pid is hedged as the
 # integrate lock's is: ESRCH is absence only in this pid namespace.
@@ -1095,7 +1098,9 @@ _doctor_check_retire_asides() {
         verdict=$(_doctor_pid_verdict "$pid")
         [ "$verdict" = stale ] || continue
         base="${wt%%@*}" task="${wt#*@}"
-        if [ ! -d "$d/cs" ]; then
+        if [ -e "$d/copy" ] && [ -d "$SESSIONS_ROOT/$wt" ]; then
+            _doctor_warn "Retire leftovers: $d holds a copy of the session records of $wt, captured by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree keeps its own .cs, so delete $d and run /finish $task in $base again"
+        elif [ ! -d "$d/cs" ]; then
             if [ -d "$SESSIONS_ROOT/$wt" ]; then
                 _doctor_warn "Retire leftovers: $d was made by a /finish retire of $wt (pid $pid), which this process cannot see; that retire is probably gone, and it moved nothing: the worktree keeps its .cs. Delete the empty directory with rmdir and run /finish $task in $base again"
             else

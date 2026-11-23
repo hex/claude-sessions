@@ -4612,13 +4612,13 @@ test_retire_tracked_mode_fuses_only_what_follows_the_feature_head() {
     printf '{"event":"committed-in-feature"}\n' >> "$wt/$timeline"
     (cd "$wt" && git add "$timeline" && git commit -q -m "feature timeline")
     sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
-    assert_eq "1" "$(grep -c -F 'committed-in-feature' "$base_dir/$timeline")" "fixture: the landing brought the committed line" || return 1
+    assert_eq "1" "$(grep -c -F '"committed-in-feature"' "$base_dir/$timeline")" "fixture: the landing brought the committed line" || return 1
     printf '{"event":"uncommitted-in-feature"}\n' >> "$wt/$timeline"
     output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
     assert_eq "0" "$status" "the retire goes through: $output" || return 1
     assert_eq "1" "$(grep -c -F 'base-seed' "$base_dir/$timeline")" "the base's own line is there once" || return 1
-    assert_eq "1" "$(grep -c -F 'committed-in-feature' "$base_dir/$timeline")" "the line the landing brought is there once" || return 1
-    assert_eq "1" "$(grep -c -F 'uncommitted-in-feature' "$base_dir/$timeline")" "the line after the feature's last commit is there once" || return 1
+    assert_eq "1" "$(grep -c -F '"committed-in-feature"' "$base_dir/$timeline")" "the line the landing brought is there once" || return 1
+    assert_eq "1" "$(grep -c -F '"uncommitted-in-feature"' "$base_dir/$timeline")" "the line after the feature's last commit is there once" || return 1
 }
 
 run_test test_retire_tracked_mode_fuses_only_what_follows_the_feature_head

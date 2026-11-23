@@ -395,7 +395,10 @@ _submodule_dirs() {  # checkout_dir prefix
 # those or deletes them with the worktree (_retire_trash_ignored_work). The
 # one exception is a root CLAUDE.local.md of the user's own: cs's exclude is
 # what ignores that name, not a choice of theirs, so it is at risk whether
-# git ignores it or not.
+# git ignores it or not. Nothing under .cs is among them either: the record
+# fuse carries a feature's session records into the base whether or not git
+# tracks .cs, and names the ones it cannot (_fuse_conflicts,
+# _tracked_record_refusals).
 # The merge gate and the readiness screen MUST read from this one definition;
 # when they disagreed, a worktree predating the cs exclude reported blocked on a
 # merge that would have gone straight through.
@@ -409,7 +412,8 @@ _worktree_untracked_at_risk() {  # wt_dir
     more=$(_submodule_others "$1" "") || return 1
     [ -z "$more" ] || listing="${listing:+$listing$'\n'}$more"
     [ -n "$listing" ] || return 0
-    printf '%s\n' "$listing" | _without_cs_bookkeeping "$1"
+    printf '%s\n' "$listing" | _without_cs_bookkeeping "$1" \
+        | { env LC_ALL=C grep -v '^\.cs/' || [ $? -eq 1 ]; }
 }
 
 # Directory names whose contents a build, an install or a test run writes
@@ -719,7 +723,7 @@ _feature_readiness() {  # base_name task
         ff=1
     fi
 
-    _tree_is_dirty "$wt_dir" && wt_dirty=1
+    _project_tree_is_dirty "$wt_dir" && wt_dirty=1
     local hidden
     hidden=$(_hidden_tracked_edits "$wt_dir") \
         || error "Could not list the index of $wt_dir"
@@ -760,6 +764,12 @@ _feature_readiness() {  # base_name task
             conflicts=$(_fuse_conflicts "$wt_dir/.cs" "$base_dir/.cs" "$task") \
                 || error "Could not classify the session records in $wt_dir/.cs"
         fi
+    else
+        conflicts=$(_tracked_record_refusals "$wt_dir" "$base_dir/.cs" "$task") \
+            || error "Could not classify the session records in $wt_dir/.cs"
+        case "$conflicts" in
+            "vault-locked "*) vault_locked="${conflicts#vault-locked }"; conflicts="" ;;
+        esac
     fi
     others="$others${others:+${conflicts:+$'\n'}}$conflicts"
     if [ -n "$others" ]; then
@@ -1314,7 +1324,7 @@ force: $force_word" ] || error "No stage at $stage records retiring $task at $sh
     [ -z "$mounted" ] \
         || error "The feature is landed, but its worktree has a volume mounted inside it at $mounted, and removing the worktree would delete what the volume holds. Unmount it, then run /finish $task here again."
 
-    if _tree_is_dirty "$wt_dir"; then
+    if _project_tree_is_dirty "$wt_dir"; then
         error "Worktree has uncommitted changes; commit them in $wt_dir first (cs never commits for you)"
     fi
     local hidden
@@ -1324,8 +1334,10 @@ force: $force_word" ] || error "No stage at $stage records retiring $task at $sh
         error "Worktree has edits git diff does not show (skip-worktree or assume-unchanged), which removal would destroy; commit them, or undo them and clear the flag (git update-index --no-skip-worktree / --no-assume-unchanged), first:
 $hidden"
     fi
-    # The mode says who carries .cs into the base: git (tracked) or the record
-    # fuse below (ignored). Without one, nothing under .cs is known to survive.
+    # The mode says what of .cs the record fuse below carries into the base:
+    # all of it (ignored), or what the feature left uncommitted, git having
+    # carried the rest (tracked). Without one, nothing under .cs is known to
+    # survive.
     local mode
     mode=$(_read_local_state "$wt_dir/.cs/local/state" cs_mode)
     case "$mode" in
@@ -1352,12 +1364,20 @@ ${wt_listing#*"$nl"}"
         locked=$(_locked_vault_link "$base_dir/.cs")
         [ -z "$locked" ] \
             || error "cannot fuse the worktree's records: $base_dir/.cs/$locked is locked. Mount it, then retry."
-        local conflicts refusal
+    fi
+    local conflicts refusal
+    if [ "$mode" = "ignored" ]; then
         conflicts=$(_fuse_conflicts "$wt_dir/.cs" "$base_dir/.cs" "$task") \
             || error "Could not classify the session records in $wt_dir/.cs; nothing was removed"
-        refusal=$(printf '%s\n' "$conflicts" | _record_refusal_message "$wt_dir" "$base_dir" "$task" "$mode")
-        [ -z "$refusal" ] || error "$refusal"
+    else
+        conflicts=$(_tracked_record_refusals "$wt_dir" "$base_dir/.cs" "$task") \
+            || error "Could not classify the session records in $wt_dir/.cs; nothing was removed"
+        case "$conflicts" in
+            "vault-locked "*) error "cannot fuse the worktree's records: $base_dir/.cs/${conflicts#vault-locked } is locked. Mount it, then retry." ;;
+        esac
     fi
+    refusal=$(printf '%s\n' "$conflicts" | _record_refusal_message "$wt_dir" "$base_dir" "$task" "$mode")
+    [ -z "$refusal" ] || error "$refusal"
     # The base's own .cs/ bookkeeping is exempt: in tracked mode the integrate
     # that just landed this feature wrote a timeline event there, and removing
     # a worktree touches no base file, so that dirt is no reason to refuse.
@@ -1365,10 +1385,13 @@ ${wt_listing#*"$nl"}"
         error "Base session has uncommitted changes; commit them in $base_dir first"
     fi
 
-    # Ignored-mode records are fused only once the worktree is gone: set them
-    # aside, remove, then fuse from the copy, so a removal that fails (a
-    # locked worktree, say) leaves the base's records untouched and puts the
-    # worktree's own back, and the retry fuses exactly once.
+    # Records are fused only once the worktree is gone: set them aside,
+    # remove, then fuse from the copy, so a removal that fails (a locked
+    # worktree, say) leaves the base's records untouched and the worktree
+    # with its own, and the retry fuses exactly once. An ignored .cs is
+    # moved aside whole and moved back on a failure; of a tracked one, the
+    # records the feature left uncommitted are copied (_capture_tracked_records)
+    # and the copy is deleted on a failure.
     # The staging directory sits beside the worktree, on its filesystem, so
     # both moves are renames: nothing is half-copied on a failure.
     # A fuse that refuses after the removal would strand the records in the
@@ -1433,33 +1456,48 @@ $missing"
             "$task" "$sha" "$wt_name" "$pid"
         return 0
     fi
+    aside="$SESSIONS_ROOT/.retire-$wt_name.$$"
+    if [ "$mode" = "tracked" ]; then
+        # Before the trash step, so this refusal too leaves every ignored
+        # file where it was.
+        local captured=0
+        if ! mkdir "$aside" 2>/dev/null; then
+            _cs_unlock "$wt_dir/.cs/session.mutex.lock"
+            error "Could not create $aside to copy the session records of $wt_dir; nothing was removed"
+        fi
+        _capture_tracked_records "$wt_dir" "$base_dir/.cs" "$task" "$aside" || captured=$?
+        if [ "$captured" != 0 ]; then
+            rm -rf "$aside"
+            _cs_unlock "$wt_dir/.cs/session.mutex.lock"
+            [ "$captured" != 2 ] \
+                || error "The feature's session records changed after cs checked them, so nothing was removed. Run /finish $task again."
+            error "Could not copy the session records of $wt_dir; nothing was removed"
+        fi
+    fi
     _retire_trash_ignored_work "$wt_dir" "$task"
     local trashed nl=$'\n'
     trashed=$(_retire_trashed_note " before this failed")
     if [ "$mode" = "ignored" ]; then
-        aside="$SESSIONS_ROOT/.retire-$wt_name.$$"
         mkdir "$aside" 2>/dev/null || error "Could not create $aside to set aside $wt_dir/.cs for the record fuse${trashed:+$nl$trashed}"
         mv "$wt_dir/.cs" "$aside/cs" || { rmdir "$aside" 2>/dev/null; error "Could not set aside $wt_dir/.cs for the record fuse${trashed:+$nl$trashed}"; }
     fi
     local remove_err
     if ! remove_err=$(git -C "$base_dir" worktree remove --force "$wt_dir" 2>&1); then
-        if [ -n "$aside" ]; then
-            if mv "$aside/cs" "$wt_dir/.cs"; then
-                rmdir "$aside" 2>/dev/null
-            else
-                error "git worktree remove failed for $wt_dir, and its session records could not be put back: they are at $aside/cs (move that directory to $wt_dir/.cs by hand)
+        if [ "$mode" = "tracked" ]; then
+            rm -rf "$aside"
+        elif mv "$aside/cs" "$wt_dir/.cs"; then
+            rmdir "$aside" 2>/dev/null
+        else
+            error "git worktree remove failed for $wt_dir, and its session records could not be put back: they are at $aside/cs (move that directory to $wt_dir/.cs by hand)
 $remove_err${trashed:+$nl$trashed}"
-            fi
         fi
         error "git worktree remove failed for $wt_dir; nothing was fused or deleted
 $remove_err${trashed:+$nl$trashed}"
     fi
     _cs_unlock "$wt_dir/.cs/session.mutex.lock"
-    if [ -n "$aside" ]; then
-        ( fuse_session_records "$aside/cs" "$base_dir/.cs" "$task" ) \
-            || error "The worktree $wt_dir is removed, but its session records could not be fused into $base_dir/.cs: they are at $aside/cs. Fuse what is missing by hand, then delete that directory.${trashed:+$nl$trashed}"
-        rm -rf "$aside"
-    fi
+    ( fuse_session_records "$aside/cs" "$base_dir/.cs" "$task" ) \
+        || error "The worktree $wt_dir is removed, but its session records could not be fused into $base_dir/.cs: they are at $aside/cs. Fuse what is missing by hand, then delete that directory.${trashed:+$nl$trashed}"
+    rm -rf "$aside"
     if [ -n "$force" ]; then
         git -C "$base_dir" branch -D "$branch" >/dev/null 2>&1 \
             || warn "Branch $branch was not deleted"
@@ -2507,8 +2545,252 @@ $blocked"
     [ -z "$refusal" ] || printf '%s\n' "$refusal"
 }
 
-# Fuse session records from a worktree .cs into the base .cs (ignored mode:
-# the repo does not track .cs/, so git merge cannot carry these). Applies the
+# How a retire treats one path under the .cs of a feature whose repo tracks
+# .cs, given relative to it:
+#   bookkeeping  cs's machine-local files, which go with the worktree
+#   legacy-log   the log cs once kept at logs/, which only an ignored
+#                feature's fuse carries
+#   log          the timeline and the narratives, which the fuse appends
+#   index        the memory index and the memory archive, pointer unions
+#   prose        the feature's own README and summary
+#   record       every other file, carried by _record_verdict
+# The predicates are the ones the fuse of an ignored .cs reads, so the two
+# cannot disagree about which file merges how.
+_tracked_record_kind() {  # rel
+    if [ "$1" = logs/session.log ]; then echo legacy-log
+    elif _fuse_walk_skips "$1"; then echo bookkeeping
+    elif [ "$1" = memory/MEMORY.md ] || [ "$1" = memory/reference_memory_archive.md ]; then echo index
+    elif _fuse_merged_record "$1"; then echo log
+    elif _fuse_feature_prose "$1"; then echo prose
+    else echo record
+    fi
+}
+
+# Write to <out> one NUL-terminated "<status><TAB><rel>" for every path under
+# a worktree's .cs, given relative to it, that differs from the worktree's
+# last commit: git's status letter for a tracked path (M, A, D, T or U, staged
+# and unstaged changes together), "?" for one git neither tracks nor ignores.
+# A repository nested there is one entry, "<rel>/". Fails when git cannot
+# list them, never answering that there are none.
+_tracked_record_dirt() {  # wt_dir out
+    local raw status path
+    : > "$2" || return 1
+    raw=$(mktemp "${TMPDIR:-/tmp}/cs-record-dirt.XXXXXX") || return 1
+    if ! git -C "$1" diff --name-status -z --no-renames HEAD -- .cs > "$raw" 2>/dev/null; then
+        rm -f "$raw"
+        return 1
+    fi
+    while IFS= read -r -d '' status && IFS= read -r -d '' path; do
+        printf '%s\t%s\0' "$status" "${path#.cs/}" >> "$2"
+    done < "$raw"
+    if ! git -C "$1" ls-files -z --others --exclude-standard -- .cs > "$raw" 2>/dev/null; then
+        rm -f "$raw"
+        return 1
+    fi
+    while IFS= read -r -d '' path; do
+        printf '?\t%s\0' "${path#.cs/}" >> "$2"
+    done < "$raw"
+    rm -f "$raw"
+}
+
+# The record ("<cksum> <bytes>", as _record_inherited writes one) of the file
+# a worktree's last commit holds at <rel> under .cs, nothing when it holds
+# none there.
+_head_blob_sum() {  # wt_dir rel
+    git -C "$1" cat-file -e "HEAD:.cs/$2" 2>/dev/null || return 0
+    git -C "$1" cat-file blob "HEAD:.cs/$2" | cksum
+}
+
+# Whether the file at <rel> under a worktree's .cs still opens with every
+# byte its last commit holds there: the feature only appended to it.
+_head_blob_is_prefix() {  # wt_dir rel
+    local size
+    size=$(git -C "$1" cat-file -s "HEAD:.cs/$2" 2>/dev/null) || return 1
+    git -C "$1" cat-file blob "HEAD:.cs/$2" | cmp -s - <(head -c "$size" "$1/.cs/$2")
+}
+
+# What a retire does with one changed path of a tracked feature's .cs
+# (_tracked_record_dirt), against the base's .cs. The verdicts of
+# _record_verdict and _prose_verdict, measured against the worktree's last
+# commit where the fuse of an ignored .cs measures against what the create
+# handed over, and:
+#   append     a log: the lines after the last commit's go onto the base's
+#   union      an index: the base's gains the pointers it lacks
+#   deleted    git tracks the file and the feature deleted it
+#   rewritten  the timeline no longer opens with what the last commit holds
+# A narrative whose committed lines changed is not refused: cs -narrative
+# rotate rewrites one, and its new lines are still carried.
+# Fails when the last commit's copy, or the file, cannot be read.
+_tracked_record_verdict() {  # wt_dir base_meta task status rel kind
+    local meta="$1/.cs" status="$4" rel="$5" kind="$6" was
+    if [ "$kind" = legacy-log ]; then echo conflict; return 0; fi
+    case "$rel" in */) echo conflict; return 0 ;; esac
+    case "$status" in
+        D) echo deleted; return 0 ;;
+        T|U) echo conflict; return 0 ;;
+    esac
+    case "$kind" in
+        log)
+            if _fuse_merge_blocked "$meta" "$2" "$rel" "$rel"; then echo conflict
+            elif [ "$rel" = timeline.jsonl ] && [ "$status" = M ] && ! _head_blob_is_prefix "$1" "$rel"; then echo rewritten
+            else echo append
+            fi ;;
+        index)
+            if _fuse_merge_blocked "$meta" "$2" "$rel" "$rel"; then echo conflict; else echo union; fi ;;
+        prose)
+            was=$(_head_blob_sum "$1" "$rel") || return 1
+            _prose_verdict "$meta" "$2" "$rel" "$3" "$was" ;;
+        *)
+            was=$(_head_blob_sum "$1" "$rel") || return 1
+            _record_verdict "$meta" "$2" "$rel" "$was" ;;
+    esac
+}
+
+# Write to <out> one NUL-terminated "<verdict> <rel>" (_tracked_record_verdict)
+# for every changed path of a tracked feature's .cs but cs's bookkeeping.
+# Reads the worktree, its last commit and the base, and writes nothing in
+# either. Fails, naming the file, when one cannot be classified, and when git
+# cannot list the changed paths.
+_tracked_record_plan() {  # wt_dir base_meta task out
+    local dirt entry status rel kind verdict tab=$'\t'
+    : > "$4" || return 1
+    dirt=$(mktemp "${TMPDIR:-/tmp}/cs-record-dirt.XXXXXX") || return 1
+    if ! _tracked_record_dirt "$1" "$dirt"; then
+        rm -f "$dirt"
+        return 1
+    fi
+    while IFS= read -r -d '' entry; do
+        status="${entry%%"$tab"*}"
+        rel="${entry#*"$tab"}"
+        kind=$(_tracked_record_kind "$rel")
+        [ "$kind" != bookkeeping ] || continue
+        verdict=$(_tracked_record_verdict "$1" "$2" "$3" "$status" "$rel" "$kind") || {
+            warn "could not read what the feature's last commit holds for $(_printable_name "$rel"), so cs cannot tell what the feature changed in it" >&2
+            rm -f "$dirt"
+            return 1
+        }
+        printf '%s %s\0' "$verdict" "$rel" >> "$4"
+    done < "$dirt"
+    rm -f "$dirt"
+}
+
+# What stops the retire of a tracked feature from fusing its changed session
+# records into the base: nothing when it has none to carry, "vault-locked
+# <link>" when the base's vault is locked (_locked_vault_link; every record
+# bound for it would read as a conflict), else the plan's refusal lines
+# (_plan_refusal_lines). The retire refuses on any; the features screen counts
+# them. Fails when the classification fails.
+_tracked_record_refusals() {  # wt_dir base_meta task
+    local plan entry locked carries=""
+    plan=$(mktemp "${TMPDIR:-/tmp}/cs-record-plan.XXXXXX") || return 1
+    if ! _tracked_record_plan "$1" "$2" "$3" "$plan"; then
+        rm -f "$plan"
+        return 1
+    fi
+    while IFS= read -r -d '' entry; do
+        case "$entry" in "skip "*) ;; *) carries=1; break ;; esac
+    done < "$plan"
+    locked=""
+    [ -z "$carries" ] || locked=$(_locked_vault_link "$2")
+    if [ -n "$locked" ]; then
+        printf 'vault-locked %s\n' "$locked"
+    else
+        _plan_refusal_lines "$plan"
+    fi
+    rm -f "$plan"
+}
+
+# Write to <out> what a tracked feature appended to the log at <rel> under
+# its .cs since its last commit, in the shape fuse_session_records reads a
+# feature's log in. A log the last commit lacks is copied whole.
+# The timeline: the bytes after the last commit's. A commit whose last line
+# has no newline was ended by the next append, so the empty line that leaves
+# in front is dropped.
+# A narrative: its frontmatter (an empty one when it has none), then the
+# bytes after the last commit's; the fuse appends what follows a narrative's
+# frontmatter, so those bytes must not be read as one. A narrative that no
+# longer opens with the last commit's bytes was rewritten (cs -narrative
+# rotate moves its oldest sections to an archive file): then the lines past
+# its frontmatter that the last commit holds nowhere, in their order.
+_stage_log_delta() {  # wt_dir rel out
+    local file="$1/.cs/$2" blob="HEAD:.cs/$2" size held status=0
+    if ! git -C "$1" cat-file -e "$blob" 2>/dev/null; then
+        cp "$file" "$3"
+        return
+    fi
+    size=$(git -C "$1" cat-file -s "$blob") || return 1
+    if [ "$2" = timeline.jsonl ]; then
+        if [ -n "$(git -C "$1" cat-file blob "$blob" | tail -c 1)" ]; then
+            tail -c "+$((size + 1))" "$file" | sed '1{/^$/d;}' > "$3"
+        else
+            tail -c "+$((size + 1))" "$file" > "$3"
+        fi
+        return
+    fi
+    env LC_ALL=C awk 'NR == 1 && $0 != "---" { print "---"; print "---"; exit }
+                      { print } NR > 1 && /^---$/ { exit }' "$file" > "$3" || return 1
+    if _head_blob_is_prefix "$1" "$2"; then
+        tail -c "+$((size + 1))" "$file" >> "$3"
+        return
+    fi
+    held=$(mktemp "${TMPDIR:-/tmp}/cs-record-held.XXXXXX") || return 1
+    git -C "$1" cat-file blob "$blob" > "$held" \
+        && env LC_ALL=C awk 'FILENAME == ARGV[1] { held[$0] = 1; next }
+                             FNR == 1 && $0 != "---" { c = 2 }
+                             /^---$/ && c < 2 { c++; next }
+                             c >= 2 && !($0 in held) { print }' "$held" "$file" >> "$3" \
+        || status=1
+    rm -f "$held"
+    return "$status"
+}
+
+# Copy into <aside>/cs what the retire of a tracked feature will fuse, in the
+# shape fuse_session_records reads an ignored feature's .cs in: each log as
+# the lines the feature appended since its last commit (_stage_log_delta),
+# every other changed record whole, beside the record of the last commit's
+# copy where _inherited_sum looks for it, so the fuse measures the feature's
+# edit against that commit. <aside>/copy marks the directory as a copy before
+# anything else is written: the worktree keeps its own .cs.
+# Returns 2, having copied nothing, when a record now refuses the retire (it
+# changed after the retire checked), 1 when a copy fails.
+_capture_tracked_records() {  # wt_dir base_meta task aside
+    local staged="$4/cs" plan entry verdict rel was status=0
+    : > "$4/copy" || return 1
+    mkdir "$staged" || return 1
+    plan=$(mktemp "${TMPDIR:-/tmp}/cs-record-plan.XXXXXX") || return 1
+    if ! _tracked_record_plan "$1" "$2" "$3" "$plan"; then
+        rm -f "$plan"
+        return 1
+    fi
+    if [ -n "$(_plan_refusal_lines "$plan")" ]; then
+        rm -f "$plan"
+        return 2
+    fi
+    while IFS= read -r -d '' entry; do
+        verdict="${entry%% *}"
+        rel="${entry#* }"
+        [ "$verdict" != skip ] || continue
+        case "$rel" in */*) mkdir -p "$staged/${rel%/*}" || { status=1; break; } ;; esac
+        if [ "$verdict" = append ]; then
+            _stage_log_delta "$1" "$rel" "$staged/$rel" || { status=1; break; }
+            continue
+        fi
+        cp "$1/.cs/$rel" "$staged/$rel" || { status=1; break; }
+        was=$(_head_blob_sum "$1" "$rel") || { status=1; break; }
+        [ -n "$was" ] || continue
+        _inherited_record_path "$staged" "$rel"
+        mkdir -p "${_CS_INHERITED_RECORD%/*}" \
+            && printf '%s\n' "$was" > "$_CS_INHERITED_RECORD" \
+            || { status=1; break; }
+    done < "$plan"
+    rm -f "$plan"
+    return "$status"
+}
+
+# Fuse session records from a worktree .cs into the base .cs: all of an
+# ignored feature's, which git merge cannot carry, or the copy a tracked
+# feature's retire made of what it left uncommitted
+# (_capture_tracked_records). Applies the
 # same semantics the merge drivers give tracked repos: union append for
 # timeline/log/narratives, base-wins for MEMORY.md and the memory archive plus
 # the feature's pointers to targets each lacks. Every other file goes back by _fuse_verdict: one the
