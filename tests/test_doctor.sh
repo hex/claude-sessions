@@ -1527,8 +1527,11 @@ test_doctor_warns_on_a_claimed_seed_whose_open_is_gone() {
 }
 
 # What the messages that say to fuse records by hand tell the reader to leave
-# out.
-_HAND_FUSE_LEAVES_OUT="leaving out what cs keeps for itself (session.lock, session.mutex.lock, everything under local but session.log, whose lines go after the base's own, and the frontmatter that opens a narrative the base holds too, down to its second --- line)"
+# out, and where the logs, the README and the summary go, for the base at
+# <base_dir> and the feature <task>.
+_expected_hand_fuse_rules() {  # base_dir task
+    printf '%s' "leaving out what cs keeps for itself (session.lock, session.mutex.lock, .narrative-reminder-cooldown, every .DS_Store, everything under local but session.log, and the frontmatter that opens a narrative the base holds too, down to its second --- line), putting the lines of logs/session.log and then of local/session.log after those of the base's own session.log, and the feature's README.md and summary.md in $1/.cs/features/$2/ (README.2.md and on when an earlier feature of that name left one there), never into the base's own"
+}
 
 # A /finish retire killed between setting the worktree's .cs aside and the
 # record fuse leaves $SESSIONS_ROOT/.retire-<worktree>.<pid>; nothing else
@@ -1543,7 +1546,7 @@ test_doctor_warns_on_a_retire_aside_whose_run_is_gone() {
     output=$("$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "Retire leftovers: $aside holds the session records of test-session@feat, set aside by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone" \
         "doctor should name the aside directory a killed retire left, hedging the pid" || return 1
-    assert_output_contains "$output" "The worktree is gone, and /finish feat cannot run again without it, so finish the retire by hand: fuse what is missing from $aside/cs into $CLAUDE_SESSION_META_DIR, $_HAND_FUSE_LEAVES_OUT, delete $aside, then run git -C \"$CLAUDE_SESSION_DIR\" worktree prune and delete the branch the retire would have removed with: git -C \"$CLAUDE_SESSION_DIR\" branch -d cs/feat" \
+    assert_output_contains "$output" "The worktree is gone, and /finish feat cannot run again without it, so finish the retire by hand: fuse what is missing from $aside/cs into $CLAUDE_SESSION_META_DIR, $(_expected_hand_fuse_rules "$CLAUDE_SESSION_DIR" feat), delete $aside, then run git -C \"$CLAUDE_SESSION_DIR\" worktree prune and delete the branch the retire would have removed with: git -C \"$CLAUDE_SESSION_DIR\" branch -d cs/feat" \
         "the row carries the fuse, the delete, the prune and the branch the retire left" || return 1
     assert_dir "$aside" "doctor reports and never deletes" || return 1
     assert_output_contains "$output" "Complete with [1-9][0-9]* warning(s)\." "the warning is counted" || return 1
@@ -1656,7 +1659,7 @@ test_doctor_retire_copy_beside_a_worktree_that_lost_its_records_says_keep_it() {
         mkdir -p "$aside/cs/plans"
         echo "a plan nobody committed" > "$aside/cs/plans/next.md"
         output=$("$CS_BIN" -doctor 2>&1) || true
-        assert_output_contains "$output" "Retire leftovers: $aside holds a copy of the session records of test-session@feat, captured by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. $known: fuse into $CS_SESSIONS_ROOT/test-session/.cs by hand what $aside/cs holds and neither $CS_SESSIONS_ROOT/test-session/.cs nor $wt/.cs does, $_HAND_FUSE_LEAVES_OUT, then delete $aside. Then put back any tracked file that retire's removal deleted, which leaves every other file as it is, and run /finish feat in test-session again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --" \
+        assert_output_contains "$output" "Retire leftovers: $aside holds a copy of the session records of test-session@feat, captured by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. $known: fuse into $CS_SESSIONS_ROOT/test-session/.cs by hand what $aside/cs holds and neither $CS_SESSIONS_ROOT/test-session/.cs nor $wt/.cs does, $(_expected_hand_fuse_rules "$CS_SESSIONS_ROOT/test-session" feat), then delete $aside. Then put back any tracked file that retire's removal deleted, which leaves every other file as it is, and run /finish feat in test-session again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --" \
             "a worktree with $holds: the row says to fuse what the copy alone holds before deleting it" || return 1
         assert_output_not_contains "$output" "The worktree holds each of them as the copy does" \
             "a worktree with $holds: the row does not say the worktree has its records" || return 1
@@ -1682,7 +1685,7 @@ test_doctor_retire_copy_beside_what_is_no_checkout_says_fuse_all_of_it() {
         from="$aside/cs holds"
         [ "$holds" = no-cs ] || from="$aside/cs or $wt/.cs holds"
         output=$("$CS_BIN" -doctor 2>&1) || true
-        assert_output_contains "$output" "Retire leftovers: $aside holds a copy of the session records of test-session@feat, captured by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. $wt is no longer a git checkout, so /finish feat cannot run there again and cs cannot tell which of those records it still holds: fuse into $CS_SESSIONS_ROOT/test-session/.cs by hand what $from and $CS_SESSIONS_ROOT/test-session/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $_HAND_FUSE_LEAVES_OUT, then delete $aside and what is left of $wt. Then run git -C \"$CS_SESSIONS_ROOT/test-session\" worktree prune and delete the branch with: git -C \"$CS_SESSIONS_ROOT/test-session\" branch -d cs/feat (git refuses -d when the base does not hold every commit of the branch, as after a squash merge that /finish retired with --force; -D deletes it then)" \
+        assert_output_contains "$output" "Retire leftovers: $aside holds a copy of the session records of test-session@feat, captured by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. $wt is no longer a git checkout, so /finish feat cannot run there again and cs cannot tell which of those records it still holds: fuse into $CS_SESSIONS_ROOT/test-session/.cs by hand what $from and $CS_SESSIONS_ROOT/test-session/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $(_expected_hand_fuse_rules "$CS_SESSIONS_ROOT/test-session" feat), then delete $aside and what is left of $wt. Then run git -C \"$CS_SESSIONS_ROOT/test-session\" worktree prune and delete the branch with: git -C \"$CS_SESSIONS_ROOT/test-session\" branch -d cs/feat (git refuses -d when the base does not hold every commit of the branch, as after a squash merge that /finish retired with --force; -D deletes it then)" \
             "what is left with $holds: the row says to fuse all the copy and the directory hold before deleting them" || return 1
         assert_output_not_contains "$output" "no longer holds each of them" \
             "what is left with $holds: the row does not say the worktree lost a record" || return 1
@@ -1700,7 +1703,7 @@ test_doctor_marked_retire_aside_without_records_or_worktree_says_delete_it() {
         rest=""
         if [ "$holds" = what-is-no-checkout ]; then
             mkdir -p "$wt/.cs"
-            rest=". $wt is no longer a git checkout, so /finish feat cannot run there again: fuse into $CS_SESSIONS_ROOT/test-session/.cs by hand what $wt/.cs holds and $CS_SESSIONS_ROOT/test-session/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $_HAND_FUSE_LEAVES_OUT, then delete what is left of $wt. Then run git -C \"$CS_SESSIONS_ROOT/test-session\" worktree prune and delete the branch with: git -C \"$CS_SESSIONS_ROOT/test-session\" branch -d cs/feat (git refuses -d when the base does not hold every commit of the branch, as after a squash merge that /finish retired with --force; -D deletes it then)"
+            rest=". $wt is no longer a git checkout, so /finish feat cannot run there again: fuse into $CS_SESSIONS_ROOT/test-session/.cs by hand what $wt/.cs holds and $CS_SESSIONS_ROOT/test-session/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $(_expected_hand_fuse_rules "$CS_SESSIONS_ROOT/test-session" feat), then delete what is left of $wt. Then run git -C \"$CS_SESSIONS_ROOT/test-session\" worktree prune and delete the branch with: git -C \"$CS_SESSIONS_ROOT/test-session\" branch -d cs/feat (git refuses -d when the base does not hold every commit of the branch, as after a squash merge that /finish retired with --force; -D deletes it then)"
         fi
         _marked_retire_copy
         output=$("$CS_BIN" -doctor 2>&1) || true
