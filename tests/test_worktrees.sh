@@ -917,6 +917,26 @@ test_worktree_create_never_copies_the_permission_settings() {
     assert_output_not_contains "$created" "that .worktreeinclude names" "and counts no copy" || return 1
 }
 
+# A .worktreeinclude git cannot read lists nothing, so the feature would
+# start without the files it names and no line would say so.
+test_worktree_create_refuses_a_worktreeinclude_git_cannot_read() {
+    _included_base "incbad" ".env"
+    local base_dir="$CS_SESSIONS_ROOT/incbad" wt="$CS_SESSIONS_ROOT/incbad@task1"
+    # Untracked, so the unreadable file is no uncommitted change of the base.
+    (cd "$base_dir" && git rm -q --cached .worktreeinclude && git commit -q -m "untrack the include list")
+    chmod 000 "$base_dir/.worktreeinclude"
+    local output status=0
+    output=$("$CS_BIN" "incbad@task1" < /dev/null 2>&1) || status=$?
+    chmod 644 "$base_dir/.worktreeinclude"
+    assert_eq "1" "$status" "the feature is not created: $output" || return 1
+    assert_output_contains "$output" "Error: Could not list the files that $base_dir/.worktreeinclude names, so no feature was created:" \
+        "the refusal names the file" || return 1
+    assert_output_contains "$output" "fatal: cannot use $base_dir/.worktreeinclude as an exclude file" \
+        "and carries git's own error" || return 1
+    assert_not_exists "$wt" "no worktree is left behind" || return 1
+    assert_eq "" "$(git -C "$base_dir" branch --list cs/task1)" "and no branch" || return 1
+}
+
 test_worktree_reopen_preserves_project_claude_md() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
     mkdir -p "$base_dir/.cs"/{memory,local}
@@ -2257,6 +2277,7 @@ run_test test_worktree_create_copies_nothing_through_a_link_in_the_feature
 run_test test_worktree_create_copies_no_link
 run_test test_worktree_create_keeps_a_file_the_feature_already_has
 run_test test_worktree_create_never_copies_the_permission_settings
+run_test test_worktree_create_refuses_a_worktreeinclude_git_cannot_read
 run_test test_worktree_reopen_preserves_project_claude_md
 run_test test_worktree_reopen_refuses_a_symlinked_cs_local
 run_test test_worktree_creation_refuses_a_committed_cs_local_link
