@@ -332,7 +332,12 @@ EOF
     chmod +x "$run"
     light_amber=$(printf '\033[38;2;162;122;58m')
     out=$(_pty_run "$run" 2>&1) || true
-    assert_output_contains "$out" "${light_amber}new vault" "the new vault row is drawn in the light palette (output: $out)" || return 1
+    # Matched as text: assert_output_contains reads a regex, where the
+    # colour's [ opens a bracket expression.
+    case "$out" in
+        *"${light_amber}new vault"*) ;;
+        *) echo "  FAIL: the new vault row is not drawn in the light palette (output: $out)"; return 1 ;;
+    esac
 }
 
 # An open while cs -encrypt asks for passwords would race its moves; the
