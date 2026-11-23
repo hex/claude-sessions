@@ -1224,6 +1224,14 @@ _retire_trashed_note() {  # heading_end
         "${_RETIRE_TRASHED_COUNT% *}" "${_RETIRE_TRASHED_COUNT#* }" "$1" "$_RETIRE_TRASHED_LINES"
 }
 
+# Delete the copy a tracked feature's retire made of its records, on any
+# exit before the worktree is removed: until then the worktree holds every
+# record the copy does. A global because an EXIT trap runs after the
+# function's locals are gone.
+_retire_drop_copy() {
+    [ -z "${_RETIRE_COPY:-}" ] || rm -rf "$_RETIRE_COPY"
+}
+
 # Retire an integrated feature worktree: fuse its session records into the
 # base (ignored mode), remove the worktree and delete its branch. Backs the
 # unadvertised `cs <base> -retire-feature <task> <sha> [--force]` that
@@ -1390,7 +1398,7 @@ ${wt_listing#*"$nl"}"
     # with its own, and the retry fuses exactly once. An ignored .cs is
     # moved aside whole and moved back on a failure; of a tracked one, the
     # records the feature left uncommitted are copied (_capture_tracked_records)
-    # and the copy is deleted on a failure.
+    # and the copy is deleted on any exit before the removal (_retire_drop_copy).
     # For an ignored .cs the staging directory sits beside the worktree, on
     # its filesystem, so both moves are renames: nothing is half-copied on a
     # failure.
@@ -1465,9 +1473,10 @@ $missing"
             _cs_unlock "$wt_dir/.cs/session.mutex.lock"
             error "Could not create $aside to copy the session records of $wt_dir; nothing was removed"
         fi
+        _RETIRE_COPY="$aside"
+        trap '_finish_progress_exit "$?"; _retire_drop_copy' EXIT
         _capture_tracked_records "$wt_dir" "$base_dir/.cs" "$task" "$aside" || captured=$?
         if [ "$captured" != 0 ]; then
-            rm -rf "$aside"
             _cs_unlock "$wt_dir/.cs/session.mutex.lock"
             [ "$captured" != 2 ] \
                 || error "The feature's session records changed after cs checked them, so nothing was removed. Run /finish $task again."
@@ -1483,17 +1492,16 @@ $missing"
     fi
     local remove_err
     if ! remove_err=$(git -C "$base_dir" worktree remove --force "$wt_dir" 2>&1); then
-        if [ "$mode" = "tracked" ]; then
-            rm -rf "$aside"
-        elif mv "$aside/cs" "$wt_dir/.cs"; then
-            rmdir "$aside" 2>/dev/null
-        else
-            error "git worktree remove failed for $wt_dir, and its session records could not be put back: they are at $aside/cs (move that directory to $wt_dir/.cs by hand)
+        if [ "$mode" = "ignored" ]; then
+            mv "$aside/cs" "$wt_dir/.cs" \
+                || error "git worktree remove failed for $wt_dir, and its session records could not be put back: they are at $aside/cs (move that directory to $wt_dir/.cs by hand)
 $remove_err${trashed:+$nl$trashed}"
+            rmdir "$aside" 2>/dev/null
         fi
         error "git worktree remove failed for $wt_dir; nothing was fused or deleted
 $remove_err${trashed:+$nl$trashed}"
     fi
+    _RETIRE_COPY=""
     _cs_unlock "$wt_dir/.cs/session.mutex.lock"
     ( fuse_session_records "$aside/cs" "$base_dir/.cs" "$task" ) \
         || error "The worktree $wt_dir is removed, but its session records could not be fused into $base_dir/.cs: they are at $aside/cs. Fuse what is missing by hand, then delete that directory.${trashed:+$nl$trashed}"
