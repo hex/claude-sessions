@@ -963,6 +963,56 @@ test_worktree_create_never_copies_the_permission_settings() {
     assert_output_not_contains "$created" "that .worktreeinclude names" "and counts no copy" || return 1
 }
 
+# A stand-in git whose listing of the files .worktreeinclude names fails once
+# git worktree add has run; every other call goes to git. Prints the
+# directory to put first on PATH.
+_git_failing_listing_after_add() {
+    local bin="$TEST_TMPDIR/stand-in-git-listing" added="$TEST_TMPDIR/worktree-added"
+    mkdir -p "$bin"
+    cat > "$bin/git" << STUB
+#!/usr/bin/env bash
+case " \$* " in
+    *" worktree add "*)
+        "$(command -v git)" "\$@" || exit \$?
+        : > "$added"
+        exit 0 ;;
+    *" ls-files "*"--exclude-from="*)
+        if [ -e "$added" ]; then
+            echo "fatal: stand-in listing failure" >&2
+            exit 128
+        fi ;;
+esac
+exec "$(command -v git)" "\$@"
+STUB
+    chmod +x "$bin/git"
+    printf '%s\n' "$bin"
+}
+
+# The files .worktreeinclude names are listed before the worktree exists, so
+# no listing can fail after git worktree add and leave a feature without its
+# records. The list is a temporary file, gone however the create ends.
+test_worktree_create_lists_the_included_files_before_the_worktree_exists() {
+    _included_base "inconce" ".env"
+    local base_dir="$CS_SESSIONS_ROOT/inconce" wt="$CS_SESSIONS_ROOT/inconce@task1" tmp="$TEST_TMPDIR/tmp-inconce"
+    local bin output status=0
+    mkdir -p "$tmp"
+    bin=$(_git_failing_listing_after_add)
+    output=$(PATH="$bin:$PATH" TMPDIR="$tmp" "$CS_BIN" "inconce@task1" < /dev/null 2>&1) || status=$?
+    assert_eq "0" "$status" "the feature is created: $output" || return 1
+    assert_eq "A=1" "$(cat "$wt/.env" 2>/dev/null)" "the named env file is copied" || return 1
+    assert_dir "$wt/.cs" "the feature has its records" || return 1
+    assert_file_exists "$wt/CLAUDE.local.md" "and its protocol file" || return 1
+    assert_eq "" "$(cd "$tmp" && find . -name 'cs-worktreeinclude.*')" "the list is gone" || return 1
+    # A create that refuses after the listing leaves no list either.
+    git -C "$base_dir" branch -q cs/task2
+    git -C "$base_dir" worktree add -q "$TEST_TMPDIR/elsewhere-inconce" cs/task2
+    status=0
+    output=$(TMPDIR="$tmp" "$CS_BIN" "inconce@task2" < /dev/null 2>&1) || status=$?
+    assert_eq "1" "$status" "a branch checked out elsewhere refuses: $output" || return 1
+    assert_output_contains "$output" "git worktree add failed (is branch 'cs/task2' checked out in another worktree?)" "and says why" || return 1
+    assert_eq "" "$(cd "$tmp" && find . -name 'cs-worktreeinclude.*')" "the list is gone after the refusal" || return 1
+}
+
 # A .worktreeinclude git cannot read lists nothing, so the feature would
 # start without the files it names and no line would say so.
 test_worktree_create_refuses_a_worktreeinclude_git_cannot_read() {
@@ -2359,6 +2409,7 @@ run_test test_worktree_create_copies_nothing_through_a_link_in_the_feature
 run_test test_worktree_create_copies_no_link
 run_test test_worktree_create_keeps_a_file_the_feature_already_has
 run_test test_worktree_create_never_copies_the_permission_settings
+run_test test_worktree_create_lists_the_included_files_before_the_worktree_exists
 run_test test_worktree_create_refuses_a_worktreeinclude_git_cannot_read
 run_test test_worktree_reopen_preserves_project_claude_md
 run_test test_worktree_reopen_refuses_a_symlinked_cs_local
