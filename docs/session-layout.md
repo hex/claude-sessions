@@ -148,7 +148,7 @@ removes anything, except the prompt hook's launch mark in `scope-prompt.trace`.
 | File | Purpose |
 |------|---------|
 | `session.log` | Human-readable audit trail — session lifecycle, tool failures, autosave notes, UUID rebinds. Per-checkout by nature; the shared structured record is `timeline.jsonl`. |
-| `state` | Session state bound to this checkout: `claude_session_id` (the conversation UUID to resume), `claude_session_color` (the `/color` palette entry), `last_resumed` (last resume date), `session_name` for adopted sessions only (their name lives in the sessions-root symlink, which a hook resolving the directory has no way to read; an ordinary session takes its name from its directory), and, for feature worktrees, `task_branch`, `cs_base` and `cs_mode` (`tracked` when the base repo tracks `.cs/`, `ignored` when it does not; it decides how the worktree's records reach the base when the feature is integrated and retired). An adopted session records `cs_mode` too, the mode its features take, and so does a flat-layout session in a git repo once the open moves it into `.cs/`. Neither `cs -adopt` nor that open commits anything, so each writes `ignored` when the project's own rules already ignore the `.cs/` directory, and `tracked` otherwise (you may commit `.cs/` later); a `cs_mode` already in the file stays. With `tracked`, cs refuses a feature while git tracks nothing under the base's `.cs/`, until you commit it or change the line to `cs_mode: ignored`, which keeps `.cs/` out of git and has each feature hide it through `.git/info/exclude`. Once git tracks `.cs/` a feature is `tracked` whatever the line says, and a base with no `cs_mode` (one cs created, or one adopted or moved into `.cs/` before cs wrote the line) has the mode inferred from whether git tracks `.cs/`. While git tracks nothing under `.cs/`, a `cs_mode` that is neither `tracked` nor `ignored` refuses a feature, naming the line to fix. Each machine binds its own conversation, so this must not sync. Writers take turns on `state.mutex.lock` beside it. `claude_session_id` is one slot, written only by the conversation `cs` launched — see [hooks.md](hooks.md) for how a teammate or walked-in claude is kept out of it. |
+| `state` | Session state bound to this checkout: `claude_session_id` (the conversation UUID to resume), `claude_session_color` (the `/color` palette entry), `last_resumed` (last resume date), `session_name` for adopted sessions only (their name lives in the sessions-root symlink, which a hook resolving the directory has no way to read; an ordinary session takes its name from its directory), and, for feature worktrees, `task_branch`, `cs_base` and `cs_mode` (`tracked` when the base repo tracks `.cs/`, `ignored` when it does not; it decides how the worktree's records reach the base when the feature is integrated and retired). With `tracked`, what the feature committed under `.cs/` lands through the integrate's merge, and the retire fuses what it left uncommitted there into the base's working tree, uncommitted, as the difference from the feature's last commit; with `ignored`, the retire fuses the whole of the feature's `.cs/`. An adopted session records `cs_mode` too, the mode its features take, and so does a flat-layout session in a git repo once the open moves it into `.cs/`. Neither `cs -adopt` nor that open commits anything, so each writes `ignored` when the project's own rules already ignore the `.cs/` directory, and `tracked` otherwise (you may commit `.cs/` later); a `cs_mode` already in the file stays. With `tracked`, cs refuses a feature while git tracks nothing under the base's `.cs/`, until you commit it or change the line to `cs_mode: ignored`, which keeps `.cs/` out of git and has each feature hide it through `.git/info/exclude`. Once git tracks `.cs/` a feature is `tracked` whatever the line says, and a base with no `cs_mode` (one cs created, or one adopted or moved into `.cs/` before cs wrote the line) has the mode inferred from whether git tracks `.cs/`. While git tracks nothing under `.cs/`, a `cs_mode` that is neither `tracked` nor `ignored` refuses a feature, naming the line to fix. Each machine binds its own conversation, so this must not sync. Writers take turns on `state.mutex.lock` beside it. `claude_session_id` is one slot, written only by the conversation `cs` launched — see [hooks.md](hooks.md) for how a teammate or walked-in claude is kept out of it. |
 | `identity` | Overrides the actor name for shared memory/narrative attribution (precedence: `$CS_ACTOR` > `local/identity` > git `user.email` > git `user.name`). |
 | `config` | This session's settings, `KEY=value` lines that outrank this machine's `~/.config/cs/config` here and that your environment outranks in turn. `cs <name> -config set`, `unset` and `reset` write it, taking turns on `config.mutex.lock` beside it. See [Settings file](configuration.md#settings-file). |
 | `migrated` | The migration stamp, written when every write an open's migration made succeeded. Line 1: the cs version, the actor and `1` or `0` for an encrypted session, tab separated. Line 2: the files it checked that existed then. See [Migration](#migration). |
@@ -418,7 +418,9 @@ conflict-free:
 - `merge=ours` — `MEMORY.md`: the index is regenerated, so a machine keeps its
   own version rather than conflicting. `/finish` then appends each feature
   pointer whose target neither the base index nor its memory archive names,
-  once per target.
+  once per target. When the feature merged the base in and so took its own
+  index over the base's, `/finish` lands the base's index with those
+  feature pointers appended, and says how many base pointers it kept.
 
 cs counts each of these lines as present only as a whole line, so where an
 earlier append glued one onto the line before, cs appends it again on a line
@@ -429,6 +431,27 @@ In a session whose `.gitignore` lists `.cs`, git merges none of these, and
 and gains each feature pointer whose target it does not name, and a base with
 no archive takes the feature's whole. A feature that never changed the
 archive it inherited brings nothing back, so the base's deletions stand.
+
+Git merges only what the feature committed. `/finish` commits no session
+record, so when it retires a feature whose base tracks `.cs/`, it fuses what
+the feature left uncommitted under `.cs/` into the base's working tree and
+leaves it there uncommitted, for you to commit with the base's own records:
+
+- `timeline.jsonl` and `local/session.log`: the base's file gains the lines
+  after the feature's last commit.
+- `narrative.*.md`: the same, and after `cs -narrative rotate` in the
+  feature, the lines the feature's last commit lacks.
+- `MEMORY.md` and `reference_memory_archive.md`: the base's copy gains each
+  pointer whose target it does not name.
+- `README.md` and `summary.md`: the feature's copy goes to
+  `.cs/features/<task>/`, and the base's own stays.
+- Any other file under `.cs/` (a plan, a narrative archive section, a memory
+  entry): copied when the base has no such file or an identical one.
+
+The retire refuses, and removes nothing, when the feature deleted a tracked
+record without committing the deletion, rewrote `timeline.jsonl` instead of
+appending to it, or changed a file the base also holds with other contents.
+The refusal names each path and what to do with it.
 
 Human-authored prose (`README.md`, `summary.md`) uses the default merge — a
 genuine divergence there is a real conflict a person should reconcile. In a

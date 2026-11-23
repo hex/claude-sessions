@@ -80,7 +80,14 @@ what creates them and fold it into the gate: `-- sh -c 'npm ci && npm test'`.
    will land — nothing committed after it is included. If `dirt_count` is
    not 0, list every `dirt:` path under the heading
    "NOT part of this integrate" before doing anything else. Never stash,
-   commit or copy them.
+   commit or copy them. Then read `base_dirty` and `feature_state`, which
+   say what cs refuses. `base_dirty: 1`: the integrate refuses
+   before it lands anything and names the paths, so run it and relay that.
+   `feature_dirty: 1`, a `feature_untracked` above 0, or
+   `feature_state: vault-locked`: the retire refuses after the landing.
+   Say so before step 3 and ask with AskUserQuestion (land now and keep the
+   worktree / stop). `feature_state: unknown`: report it and its
+   `feature_state_reason` verbatim, and go on.
 2. **PR state.** Read `pr_state`:
    - `none` — proceed with the local path.
    - `MERGED` — the PR path (step 4). `pr_merge_commit` and `pr_base_ref`
@@ -170,7 +177,7 @@ what creates them and fold it into the gate: `-- sh -c 'npm ci && npm test'`.
    may print `Moved N ignored files to the system trash:` with one line per
    file it moved, and one per directory it moved whole (its path and the
    number of files inside): relay that block whole, since the user's ignored
-   files went there. In ignored mode it may also print `The feature's
+   files went there. It may also print `The feature's
    <file> is kept at <path>` for the feature's README.md or summary.md:
    relay each such line, since that is where the feature's copy now lives.
    A refusal can carry the same block (`... before this failed:`); print it
@@ -181,8 +188,10 @@ what creates them and fold it into the gate: `-- sh -c 'npm ci && npm test'`.
    conversation for the user.
 7. **Report.** End with, in this order: what landed (`sha -> base_head`);
    the `not_integrated` count ("N commits on cs/<task> after the captured
-   commit are NOT integrated"); the dirt list ("NOT part of this integrate",
-   and now gone with the worktree when retirement succeeded — say so); the
+   commit are NOT integrated"); the dirt list ("NOT part of this integrate";
+   when retirement succeeded, its .cs records are now in the base's working
+   tree, uncommitted, the feature's README.md and summary.md under
+   .cs/features/<task>/ — say so); the
    PR line; and the retirement outcome (the `retired` line, the `staged`
    line with the one sentence above, or the refusal and what the user does
    next).
