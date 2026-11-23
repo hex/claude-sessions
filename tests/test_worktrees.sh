@@ -888,6 +888,35 @@ test_worktree_create_keeps_a_file_the_feature_already_has() {
     assert_eq "no" "$([ -e "$wt/.cs/local/marker" ] && echo yes || echo no)" "cs's own records are not copied" || return 1
 }
 
+# cs writes a feature's .claude/settings.local.json itself, and the retire
+# adds every permission rule that file holds to the base's. A copy of the
+# base's file would hand the base back, at the retire, a rule it had dropped
+# since the feature was created.
+test_worktree_create_never_copies_the_permission_settings() {
+    _included_base "incperm" ".claude/settings.local.json"
+    local base_dir="$CS_SESSIONS_ROOT/incperm" wt="$CS_SESSIONS_ROOT/incperm@task1"
+    local settings=".claude/settings.local.json" created sha output status=0
+    echo "$settings" >> "$base_dir/.gitignore"
+    (cd "$base_dir" && git add .gitignore && git commit -q -m "ignore the local settings")
+    mkdir -p "$base_dir/.claude"
+    printf '%s\n' '{"permissions": {"allow": ["Bash(rm -rf:*)", "Bash(ls:*)"]}}' > "$base_dir/$settings"
+    created=$("$CS_BIN" "incperm@task1" < /dev/null 2>&1) || status=$?
+    assert_eq "0" "$status" "the feature is created: $created" || return 1
+    printf '%s\n' '{"permissions": {"allow": ["Bash(ls:*)"]}}' > "$base_dir/$settings"
+    jq '.permissions.allow += ["Bash(npm test:*)"]' "$wt/$settings" > "$wt/.claude/s.json" \
+        && mv "$wt/.claude/s.json" "$wt/$settings"
+    echo "done" > "$wt/result.txt"
+    (cd "$wt" && git add result.txt && git commit -q -m "task")
+    sha=$(land_feature incperm task1) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" incperm -retire-feature task1 "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire succeeds: $output" || return 1
+    assert_eq '["Bash(ls:*)","Bash(npm test:*)"]' "$(jq -c .permissions.allow "$base_dir/$settings")" \
+        "the rule the base dropped stays dropped, and the feature's grant comes" || return 1
+    assert_output_contains "$created" "Not copied: .claude/settings.local.json (cs manages it)" \
+        "the launch names the file it left and why" || return 1
+    assert_output_not_contains "$created" "that .worktreeinclude names" "and counts no copy" || return 1
+}
+
 test_worktree_reopen_preserves_project_claude_md() {
     local base_dir="$CS_SESSIONS_ROOT/proj"
     mkdir -p "$base_dir/.cs"/{memory,local}
@@ -2227,6 +2256,7 @@ run_test test_worktree_create_without_worktreeinclude_copies_nothing
 run_test test_worktree_create_copies_nothing_through_a_link_in_the_feature
 run_test test_worktree_create_copies_no_link
 run_test test_worktree_create_keeps_a_file_the_feature_already_has
+run_test test_worktree_create_never_copies_the_permission_settings
 run_test test_worktree_reopen_preserves_project_claude_md
 run_test test_worktree_reopen_refuses_a_symlinked_cs_local
 run_test test_worktree_creation_refuses_a_committed_cs_local_link
