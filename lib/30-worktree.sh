@@ -1897,25 +1897,39 @@ _integrate_in_temp() {  # base_dir wt_dir task sha common from_remote ci_green g
     # The merge commit this integrate will land, read before the gate runs.
     # Everything after the gate is measured against it: what lands is this
     # commit, never whatever the temp holds when the gate is done.
-    # merge=ours kept the base's MEMORY.md; a pointer to a topic only the
-    # feature indexed is appended and folded into the merge commit, so it
-    # lands with it. A --from-remote landing is origin's commit, left as is.
+    # The merged MEMORY.md is the base's with the feature's pointers added.
+    # merge=ours keeps the base's when both sides changed it, but a feature
+    # that merged the base in makes the base an ancestor, and the merge then
+    # takes the feature's copy whole: the base's copy is put back first. A
+    # pointer to a topic only the feature indexed is then appended, and the
+    # result is folded into the merge commit, so it lands with it. A
+    # --from-remote landing is origin's commit, left as is.
     if [ "$merge_status" = 0 ] && [ "$mode" = "tracked" ] && [ -z "$from_remote" ] \
-        && git -C "$tmp" cat-file -e "$sha:.cs/memory/MEMORY.md" 2>/dev/null; then
-        local feature_index added
+        && git -C "$tmp" cat-file -e "HEAD:.cs/memory/MEMORY.md" 2>/dev/null; then
+        local index="$tmp/.cs/memory/MEMORY.md" feature_index base_index added kept=0
         feature_index=$(mktemp "${TMPDIR:-/tmp}/cs-memory-index.XXXXXX")
-        if ! git -C "$tmp" show "$sha:.cs/memory/MEMORY.md" > "$feature_index" \
-            || ! added=$(_append_missing_memory_pointers "$feature_index" "$tmp/.cs/memory/MEMORY.md"); then
-            rm -f "$feature_index"; rmdir "$no_hooks"
+        base_index=$(mktemp "${TMPDIR:-/tmp}/cs-memory-index.XXXXXX")
+        if ! {
+            if git -C "$tmp" cat-file -e "$B:.cs/memory/MEMORY.md" 2>/dev/null; then
+                git -C "$tmp" show "$B:.cs/memory/MEMORY.md" > "$base_index" \
+                    && kept=$(_append_missing_memory_pointers "$base_index" "$index") \
+                    && cs_write_atomic "$index" cat "$base_index"
+            fi \
+                && { ! git -C "$tmp" cat-file -e "$sha:.cs/memory/MEMORY.md" 2>/dev/null \
+                     || git -C "$tmp" show "$sha:.cs/memory/MEMORY.md" > "$feature_index"; } \
+                && added=$(_append_missing_memory_pointers "$feature_index" "$index")
+        }; then
+            rm -f "$feature_index" "$base_index"; rmdir "$no_hooks"
             error "Could not carry the feature's MEMORY.md pointers into the merge in $tmp; base untouched"
         fi
-        rm -f "$feature_index"
-        if [ "$added" != 0 ]; then
+        rm -f "$feature_index" "$base_index"
+        if ! git -C "$tmp" diff --quiet HEAD -- .cs/memory/MEMORY.md; then
             git -C "$tmp" add -- .cs/memory/MEMORY.md \
                 && git -C "$tmp" -c core.hooksPath="$no_hooks" commit -q --amend --no-edit >/dev/null \
                 || { rmdir "$no_hooks"; error "Could not commit the feature's MEMORY.md pointers in $tmp; base untouched"; }
-            info "MEMORY.md: appended $added pointer(s) from the feature (base lines kept)"
         fi
+        [ "$kept" = 0 ] || info "MEMORY.md: kept $kept base pointer(s) the feature's copy lacked"
+        [ "$added" = 0 ] || info "MEMORY.md: appended $added pointer(s) from the feature (base lines kept)"
     fi
     local M=""
     [ "$merge_status" = 0 ] && M=$(git -C "$tmp" rev-parse HEAD)
