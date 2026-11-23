@@ -9,6 +9,8 @@ source "$SCRIPT_DIR/test_lib.sh"
 # The vault prompt draws a lock glyph when the shell exports CS_NERD_FONTS=1;
 # these tests read the rows without it.
 export CS_NERD_FONTS=0
+# NO_COLOR blanks every colour cs draws; one test reads the palette's amber.
+unset NO_COLOR
 
 # PATH stubs: uname answers $FAKE_UNAME; diskutil logs its argv, one call per
 # line, and fails the verb named in $FAKE_DISKUTIL_FAIL (create, attach or
