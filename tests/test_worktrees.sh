@@ -4966,6 +4966,61 @@ test_retire_tracked_mode_refuses_what_the_fuse_cannot_carry() {
 
 run_test test_retire_tracked_mode_refuses_what_the_fuse_cannot_carry
 
+# Before the landing the base still holds the bytes it gave the feature, and
+# the landing is what brings the feature's committed edit of a record there.
+# The features screen reads a record the feature edited again after that
+# commit as the retire will find it once the feature has landed: carried.
+test_features_reads_a_tracked_record_as_the_retire_will_after_the_landing() {
+    local base_dir wt sha line output status=0 token="$RANDOM$RANDOM" topic=".cs/memory/topic-x.md"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    echo "base topic" > "$base_dir/$topic"
+    (cd "$base_dir" && git add "$topic" && git commit -q -m "a topic")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "committed in the feature" >> "$wt/$topic"
+    (cd "$wt" && git add "$topic" && git commit -q -m "the feature edits the topic")
+    echo "uncommitted $token" >> "$wt/$topic"
+    line=$("$CS_BIN" myproj -features --porcelain 2>&1)
+    assert_eq "0" "$(_feat_field "$line" 7)" "the features screen counts no record at risk: $line" || return 1
+    assert_eq "ready" "$(_feat_field "$line" 10)" "and reads the feature as ready: $line" || return 1
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire goes through: $output" || return 1
+    assert_eq "retired fix-auth $sha" "$(printf '%s\n' "$output" | tail -n 1)" "the retire prints its outcome" || return 1
+    assert_eq "base topic
+committed in the feature
+uncommitted $token" "$(cat "$base_dir/$topic")" "the base's topic is the feature's" || return 1
+}
+
+run_test test_features_reads_a_tracked_record_as_the_retire_will_after_the_landing
+
+# A record the base committed to as well is merged by the landing, so the
+# base will not hold the feature's committed bytes, and the retire refuses
+# over the feature's later edit. The features screen says so beforehand.
+test_features_counts_a_tracked_record_the_base_committed_to_as_well() {
+    local base_dir wt sha line output status=0 topic=".cs/memory/topic-x.md"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    printf '%s\n' "first" "second" "third" "fourth" "fifth" > "$base_dir/$topic"
+    (cd "$base_dir" && git add "$topic" && git commit -q -m "a topic")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "committed in the feature" >> "$wt/$topic"
+    (cd "$wt" && git add "$topic" && git commit -q -m "the feature edits the topic")
+    echo "uncommitted in the feature" >> "$wt/$topic"
+    printf '%s\n' "committed in the base" "first" "second" "third" "fourth" "fifth" > "$base_dir/$topic"
+    (cd "$base_dir" && git add "$topic" && git commit -q -m "the base edits the topic")
+    line=$("$CS_BIN" myproj -features --porcelain 2>&1)
+    assert_eq "1" "$(_feat_field "$line" 7)" "the features screen counts the record: $line" || return 1
+    assert_eq "untracked" "$(_feat_field "$line" 10)" "and reads the feature as holding work at risk: $line" || return 1
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "the retire refuses: $output" || return 1
+    assert_output_contains "$output" "the base holds a different file at the same path" "over a record the base changed too" || return 1
+    assert_eq "$topic" "$(printf '%s\n' "$output" | tail -n 1)" "and names the topic" || return 1
+}
+
+run_test test_features_counts_a_tracked_record_the_base_committed_to_as_well
+
 # A log committed with nothing in it is a log like any other: the features
 # screen and the retire read what the feature appended to it and print
 # nothing else.
