@@ -1074,7 +1074,7 @@ _doctor_pid_verdict() {  # pid (digits)
     fi
 }
 
-# Beside "branch -d" in a row for a retire that is gone: doctor cannot read
+# Beside "branch -d" in a row for a retire that is gone: doctor does not read
 # whether that retire ran with --force, which deletes its branch with -D.
 _DOCTOR_FORCED_BRANCH_NOTE="(git refuses -d when the base does not hold every commit of the branch, as after a squash merge that /finish retired with --force; -D deletes it then)"
 
@@ -1134,7 +1134,8 @@ _doctor_retire_copy_row() {  # aside worktree_name pid
 # nothing moved, and a missing worktree means /finish cannot run again. For
 # a feature whose repo tracks .cs the retire copies the records it will fuse
 # and marks the directory with a file named copy first: such a directory
-# gets a row of its own (_doctor_retire_copy_row). Only
+# gets its row from _doctor_retire_copy_row, except one holding records
+# whose worktree is gone, which gets the row of records set aside. Only
 # a directory whose retire is gone is reported: a live one is a retire in
 # progress, and one cs cannot judge gets no remedy. The pid is hedged as the
 # integrate lock's is: ESRCH is absence only in this pid namespace.

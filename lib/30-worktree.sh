@@ -1287,9 +1287,9 @@ _retire_drop_copy() {
     [ -z "${_RETIRE_COPY:-}" ] || rm -rf "$_RETIRE_COPY"
 }
 
-# Whether git reads <dir> as the top of a checkout, which a /finish needs of
-# a worktree before it does anything there. A directory whose removal failed
-# part-way is not one once git has forgotten the worktree or deleted its .git.
+# Whether git reads <dir> as the top of a checkout. A directory whose removal
+# failed part-way is not one once git has forgotten the worktree or deleted
+# its .git.
 _worktree_is_checkout() {  # dir
     local top
     top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) && [ "$top" -ef "$1" ]
@@ -1601,9 +1601,7 @@ $remove_err${trashed:+$nl$trashed}"
             _retire_copy_is_spare "$wt_dir" "$base_dir/.cs" "$task" "$aside" || spare=$?
             [ "$spare" != 2 ] || known="cs could not copy the worktree's session records again, so it cannot tell whether the worktree still holds every one the feature left uncommitted"
             # git deletes what it can before it fails, so the copy can be
-            # the only one of a record by now. The deleted files go back
-            # only after the fuse by hand: a record put back as its last
-            # commit holds it no longer shows which lines the copy alone has.
+            # the only one of a record by now.
             [ "$spare" = 0 ] \
                 || error "git worktree remove failed for $wt_dir after deleting part of it, and $known. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
 $remove_err${trashed:+$nl$trashed}"

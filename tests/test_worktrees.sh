@@ -4979,9 +4979,9 @@ run_test test_retire_tracked_mode_says_to_fuse_what_a_dead_checkout_still_holds
 # refuses over the deletions, so the refusal and cs -doctor say how to put
 # them back, and neither calls the record lost: a tracked record that is
 # gone refuses the second copy, so cs has compared nothing. Followed to the
-# letter, the steps end in a retire that carries
-# each of the feature's lines once: the one whose record the removal deleted
-# by hand from the copy, the one the worktree kept by the retire.
+# letter, the steps end in a retire that carries each of the feature's lines
+# once: the one whose record the removal deleted by hand from the copy, the
+# one the worktree kept by the retire.
 test_retire_tracked_mode_remedy_after_a_part_way_removal_ends_in_a_retire() {
     local base_dir wt sha narrative bin aside remedy output status=0 token="$RANDOM$RANDOM"
     base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }

@@ -1601,8 +1601,8 @@ _marked_retire_copy() {
 # worktree's records with a part of them. The copy is marked before its cs
 # directory is made, so a marked aside without one is deleted too, and not
 # with rmdir, which fails on a directory holding the mark. A removal killed
-# part-way leaves tracked files deleted, which the next /finish refuses over,
-# so each row says how to put them back.
+# part-way can leave tracked files deleted, which the next /finish refuses
+# over, so each row says how to put them back.
 test_doctor_retire_copy_with_its_worktree_says_delete_it() {
     local dead aside output holds wt="$CS_SESSIONS_ROOT/test-session@feat" rerun
     _feature_checkout || { echo "  FAIL: fixture: a feature checkout"; return 1; }
