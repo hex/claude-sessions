@@ -6198,9 +6198,9 @@ ${wt_listing#*"$nl"}"
     # with its own, and the retry fuses exactly once. An ignored .cs is
     # moved aside whole and moved back on a failure; of a tracked one, the
     # records the feature left uncommitted are copied (_capture_tracked_records)
-    # and the copy is deleted on any exit before the removal (_retire_drop_copy),
-    # and after a removal that failed only while the worktree still holds
-    # each of them (_retire_copy_is_spare).
+    # and the copy is deleted on any exit before the removal begins
+    # (_retire_drop_copy), and after a removal that failed only while the
+    # worktree still holds each of them (_retire_copy_is_spare).
     # For an ignored .cs the staging directory sits beside the worktree, on
     # its filesystem, so both moves are renames: nothing is half-copied on a
     # failure.
@@ -6292,6 +6292,9 @@ $missing"
         mkdir "$aside" 2>/dev/null || error "Could not create $aside to set aside $wt_dir/.cs for the record fuse${trashed:+$nl$trashed}"
         mv "$wt_dir/.cs" "$aside/cs" || { rmdir "$aside" 2>/dev/null; error "Could not set aside $wt_dir/.cs for the record fuse${trashed:+$nl$trashed}"; }
     fi
+    # From here the worktree may have lost records, so no exit deletes the
+    # copy unasked.
+    _RETIRE_COPY=""
     local remove_err
     if ! remove_err=$(git -C "$base_dir" worktree remove --force "$wt_dir" 2>&1); then
         if [ "$mode" = "ignored" ]; then
@@ -6299,17 +6302,17 @@ $missing"
                 || error "git worktree remove failed for $wt_dir, and its session records could not be put back: they are at $aside/cs (move that directory to $wt_dir/.cs by hand)
 $remove_err${trashed:+$nl$trashed}"
             rmdir "$aside" 2>/dev/null
-        elif ! _retire_copy_is_spare "$wt_dir" "$base_dir/.cs" "$task" "$aside"; then
+        elif _retire_copy_is_spare "$wt_dir" "$base_dir/.cs" "$task" "$aside"; then
+            rm -rf "$aside"
+        else
             # git deletes what it can before it fails, so the copy can be
             # the only one of a record by now.
-            _RETIRE_COPY=""
-            error "git worktree remove failed for $wt_dir after deleting part of it, and the worktree no longer holds every session record the feature left uncommitted. The copy cs made of them is at $aside/cs, and nothing was fused. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, then delete $aside. If git still lists the worktree (git -C \"$base_dir\" worktree list), run /finish $task again; if not, delete what is left of $wt_dir and then the branch with: git -C \"$base_dir\" branch -d $branch
+            error "git worktree remove failed for $wt_dir after deleting part of it, and the worktree no longer holds every session record the feature left uncommitted. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, then delete $aside. If git still lists the worktree (git -C \"$base_dir\" worktree list), run /finish $task again; if not, delete what is left of $wt_dir and then the branch with: git -C \"$base_dir\" branch -d $branch
 $remove_err${trashed:+$nl$trashed}"
         fi
         error "git worktree remove failed for $wt_dir; nothing was fused or deleted
 $remove_err${trashed:+$nl$trashed}"
     fi
-    _RETIRE_COPY=""
     _cs_unlock "$wt_dir/.cs/session.mutex.lock"
     ( fuse_session_records "$aside/cs" "$base_dir/.cs" "$task" ) \
         || error "The worktree $wt_dir is removed, but its session records could not be fused into $base_dir/.cs: they are at $aside/cs. Fuse what is missing by hand, then delete that directory.${trashed:+$nl$trashed}"
@@ -7140,7 +7143,8 @@ _fuse_verdict() {  # feature_meta base_meta rel
 # _fuse_verdict's answer for a file whose earlier copy has the record <was>
 # ("<cksum> <bytes>"), or none when the feature wrote the file itself. With
 # <delivered>, the answer for a base that holds that earlier copy at <rel>,
-# whatever it holds there now: a landing is about to put it there.
+# or no file there when there is none, whatever it holds now: a landing is
+# about to leave it so.
 _record_verdict() {  # feature_meta base_meta rel was [delivered]
     local src="$1/$3" dst="$2/$3" was="$4" now
     if [ -L "$src" ] || [ ! -f "$src" ]; then echo conflict; return 0; fi
@@ -7149,7 +7153,10 @@ _record_verdict() {  # feature_meta base_meta rel was [delivered]
         if [ "$now" = "$was" ]; then echo skip; return 0; fi
     fi
     if _fuse_path_blocked "$2" "$3"; then echo conflict; return 0; fi
-    if [ -n "${5:-}" ]; then echo replace; return 0; fi
+    if [ -n "${5:-}" ]; then
+        if [ -n "$was" ]; then echo replace; else echo carry; fi
+        return 0
+    fi
     if [ ! -e "$dst" ] && [ ! -L "$dst" ]; then
         if [ -n "$was" ]; then echo restore; else echo carry; fi
         return 0
@@ -7550,7 +7557,7 @@ _tracked_record_verdict() {  # wt_dir base_meta task status rel kind [delivered]
             _prose_verdict "$meta" "$2" "$rel" "$3" "$was" ;;
         *)
             was=$(_head_blob_sum "$1" "$rel") || return 1
-            if [ -n "$was" ] && [ -n "${7:-}" ] && grep -Fxq -- ".cs/$rel" "$7"; then delivered=1; fi
+            if [ -n "${7:-}" ] && grep -Fxq -- ".cs/$rel" "$7"; then delivered=1; fi
             _record_verdict "$meta" "$2" "$rel" "$was" "$delivered" ;;
     esac
 }
