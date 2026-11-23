@@ -4676,6 +4676,34 @@ test_retire_tracked_mode_fuses_nothing_when_removal_fails_and_retry_fuses_once()
 
 run_test test_retire_tracked_mode_fuses_nothing_when_removal_fails_and_retry_fuses_once
 
+# A trash command that fails ends the retire of a tracked feature like any
+# other refusal: the copy it made of the feature's records goes too.
+test_retire_tracked_mode_leaves_no_copy_when_the_trash_command_fails() {
+    local base_dir wt sha narrative bin output status=0
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    echo ".env" >> "$base_dir/.gitignore"
+    (cd "$base_dir" && git add .gitignore && git commit -q -m "ignore .env")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    echo "- feature line" >> "$wt/$narrative"
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    echo "KEY=value" > "$wt/.env"
+    bin=$(fake_trash_bin fails trash)
+    output=$(PATH="$bin:$PATH" "$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "the retire refuses: $output" || return 1
+    assert_eq "Error: Could not move 1 ignored file to the system trash, so nothing was removed; anything the trash command did move is in the trash. Move or delete it, then run /finish fix-auth here again:
+    .env
+trash: trash: the items could not be moved (stand-in failure)" "$output" "the refusal names the file and the trash command's error" || return 1
+    assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')" "no copy of the records is left behind" || return 1
+    assert_eq "KEY=value" "$(cat "$wt/.env")" "the ignored file is where it was" || return 1
+    assert_file_contains "$wt/$narrative" "feature line" "the worktree keeps its narrative" || return 1
+}
+
+run_test test_retire_tracked_mode_leaves_no_copy_when_the_trash_command_fails
+
 # The fuse carries additions and edits. What it cannot carry refuses the
 # retire by name, before anything is trashed or removed, and the features
 # screen counts it: a record the feature deleted, a timeline whose committed
