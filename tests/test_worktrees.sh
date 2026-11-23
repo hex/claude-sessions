@@ -2488,24 +2488,32 @@ test_integrate_carries_the_base_lines_of_a_log_the_feature_also_changed() {
     assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.landing-*')" "nothing set aside is left behind" || return 1
 }
 
+# A directory to put first on PATH, holding a stand-in git that runs the
+# shell line given in place of a fast-forward and is git for everything else.
+_git_with_the_fast_forward_replaced() {  # shell line
+    local bin="$TEST_TMPDIR/stand-in-git"
+    mkdir -p "$bin"
+    cat > "$bin/git" << STUB
+#!/usr/bin/env bash
+for arg in "\$@"; do
+    [ "\$arg" != --ff-only ] || { $1; }
+done
+exec "$(command -v git)" "\$@"
+STUB
+    chmod +x "$bin/git"
+    echo "$bin"
+}
+
 # A landing that fails once the base's lines are set aside puts them back:
 # the base's records are byte for byte what they were.
 test_integrate_puts_the_base_lines_back_when_the_landing_fails() {
-    local base_dir="$CS_SESSIONS_ROOT/myproj" sha narrative timeline=".cs/timeline.jsonl" head bin="$TEST_TMPDIR/failing-git" output status=0 token="$RANDOM$RANDOM"
+    local base_dir="$CS_SESSIONS_ROOT/myproj" sha narrative timeline=".cs/timeline.jsonl" head bin output status=0 token="$RANDOM$RANDOM"
     sha=$(_feature_and_base_wrote_the_same_logs "$token") || { echo "  FAIL: fixture: the feature and the base wrote the same logs"; return 1; }
     narrative=$(_narrative_rel "$base_dir")
     cp "$base_dir/$narrative" "$TEST_TMPDIR/narrative"
     cp "$base_dir/$timeline" "$TEST_TMPDIR/timeline"
     head=$(git -C "$base_dir" rev-parse HEAD)
-    mkdir -p "$bin"
-    cat > "$bin/git" << STUB
-#!/usr/bin/env bash
-for arg in "\$@"; do
-    [ "\$arg" != --ff-only ] || { echo "fatal: the fast-forward failed (stand-in failure)" >&2; exit 1; }
-done
-exec "$(command -v git)" "\$@"
-STUB
-    chmod +x "$bin/git"
+    bin=$(_git_with_the_fast_forward_replaced 'echo "fatal: the fast-forward failed (stand-in failure)" >&2; exit 1')
     output=$(PATH="$bin:$PATH" "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
     assert_eq "1" "$status" "the integrate fails: $output" || return 1
     assert_output_contains "$output" "fatal: the fast-forward failed (stand-in failure)" "it is the landing that failed" || return 1
@@ -2513,6 +2521,27 @@ STUB
     cmp -s "$TEST_TMPDIR/narrative" "$base_dir/$narrative" || { echo "  FAIL: the base narrative is not what it was"; return 1; }
     cmp -s "$TEST_TMPDIR/timeline" "$base_dir/$timeline" || { echo "  FAIL: the base timeline is not what it was"; return 1; }
     assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.landing-*')" "nothing set aside is left behind" || return 1
+}
+
+# A landing terminated once the base's lines are set aside puts them back on
+# its way out, and leaves neither the lines aside nor the integrate's lock.
+test_integrate_puts_the_base_lines_back_when_the_landing_is_terminated() {
+    local base_dir="$CS_SESSIONS_ROOT/myproj" sha narrative timeline=".cs/timeline.jsonl" head lock bin output status=0 token="$RANDOM$RANDOM"
+    sha=$(_feature_and_base_wrote_the_same_logs "$token") || { echo "  FAIL: fixture: the feature and the base wrote the same logs"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cp "$base_dir/$narrative" "$TEST_TMPDIR/narrative"
+    cp "$base_dir/$timeline" "$TEST_TMPDIR/timeline"
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    lock="$base_dir/.git/cs/integrate.lock"
+    bin=$(_git_with_the_fast_forward_replaced "kill -TERM \"\$(cat '$lock/pid')\"; : > '$TEST_TMPDIR/terminated'; exit 1")
+    output=$(PATH="$bin:$PATH" "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_file_exists "$TEST_TMPDIR/terminated" "fixture: the landing reached its fast-forward and was sent TERM: $output" || return 1
+    assert_eq "130" "$status" "the integrate ends as an interrupted run: $output" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+    cmp -s "$TEST_TMPDIR/narrative" "$base_dir/$narrative" || { echo "  FAIL: the base narrative is not what it was"; return 1; }
+    cmp -s "$TEST_TMPDIR/timeline" "$base_dir/$timeline" || { echo "  FAIL: the base timeline is not what it was"; return 1; }
+    assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.landing-*')" "nothing set aside is left behind" || return 1
+    assert_not_exists "$lock" "the integrate's lock is released" || return 1
 }
 
 # A feature that merged the base in keeps its own MEMORY.md (merge=ours), so
@@ -2751,6 +2780,7 @@ run_test test_integrate_refuses_a_landing_that_overwrites_base_session_records
 run_test test_integrate_rechecks_session_records_the_gate_dirtied
 run_test test_integrate_carries_the_base_lines_of_a_log_the_feature_also_changed
 run_test test_integrate_puts_the_base_lines_back_when_the_landing_fails
+run_test test_integrate_puts_the_base_lines_back_when_the_landing_is_terminated
 run_test test_integrate_keeps_the_base_memory_pointers_a_feature_merge_dropped
 run_test test_integrate_lands_without_the_pointer_to_a_topic_the_feature_deleted
 run_test test_integrate_lands_without_the_pointer_the_feature_archived

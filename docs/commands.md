@@ -164,7 +164,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 - Where the feature committed lines to the base's `timeline.jsonl` or a `narrative.*.md` and the base holds lines of its own there uncommitted, the landing sets the base's lines aside in `<sessions root>/.landing-<base>@<task>.<pid>`, fast-forwards, and appends them after the feature's, still uncommitted. A landing that fails puts the files back as they were. One killed before it puts them back leaves the directory; `cs -doctor` names it once that pid is gone and says which lines to append by hand. Any other record both sides changed, and a log whose committed lines the base rewrote, still refuses by name.
 - It reports `gate skipped` only for an already-merged pull request with passing recorded merge checks and no extra base commits.
 - A clean gate checkout lacks ignored dependencies, environment files, and build output. A gate needing them must install them, for example `-- sh -c 'npm ci && npm test'`.
-- See [merge policy](session-layout.md#merge-policy) for record fusion, preserving the base's memory index, and `.cs/features/<task>/` outcomes.
+- See [merge policy](session-layout.md#merge-policy) for record fusion, the memory index a landing keeps, and `.cs/features/<task>/` outcomes.
 
 ### Retirement
 
