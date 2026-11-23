@@ -1083,8 +1083,8 @@ _doctor_pid_verdict() {  # pid (digits)
 # a feature whose repo tracks .cs the retire copies the records it will fuse
 # and marks the directory with a file named copy first: beside a worktree
 # that still holds each record in it (_retire_copy_is_spare), such a
-# directory is only deleted, and beside one the removal had begun on, it is
-# what to fuse by hand. Only
+# directory is only deleted, and beside one that does not, it is what to
+# fuse by hand. Only
 # a directory whose retire is gone is reported: a live one is a retire in
 # progress, and one cs cannot judge gets no remedy. The pid is hedged as the
 # integrate lock's is: ESRCH is absence only in this pid namespace.

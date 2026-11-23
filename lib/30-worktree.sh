@@ -803,8 +803,9 @@ _feature_readiness() {  # base_name task
                 || error "Could not classify the session records in $wt_dir/.cs"
         fi
     else
-        # The retire runs once the feature has landed, so each record is
-        # judged against what the base will hold then (_landing_delivers).
+        # The retire runs once the feature has landed, so a record the
+        # landing brings is judged against what the base will hold then
+        # (_landing_delivers).
         local delivered
         delivered=$(mktemp "${TMPDIR:-/tmp}/cs-landing.XXXXXX") \
             || error "Could not create a temporary file under ${TMPDIR:-/tmp}"
@@ -1464,8 +1465,8 @@ ${wt_listing#*"$nl"}"
 
     # Records are fused only once the worktree is gone: set them aside,
     # remove, then fuse from the copy, so a removal that fails (a locked
-    # worktree, say) leaves the base's records untouched and the worktree
-    # with its own, and the retry fuses exactly once. An ignored .cs is
+    # worktree, say) leaves the base's records untouched, and the retry of
+    # one that deleted nothing fuses exactly once. An ignored .cs is
     # moved aside whole and moved back on a failure; of a tracked one, the
     # records the feature left uncommitted are copied (_capture_tracked_records)
     # and the copy is deleted on any exit before the removal begins
@@ -2803,8 +2804,8 @@ _head_blob_is_prefix() {  # wt_dir rel
 # A narrative whose committed lines changed is not refused: cs -narrative
 # rotate rewrites one, and its new lines are still carried.
 # With <delivered>, a file of paths a landing is about to leave in the base
-# as that commit holds them (_landing_delivers), a record at one of them is
-# measured against the base as it will be then.
+# as that commit holds them (_landing_delivers), a record _record_verdict
+# answers for at one of them is measured against the base as it will be then.
 # Fails when the last commit's copy, or the file, cannot be read.
 _tracked_record_verdict() {  # wt_dir base_meta task status rel kind [delivered]
     local meta="$1/.cs" status="$4" rel="$5" kind="$6" was delivered=""
