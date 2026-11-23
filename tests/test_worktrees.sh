@@ -59,6 +59,36 @@ _feat_field() {  # line field_number
     printf '%s\n' "$1" | awk -F'\t' -v n="$2" '{print $n}'
 }
 
+# A base cs made itself: its first commit tracks its README, its memory index
+# and its narrative. Prints the base dir.
+_tracked_base() {  # name
+    local dir="$CS_SESSIONS_ROOT/$1" narrative
+    "$CS_BIN" "$1" <<< "" >/dev/null 2>&1
+    narrative=$(_narrative_rel "$dir") || return 1
+    git -C "$dir" ls-files --error-unmatch .cs/README.md .cs/memory/MEMORY.md "$narrative" >/dev/null 2>&1 || return 1
+    printf '%s\n' "$dir"
+}
+
+# The one narrative of a session, relative to its directory.
+_narrative_rel() {  # session_dir
+    (cd "$1" && ls .cs/memory/narrative.*.md)
+}
+
+# A conversation's SessionStart or SessionEnd hook, as the lead of the session
+# at <dir>, with the built cs on PATH.
+_session_hook() {  # start|end session_dir session_name conversation_id
+    local input script=session-start.sh
+    input=$(printf '{"session_id":"%s","source":"startup","hook_event_name":"SessionStart"}' "$4")
+    if [ "$1" = end ]; then
+        script=session-end.sh
+        input=$(printf '{"session_id":"%s","reason":"other","hook_event_name":"SessionEnd"}' "$4")
+    fi
+    printf '%s\n' "$input" \
+        | CLAUDE_SESSION_NAME="$3" CLAUDE_SESSION_DIR="$2" CLAUDE_SESSION_META_DIR="$2/.cs" \
+          CS_LEAD_PID=$$ CLAUDE_PID=$$ PATH="$(cd "$(dirname "$CS_BIN")" && pwd):$PATH" \
+          bash "$SCRIPT_DIR/../hooks/$script" >/dev/null 2>&1
+}
+
 # Build a ps seam for the ownership walk. Process inspection may be restricted
 # in a test sandbox; production uses BSD ps, while these integration tests
 # inject the one parent edge relevant to the scenario.
@@ -1182,6 +1212,27 @@ test_stop_hook_retires_a_staged_feature_once_its_conversation_closed() {
     assert_eq "" "$(git -C "$base_dir" branch --list cs/fix-auth)" "branch deleted" || return 1
 }
 
+# The feature's close writes its timeline after the last commit anyone made,
+# so a staged retire always finds the worktree's records changed. It fuses
+# them and retires.
+test_stop_hook_retires_a_tracked_feature_after_its_close_writes_the_timeline() {
+    local base_dir stage sha out narrative token="$RANDOM$RANDOM" wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    { read -r stage; read -r sha; } < <(_staged_feature "$base_dir") || { echo "  FAIL: stage fixture"; return 1; }
+    assert_file_exists "$stage" "fixture: the retire is staged" || return 1
+    echo "- feature line $token" >> "$wt/$narrative"
+    _feature_end "$base_dir" other
+    assert_eq "1" "$(jq -c 'select(.event == "ended" and .session_id == "s")' "$wt/.cs/timeline.jsonl" | grep -c .)" "fixture: the close wrote the worktree's timeline" || return 1
+    out=$(_base_stop "$base_dir")
+    assert_output_contains "$out" "cs: the 'myproj@fix-auth' conversation closed, and the retire /finish staged ran: " \
+        "the lead's next Stop reports the retire: $out" || return 1
+    assert_output_contains "$out" "retired fix-auth $sha" "and the retire went through: $out" || return 1
+    assert_not_exists "$wt" "worktree removed" || return 1
+    assert_eq "1" "$(jq -c 'select(.event == "ended" and .session_id == "s")' "$base_dir/.cs/timeline.jsonl" | grep -c .)" "the close is in the base timeline once" || return 1
+    assert_eq "1" "$(grep -c -F -- "- feature line $token" "$base_dir/$narrative")" "the narrative line is in the base once" || return 1
+}
+
 test_stop_hook_reports_a_staged_retire_the_entry_refuses_and_drops_the_stage() {
     local base_dir stage out wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
     base_dir=$(create_test_session_with_git "myproj")
@@ -2170,6 +2221,7 @@ run_test test_retire_removes_its_stage_when_it_retires
 run_test test_features_reports_a_locked_worktree_with_a_stage_as_staged
 run_test test_stop_hook_leaves_a_staged_retire_while_the_feature_conversation_is_open
 run_test test_stop_hook_retires_a_staged_feature_once_its_conversation_closed
+run_test test_stop_hook_retires_a_tracked_feature_after_its_close_writes_the_timeline
 run_test test_stop_hook_reports_a_staged_retire_the_entry_refuses_and_drops_the_stage
 run_test test_stop_hook_of_a_teammate_leaves_a_staged_retire_alone
 run_test test_stop_hook_drops_an_unreadable_stage_and_says_so
@@ -2276,36 +2328,6 @@ test_integrate_refuses_dirty_base() {
     assert_eq "1" "$status" "dirty base refuses" || return 1
     assert_output_contains "$output" "uncommitted changes" "names the dirt" || return 1
     assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
-}
-
-# A base cs made itself: its first commit tracks its README, its memory index
-# and its narrative. Prints the base dir.
-_tracked_base() {  # name
-    local dir="$CS_SESSIONS_ROOT/$1" narrative
-    "$CS_BIN" "$1" <<< "" >/dev/null 2>&1
-    narrative=$(_narrative_rel "$dir") || return 1
-    git -C "$dir" ls-files --error-unmatch .cs/README.md .cs/memory/MEMORY.md "$narrative" >/dev/null 2>&1 || return 1
-    printf '%s\n' "$dir"
-}
-
-# The one narrative of a session, relative to its directory.
-_narrative_rel() {  # session_dir
-    (cd "$1" && ls .cs/memory/narrative.*.md)
-}
-
-# A conversation's SessionStart or SessionEnd hook, as the lead of the session
-# at <dir>, with the built cs on PATH.
-_session_hook() {  # start|end session_dir session_name conversation_id
-    local input script=session-start.sh
-    input=$(printf '{"session_id":"%s","source":"startup","hook_event_name":"SessionStart"}' "$4")
-    if [ "$1" = end ]; then
-        script=session-end.sh
-        input=$(printf '{"session_id":"%s","reason":"other","hook_event_name":"SessionEnd"}' "$4")
-    fi
-    printf '%s\n' "$input" \
-        | CLAUDE_SESSION_NAME="$3" CLAUDE_SESSION_DIR="$2" CLAUDE_SESSION_META_DIR="$2/.cs" \
-          CS_LEAD_PID=$$ CLAUDE_PID=$$ PATH="$(cd "$(dirname "$CS_BIN")" && pwd):$PATH" \
-          bash "$SCRIPT_DIR/../hooks/$script" >/dev/null 2>&1
 }
 
 # The base's conversation writes its narrative and its hooks write the
@@ -4521,11 +4543,216 @@ test_retire_ignored_mode_refuses_a_cs_that_is_itself_a_repository() {
 
 run_test test_retire_ignored_mode_refuses_a_cs_that_is_itself_a_repository
 
-# A repo that tracks .cs carries it through git, so an untracked file under
-# .cs is no more carried than one anywhere else: the retire refuses and names
-# it. Only cs's own machine-local files (.cs/local, the locks) go with the
-# worktree unasked.
-test_retire_tracked_mode_refuses_untracked_session_records() {
+# A repo that tracks .cs carries what the feature committed through the
+# landing. What the feature's conversation and hooks wrote after its last
+# commit is fused into the base's working tree at retire, uncommitted, by the
+# rules an ignored .cs is fused by: nobody commits session records to retire.
+test_retire_tracked_mode_fuses_every_kind_of_uncommitted_record() {
+    local base_dir wt sha narrative output status=0 commits rel token="$RANDOM$RANDOM"
+    local id="7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    _session_hook start "$wt" "myproj@fix-auth" "$id"
+    echo "- feature line $token" >> "$wt/$narrative"
+    mkdir -p "$wt/.cs/handoffs" "$wt/.cs/plans" "$wt/.cs/task-archive" "$TEST_TMPDIR/kept"
+    echo "topic $token" > "$wt/.cs/memory/new-topic.md"
+    echo "- [New topic](new-topic.md): from the feature" >> "$wt/.cs/memory/MEMORY.md"
+    echo "handoff $token" > "$wt/.cs/handoffs/h.md"
+    echo "plan $token" > "$wt/.cs/plans/next.md"
+    echo "{\"subject\":\"row $token\"}" > "$wt/.cs/task-archive/rows.jsonl"
+    printf '\nShip the fix-auth feature, %s.\n' "$token" >> "$wt/.cs/README.md"
+    printf '# Session Summary: myproj@fix-auth\n\nsummary %s\n' "$token" > "$wt/.cs/summary.md"
+    (cd "$wt/.cs" && tar cf "$TEST_TMPDIR/kept/records.tar" memory/new-topic.md handoffs plans task-archive README.md summary.md)
+    (cd "$TEST_TMPDIR/kept" && tar xf records.tar)
+    echo "fix" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    commits=$(git -C "$base_dir" rev-list --count HEAD)
+    _session_hook end "$wt" "myproj@fix-auth" "$id"
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire goes through: $output" || return 1
+    # The walk's order is the file system's, so the lines are compared sorted.
+    assert_eq "MEMORY.md: appended 1 pointer(s) from the feature (base lines kept)
+The feature's README.md is kept at $base_dir/.cs/features/fix-auth/README.md
+The feature's summary.md is kept at $base_dir/.cs/features/fix-auth/summary.md
+retired fix-auth $sha" "$(printf '%s\n' "$output" | LC_ALL=C sort)" "the retire names where each went, and nothing else" || return 1
+    assert_not_exists "$wt" "the worktree is retired" || return 1
+    assert_eq "1" "$(grep -c -F -- "- feature line $token" "$base_dir/$narrative")" "the narrative line is in the base once" || return 1
+    assert_eq "1" "$(jq -c --arg id "$id" 'select(.event == "ended" and .session_id == $id)' "$base_dir/.cs/timeline.jsonl" | grep -c .)" "the conversation's close is in the base timeline once" || return 1
+    assert_eq "1" "$(jq -c --arg id "$id" 'select(.event == "started" and .session_id == $id)' "$base_dir/.cs/timeline.jsonl" | grep -c .)" "and its start once" || return 1
+    assert_eq "1" "$(grep -c -F '(new-topic.md)' "$base_dir/.cs/memory/MEMORY.md")" "the topic's pointer is in the base index once" || return 1
+    for rel in memory/new-topic.md handoffs/h.md plans/next.md task-archive/rows.jsonl; do
+        cmp -s "$TEST_TMPDIR/kept/$rel" "$base_dir/.cs/$rel" \
+            || { echo "  FAIL: $rel is not in the base as the feature left it"; return 1; }
+    done
+    for rel in README.md summary.md; do
+        cmp -s "$TEST_TMPDIR/kept/$rel" "$base_dir/.cs/features/fix-auth/$rel" \
+            || { echo "  FAIL: the feature's $rel is not under its path"; return 1; }
+    done
+    assert_eq "" "$(git -C "$base_dir" status --porcelain -- .cs/README.md)" "the base's own README is untouched" || return 1
+    assert_eq "$commits" "$(git -C "$base_dir" rev-list --count HEAD)" "the retire commits nothing" || return 1
+    assert_eq "" "$(git -C "$base_dir" diff --cached --name-only)" "and stages nothing" || return 1
+}
+
+run_test test_retire_tracked_mode_fuses_every_kind_of_uncommitted_record
+
+# What the feature committed reached the base through the landing. The retire
+# carries only what follows the feature's last commit: fusing a whole log
+# would repeat every line the landing already brought.
+test_retire_tracked_mode_fuses_only_what_follows_the_feature_head() {
+    local base_dir wt sha output status=0 timeline=".cs/timeline.jsonl"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    printf '{"event":"base-seed"}\n' >> "$base_dir/$timeline"
+    (cd "$base_dir" && git add -f "$timeline" && git commit -q -m "timeline seed")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    (cd "$base_dir" && git add "$timeline" && git commit -q --allow-empty -m "base timeline")
+    printf '{"event":"committed-in-feature"}\n' >> "$wt/$timeline"
+    (cd "$wt" && git add "$timeline" && git commit -q -m "feature timeline")
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    assert_eq "1" "$(grep -c -F 'committed-in-feature' "$base_dir/$timeline")" "fixture: the landing brought the committed line" || return 1
+    printf '{"event":"uncommitted-in-feature"}\n' >> "$wt/$timeline"
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire goes through: $output" || return 1
+    assert_eq "1" "$(grep -c -F 'base-seed' "$base_dir/$timeline")" "the base's own line is there once" || return 1
+    assert_eq "1" "$(grep -c -F 'committed-in-feature' "$base_dir/$timeline")" "the line the landing brought is there once" || return 1
+    assert_eq "1" "$(grep -c -F 'uncommitted-in-feature' "$base_dir/$timeline")" "the line after the feature's last commit is there once" || return 1
+}
+
+run_test test_retire_tracked_mode_fuses_only_what_follows_the_feature_head
+
+# A removal that fails leaves the base's records as they were and no copy of
+# the feature's behind; the retry fuses each line once.
+test_retire_tracked_mode_fuses_nothing_when_removal_fails_and_retry_fuses_once() {
+    local base_dir wt sha narrative output status=0 token="$RANDOM$RANDOM"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    echo "- feature line $token" >> "$wt/$narrative"
+    printf '{"event":"from-feature-%s"}\n' "$token" >> "$wt/.cs/timeline.jsonl"
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    git -C "$base_dir" worktree lock "$wt"
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "a locked worktree cannot be removed: $output" || return 1
+    assert_output_contains "$output" "git worktree remove failed for $wt; nothing was fused or deleted" "the refusal says nothing was fused" || return 1
+    assert_file_contains "$wt/$narrative" "feature line $token" "the worktree keeps its narrative" || return 1
+    assert_file_not_contains "$base_dir/$narrative" "feature line $token" "the base narrative is untouched" || return 1
+    assert_file_not_contains "$base_dir/.cs/timeline.jsonl" "from-feature-$token" "the base timeline is untouched" || return 1
+    assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')" "no copy of the records is left behind" || return 1
+    git -C "$base_dir" worktree unlock "$wt"
+    status=0
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retry retires: $output" || return 1
+    assert_not_exists "$wt" "the worktree is removed on the retry" || return 1
+    assert_eq "1" "$(grep -c -F -- "- feature line $token" "$base_dir/$narrative")" "the narrative line is fused once" || return 1
+    assert_eq "1" "$(grep -c -F "from-feature-$token" "$base_dir/.cs/timeline.jsonl")" "the timeline line is fused once" || return 1
+}
+
+run_test test_retire_tracked_mode_fuses_nothing_when_removal_fails_and_retry_fuses_once
+
+# The fuse carries additions and edits. What it cannot carry refuses the
+# retire by name, before anything is trashed or removed, and the features
+# screen counts it: a record the feature deleted, a timeline whose committed
+# lines it changed, and a file the base changed too.
+test_retire_tracked_mode_refuses_what_the_fuse_cannot_carry() {
+    local base_dir="$CS_SESSIONS_ROOT/myproj" wt="$CS_SESSIONS_ROOT/myproj@fix-auth" sha bin case expected output line status
+    bin=$(fake_trash_bin moves trash)
+    for case in deleted rewritten both-edited; do
+        rm -rf "$wt" "$base_dir" "$TEST_TMPDIR/trash.log"
+        _tracked_base myproj > /dev/null || { echo "  FAIL: $case: fixture: the base tracks its narrative and index"; return 1; }
+        echo ".env" >> "$base_dir/.gitignore"
+        echo "base topic" > "$base_dir/.cs/memory/topic.md"
+        printf '{"event":"base-seed"}\n' >> "$base_dir/.cs/timeline.jsonl"
+        (cd "$base_dir" && git add .gitignore .cs/memory/topic.md && git add -f .cs/timeline.jsonl && git commit -q -m "a topic and a timeline")
+        cs_launch "myproj@fix-auth"
+        echo "fix" > "$wt/feature.txt"
+        (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+        sha=$(land_feature myproj fix-auth) || { echo "  FAIL: $case: integrate fixture"; return 1; }
+        echo "KEY=value" > "$wt/.env"
+        case "$case" in
+            deleted)
+                rm "$wt/.cs/memory/topic.md"
+                expected="Error: The feature deletes session records git tracks, and the record fuse carries additions and edits only. Nothing was removed. Restore each with git -C \"$wt\" checkout HEAD -- <path>, or commit the deletion on cs/fix-auth, then run /finish fix-auth again:
+.cs/memory/topic.md" ;;
+            rewritten)
+                printf '{"event":"rewritten"}\n' > "$wt/.cs/timeline.jsonl"
+                expected="Error: The feature changes lines its last commit holds in a session record cs only appends to, so the record fuse cannot carry the change into $base_dir/.cs. Nothing was removed. Commit the change on cs/fix-auth, or put those lines back, then run /finish fix-auth again:
+.cs/timeline.jsonl" ;;
+            both-edited)
+                echo "the feature's edit" >> "$wt/.cs/memory/topic.md"
+                echo "the base's edit" >> "$base_dir/.cs/memory/topic.md"
+                expected="Error: The feature's session records hold files the record fuse cannot carry into $base_dir/.cs: the base holds a different file at the same path, or a file or a link out of the session where the path needs a directory, or the path needs a new directory named .cs, or the file is a link, a repository or a file that changed type. Nothing was removed. Commit each on cs/fix-auth, or merge it into $base_dir/.cs by hand and undo it in $wt, then run /finish fix-auth again:
+.cs/memory/topic.md" ;;
+        esac
+        line=$("$CS_BIN" myproj -features --porcelain 2>&1)
+        assert_eq "1" "$(_feat_field "$line" 7)" "$case: the features screen counts the record: $line" || return 1
+        assert_eq "untracked" "$(_feat_field "$line" 10)" "$case: and reads the feature as holding work at risk: $line" || return 1
+        status=0
+        output=$(PATH="$bin:$PATH" "$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+        assert_eq "1" "$status" "$case: the retire refuses: $output" || return 1
+        assert_eq "$expected" "$output" "$case: the refusal" || return 1
+        assert_dir "$wt/.cs" "$case: the worktree keeps its records" || return 1
+        assert_eq "KEY=value" "$(cat "$wt/.env")" "$case: the ignored file is where it was" || return 1
+        assert_not_exists "$TEST_TMPDIR/trash.log" "$case: the trash command is never run" || return 1
+        assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')" "$case: no copy of the records is left behind" || return 1
+    done
+}
+
+run_test test_retire_tracked_mode_refuses_what_the_fuse_cannot_carry
+
+# /wrap rotates a narrative over its budget: the oldest sections move to an
+# archive file and the narrative is rewritten without them. The retire
+# carries the lines the feature's last commit lacks and the archive file, so
+# a feature that wrapped retires like any other.
+test_retire_tracked_mode_carries_a_rotated_narrative() {
+    local base_dir wt sha narrative output status=0 token="$RANDOM$RANDOM" section n archive
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    for section in 1 2 3 4 5 6; do
+        printf '\n## 2026-01-0%s section %s\n\n' "$section" "$section" >> "$wt/$narrative"
+        n=0
+        while [ "$n" -lt 40 ]; do
+            n=$((n + 1))
+            echo "- note $section.$n $token, long enough to fill a narrative past its budget" >> "$wt/$narrative"
+        done
+        if [ "$section" = 3 ]; then
+            echo "fix" > "$wt/feature.txt"
+            (cd "$wt" && git add feature.txt "$narrative" && git commit -q -m "feature work and three sections")
+            sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+        fi
+    done
+    output=$(cd "$wt" && CLAUDE_SESSION_NAME="myproj@fix-auth" CLAUDE_SESSION_DIR="$wt" CLAUDE_SESSION_META_DIR="$wt/.cs" \
+        CS_NARRATIVE_MAX_BYTES=8000 CS_NARRATIVE_KEEP_BYTES=4000 "$CS_BIN" -narrative rotate 2>&1) \
+        || { echo "  FAIL: fixture: the rotation runs: $output"; return 1; }
+    archive=$(cd "$wt" && ls .cs/narrative-archive/*/*.md) || { echo "  FAIL: fixture: the rotation wrote an archive file: $output"; return 1; }
+    assert_eq "0" "$(grep -c -F -- "- note 1.1 $token" "$wt/$narrative")" "fixture: a committed section left the narrative" || return 1
+    assert_eq "1" "$(grep -c -F -- "- note 6.40 $token" "$wt/$narrative")" "fixture: the newest section stayed" || return 1
+    cp "$wt/$archive" "$TEST_TMPDIR/archive.md"
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire goes through: $output" || return 1
+    assert_not_exists "$wt" "the worktree is retired" || return 1
+    assert_eq "1" "$(grep -c -F -- "- note 1.1 $token" "$base_dir/$narrative")" "a line the landing brought is in the base once" || return 1
+    assert_eq "1" "$(grep -c -F -- "- note 6.1 $token" "$base_dir/$narrative")" "the first new line the narrative kept is in the base once" || return 1
+    assert_eq "1" "$(grep -c -F -- "- note 6.40 $token" "$base_dir/$narrative")" "the last new line is in the base once" || return 1
+    assert_eq "1" "$(grep -c -x -F '## 2026-01-06 section 6' "$base_dir/$narrative")" "with its heading" || return 1
+    cmp -s "$TEST_TMPDIR/archive.md" "$base_dir/$archive" \
+        || { echo "  FAIL: the archive file is not in the base as the rotation wrote it"; return 1; }
+    assert_eq "1" "$(jq -c 'select(.event == "narrative_rotated")' "$base_dir/.cs/timeline.jsonl" | grep -c .)" "the rotation's event is in the base timeline once" || return 1
+}
+
+run_test test_retire_tracked_mode_carries_a_rotated_narrative
+
+# Files the feature never committed under .cs are session records like the
+# rest: the retire fuses them into the base, and only cs's own machine-local
+# files (.cs/local, the locks) go with the worktree.
+test_retire_tracked_mode_fuses_untracked_session_records() {
     local base_dir wt sha output line status=0 rel
     base_dir=$(create_test_session_with_git "myproj")
     cs_launch "myproj@t1"
@@ -4539,29 +4766,23 @@ test_retire_tracked_mode_refuses_untracked_session_records() {
     done
     : > "$wt/.cs/session.lock"
     sha=$(land_feature myproj t1) || { echo "  FAIL: integrate fixture"; return 1; }
+    assert_eq "" "$(git -C "$wt" ls-files .cs/memory .cs/handoffs .cs/plans .cs/summary.md)" "fixture: git tracks none of them" || return 1
     line=$("$CS_BIN" myproj -features --porcelain 2>&1)
-    assert_eq "5" "$(_feat_field "$line" 7)" "five files at risk: $line" || return 1
+    assert_eq "0" "$(_feat_field "$line" 7)" "nothing is at risk: $line" || return 1
+    assert_eq "merged" "$(_feat_field "$line" 10)" "the feature reads as merged: $line" || return 1
     output=$("$CS_BIN" myproj -retire-feature t1 "$sha" 2>&1) || status=$?
-    assert_eq "1" "$status" "the retire refuses: $output" || return 1
-    # git tracks nothing under these three directories, so each is one entry.
-    assert_eq "" "$(git -C "$wt" ls-files .cs/memory .cs/handoffs .cs/plans)" "fixture: git tracks nothing there" || return 1
-    assert_eq "Error: Worktree has 5 untracked files that removal would destroy; commit or remove them first:
-    .cs/memory/    (2 files)
-    .cs/handoffs/  (1 file)
-    .cs/plans/     (1 file)
-    .cs/summary.md" "$output" "the refusal counts all five and names where they are" || return 1
-    assert_eq "feature memory/new-topic.md" "$(cat "$wt/.cs/memory/new-topic.md")" "the topic is still there" || return 1
-    assert_eq "feature plans/feat-plan.md" "$(cat "$wt/.cs/plans/feat-plan.md")" "the plan is still there" || return 1
-    # Positive control: committed, they land with the feature and the worktree retires.
-    (cd "$wt" && git add .cs && git commit -q -m "session records")
-    sha=$(land_feature myproj t1) || { echo "  FAIL: second integrate"; return 1; }
-    status=0
-    output=$("$CS_BIN" myproj -retire-feature t1 "$sha" 2>&1) || status=$?
-    assert_eq "0" "$status" "the retire proceeds: $output" || return 1
-    assert_eq "feature plans/feat-plan.md" "$(cat "$base_dir/.cs/plans/feat-plan.md")" "the plan landed" || return 1
+    assert_eq "0" "$status" "the retire goes through: $output" || return 1
+    assert_eq "The feature's summary.md is kept at $base_dir/.cs/features/t1/summary.md
+retired t1 $sha" "$output" "the retire names where the summary went, and nothing else" || return 1
+    for rel in plans/feat-plan.md memory/new-topic.md memory/narrative.someone.md handoffs/h.md; do
+        assert_eq "feature $rel" "$(cat "$base_dir/.cs/$rel")" "$rel is in the base" || return 1
+    done
+    assert_eq "feature summary.md" "$(cat "$base_dir/.cs/features/t1/summary.md")" "the summary is under the feature's path" || return 1
+    assert_not_exists "$wt" "the worktree is retired" || return 1
+    assert_eq "" "$(git -C "$base_dir" diff --cached --name-only)" "the retire stages nothing" || return 1
 }
 
-run_test test_retire_tracked_mode_refuses_untracked_session_records
+run_test test_retire_tracked_mode_fuses_untracked_session_records
 
 # cs writes the root CLAUDE.local.md with its protocol sentinel, and that copy
 # goes with the worktree. One without the sentinel is the user's own: git

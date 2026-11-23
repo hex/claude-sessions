@@ -1576,6 +1576,33 @@ test_doctor_empty_retire_aside_says_nothing_moved() {
     assert_dir "$aside" "doctor reports and never deletes" || return 1
 }
 
+# A retire of a feature whose repo tracks .cs copies the records it will fuse
+# and leaves the worktree's own .cs where it is. Killed before the removal, it
+# leaves the copy beside a whole worktree: moving it back would overwrite the
+# worktree's records with a part of them. The copy is marked before its cs
+# directory is made, so a marked aside without one gets the same remedy.
+test_doctor_retire_copy_with_its_worktree_says_delete_it() {
+    local dead aside output holds
+    mkdir -p "$CS_SESSIONS_ROOT/test-session@feat/.cs"
+    for holds in records nothing; do
+        sh -c 'exit 0' & dead=$!
+        wait "$dead"
+        aside="$CS_SESSIONS_ROOT/.retire-test-session@feat.$dead"
+        mkdir -p "$aside"
+        : > "$aside/copy"
+        [ "$holds" = nothing ] || mkdir "$aside/cs"
+        output=$("$CS_BIN" -doctor 2>&1) || true
+        assert_output_contains "$output" "Retire leftovers: $aside holds a copy of the session records of test-session@feat, captured by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. The worktree keeps its own .cs, so delete $aside and run /finish feat in test-session again" \
+            "a copy holding $holds: the row says to delete it and run /finish again" || return 1
+        assert_output_not_contains "$output" "move $aside/cs back" \
+            "a copy holding $holds: the row never says to move the copy over the worktree's records" || return 1
+        assert_output_not_contains "$output" "rmdir" \
+            "a copy holding $holds: the row names no rmdir, which fails on a directory holding the mark" || return 1
+        assert_dir "$aside" "doctor reports and never deletes" || return 1
+        rm -rf "$aside"
+    done
+}
+
 test_doctor_leaves_a_retire_aside_alone_while_its_run_lives() {
     mkdir -p "$CS_SESSIONS_ROOT/.retire-test-session@feat.$$/cs"
     local output
@@ -1821,6 +1848,7 @@ run_test test_doctor_warns_on_orphaned_spawn_seed
 run_test test_doctor_warns_on_a_retire_aside_whose_run_is_gone
 run_test test_doctor_retire_aside_with_its_worktree_says_move_the_records_back
 run_test test_doctor_empty_retire_aside_says_nothing_moved
+run_test test_doctor_retire_copy_with_its_worktree_says_delete_it
 run_test test_doctor_leaves_a_retire_aside_alone_while_its_run_lives
 run_test test_doctor_leaves_a_retire_aside_alone_when_its_pid_cannot_be_judged
 run_test test_doctor_leaves_a_spawn_claim_of_another_users_open_alone
