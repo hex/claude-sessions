@@ -1855,6 +1855,40 @@ test_retire_fuses_nothing_when_removal_fails_and_retry_fuses_once() {
     assert_eq "1" "$(grep -c "from-task" "$base_dir/.cs/timeline.jsonl")" "fused exactly once" || return 1
 }
 
+# git worktree remove deletes what it can before it fails on a file it
+# cannot delete, and forgets the worktree: no /finish runs there again. The
+# records an ignored feature's retire set aside stay where they are, whole,
+# and the refusal and cs -doctor say what to do with them.
+test_retire_ignored_mode_keeps_the_records_aside_when_the_removal_left_no_checkout() {
+    local base_dir="$CS_SESSIONS_ROOT/proj" wt="$CS_SESSIONS_ROOT/proj@t1" sha aside pid output status=0 token="$RANDOM$RANDOM"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# P" > "$base_dir/README.md"
+    printf '.cs/\n.claude/settings.local.json\nnode_modules/\n' > "$base_dir/.gitignore"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
+    printf '{"event":"base-seed"}\n' > "$base_dir/.cs/timeline.jsonl"
+    cs_launch "proj@t1"
+    echo "done" > "$wt/result.txt"
+    (cd "$wt" && git add result.txt && git commit -q -m "task")
+    printf '{"event":"from-task-%s"}\n' "$token" > "$wt/.cs/timeline.jsonl"
+    sha=$(land_feature proj t1) || { echo "  FAIL: integrate fixture"; return 1; }
+    mkdir -p "$wt/node_modules/pkg"
+    echo y > "$wt/node_modules/pkg/f"
+    chmod 555 "$wt/node_modules/pkg"
+    output=$("$CS_BIN" proj -retire-feature t1 "$sha" 2>&1) || status=$?
+    chmod -R u+w "$wt"
+    assert_eq "1" "$status" "a worktree holding a file git cannot delete is not removed: $output" || return 1
+    assert_not_exists "$wt/result.txt" "fixture: the removal deleted part of the worktree before it failed" || return 1
+    assert_output_not_contains "$output" "nothing was fused or deleted" "the refusal does not read as one that left the worktree whole" || return 1
+    aside=$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')
+    pid="${aside##*.}"
+    assert_eq "1" "$(grep -c -F "from-task-$token" "$aside/cs/timeline.jsonl" 2>/dev/null)" "the records are where the retire set them aside: $output" || return 1
+    assert_output_contains "$output" "git worktree remove failed for $wt after deleting part of it, and what is left is no git checkout, so /finish t1 cannot run again. The feature's session records are all at $aside/cs, where cs set them aside before the removal, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and $base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), then delete $aside and what is left of $wt. Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch -d cs/t1" \
+        "the refusal says where the records are and what to do with them" || return 1
+    assert_file_not_contains "$base_dir/.cs/timeline.jsonl" "from-task-$token" "the base timeline is untouched" || return 1
+    assert_output_contains "$("$CS_BIN" -doctor 2>&1)" "Retire leftovers: $aside holds the session records of proj@t1, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. $wt is no longer a git checkout, so /finish t1 cannot run there again: fuse into $base_dir/.cs by hand what $aside/cs holds and $base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), then delete $aside and what is left of $wt. Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch -d cs/t1 (git refuses -d when the base does not hold every commit of the branch, as after a squash merge that /finish retired with --force; -D deletes it then)" \
+        "cs -doctor names the records and says to fuse them" || return 1
+}
+
 # An encrypted base keeps its log behind .cs/private, and a locked vault
 # cannot take the worktree's. Retire refuses before anything moves: the
 # worktree stays whole with its records, nothing is stranded in a .retire-*
@@ -2366,6 +2400,7 @@ run_test test_retire_force_takes_a_squash_landed_branch
 run_test test_retire_force_still_refuses_untracked_work
 run_test test_retire_force_refuses_commits_after_the_captured_one
 run_test test_retire_fuses_nothing_when_removal_fails_and_retry_fuses_once
+run_test test_retire_ignored_mode_keeps_the_records_aside_when_the_removal_left_no_checkout
 run_test test_retire_with_a_locked_base_vault_leaves_the_worktree_whole
 run_test test_retire_keeps_the_records_when_a_fuse_write_fails
 run_test test_retire_refusal_for_an_open_session_comes_after_the_landing_check

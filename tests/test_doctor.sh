@@ -1552,7 +1552,8 @@ test_doctor_retire_aside_with_its_worktree_says_move_the_records_back() {
     sh -c 'exit 0' & dead=$!
     wait "$dead"
     local aside="$CS_SESSIONS_ROOT/.retire-test-session@feat.$dead"
-    mkdir -p "$aside/cs" "$CS_SESSIONS_ROOT/test-session@feat"
+    mkdir -p "$aside/cs"
+    _feature_checkout || { echo "  FAIL: fixture: the feature's checkout"; return 1; }
     local output
     output=$("$CS_BIN" -doctor 2>&1) || true
     assert_output_contains "$output" "Retire leftovers: $aside holds the session records of test-session@feat, set aside by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. The worktree is still there, so move $aside/cs back to $CS_SESSIONS_ROOT/test-session@feat/.cs by hand, delete the empty $aside, and run /finish feat in test-session again" \
