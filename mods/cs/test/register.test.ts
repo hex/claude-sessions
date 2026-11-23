@@ -10,7 +10,7 @@ import { labels as filterChatLabels } from '../../cs-filter-chat/hooks/words.ts'
 ;(globalThis as any).h = (type: any, props: any, ...children: any[]) => ({ type, props: props ?? {}, children })
 ;(globalThis as any).Fragment = 'Fragment'
 
-import { register, buildBandEntries, drawBand, fitBand, entriesAt, drawFooterKeys, keysRoute, isCycleHint, noticeCells, parseStatusWidth, modesWidth, keysWidth, STATUS_WIDTH, FOOTER_POLL_MS, FILTER_CHAT_MODE, type BandView, parsePrompts, promptRows, PROMPT_ROWS, RAIL_TEXT_CHARS, DEFAULT_PERCENT, GRACE_SECONDS, NEXT_STEP_CHARS, WRAP_QUESTION, WRAP_YES, QUEUE_START, QUEUE_COMPACT, QUEUE_KICK, QUEUE_MODE_QUESTION, QUEUE_HERE, QUEUE_SUBAGENTS, QUEUE_WORKFLOWS, nextStepLine, isUnconsumed, TOASTS, LOGS, REPLIES, finishToast, parseFeatures, featuresWordOf } from '../hooks/register.tsx'
+import { register, buildBandEntries, drawBand, fitBand, entriesAt, drawFooterKeys, keysRoute, isCycleHint, noticeCells, parseStatusWidth, modesWidth, keysWidth, STATUS_WIDTH, FOOTER_POLL_MS, FILTER_CHAT_MODE, type BandView, type Prompt, parsePrompts, promptRows, PROMPT_ROWS, RAIL_TEXT_CHARS, DEFAULT_PERCENT, GRACE_SECONDS, NEXT_STEP_CHARS, WRAP_QUESTION, WRAP_YES, QUEUE_START, QUEUE_COMPACT, QUEUE_KICK, QUEUE_MODE_QUESTION, QUEUE_HERE, QUEUE_SUBAGENTS, QUEUE_WORKFLOWS, nextStepLine, isUnconsumed, TOASTS, LOGS, REPLIES, finishToast, parseFeatures, featuresWordOf } from '../hooks/register.tsx'
 
 type Hook = ($: any, e: any, next: (e: any) => Promise<any>) => Promise<any>
 const hooks: Record<string, Hook> = {}
@@ -2710,11 +2710,12 @@ const rail = (tree: any): string[] => {
 }
 const tickButtons = (tree: any) => buttons(tree).filter((b: any) => /^cs-rail-\d+$/.test(b.props.key))
 
-test('the live branch of a linear transcript lists every prompt, first line trimmed and cut to 80 characters', () => {
+test('the live branch of a linear transcript lists every prompt, first line trimmed and cut to 80 characters, the whole line kept beside the cut', () => {
   const long = prompt('u5', 'a4', 'x'.repeat(100))
   expect(parsePrompts(`${[...LINEAR, long].join('\n')}\n`)).toEqual([
-    { uuid: 'u1', text: 'say one' }, { uuid: 'u2', text: 'say two' }, { uuid: 'u3', text: 'say three' }, { uuid: 'u4', text: 'say four' },
-    { uuid: 'u5', text: `${'x'.repeat(RAIL_TEXT_CHARS - 1)}\u2026` },
+    { uuid: 'u1', text: 'say one', line: 'say one' }, { uuid: 'u2', text: 'say two', line: 'say two' },
+    { uuid: 'u3', text: 'say three', line: 'say three' }, { uuid: 'u4', text: 'say four', line: 'say four' },
+    { uuid: 'u5', text: `${'x'.repeat(RAIL_TEXT_CHARS - 1)}\u2026`, line: 'x'.repeat(100) },
   ])
 })
 
@@ -4026,12 +4027,12 @@ const AMBER = 'rgb(180,83,9)'
 // The filter chat key's dot while on: the palette's green.
 const GREEN = 'rgb(22,163,74)'
 const quiet = { rotating: false, armed: false, wrapping: false, waiting: 0, queued: 0, queueRunning: false, queueInk: AMBER, mail: 0, rotate: noPress, wrap: noPress, queue: noPress }
-const FOUR = [{ uuid: 'u1', text: 'say one' }, { uuid: 'u2', text: 'say two' }, { uuid: 'u3', text: 'say three' }, { uuid: 'u4', text: 'say four' }]
-const THIRTY = Array.from({ length: 30 }, (_, i) => ({ uuid: `m${i + 1}`, text: `step ${i + 1}` }))
+const FOUR = [{ uuid: 'u1', text: 'say one', line: 'say one' }, { uuid: 'u2', text: 'say two', line: 'say two' }, { uuid: 'u3', text: 'say three', line: 'say three' }, { uuid: 'u4', text: 'say four', line: 'say four' }]
+const THIRTY = Array.from({ length: 30 }, (_, i) => ({ uuid: `m${i + 1}`, text: `step ${i + 1}`, line: `step ${i + 1}` }))
 const thirtyPrompts = () => transcript(THIRTY.flatMap((p, i) => [prompt(p.uuid, i === 0 ? null : `r${i}`, p.text), reply(`r${i + 1}`, p.uuid)]))
-const railOf = (prompts: { uuid: string; text: string }[]) => ({ prompts, named: prompts.length - 1, denied: new Set<string>(), bars: 10, jump: noJump })
+const railOf = (prompts: Prompt[]) => ({ prompts, named: prompts.length - 1, denied: new Set<string>(), bars: 10, jump: noJump })
 const view = (over: Partial<BandView>): BandView => ({ drawn: DRAWN as any, entries: [], chords: CHORDS, own: OWN, bodyColumns: 110, surface: 'terminal', ...over })
-const railViews = (name: string, arrange: () => Promise<void>, prompts: { uuid: string; text: string }[]) =>
+const railViews = (name: string, arrange: () => Promise<void>, prompts: Prompt[]) =>
   [80, 60, 40].map(columns => [`${name} at ${columns}`, arrange, { bodyColumns: columns }, view({ bodyColumns: columns, rail: railOf(prompts) })] as const)
 
 const bandViews: (readonly [string, () => void | Promise<void>, { isWorking?: boolean; hasSurvey?: boolean; bodyColumns?: number }, BandView])[] = [
@@ -4129,7 +4130,10 @@ const gap = (n: number) => ' '.repeat(n)
 
 // The typical line at 120 columns: the actions at the left, then what the
 // session is and the rail at the right edge, the spacer between them.
-const FOURTEEN = Array.from({ length: 14 }, (_, i) => ({ uuid: `t${i + 1}`, text: i === 13 ? 'the band is too busy' : `step ${i + 1}` }))
+const FOURTEEN = Array.from({ length: 14 }, (_, i) => {
+  const text = i === 13 ? 'the band is too busy' : `step ${i + 1}`
+  return { uuid: `t${i + 1}`, text, line: text }
+})
 const typical = buildBandEntries({ ...quiet, rotating: true, wrapping: true, filterChat: { on: true, onPress: noPress }, waiting: 2, mail: 1 })
 
 // The rail at 120 columns: fourteen prompts, five bars, and the jump to the
@@ -4434,7 +4438,7 @@ test('a chord drawn as its key alone is still its Button, pressed by its action,
 })
 
 test('a cut that lands after a space drops the space before the ellipsis, in the band\'s words and the rail\'s prompt alike', () => {
-  const shop = [{ uuid: 'u1', text: 'say one' }, { uuid: 'u2', text: 'go to the shop' }]
+  const shop = [{ uuid: 'u1', text: 'say one', line: 'say one' }, { uuid: 'u2', text: 'go to the shop', line: 'go to the shop' }]
   // 17 cells leave the named prompt 10: `#2 go to ` and `…`, the space dropped and the cell padded.
   expect(textOf(gapLabel(drawBand(view({ bodyColumns: 17, rail: railOf(shop) }), EL)))).toBe(' #2 go to…')
 })
@@ -5593,8 +5597,15 @@ test('the typeahead adds nothing outside the argument of /cs, past its first wor
   expect(promptRows([], '/cs f', 4, 'f')).toEqual([])
 })
 
+test('the typeahead matches a word anywhere in a prompt\'s first line, past the rail\'s cut too, and the row shows the cut text', () => {
+  const long = prompt('u5', 'a4', `${'x '.repeat(45)}zebra crossing\nsecond line giraffe`)
+  const list = parsePrompts(`${[...LINEAR, long].join('\n')}\n`)
+  expect(promptRows(list, '/cs zebra', 4, 'zebra')).toEqual([{ text: '5', label: '5', description: `${'x '.repeat(39)}x\u2026` }])
+  expect(promptRows(list, '/cs giraffe', 4, 'giraffe')).toEqual([])
+})
+
 test('the typeahead lists at most PROMPT_ROWS prompts, the newest', () => {
-  const many = Array.from({ length: 12 }, (_, i) => ({ uuid: `u${i + 1}`, text: `fix part ${i + 1}` }))
+  const many = Array.from({ length: 12 }, (_, i) => ({ uuid: `u${i + 1}`, text: `fix part ${i + 1}`, line: `fix part ${i + 1}` }))
   const rows = promptRows(many, '/cs fix', 4, 'fix')
   expect(PROMPT_ROWS).toBe(8)
   expect(rows.map(r => r.text)).toEqual(['12', '11', '10', '9', '8', '7', '6', '5'])
