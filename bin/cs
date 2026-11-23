@@ -5980,11 +5980,27 @@ _retire_trashed_note() {  # heading_end
 }
 
 # Delete the copy a tracked feature's retire made of its records, on any
-# exit before the worktree is removed: until then the worktree holds every
-# record the copy does. A global because an EXIT trap runs after the
+# exit before the worktree's removal begins: until then the worktree holds
+# every record the copy does. A global because an EXIT trap runs after the
 # function's locals are gone.
 _retire_drop_copy() {
     [ -z "${_RETIRE_COPY:-}" ] || rm -rf "$_RETIRE_COPY"
+}
+
+# Whether a worktree still holds every record a tracked feature's retire
+# copied to <aside> (_capture_tracked_records): its .cs is there, and a copy
+# made now holds each file of that one byte for byte. Anything that stops
+# the second copy answers no.
+_retire_copy_is_spare() {  # wt_dir base_meta task aside
+    local again file status=0
+    [ -d "$1/.cs" ] || return 1
+    again=$(mktemp -d "${TMPDIR:-/tmp}/cs-retire-copy.XXXXXX") || return 1
+    _capture_tracked_records "$1" "$2" "$3" "$again" > /dev/null 2>&1 || status=1
+    while [ "$status" = 0 ] && IFS= read -r -d '' file; do
+        cmp -s "$file" "$again/cs/${file#"$4/cs/"}" || status=1
+    done < <(find "$4/cs" -type f -print0 2>/dev/null)
+    rm -rf "$again"
+    return "$status"
 }
 
 # Retire an integrated feature worktree: fuse its session records into the
@@ -6153,7 +6169,9 @@ ${wt_listing#*"$nl"}"
     # with its own, and the retry fuses exactly once. An ignored .cs is
     # moved aside whole and moved back on a failure; of a tracked one, the
     # records the feature left uncommitted are copied (_capture_tracked_records)
-    # and the copy is deleted on any exit before the removal (_retire_drop_copy).
+    # and the copy is deleted on any exit before the removal (_retire_drop_copy),
+    # and after a removal that failed only while the worktree still holds
+    # each of them (_retire_copy_is_spare).
     # For an ignored .cs the staging directory sits beside the worktree, on
     # its filesystem, so both moves are renames: nothing is half-copied on a
     # failure.
@@ -6252,6 +6270,12 @@ $missing"
                 || error "git worktree remove failed for $wt_dir, and its session records could not be put back: they are at $aside/cs (move that directory to $wt_dir/.cs by hand)
 $remove_err${trashed:+$nl$trashed}"
             rmdir "$aside" 2>/dev/null
+        elif ! _retire_copy_is_spare "$wt_dir" "$base_dir/.cs" "$task" "$aside"; then
+            # git deletes what it can before it fails, so the copy can be
+            # the only one of a record by now.
+            _RETIRE_COPY=""
+            error "git worktree remove failed for $wt_dir after deleting part of it, and the worktree no longer holds every session record the feature left uncommitted. The copy cs made of them is at $aside/cs, and nothing was fused. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, then delete $aside. If git still lists the worktree (git -C \"$base_dir\" worktree list), run /finish $task again; if not, delete what is left of $wt_dir and then the branch with: git -C \"$base_dir\" branch -d $branch
+$remove_err${trashed:+$nl$trashed}"
         fi
         error "git worktree remove failed for $wt_dir; nothing was fused or deleted
 $remove_err${trashed:+$nl$trashed}"
