@@ -1004,7 +1004,8 @@ _worktree_included_list() {  # base_dir out
 # back a rule it dropped meanwhile), a link (cs writes some of these files
 # later, and a write through a copied link lands on the base's file), and a
 # path that passes through a link in the feature. Runs command-substituted
-# with its caller, so every line it says goes to stderr.
+# with its caller, so every line it says goes to stderr. Fails, having copied
+# nothing, when it cannot read the list.
 _worktree_carry_included() {  # base_dir wt_dir list
     local base="$1" wt="$2" f dest copied=0
     while IFS= read -r -d '' f; do
@@ -1028,7 +1029,7 @@ _worktree_carry_included() {  # base_dir wt_dir list
         else
             warn "Not copied: $(_printable_name "$f")" >&2
         fi
-    done < "$3"
+    done < "$3" || return 1
     [ "$copied" = 0 ] \
         || info "Copied $copied ignored file$([ "$copied" = 1 ] || printf s) that .worktreeinclude names" >&2
 }
@@ -1108,7 +1109,8 @@ $_CS_WORKTREEINCLUDE_GIT_SAID" >&2
     # The checkout can carry a committed link or per-actor state from the
     # base's history; refuse before the state writes below go through it.
     cs_assert_local_untracked "$wt_dir"
-    [ -z "$_CS_WORKTREEINCLUDE_LIST" ] || _worktree_carry_included "$base_dir" "$wt_dir" "$_CS_WORKTREEINCLUDE_LIST"
+    [ -z "$_CS_WORKTREEINCLUDE_LIST" ] || _worktree_carry_included "$base_dir" "$wt_dir" "$_CS_WORKTREEINCLUDE_LIST" \
+        || warn "Could not read the list cs made of the files $base_dir/.worktreeinclude names, so none of them was copied" >&2
 
     if [ "$mode" = "ignored" ]; then
         bootstrap_worktree_meta "$wt_dir" "$base_name" "$task" "$base_dir"
