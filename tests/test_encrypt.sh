@@ -1250,6 +1250,22 @@ test_open_says_it_moved_conversations_only_when_it_moved_one() {
     assert_output_not_contains "$out" ": moved" "and moved nothing" || return 1
 }
 
+# Two opens that reach the move together would both copy: the move runs
+# under the openers' mutex, and an open that cannot take it moves nothing.
+test_open_moves_nothing_while_another_cs_holds_the_openers_mutex() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 meta="$CS_SESSIONS_ROOT/enc/.cs" proj out rc=0
+    proj=$(_plain_conversation enc "$id" "before the vault")
+    _hold_session_mutex "$meta/session.mutex.lock" || return 1
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    kill "$MUTEX_HOLDER" 2>/dev/null; wait "$MUTEX_HOLDER" 2>/dev/null
+    assert_file_contains "$proj/$id.jsonl" "before the vault" "the conversation outside is untouched" || return 1
+    [ ! -e "$(_vault_projects enc)" ] || { echo "  FAIL: the vault has a folder for the session"; return 1; }
+    assert_eq "1" "$rc" "the open stops: $out" || return 1
+    assert_output_contains "$out" "enc: another cs is opening this session ($meta/session.mutex.lock is held), so cs moved none of its conversations into the vault; try again in a moment." "names the held mutex" || return 1
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1496,6 +1512,7 @@ run_test test_open_removes_a_copy_outside_that_the_vault_already_holds
 run_test test_open_names_what_it_could_not_remove_outside_the_vault
 run_test test_open_moves_a_folder_over_an_empty_one_in_the_vault
 run_test test_open_says_it_moved_conversations_only_when_it_moved_one
+run_test test_open_moves_nothing_while_another_cs_holds_the_openers_mutex
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
