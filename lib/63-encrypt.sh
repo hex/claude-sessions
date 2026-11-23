@@ -420,6 +420,19 @@ _plain_claude_writer() {  # session_dir
     return 1
 }
 
+# Why a session's conversations must stay outside the vault for now, in
+# CS_MOVE_REFUSAL, ending with what the caller says of a running claude.
+# Returns 1 when nothing stands in the way.
+_conversations_move_refusal() {  # session_dir, plain_dir, what to do about a running claude
+    local writer
+    CS_MOVE_REFUSAL=""
+    if writer=$(_plain_claude_writer "$1"); then
+        CS_MOVE_REFUSAL="a claude (pid $writer) runs in this session outside cs and writes its conversations to $2, so cs moved none of them into the vault. $3"
+        return 0
+    fi
+    return 1
+}
+
 # A session cs -encrypt sealed before it moved conversations keeps them in
 # the shell's projects folder, where its claude, on the vault's config, never
 # looks. With the vault mounted, the open moves them in as cs -encrypt does,
@@ -446,10 +459,10 @@ _move_plain_conversations_at_open() {  # session_name, session_dir
 }
 
 _move_plain_conversations_under_mutex() {  # session_name, session_dir, plain_dir
-    local meta="$2/.cs" plain="$3" vault entry writer rc=0
+    local meta="$2/.cs" plain="$3" vault entry rc=0
     [ -d "$plain" ] || return 0
-    if writer=$(_plain_claude_writer "$2"); then
-        warn "$1: a claude (pid $writer) runs in this session outside cs and writes its conversations to $plain, so cs moved none of them into the vault. Reopen once it has ended."
+    if _conversations_move_refusal "$2" "$plain" "Reopen once it has ended."; then
+        warn "$1: $CS_MOVE_REFUSAL"
         return 0
     fi
     vault="$meta/claude-config/projects/${plain##*/}"
@@ -542,7 +555,12 @@ run_encrypt() {
     # the vault mounted; a removal that stops leaves whole copies in the
     # vault, so cs -encrypt names what is left and finishes. A project dir
     # that is a link is left alone: moving the link would move no conversation.
-    if [ -d "$transcripts" ] && [ ! -L "$transcripts" ]; then
+    # Conversations a running claude writes stay too, for the next open.
+    if [ ! -d "$transcripts" ] || [ -L "$transcripts" ]; then
+        :
+    elif _conversations_move_refusal "$SESSIONS_ROOT/$name" "$transcripts" "The next open moves them once it has ended."; then
+        warn "$name: $CS_MOVE_REFUSAL"
+    else
         _move_conversations_into_vault "$transcripts" "$mnt/claude-config/projects/${transcripts##*/}" || move_rc=$?
         case "$move_rc" in
             0) ;;
