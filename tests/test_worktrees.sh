@@ -2390,6 +2390,38 @@ Commit them in $base_dir (cs never commits session records), then re-run /finish
     assert_eq "- gate note" "$(tail -n 1 "$base_dir/$narrative")" "what the gate wrote is still there" || return 1
 }
 
+# A feature that merged the base in keeps its own MEMORY.md (merge=ours), so
+# the pointers the base indexed meanwhile are missing from its copy, and the
+# landing takes that copy whole: the base is an ancestor. The landing keeps
+# the base's index and adds the feature's pointers to it.
+test_integrate_keeps_the_base_memory_pointers_a_feature_merge_dropped() {
+    local base_dir wt sha index=".cs/memory/MEMORY.md" base_index output status=0 topic
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "feature topic" > "$wt/.cs/memory/topic-f.md"
+    echo "- [Topic f](topic-f.md): the feature's" >> "$wt/$index"
+    (cd "$wt" && git add .cs/memory && git commit -q -m "feature topic")
+    for topic in a b; do
+        echo "base topic $topic" > "$base_dir/.cs/memory/topic-$topic.md"
+        echo "- [Topic $topic](topic-$topic.md): the base's" >> "$base_dir/$index"
+    done
+    (cd "$base_dir" && git add .cs/memory && git commit -q -m "base topics")
+    base_index=$(cat "$base_dir/$index")
+    (cd "$wt" && git merge -q --no-edit "$(git -C "$base_dir" symbolic-ref --short HEAD)" >/dev/null 2>&1) \
+        || { echo "  FAIL: fixture: the feature merges the base in"; return 1; }
+    assert_eq "0" "$(grep -c -F '(topic-a.md)' "$wt/$index")" "fixture: the feature's index lacks the base's first pointer" || return 1
+    assert_eq "0" "$(grep -c -F '(topic-b.md)' "$wt/$index")" "fixture: the feature's index lacks the base's second pointer" || return 1
+    sha=$(git -C "$wt" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "the integrate lands: $output" || return 1
+    assert_eq "$base_index
+- [Topic f](topic-f.md): the feature's" "$(git -C "$base_dir" show "HEAD:$index")" "the landed index is the base's, then the feature's pointer" || return 1
+    assert_eq "MEMORY.md: kept 2 base pointer(s) the feature's copy lacked
+MEMORY.md: appended 1 pointer(s) from the feature (base lines kept)" "$(printf '%s\n' "$output" | grep -F 'MEMORY.md:')" "the integrate says what it did to the index" || return 1
+    assert_eq "" "$(git -C "$base_dir" status --porcelain -- .cs/memory)" "the index landed committed" || return 1
+}
+
 test_integrate_refuses_foreign_live_base_lock() {
     local sha base_dir
     sha=$(integrate_fixture myproj fix-auth)
@@ -2550,6 +2582,7 @@ run_test test_integrate_refuses_dirty_base
 run_test test_integrate_lands_over_base_session_records_it_does_not_touch
 run_test test_integrate_refuses_a_landing_that_overwrites_base_session_records
 run_test test_integrate_rechecks_session_records_the_gate_dirtied
+run_test test_integrate_keeps_the_base_memory_pointers_a_feature_merge_dropped
 run_test test_integrate_refuses_foreign_live_base_lock
 run_test test_integrate_reads_the_base_lock_by_the_one_lock_rule
 run_test test_integrate_cleanup_releases_the_lock_only_once
