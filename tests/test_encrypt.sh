@@ -284,6 +284,25 @@ vault pw [8 bytes]" "$(cat "$FAKE_DISKUTIL_LOG.stdin")" "the password typed once
     assert_output_not_contains "$out" "Disk ejected" "nor its eject line" || return 1
 }
 
+# A conversations folder that is a link is left where it is: moving the link
+# would move no conversation. The closing list then names it, since what it
+# points to stays outside the vault in plain text.
+test_encrypt_names_a_linked_conversations_folder_it_leaves() {
+    _stubs
+    _populated_session enc
+    local proj real out rc=0
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$CS_SESSIONS_ROOT/enc")"
+    real="$TEST_TMPDIR/kept-elsewhere"
+    mkdir -p "$real"
+    echo "conversation" > "$real/44444444-4444-4444-8444-444444444444.jsonl"
+    ln -s "$real" "$proj"
+    out=$(_encrypt enc 2>&1) || rc=$?
+    assert_eq "0" "$rc" "exit 0 (output: $out)" || return 1
+    assert_eq "$real" "$(readlink "$proj")" "the link is left as it was" || return 1
+    assert_eq "conversation" "$(cat "$real/44444444-4444-4444-8444-444444444444.jsonl")" "the conversation stays where the link points" || return 1
+    assert_output_contains "$out" "  - this session's conversations: $proj is a link, so cs left it, and the folder it points to, outside the vault" "the closing list names the linked folder" || return 1
+}
+
 # A session cloned or synced here and never opened has no .cs/local: it is
 # gitignored and born on the first open, and the pre-open hook lives in it.
 test_encrypt_builds_a_session_never_opened_on_this_machine() {
@@ -1128,6 +1147,7 @@ run_test test_encrypt_refuses_a_real_claude_config_or_private
 run_test test_encrypt_refuses_an_existing_pre_open
 run_test test_encrypt_refuses_an_existing_container
 run_test test_encrypt_builds_the_vault_and_detaches
+run_test test_encrypt_names_a_linked_conversations_folder_it_leaves
 run_test test_encrypt_builds_a_session_never_opened_on_this_machine
 run_test test_encrypt_prompt_follows_a_light_terminal
 run_test test_encrypt_holds_the_session_lock_while_it_works
