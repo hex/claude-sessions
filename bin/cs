@@ -16232,11 +16232,20 @@ _volume_mounted_under() {  # dir
 # worktree's own untracked and ignored files and every file inside a
 # submodule, without cs's own bookkeeping (_without_cs_bookkeeping), so a
 # CLAUDE.local.md of the user's own and, in tracked mode, an untracked file
-# under .cs are listed. Fails when git cannot list them.
-_worktree_untracked_paths() {  # worktree_dir
-    local listing more
+# under .cs are listed. Given the base, an ignored file the base holds byte
+# for byte at the same path (_base_held_filter) is left out, as the retire
+# leaves it out of the trash; one under a regenerable directory is listed
+# without that comparison, as the retire does not trash it either. Fails when
+# git cannot list them.
+_worktree_untracked_paths() {  # worktree_dir [base_dir]
+    local listing more regenerable
     listing=$(_worktree_others "$1") || return 1
     more=$(_worktree_others "$1" --ignored) || return 1
+    if [ -n "$more" ] && [ -n "${2:-}" ]; then
+        regenerable=$(printf '%s\n' "$more" | _regenerable_filter regenerable) || return 1
+        more=$(printf '%s\n' "$more" | _regenerable_filter other | _base_held_filter other "$1" "$2") || return 1
+        [ -z "$regenerable" ] || more="$regenerable${more:+$'\n'$more}"
+    fi
     [ -z "$more" ] || listing="${listing:+$listing$'\n'}$more"
     more=$(_submodule_others "$1" "") || return 1
     [ -z "$more" ] || more=$(printf '%s\n' "$more" | _without_cs_bookkeeping "$1") || return 1
@@ -16314,7 +16323,7 @@ _remove_one_session() {
                 local wt_branch
                 wt_branch=$(_read_local_state "$session_dir/.cs/local/state" task_branch)
                 local untracked untracked_listing="" nl=$'\n'
-                untracked=$(_worktree_untracked_paths "$session_dir") \
+                untracked=$(_worktree_untracked_paths "$session_dir" "$wt_base_dir") \
                     || error "git could not list the files in $session_dir; refusing to remove what it cannot list"
                 if [ -n "$untracked" ]; then
                     untracked_listing=$(_untracked_listing "$session_dir" "$untracked") \

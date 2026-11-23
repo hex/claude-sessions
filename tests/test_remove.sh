@@ -781,6 +781,30 @@ Add --delete-files to remove it with --force" "$out" "the refusal names the reco
     assert_not_exists "$wt" "the worktree is removed" || return 1
 }
 
+# An ignored file the base holds byte for byte at the same path, as the
+# .worktreeinclude copy leaves one, is no one's work: removing the worktree
+# loses nothing, so it is not listed and --force goes through over it, as
+# retire leaves it out of the trash. A copy the feature changed is listed.
+test_remove_worktree_leaves_out_an_ignored_file_the_base_holds_byte_for_byte() {
+    local wt base="$CS_SESSIONS_ROOT/wf14" out rc=0
+    wt=$(_worktree_with_user_files wf14)
+    echo secret > "$base/journal.img"
+    echo "base copy" > "$base/cover.img"
+    echo "feature copy" > "$wt/cover.img"
+    out=$("$CS_BIN" -rm wf14@t --force </dev/null 2>&1) || rc=$?
+    assert_eq "1" "$rc" "--force refuses over the user's files: $out" || return 1
+    assert_eq "Error: Worktree session 'wf14@t' holds 2 files git does not track:
+    cover.img
+    notes.txt
+Add --delete-files to remove them with --force" "$out" "the listing leaves out the copy the base holds and keeps the changed one" || return 1
+    rm "$wt/notes.txt" "$wt/cover.img"
+    rc=0
+    out=$("$CS_BIN" -rm wf14@t --force </dev/null 2>&1) || rc=$?
+    assert_eq "0" "$rc" "a worktree holding only a copy the base holds goes with --force: $out" || return 1
+    assert_not_exists "$wt" "the worktree is removed" || return 1
+    assert_eq "secret" "$(cat "$base/journal.img")" "the base keeps its own file" || return 1
+}
+
 # The pins and recipient digests `cs -secrets age add` keeps for a session
 # live under ~/.cs-secrets/sessions/<name>/, outside the session directory.
 # Removing a base session drops them and says so on one line naming the path.
@@ -1325,6 +1349,7 @@ run_test test_remove_worktree_lists_a_user_authored_claude_local_md
 run_test test_remove_worktree_lists_files_inside_an_initialised_submodule
 run_test test_remove_worktree_lists_files_in_a_submodule_directory_never_populated
 run_test test_remove_tracked_mode_worktree_lists_untracked_session_records
+run_test test_remove_worktree_leaves_out_an_ignored_file_the_base_holds_byte_for_byte
 run_test test_remove_force_on_adopted_removes_only_the_link
 run_test test_remove_refuses_while_the_vault_is_mounted_inside
 run_test test_remove_names_a_mounted_vault_link_by_a_plain_target
