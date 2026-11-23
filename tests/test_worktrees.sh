@@ -4879,7 +4879,7 @@ test_retire_tracked_mode_keeps_its_copy_when_the_removal_deleted_the_records() {
     aside=$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')
     kept=$(grep -rl -F -- "- feature line $token" "$aside" 2>/dev/null || true)
     assert_eq "$aside/cs/${narrative#.cs/}" "$kept" "the copy still holds the feature's narrative line: $output" || return 1
-    assert_output_not_contains "$output" "nothing was fused or deleted" "the refusal does not say nothing was deleted" || return 1
+    assert_output_not_contains "$output" "nothing was fused" "the refusal does not read as one that left the worktree whole" || return 1
     assert_output_contains "$output" "The copy cs made of them is at $aside/cs" "the refusal says where the records are" || return 1
     assert_file_not_contains "$base_dir/$narrative" "feature line $token" "the base narrative is untouched" || return 1
     assert_output_contains "$("$CS_BIN" -doctor 2>&1)" "Retire leftovers: $aside holds a copy of the session records of myproj@fix-auth, captured by a /finish retire (pid ${aside##*.}), which this process cannot see; that retire is probably gone. The worktree no longer holds each of them as the copy does, so the copy may be the only one: fuse into $CS_SESSIONS_ROOT/myproj/.cs by hand what $aside/cs holds and neither $CS_SESSIONS_ROOT/myproj/.cs nor $CS_SESSIONS_ROOT/myproj@fix-auth/.cs does, then delete $aside. If git still lists the worktree (git -C \"$CS_SESSIONS_ROOT/myproj\" worktree list), run /finish fix-auth in myproj again; if not, delete what is left of $CS_SESSIONS_ROOT/myproj@fix-auth and then the branch with: git -C \"$CS_SESSIONS_ROOT/myproj\" branch -d cs/fix-auth" \
@@ -4887,6 +4887,44 @@ test_retire_tracked_mode_keeps_its_copy_when_the_removal_deleted_the_records() {
 }
 
 run_test test_retire_tracked_mode_keeps_its_copy_when_the_removal_deleted_the_records
+
+# A retire stopped while git is removing the worktree cannot tell what the
+# removal had deleted by then, so the copy stays for cs -doctor to judge.
+test_retire_tracked_mode_keeps_its_copy_when_stopped_during_the_removal() {
+    local base_dir wt sha narrative bin aside output status=0 token="$RANDOM$RANDOM"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    echo "- feature line $token" >> "$wt/$narrative"
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    bin="$TEST_TMPDIR/stand-in-git"
+    mkdir -p "$bin"
+    cat > "$bin/git" << STUB
+#!/usr/bin/env bash
+case " \$* " in
+    *" worktree remove "*)
+        rm -rf "$wt/.cs"
+        aside=\$(echo "$CS_SESSIONS_ROOT"/.retire-*)
+        kill -TERM "\${aside##*.}"
+        : > "$TEST_TMPDIR/terminated"
+        exit 1 ;;
+esac
+exec "$(command -v git)" "\$@"
+STUB
+    chmod +x "$bin/git"
+    output=$(PATH="$bin:$PATH" "$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_file_exists "$TEST_TMPDIR/terminated" "fixture: the retire reached the removal and was sent TERM: $output" || return 1
+    assert_eq "143" "$status" "the retire ends on the signal: $output" || return 1
+    aside=$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')
+    assert_eq "$aside/cs/${narrative#.cs/}" "$(grep -rl -F -- "- feature line $token" "$aside" 2>/dev/null || true)" "the copy still holds the feature's narrative line" || return 1
+    assert_output_contains "$("$CS_BIN" -doctor 2>&1)" "Retire leftovers: $aside holds a copy of the session records of myproj@fix-auth, captured by a /finish retire (pid ${aside##*.}), which this process cannot see; that retire is probably gone. The worktree no longer holds each of them as the copy does, so the copy may be the only one" \
+        "cs -doctor says the copy may be the only one" || return 1
+}
+
+run_test test_retire_tracked_mode_keeps_its_copy_when_stopped_during_the_removal
 
 # A trash command that fails ends the retire of a tracked feature like any
 # other refusal: the copy it made of the feature's records goes too.
@@ -5020,6 +5058,28 @@ test_features_counts_a_tracked_record_the_base_committed_to_as_well() {
 }
 
 run_test test_features_counts_a_tracked_record_the_base_committed_to_as_well
+
+# A record the feature's branch deleted and the feature wrote again without
+# committing: the landing takes the base's copy away, and the retire then
+# carries the feature's. The features screen reads it so beforehand.
+test_features_reads_a_record_the_branch_deleted_and_the_feature_wrote_again() {
+    local base_dir wt sha line output status=0 token="$RANDOM$RANDOM" topic=".cs/memory/topic-x.md"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    echo "base topic" > "$base_dir/$topic"
+    (cd "$base_dir" && git add "$topic" && git commit -q -m "a topic")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    (cd "$wt" && git rm -q "$topic" && git commit -q -m "the feature deletes the topic")
+    echo "written again $token" > "$wt/$topic"
+    line=$("$CS_BIN" myproj -features --porcelain 2>&1)
+    assert_eq "0" "$(_feat_field "$line" 7)" "the features screen counts no record at risk: $line" || return 1
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire goes through: $output" || return 1
+    assert_eq "written again $token" "$(cat "$base_dir/$topic")" "the base holds the feature's file" || return 1
+}
+
+run_test test_features_reads_a_record_the_branch_deleted_and_the_feature_wrote_again
 
 # A log committed with nothing in it is a log like any other: the features
 # screen and the retire read what the feature appended to it and print
