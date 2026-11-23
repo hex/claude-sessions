@@ -477,26 +477,29 @@ test_encrypt_refuses_a_readme_it_cannot_tag() {
 # The conversations move after everything under .cs/. When that move fails
 # the vault stays mounted, since it may hold the only whole copy, the message
 # names what has moved, and the session is not linked into the vault.
-test_encrypt_stops_when_the_conversations_will_not_move() {
-    [ "$(id -u)" != "0" ] || { echo "  SKIP: root ignores the permission that makes the move fail"; return 77; }
+# Once the vault holds whole copies, what cs cannot remove outside it is no
+# reason to stop: cs -encrypt names what is left in plain text and goes on.
+test_encrypt_names_what_it_could_not_remove_outside_the_vault() {
+    [ "$(id -u)" != "0" ] || { echo "  SKIP: root ignores the permission that makes the removal fail"; return 77; }
     _stubs
     _populated_session enc
-    local s="$CS_SESSIONS_ROOT/enc/.cs" out rc=0 proj c
+    local s="$CS_SESSIONS_ROOT/enc/.cs" id=44444444-4444-4444-8444-444444444444 out rc=0 proj c
     proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$CS_SESSIONS_ROOT/enc")"
     mkdir -p "$proj"
-    echo "conversation" > "$proj/44444444-4444-4444-8444-444444444444.jsonl"
+    echo "conversation" > "$proj/$id.jsonl"
     chmod 555 "$CS_TRANSCRIPTS_DIR"
     out=$(_encrypt enc 2>&1) || rc=$?
     chmod 755 "$CS_TRANSCRIPTS_DIR"
     c=$(_vault_path enc)
-    assert_eq "1" "$rc" "non-zero exit" || return 1
-    assert_output_contains "$out" "enc: could not move the session's conversations ($proj) into the vault. Already moved: .cs/memory .cs/plans .cs/local/session.log .cs/local/mail .cs/local/pending-handoff .cs/handoffs .cs/checkpoints .cs/narrative-archive. The vault is still mounted at .cs/vault-mnt and may hold the only whole copy of the conversations:" "names what moved and that the vault is mounted" || return 1
-    assert_eq "conversation" "$(cat "$proj/44444444-4444-4444-8444-444444444444.jsonl")" "the conversation is where it was" || return 1
-    assert_eq "narrative" "$(cat "$s/vault-mnt/memory/narrative.alice.md")" "memory is in the vault, as the message says" || return 1
-    [ ! -L "$s/memory" ] && [ ! -e "$s/local/pre-open" ] || { echo "  FAIL: the session was linked into the vault"; return 1; }
+    assert_eq "0" "$rc" "cs -encrypt goes on: $out" || return 1
+    assert_eq "conversation" "$(cat "$s/vault-mnt/claude-config/projects/${proj##*/}/$id.jsonl" 2>/dev/null)" "the vault holds the whole conversation" || return 1
+    assert_output_contains "$out" "enc: the vault holds whole copies of this session's conversations, but cs could not remove them all from outside it. What is left in $proj is in plain text; remove it by hand. Removing it failed with: rmdir: " "names what is left outside" || return 1
+    [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
     assert_eq "image create blank --encrypt --stdinpassphrase --format UDSB --size 50g --volumeName cs-enc --fs APFS $c
-image attach --stdinpassphrase --nobrowse --mountPoint $s/vault-mnt $c" "$(cat "$FAKE_DISKUTIL_LOG")" "no eject: the vault stays mounted" || return 1
+image attach --stdinpassphrase --nobrowse --mountPoint $s/vault-mnt $c
+eject $s/vault-mnt" "$(cat "$FAKE_DISKUTIL_LOG")" "the vault is built and detached" || return 1
 }
+
 
 # The new password is typed twice before anything is made: two that differ,
 # or none, stop with the session as it was.
@@ -1359,7 +1362,7 @@ run_test test_encrypt_releases_the_lock_under_a_root_with_quotes
 run_test test_encrypt_refuses_an_open_that_took_the_lock_after_its_check
 run_test test_encrypt_refuses_while_the_openers_mutex_stays_held
 run_test test_encrypt_refuses_a_readme_it_cannot_tag
-run_test test_encrypt_stops_when_the_conversations_will_not_move
+run_test test_encrypt_names_what_it_could_not_remove_outside_the_vault
 run_test test_encrypt_refuses_passwords_that_differ_or_are_empty
 run_test test_encrypt_stops_when_create_fails
 run_test test_encrypt_stops_when_attach_fails
