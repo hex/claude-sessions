@@ -4853,6 +4853,39 @@ test_retire_tracked_mode_fuses_nothing_when_removal_fails_and_retry_fuses_once()
 
 run_test test_retire_tracked_mode_fuses_nothing_when_removal_fails_and_retry_fuses_once
 
+# git worktree remove deletes what it can before it fails on a file it
+# cannot delete, and the feature's uncommitted records can be among what it
+# deleted. The copy the retire made is then the only one: it stays, and the
+# refusal says where it is.
+test_retire_tracked_mode_keeps_its_copy_when_the_removal_deleted_the_records() {
+    local base_dir wt sha narrative aside kept output status=0 token="$RANDOM$RANDOM"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    echo "node_modules/" >> "$base_dir/.gitignore"
+    (cd "$base_dir" && git add .gitignore && git commit -q -m "ignore node_modules")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    echo "- feature line $token" >> "$wt/$narrative"
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    mkdir -p "$wt/node_modules/pkg"
+    echo y > "$wt/node_modules/pkg/f"
+    chmod 555 "$wt/node_modules/pkg"
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    chmod -R u+w "$wt"
+    assert_eq "1" "$status" "a worktree holding a file git cannot delete is not removed: $output" || return 1
+    assert_not_exists "$wt/$narrative" "fixture: the removal deleted the worktree's narrative before it failed" || return 1
+    aside=$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')
+    kept=$(grep -rl -F -- "- feature line $token" "$aside" 2>/dev/null || true)
+    assert_eq "$aside/cs/${narrative#.cs/}" "$kept" "the copy still holds the feature's narrative line: $output" || return 1
+    assert_output_not_contains "$output" "nothing was fused or deleted" "the refusal does not say nothing was deleted" || return 1
+    assert_output_contains "$output" "The copy cs made of them is at $aside/cs" "the refusal says where the records are" || return 1
+    assert_file_not_contains "$base_dir/$narrative" "feature line $token" "the base narrative is untouched" || return 1
+}
+
+run_test test_retire_tracked_mode_keeps_its_copy_when_the_removal_deleted_the_records
+
 # A trash command that fails ends the retire of a tracked feature like any
 # other refusal: the copy it made of the feature's records goes too.
 test_retire_tracked_mode_leaves_no_copy_when_the_trash_command_fails() {
