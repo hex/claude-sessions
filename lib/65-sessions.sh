@@ -516,7 +516,7 @@ _volume_mounted_under() {  # dir
 # submodule, without cs's own bookkeeping (_without_cs_bookkeeping), so a
 # CLAUDE.local.md of the user's own and, in tracked mode, an untracked file
 # under .cs are listed. Given the base, an ignored file the base holds byte
-# for byte at the same path (_base_held_filter) is left out, as the retire
+# for byte at the same path (_mark_base_held) is left out, as the retire
 # leaves it out of the trash; one under a regenerable directory is listed
 # without that comparison, as the retire does not trash it either. Fails when
 # git cannot list them.
@@ -526,7 +526,7 @@ _worktree_untracked_paths() {  # worktree_dir [base_dir]
     more=$(_worktree_others "$1" --ignored) || return 1
     if [ -n "$more" ] && [ -n "${2:-}" ]; then
         regenerable=$(printf '%s\n' "$more" | _regenerable_filter regenerable) || return 1
-        more=$(printf '%s\n' "$more" | _regenerable_filter other | _base_held_filter other "$1" "$2") || return 1
+        more=$(printf '%s\n' "$more" | _regenerable_filter other | _mark_base_held "$1" "$2" | env LC_ALL=C sed -n 's/^other //p') || return 1
         [ -z "$regenerable" ] || more="$regenerable${more:+$'\n'$more}"
     fi
     [ -z "$more" ] || listing="${listing:+$listing$'\n'}$more"
