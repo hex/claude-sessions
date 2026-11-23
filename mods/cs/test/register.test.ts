@@ -2710,11 +2710,12 @@ const rail = (tree: any): string[] => {
 }
 const tickButtons = (tree: any) => buttons(tree).filter((b: any) => /^cs-rail-\d+$/.test(b.props.key))
 
-test('the live branch of a linear transcript lists every prompt, first line trimmed and cut to 80 characters', () => {
+test('the live branch of a linear transcript lists every prompt, first line trimmed and cut to 80 characters, the whole line kept beside the cut', () => {
   const long = prompt('u5', 'a4', 'x'.repeat(100))
   expect(parsePrompts(`${[...LINEAR, long].join('\n')}\n`)).toEqual([
-    { uuid: 'u1', text: 'say one' }, { uuid: 'u2', text: 'say two' }, { uuid: 'u3', text: 'say three' }, { uuid: 'u4', text: 'say four' },
-    { uuid: 'u5', text: `${'x'.repeat(RAIL_TEXT_CHARS - 1)}\u2026` },
+    { uuid: 'u1', text: 'say one', line: 'say one' }, { uuid: 'u2', text: 'say two', line: 'say two' },
+    { uuid: 'u3', text: 'say three', line: 'say three' }, { uuid: 'u4', text: 'say four', line: 'say four' },
+    { uuid: 'u5', text: `${'x'.repeat(RAIL_TEXT_CHARS - 1)}\u2026`, line: 'x'.repeat(100) },
   ])
 })
 
@@ -5593,8 +5594,15 @@ test('the typeahead adds nothing outside the argument of /cs, past its first wor
   expect(promptRows([], '/cs f', 4, 'f')).toEqual([])
 })
 
+test('the typeahead matches a word anywhere in a prompt\'s first line, past the rail\'s cut too, and the row shows the cut text', () => {
+  const long = prompt('u5', 'a4', `${'x '.repeat(45)}zebra crossing\nsecond line giraffe`)
+  const list = parsePrompts(`${[...LINEAR, long].join('\n')}\n`)
+  expect(promptRows(list, '/cs zebra', 4, 'zebra')).toEqual([{ text: '5', label: '5', description: `${'x '.repeat(39)}x\u2026` }])
+  expect(promptRows(list, '/cs giraffe', 4, 'giraffe')).toEqual([])
+})
+
 test('the typeahead lists at most PROMPT_ROWS prompts, the newest', () => {
-  const many = Array.from({ length: 12 }, (_, i) => ({ uuid: `u${i + 1}`, text: `fix part ${i + 1}` }))
+  const many = Array.from({ length: 12 }, (_, i) => ({ uuid: `u${i + 1}`, text: `fix part ${i + 1}`, line: `fix part ${i + 1}` }))
   const rows = promptRows(many, '/cs fix', 4, 'fix')
   expect(PROMPT_ROWS).toBe(8)
   expect(rows.map(r => r.text)).toEqual(['12', '11', '10', '9', '8', '7', '6', '5'])
