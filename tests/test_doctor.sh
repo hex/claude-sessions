@@ -1603,6 +1603,28 @@ test_doctor_retire_copy_with_its_worktree_says_delete_it() {
     done
 }
 
+# A /finish landing sets aside the lines the base's narrative and timeline
+# hold uncommitted, in $SESSIONS_ROOT/.landing-<base>@<task>.<pid>, and puts
+# them back once the feature's are in. Killed in between, it leaves the
+# directory; nothing else names it.
+test_doctor_warns_on_a_landing_aside_whose_run_is_gone() {
+    local dead aside output
+    sh -c 'exit 0' & dead=$!
+    wait "$dead"
+    aside="$CS_SESSIONS_ROOT/.landing-test-session@feat.$dead"
+    mkdir -p "$aside/cs/memory" "$CS_SESSIONS_ROOT/.landing-test-session@live.$$/cs"
+    echo "- a line nobody committed" > "$aside/cs/memory/narrative.alice.md"
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Landing leftovers: $aside holds the lines the session records of test-session held uncommitted, set aside by a /finish landing of feat (pid $dead), which this process cannot see; that landing is probably gone. Each file under $aside/cs holds the lines of the file at the same path under $CLAUDE_SESSION_META_DIR: append those that file lacks, then delete $aside" \
+        "doctor should name the lines a killed landing set aside, and where they go" || return 1
+    assert_output_not_contains "$output" ".landing-test-session@live" "a live landing's directory is a landing in progress" || return 1
+    assert_dir "$aside" "doctor reports and never deletes" || return 1
+    rm -rf "$aside/cs"
+    output=$("$CS_BIN" -doctor 2>&1) || true
+    assert_output_contains "$output" "Landing leftovers: $aside was made by a /finish landing of feat into test-session (pid $dead), which this process cannot see; that landing is probably gone, and it set no line aside. Delete $aside" \
+        "a directory without its cs holds nothing the base lacks" || return 1
+}
+
 test_doctor_leaves_a_retire_aside_alone_while_its_run_lives() {
     mkdir -p "$CS_SESSIONS_ROOT/.retire-test-session@feat.$$/cs"
     local output
@@ -1849,6 +1871,7 @@ run_test test_doctor_warns_on_a_retire_aside_whose_run_is_gone
 run_test test_doctor_retire_aside_with_its_worktree_says_move_the_records_back
 run_test test_doctor_empty_retire_aside_says_nothing_moved
 run_test test_doctor_retire_copy_with_its_worktree_says_delete_it
+run_test test_doctor_warns_on_a_landing_aside_whose_run_is_gone
 run_test test_doctor_leaves_a_retire_aside_alone_while_its_run_lives
 run_test test_doctor_leaves_a_retire_aside_alone_when_its_pid_cannot_be_judged
 run_test test_doctor_leaves_a_spawn_claim_of_another_users_open_alone

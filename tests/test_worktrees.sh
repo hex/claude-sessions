@@ -2433,6 +2433,79 @@ Commit them in $base_dir (cs leaves session records for you to commit), then re-
     assert_eq "- gate note" "$(tail -n 1 "$base_dir/$narrative")" "what the gate wrote is still there" || return 1
 }
 
+# A base whose timeline git tracks, and a feature that committed a line to
+# the base's narrative and one to its timeline while the base holds a line of
+# its own in each, uncommitted. Prints the feature's commit.
+_feature_and_base_wrote_the_same_logs() {  # token
+    local base_dir wt narrative timeline=".cs/timeline.jsonl"
+    base_dir=$(_tracked_base myproj) || return 1
+    narrative=$(_narrative_rel "$base_dir")
+    printf '{"event":"base-seed"}\n' >> "$base_dir/$timeline"
+    (cd "$base_dir" && git add -f "$timeline" && git commit -q -m "a timeline") || return 1
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "- feature note $1" >> "$wt/$narrative"
+    printf '{"event":"feature-%s"}\n' "$1" >> "$wt/$timeline"
+    (cd "$wt" && git add "$narrative" && git add -f "$timeline" && git commit -q -m "feature records") || return 1
+    echo "- base note $1" >> "$base_dir/$narrative"
+    printf '{"event":"base-%s"}\n' "$1" >> "$base_dir/$timeline"
+    git -C "$wt" rev-parse HEAD
+}
+
+# The base's conversation and its hooks append to its narrative and timeline,
+# and nobody commits the lines. A feature that committed lines of its own to
+# those files still lands: the base's uncommitted lines, one a gate appended
+# among them, are set aside, the landing brings the feature's, and the base's
+# go back after them, uncommitted.
+test_integrate_carries_the_base_lines_of_a_log_the_feature_also_changed() {
+    local base_dir="$CS_SESSIONS_ROOT/myproj" sha narrative timeline=".cs/timeline.jsonl" output line status=0 token="$RANDOM$RANDOM"
+    sha=$(_feature_and_base_wrote_the_same_logs "$token") || { echo "  FAIL: fixture: the feature and the base wrote the same logs"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'echo "- gate note" >> "$0"' "$base_dir/$narrative" 2>&1) || status=$?
+    assert_eq "0" "$status" "the integrate lands: $output" || return 1
+    assert_eq "integrated fix-auth $sha -> $(git -C "$base_dir" rev-parse HEAD)" "$(printf '%s\n' "$output" | tail -n 1)" "the machine line names the landing" || return 1
+    for line in "- feature note $token" "- base note $token" "- gate note"; do
+        assert_eq "1" "$(grep -c -x -F -- "$line" "$base_dir/$narrative")" "the narrative holds '$line' once" || return 1
+    done
+    assert_eq "- base note $token
+- gate note" "$(tail -n 2 "$base_dir/$narrative")" "the base's lines follow the feature's" || return 1
+    for line in base-seed "feature-$token" "base-$token"; do
+        assert_eq "1" "$(grep -c -F "\"$line\"" "$base_dir/$timeline")" "the timeline holds $line once" || return 1
+    done
+    assert_eq "feature-integrated" "$(tail -n 1 "$base_dir/$timeline" | jq -r .event)" "the landing's own event follows the base's lines" || return 1
+    assert_eq "0" "$(git -C "$base_dir" show "HEAD:$narrative" | grep -c -F "base note $token")" "the base's narrative line is not committed" || return 1
+    assert_eq " M $narrative" "$(git -C "$base_dir" status --porcelain -- "$narrative")" "the narrative is changed and uncommitted" || return 1
+    assert_eq " M $timeline" "$(git -C "$base_dir" status --porcelain -- "$timeline")" "the timeline is changed and uncommitted" || return 1
+    assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.landing-*')" "nothing set aside is left behind" || return 1
+}
+
+# A landing that fails once the base's lines are set aside puts them back:
+# the base's records are byte for byte what they were.
+test_integrate_puts_the_base_lines_back_when_the_landing_fails() {
+    local base_dir="$CS_SESSIONS_ROOT/myproj" sha narrative timeline=".cs/timeline.jsonl" head bin="$TEST_TMPDIR/failing-git" output status=0 token="$RANDOM$RANDOM"
+    sha=$(_feature_and_base_wrote_the_same_logs "$token") || { echo "  FAIL: fixture: the feature and the base wrote the same logs"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cp "$base_dir/$narrative" "$TEST_TMPDIR/narrative"
+    cp "$base_dir/$timeline" "$TEST_TMPDIR/timeline"
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    mkdir -p "$bin"
+    cat > "$bin/git" << STUB
+#!/usr/bin/env bash
+for arg in "\$@"; do
+    [ "\$arg" != --ff-only ] || { echo "fatal: the fast-forward failed (stand-in failure)" >&2; exit 1; }
+done
+exec "$(command -v git)" "\$@"
+STUB
+    chmod +x "$bin/git"
+    output=$(PATH="$bin:$PATH" "$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "1" "$status" "the integrate fails: $output" || return 1
+    assert_output_contains "$output" "fatal: the fast-forward failed (stand-in failure)" "it is the landing that failed" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+    cmp -s "$TEST_TMPDIR/narrative" "$base_dir/$narrative" || { echo "  FAIL: the base narrative is not what it was"; return 1; }
+    cmp -s "$TEST_TMPDIR/timeline" "$base_dir/$timeline" || { echo "  FAIL: the base timeline is not what it was"; return 1; }
+    assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.landing-*')" "nothing set aside is left behind" || return 1
+}
+
 # A feature that merged the base in keeps its own MEMORY.md (merge=ours), so
 # the pointers the base indexed meanwhile are missing from its copy, and the
 # landing takes that copy whole: the base is an ancestor. The landing adds
@@ -2667,6 +2740,8 @@ run_test test_integrate_refuses_dirty_base
 run_test test_integrate_lands_over_base_session_records_it_does_not_touch
 run_test test_integrate_refuses_a_landing_that_overwrites_base_session_records
 run_test test_integrate_rechecks_session_records_the_gate_dirtied
+run_test test_integrate_carries_the_base_lines_of_a_log_the_feature_also_changed
+run_test test_integrate_puts_the_base_lines_back_when_the_landing_fails
 run_test test_integrate_keeps_the_base_memory_pointers_a_feature_merge_dropped
 run_test test_integrate_lands_without_the_pointer_to_a_topic_the_feature_deleted
 run_test test_integrate_lands_without_the_pointer_the_feature_archived
@@ -6184,6 +6259,12 @@ test_features_ignores_base_session_records_the_landing_leaves_alone() {
     assert_eq "ready" "$(_feat_field "$line" 10)" "the feature reads as ready: $line" || return 1
     echo "- feature note" >> "$wt/$narrative"
     (cd "$wt" && git add "$narrative" && git commit -q -m "feature narrative")
+    line=$("$CS_BIN" myproj -features --porcelain 2>&1)
+    assert_eq "0" "$(_feat_field "$line" 8)" "a narrative both wrote is not base dirt, the landing carries the base's lines: $line" || return 1
+    assert_eq "ready" "$(_feat_field "$line" 10)" "the feature still reads as ready: $line" || return 1
+    echo "the feature's objective" >> "$wt/.cs/README.md"
+    (cd "$wt" && git add .cs/README.md && git commit -q -m "feature README")
+    echo "the base's objective" >> "$base_dir/.cs/README.md"
     line=$("$CS_BIN" myproj -features --porcelain 2>&1)
     assert_eq "1" "$(_feat_field "$line" 8)" "a record the landing would overwrite is base dirt: $line" || return 1
     assert_eq "base-dirty" "$(_feat_field "$line" 10)" "the feature reads as blocked by the base: $line" || return 1
