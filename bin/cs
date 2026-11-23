@@ -4927,6 +4927,23 @@ _predicted_landing_paths() {  # base_dir branch
         | env LC_ALL=C sort | uniq -d
 }
 
+# The paths a landing of <branch> leaves in a base as the branch's last
+# commit holds them, one per line: those it changes (_predicted_landing_paths)
+# that the base has not committed to since the branch forked, so the landing
+# merges nothing into them.
+_landing_delivers() {  # base_dir branch
+    local fork changes held
+    fork=$(git -C "$1" merge-base HEAD "$2" 2>/dev/null) || return 0
+    changes=$(_predicted_landing_paths "$1" "$2") || return 1
+    [ -n "$changes" ] || return 0
+    held=$(git -C "$1" diff --name-only "$fork" HEAD) || return 1
+    if [ -z "$held" ]; then
+        printf '%s\n' "$changes"
+    else
+        printf '%s\n' "$changes" | { grep -Fxv -f <(printf '%s\n' "$held") || [ $? -eq 1 ]; }
+    fi
+}
+
 # The names `git ls-files -z` prints, read on stdin, one per line. A name may
 # hold any byte, so a backslash in one is written "\\" and a newline "\n":
 # each line stands for exactly one name, and printf's %b gives the name back.
@@ -5516,8 +5533,20 @@ _feature_readiness() {  # base_name task
                 || error "Could not classify the session records in $wt_dir/.cs"
         fi
     else
-        conflicts=$(_tracked_record_refusals "$wt_dir" "$base_dir/.cs" "$task") \
-            || error "Could not classify the session records in $wt_dir/.cs"
+        # The retire runs once the feature has landed, so each record is
+        # judged against what the base will hold then (_landing_delivers).
+        local delivered
+        delivered=$(mktemp "${TMPDIR:-/tmp}/cs-landing.XXXXXX") \
+            || error "Could not create a temporary file under ${TMPDIR:-/tmp}"
+        if ! _landing_delivers "$base_dir" "$branch" > "$delivered"; then
+            rm -f "$delivered"
+            error "Could not list what landing $branch would change in $base_dir"
+        fi
+        if ! conflicts=$(_tracked_record_refusals "$wt_dir" "$base_dir/.cs" "$task" "$delivered"); then
+            rm -f "$delivered"
+            error "Could not classify the session records in $wt_dir/.cs"
+        fi
+        rm -f "$delivered"
         case "$conflicts" in
             "vault-locked "*) vault_locked="${conflicts#vault-locked }"; conflicts="" ;;
         esac
@@ -7109,8 +7138,10 @@ _fuse_verdict() {  # feature_meta base_meta rel
 }
 
 # _fuse_verdict's answer for a file whose earlier copy has the record <was>
-# ("<cksum> <bytes>"), or none when the feature wrote the file itself.
-_record_verdict() {  # feature_meta base_meta rel was
+# ("<cksum> <bytes>"), or none when the feature wrote the file itself. With
+# <delivered>, the answer for a base that holds that earlier copy at <rel>,
+# whatever it holds there now: a landing is about to put it there.
+_record_verdict() {  # feature_meta base_meta rel was [delivered]
     local src="$1/$3" dst="$2/$3" was="$4" now
     if [ -L "$src" ] || [ ! -f "$src" ]; then echo conflict; return 0; fi
     if [ -n "$was" ]; then
@@ -7118,6 +7149,7 @@ _record_verdict() {  # feature_meta base_meta rel was
         if [ "$now" = "$was" ]; then echo skip; return 0; fi
     fi
     if _fuse_path_blocked "$2" "$3"; then echo conflict; return 0; fi
+    if [ -n "${5:-}" ]; then echo replace; return 0; fi
     if [ ! -e "$dst" ] && [ ! -L "$dst" ]; then
         if [ -n "$was" ]; then echo restore; else echo carry; fi
         return 0
@@ -7493,9 +7525,12 @@ _head_blob_is_prefix() {  # wt_dir rel
 #   rewritten  the timeline no longer opens with what the last commit holds
 # A narrative whose committed lines changed is not refused: cs -narrative
 # rotate rewrites one, and its new lines are still carried.
+# With <delivered>, a file of paths a landing is about to leave in the base
+# as that commit holds them (_landing_delivers), a record at one of them is
+# measured against the base as it will be then.
 # Fails when the last commit's copy, or the file, cannot be read.
-_tracked_record_verdict() {  # wt_dir base_meta task status rel kind
-    local meta="$1/.cs" status="$4" rel="$5" kind="$6" was
+_tracked_record_verdict() {  # wt_dir base_meta task status rel kind [delivered]
+    local meta="$1/.cs" status="$4" rel="$5" kind="$6" was delivered=""
     if [ "$kind" = logs-dir-log ]; then echo conflict; return 0; fi
     case "$rel" in */) echo conflict; return 0 ;; esac
     case "$status" in
@@ -7515,7 +7550,8 @@ _tracked_record_verdict() {  # wt_dir base_meta task status rel kind
             _prose_verdict "$meta" "$2" "$rel" "$3" "$was" ;;
         *)
             was=$(_head_blob_sum "$1" "$rel") || return 1
-            _record_verdict "$meta" "$2" "$rel" "$was" ;;
+            if [ -n "$was" ] && [ -n "${7:-}" ] && grep -Fxq -- ".cs/$rel" "$7"; then delivered=1; fi
+            _record_verdict "$meta" "$2" "$rel" "$was" "$delivered" ;;
     esac
 }
 
@@ -7523,8 +7559,8 @@ _tracked_record_verdict() {  # wt_dir base_meta task status rel kind
 # for every changed path of a tracked feature's .cs but cs's bookkeeping.
 # Reads the worktree, its last commit and the base, and writes nothing in
 # either. Fails, naming the file, when one cannot be classified, and when git
-# cannot list the changed paths.
-_tracked_record_plan() {  # wt_dir base_meta task out
+# cannot list the changed paths. <delivered> is _tracked_record_verdict's.
+_tracked_record_plan() {  # wt_dir base_meta task out [delivered]
     local dirt entry status rel kind verdict tab=$'\t'
     : > "$4" || return 1
     dirt=$(mktemp "${TMPDIR:-/tmp}/cs-record-dirt.XXXXXX") || return 1
@@ -7537,7 +7573,7 @@ _tracked_record_plan() {  # wt_dir base_meta task out
         rel="${entry#*"$tab"}"
         kind=$(_tracked_record_kind "$rel")
         [ "$kind" != bookkeeping ] || continue
-        verdict=$(_tracked_record_verdict "$1" "$2" "$3" "$status" "$rel" "$kind") || {
+        verdict=$(_tracked_record_verdict "$1" "$2" "$3" "$status" "$rel" "$kind" "${5:-}") || {
             warn "could not read what the feature's last commit holds for $(_printable_name "$rel"), so cs cannot tell what the feature changed in it" >&2
             rm -f "$dirt"
             return 1
@@ -7552,11 +7588,13 @@ _tracked_record_plan() {  # wt_dir base_meta task out
 # <link>" when the base's vault is locked (_locked_vault_link; every record
 # bound for it would read as a conflict), else the plan's refusal lines
 # (_plan_refusal_lines). The retire refuses on any; the features screen counts
-# them. Fails when the classification fails.
-_tracked_record_refusals() {  # wt_dir base_meta task
+# them. Fails when the classification fails. <delivered> is
+# _tracked_record_verdict's: the features screen gives it before the landing,
+# the retire never.
+_tracked_record_refusals() {  # wt_dir base_meta task [delivered]
     local plan entry locked carries=""
     plan=$(mktemp "${TMPDIR:-/tmp}/cs-record-plan.XXXXXX") || return 1
-    if ! _tracked_record_plan "$1" "$2" "$3" "$plan"; then
+    if ! _tracked_record_plan "$1" "$2" "$3" "$plan" "${4:-}"; then
         rm -f "$plan"
         return 1
     fi
