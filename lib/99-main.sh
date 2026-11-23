@@ -232,6 +232,9 @@ main() {
             return $?
             ;;
         -encrypt)
+            # The password rows follow the terminal's theme, as an open's do.
+            _export_term_theme
+            setup_palette
             shift
             run_encrypt "$@"
             return $?
@@ -652,6 +655,8 @@ main() {
             || error "$session_dir is not a cs session (no .cs/ directory); cs will not write session files into it. Move it out of $SESSIONS_ROOT or open another name."
         _run_pre_open "$session_name" "$session_dir"
         _refuse_unmounted_meta "$session_name" "$session_dir"
+        # Before migrate binds the conversation, so it binds one in the vault.
+        _move_plain_conversations_at_open "$session_name" "$session_dir"
         migrate_session "$session_dir"
     fi
 

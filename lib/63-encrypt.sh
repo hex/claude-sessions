@@ -275,6 +275,106 @@ _detach_opened_vault() {
     warn "The vault is still mounted at $mnt; the next open detaches it, or run: diskutil eject $mnt"
 }
 
+# Claude Code's config dir as the shell has it, outside any vault, read as
+# _claude_project_dir reads it: a session's conversations sit under it until
+# cs -encrypt, or the first open after, moves them into the vault.
+_plain_claude_config_dir() {
+    local config="${CLAUDE_CONFIG_DIR:-}"
+    case "$config" in
+        */.cs/claude-config) config="${CLAUDE_SECURESTORAGE_CONFIG_DIR:-}" ;;
+    esac
+    printf '%s\n' "${config:-$HOME/.claude}"
+}
+
+_plain_claude_project_dir() {  # session_dir
+    local resolved
+    resolved=$( (cd -- "$1" 2>/dev/null && pwd -P) || printf '%s' "$1" )
+    printf '%s/%s\n' "${CS_TRANSCRIPTS_DIR:-$(_plain_claude_config_dir)/projects}" "$(_claude_encode_path "$resolved")"
+}
+
+# An empty folder holds nothing to move: Claude Code makes an empty memory/ in
+# every project folder, so the one outside and the one in the vault are no
+# clash, and the one outside is removed.
+_empty_real_dir() {  # path
+    [ -d "$1" ] && [ ! -L "$1" ] && [ -z "$(ls -A -- "$1" 2>/dev/null)" ]
+}
+
+# Moves a session's conversations folder into the vault's. A vault without
+# one takes the whole folder in one mv; one that has it takes each entry, so
+# the caller checks first that no name is on both sides. mv across volumes
+# copies, then removes the source, and can stop in either half. On a failure,
+# CS_MOVE_ERROR holds what mv said and CS_MOVED_ENTRIES what moved before it.
+_move_conversations_into_vault() {  # plain_dir, vault_dir
+    local entry out
+    CS_MOVE_ERROR=""
+    CS_MOVED_ENTRIES=""
+    if [ ! -e "$2" ] && [ ! -L "$2" ]; then
+        out=$(mkdir -p "${2%/*}" 2>&1 && mv "$1" "${2%/*}/" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
+        return 0
+    fi
+    for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        if _empty_real_dir "$entry"; then
+            out=$(rmdir "$entry" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
+            continue
+        fi
+        out=$(mv "$entry" "$2/" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
+        CS_MOVED_ENTRIES="$CS_MOVED_ENTRIES ${entry##*/}"
+    done
+    out=$(rmdir "$1" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
+}
+
+# The pid of a claude Claude Code lists as running in the session (sessions/
+# <pid>.json in its config dir), writing its conversations outside the vault.
+_plain_claude_writer() {  # session_dir
+    local f pid resolved
+    resolved=$(cd -- "$1" 2>/dev/null && pwd -P) || resolved=$1
+    for f in "$(_plain_claude_config_dir)"/sessions/*.json; do
+        [ -f "$f" ] || continue
+        pid=${f##*/}
+        pid=${pid%.json}
+        case "$pid" in ''|0*|*[!0-9]*) continue ;; esac
+        kill -0 "$pid" 2>/dev/null || continue
+        grep -qF -e "\"cwd\":\"$1\"" -e "\"cwd\":\"$resolved\"" "$f" 2>/dev/null || continue
+        printf '%s\n' "$pid"
+        return 0
+    done
+    return 1
+}
+
+# A session cs -encrypt sealed before it moved conversations keeps them in
+# the shell's projects folder, where its claude, on the vault's config, never
+# looks. With the vault mounted, the open moves them in as cs -encrypt does,
+# and says so; the folder is gone after, so the next open has nothing to do.
+# A link, a name on both sides, or a claude writing there is named instead,
+# and the open goes on with nothing moved.
+_move_plain_conversations_at_open() {  # session_name, session_dir
+    local meta="$2/.cs" plain vault entry writer
+    [ -f "$meta/local/vault" ] && [ -L "$meta/claude-config" ] || return 0
+    _vault_mountpoint_if_mounted "$meta" >/dev/null || return 0
+    plain=$(_plain_claude_project_dir "$2")
+    if [ -L "$plain" ]; then
+        warn "$1: $plain is a link, so cs moved nothing from it; the conversations in the folder it points to stay outside the vault, in plain text."
+        return 0
+    fi
+    [ -d "$plain" ] || return 0
+    if writer=$(_plain_claude_writer "$2"); then
+        warn "$1: a claude (pid $writer) runs in this session outside cs and writes its conversations to $plain, so cs moved none of them into the vault. Reopen once it has ended."
+        return 0
+    fi
+    vault="$meta/claude-config/projects/${plain##*/}"
+    for entry in "$plain"/* "$plain"/.[!.]* "$plain"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        _empty_real_dir "$entry" && continue
+        [ -e "$vault/${entry##*/}" ] || [ -L "$vault/${entry##*/}" ] || continue
+        warn "$1: $entry is in the vault too, as .cs/claude-config/projects/${plain##*/}/${entry##*/}, so cs moved none of the conversations in $plain. Keep the copy you want in the vault, remove the other, then reopen."
+        return 0
+    done
+    _move_conversations_into_vault "$plain" "$vault" \
+        || error "$1: could not move the session's conversations from $plain into its vault. Already moved:${CS_MOVED_ENTRIES:- nothing}. mv copies across volumes before it removes, so the vault may hold the only whole copy of what it stopped on; the next open names anything on both sides. mv said: $CS_MOVE_ERROR"
+    info "$1: moved this session's conversations from $plain into its vault."
+}
+
 run_encrypt() {
     [ $# -eq 1 ] || error "Usage: cs -encrypt <name>"
     local name="$1" meta container mnt sub taken=0 password="" again="" out transcripts moved
@@ -303,9 +403,8 @@ run_encrypt() {
     mnt="$meta/vault-mnt"
     container=$(_encrypt_container_path "$name")
 
-    # Where Claude Code kept this session's conversations so far. Read before
-    # .cs/claude-config exists, after which the same call names the vault.
-    transcripts=$(_claude_project_dir "$SESSIONS_ROOT/$name")
+    # Where Claude Code kept this session's conversations so far.
+    transcripts=$(_plain_claude_project_dir "$SESSIONS_ROOT/$name")
 
     # cs asks once and hands the password to diskutil on stdin, for the
     # create and for the attach: it is never an argument, and diskutil is
@@ -342,9 +441,8 @@ run_encrypt() {
     # the message says it may hold the only whole copy. A project dir that is
     # a link is left alone: moving the link would move no conversation.
     if [ -d "$transcripts" ] && [ ! -L "$transcripts" ]; then
-        mkdir -p "$mnt/claude-config/projects"
-        out=$(mv "$transcripts" "$mnt/claude-config/projects/" 2>&1) \
-            || error "$name: could not move the session's conversations ($transcripts) into the vault. Already moved:${moved:- nothing}. The vault is still mounted at .cs/vault-mnt and may hold the only whole copy of the conversations: copy back from .cs/vault-mnt/claude-config/projects/ whatever $transcripts is missing, then finish by hand or move the rest back, and detach it. mv said: $out"
+        _move_conversations_into_vault "$transcripts" "$mnt/claude-config/projects/${transcripts##*/}" \
+            || error "$name: could not move the session's conversations ($transcripts) into the vault. Already moved:${moved:- nothing}. The vault is still mounted at .cs/vault-mnt and may hold the only whole copy of the conversations: copy back from .cs/vault-mnt/claude-config/projects/ whatever $transcripts is missing, then finish by hand or move the rest back, and detach it. mv said: $CS_MOVE_ERROR"
     fi
     for sub in $CS_VAULT_LINKS; do
         ln -s "vault-mnt/$sub" "$meta/$sub"
@@ -364,6 +462,9 @@ run_encrypt() {
     echo "  - conversations started from another folder, such as a subfolder of the session, in ~/.claude/projects/"
     echo "  - what else Claude Code kept for its conversations under ~/.claude (file-history/, tasks/, debug/, paste-cache/)"
     echo "  - git history of anything committed before, and backups or snapshots"
+    if [ -L "$transcripts" ]; then
+        echo "  - this session's conversations: $transcripts is a link, so cs left it, and the folder it points to, outside the vault"
+    fi
     echo "Always in plaintext:"
     echo "  - .cs/summary.md and .cs/brief.md"
 }
