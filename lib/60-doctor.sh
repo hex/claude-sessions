@@ -1099,7 +1099,8 @@ _doctor_retire_copy_row() {  # aside worktree_name pid
         || lead="Retire leftovers: $d was made by a /finish retire of $wt (pid $pid) to hold a copy of its session records, which this process cannot see; that retire is probably gone, and it copied none. Delete it with: rm -r \"$d\""
     local rerun="Then put back any tracked file that retire's removal deleted, which leaves every other file as it is, and run /finish $task in $base again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --"
     local by_hand="Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
-    local lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $_CS_HAND_FUSE_LEAVES_OUT"
+    local lacks
+    lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $(_hand_fuse_rules "$base_dir" "$task")"
     if [ ! -d "$wt_dir" ]; then
         [ -z "$copied" ] || return 1
         _doctor_warn "$lead"
@@ -1115,7 +1116,7 @@ _doctor_retire_copy_row() {  # aside worktree_name pid
             1) known="The worktree no longer holds each of them as the copy does" ;;
             *) known="cs could not copy the worktree's session records again to compare" ;;
         esac
-        _doctor_warn "$lead $known, so the copy may be the only one: fuse into $base_dir/.cs by hand what $d/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, $_CS_HAND_FUSE_LEAVES_OUT, then delete $d. $rerun"
+        _doctor_warn "$lead $known, so the copy may be the only one: fuse into $base_dir/.cs by hand what $d/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, $(_hand_fuse_rules "$base_dir" "$task"), then delete $d. $rerun"
     elif [ -n "$copied" ]; then
         held="$d/cs holds"
         [ ! -d "$wt_dir/.cs" ] || held="$d/cs or $wt_dir/.cs holds"
@@ -1162,11 +1163,11 @@ _doctor_check_retire_asides() {
                 _doctor_warn "Retire leftovers: $d was made by a /finish retire of $wt (pid $pid), which this process cannot see; that retire is probably gone, and the directory holds no records. Delete it with rmdir"
             fi
         elif [ -d "$SESSIONS_ROOT/$wt" ] && ! _worktree_is_checkout "$SESSIONS_ROOT/$wt"; then
-            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. $SESSIONS_ROOT/$wt is no longer a git checkout, so /finish $task cannot run there again: fuse into $SESSIONS_ROOT/$base/.cs by hand what $d/cs holds and $SESSIONS_ROOT/$base/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $_CS_HAND_FUSE_LEAVES_OUT, then delete $d and what is left of $SESSIONS_ROOT/$wt. Then run git -C \"$SESSIONS_ROOT/$base\" worktree prune and delete the branch with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
+            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. $SESSIONS_ROOT/$wt is no longer a git checkout, so /finish $task cannot run there again: fuse into $SESSIONS_ROOT/$base/.cs by hand what $d/cs holds and $SESSIONS_ROOT/$base/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $(_hand_fuse_rules "$SESSIONS_ROOT/$base" "$task"), then delete $d and what is left of $SESSIONS_ROOT/$wt. Then run git -C \"$SESSIONS_ROOT/$base\" worktree prune and delete the branch with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
         elif [ -d "$SESSIONS_ROOT/$wt" ]; then
             _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is still there, so move $d/cs back to $SESSIONS_ROOT/$wt/.cs by hand, delete the empty $d, and run /finish $task in $base again"
         else
-            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is gone, and /finish $task cannot run again without it, so finish the retire by hand: fuse what is missing from $d/cs into $SESSIONS_ROOT/$base/.cs, $_CS_HAND_FUSE_LEAVES_OUT, delete $d, then run git -C \"$SESSIONS_ROOT/$base\" worktree prune and delete the branch the retire would have removed with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
+            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is gone, and /finish $task cannot run again without it, so finish the retire by hand: fuse what is missing from $d/cs into $SESSIONS_ROOT/$base/.cs, $(_hand_fuse_rules "$SESSIONS_ROOT/$base" "$task"), delete $d, then run git -C \"$SESSIONS_ROOT/$base\" worktree prune and delete the branch the retire would have removed with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
         fi
     done
 }

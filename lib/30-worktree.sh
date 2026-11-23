@@ -482,24 +482,24 @@ _regenerable_filter() {  # regenerable|other
         }'
 }
 
-# The paths given one per line on stdin (_names_as_lines) that name a file
-# of the worktree the base holds byte for byte at the same path (keep=held)
-# or that do not (keep=other). Removing a held one with the worktree loses
+# Each path given one per line on stdin (_names_as_lines), after "held " when
+# it names a file of the worktree the base holds byte for byte at the same
+# path, else after "other ". Removing a held one with the worktree loses
 # nothing, whoever put it there; the .worktreeinclude copy at the feature's
 # creation leaves such files, and the base's own is compared at the retire
 # because a record of that copy would still name a file the base has since
 # changed or deleted. A link on either side, or on the way to the base's
 # file, is never held: the bytes behind it are not the base's to keep.
-_base_held_filter() {  # held|other wt_dir base_dir
-    local line name held
+_mark_base_held() {  # wt_dir base_dir
+    local line name
     while IFS= read -r line; do
         printf -v name '%b' "$line"
-        held=other
-        if [ -f "$2/$name" ] && [ ! -L "$2/$name" ] && [ -f "$3/$name" ] \
-            && ! _path_goes_through_a_link "$3" "$name" && cmp -s "$2/$name" "$3/$name"; then
-            held=held
+        if [ -f "$1/$name" ] && [ ! -L "$1/$name" ] && [ -f "$2/$name" ] \
+            && ! _path_goes_through_a_link "$2" "$name" && cmp -s "$1/$name" "$2/$name"; then
+            printf 'held %s\n' "$line"
+        else
+            printf 'other %s\n' "$line"
         fi
-        [ "$held" != "$1" ] || printf '%s\n' "$line"
     done
 }
 
@@ -971,19 +971,23 @@ _path_goes_through_a_link() {  # root, relative path
 
 # Writes to <out> the base's files that its .worktreeinclude names and git
 # ignores, each ended by a NUL; one check-ignore answers for the whole list.
-# Fails, leaving what git said in
-# _CS_WORKTREEINCLUDE_ERROR, when git cannot list them: an unreadable
-# .worktreeinclude would otherwise read as one that names nothing.
+# Leaves what git said in _CS_WORKTREEINCLUDE_GIT_SAID. Fails when git cannot
+# list them: an unreadable .worktreeinclude would otherwise read as one that
+# names nothing. Git lists the rest and exits 0 when it cannot read a
+# directory of the base, saying so for each.
 _worktree_included_list() {  # base_dir out
-    local base="$1" named status=0
-    _CS_WORKTREEINCLUDE_ERROR=""
+    local base="$1" named said status=0 nl=$'\n'
+    _CS_WORKTREEINCLUDE_GIT_SAID=""
     named=$(mktemp "${TMPDIR:-/tmp}/cs-worktreeinclude.XXXXXX") || return 1
-    if _CS_WORKTREEINCLUDE_ERROR=$(git -C "$base" ls-files -z --others --ignored \
+    if said=$(git -C "$base" ls-files -z --others --ignored \
             --exclude-from="$base/.worktreeinclude" 2>&1 > "$named"); then
+        _CS_WORKTREEINCLUDE_GIT_SAID=$said
         # check-ignore exits 1 when it names no path.
-        _CS_WORKTREEINCLUDE_ERROR=$(git -C "$base" check-ignore -z --stdin < "$named" 2>&1 > "$2") \
+        said=$(git -C "$base" check-ignore -z --stdin < "$named" 2>&1 > "$2") \
             || [ $? -eq 1 ] || status=1
+        [ -z "$said" ] || _CS_WORKTREEINCLUDE_GIT_SAID="${_CS_WORKTREEINCLUDE_GIT_SAID:+$_CS_WORKTREEINCLUDE_GIT_SAID$nl}$said"
     else
+        _CS_WORKTREEINCLUDE_GIT_SAID=$said
         status=1
     fi
     rm -f "$named"
@@ -992,24 +996,18 @@ _worktree_included_list() {  # base_dir out
 
 # Copies into a feature's checkout the base's files that its .worktreeinclude
 # names and git ignores (an env file, a local config), which a checkout never
-# carries. The file reads as a .gitignore does, as Claude Code reads it for
-# the worktrees it makes itself (_worktree_included_list). Left where they
-# are: a file the feature already has, cs's own records,
+# carries, from the list _worktree_included_list wrote. The file reads as a
+# .gitignore does, as Claude Code reads it for the worktrees it makes itself.
+# Left where they are: a file the feature already has, cs's own records,
 # .claude/settings.local.json (cs writes the feature's, and the retire adds
 # every permission rule it holds to the base's, so a copy would hand the base
 # back a rule it dropped meanwhile), a link (cs writes some of these files
 # later, and a write through a copied link lands on the base's file), and a
 # path that passes through a link in the feature. Runs command-substituted
 # with its caller, so every line it says goes to stderr. Fails, having copied
-# nothing, when git cannot list them (_CS_WORKTREEINCLUDE_ERROR).
-_worktree_carry_included() {  # base_dir wt_dir
-    local base="$1" wt="$2" f dest copied=0 list
-    [ -f "$base/.worktreeinclude" ] || return 0
-    list=$(mktemp "${TMPDIR:-/tmp}/cs-worktreeinclude.XXXXXX") || return 1
-    if ! _worktree_included_list "$base" "$list"; then
-        rm -f "$list"
-        return 1
-    fi
+# nothing, when it cannot read the list.
+_worktree_carry_included() {  # base_dir wt_dir list
+    local base="$1" wt="$2" f dest copied=0
     while IFS= read -r -d '' f; do
         case "$f" in */|.cs/*|CLAUDE.local.md) continue ;; esac
         if [ "$f" = .claude/settings.local.json ]; then
@@ -1031,8 +1029,7 @@ _worktree_carry_included() {  # base_dir wt_dir
         else
             warn "Not copied: $(_printable_name "$f")" >&2
         fi
-    done < "$list"
-    rm -f "$list"
+    done < "$3" || return 1
     [ "$copied" = 0 ] \
         || info "Copied $copied ignored file$([ "$copied" = 1 ] || printf s) that .worktreeinclude names" >&2
 }
@@ -1079,12 +1076,23 @@ create_worktree_session() {
         printf '%s\n' "$untracked" >&2
     fi
 
-    # Listed once before the worktree exists, so a .worktreeinclude git
-    # cannot read leaves nothing behind.
-    local included_error="Could not list the files that $base_dir/.worktreeinclude names"
-    [ ! -f "$base_dir/.worktreeinclude" ] || _worktree_included_list "$base_dir" /dev/null \
-        || error "$included_error, so no feature was created:
-$_CS_WORKTREEINCLUDE_ERROR"
+    # The files .worktreeinclude names are listed once, before the worktree
+    # exists, so a listing git cannot make leaves nothing behind; the copy
+    # after the add reads that list. This function runs command-substituted,
+    # so the trap is its subshell's own and removes the list however the
+    # create ends; a global, as the trap runs after the locals are gone.
+    _CS_WORKTREEINCLUDE_LIST=""
+    if [ -f "$base_dir/.worktreeinclude" ]; then
+        _CS_WORKTREEINCLUDE_LIST=$(mktemp "${TMPDIR:-/tmp}/cs-worktreeinclude.XXXXXX") \
+            || error "Could not make a file to list the files that $base_dir/.worktreeinclude names, so no feature was created"
+        trap 'rm -f "$_CS_WORKTREEINCLUDE_LIST"' EXIT
+        _worktree_included_list "$base_dir" "$_CS_WORKTREEINCLUDE_LIST" \
+            || error "Could not list the files that $base_dir/.worktreeinclude names, so no feature was created:
+$_CS_WORKTREEINCLUDE_GIT_SAID"
+        [ -z "$_CS_WORKTREEINCLUDE_GIT_SAID" ] \
+            || warn "git could not read every directory of $base_dir, so a file .worktreeinclude names in one of these is not copied:
+$_CS_WORKTREEINCLUDE_GIT_SAID" >&2
+    fi
 
     if git -C "$base_dir" rev-parse -q --verify "refs/heads/$branch" >/dev/null 2>&1; then
         # The branch's own tip, not the base's HEAD, is where the feature
@@ -1101,9 +1109,8 @@ $_CS_WORKTREEINCLUDE_ERROR"
     # The checkout can carry a committed link or per-actor state from the
     # base's history; refuse before the state writes below go through it.
     cs_assert_local_untracked "$wt_dir"
-    _worktree_carry_included "$base_dir" "$wt_dir" \
-        || error "$included_error, so the feature at $wt_dir has none of them:
-$_CS_WORKTREEINCLUDE_ERROR"
+    [ -z "$_CS_WORKTREEINCLUDE_LIST" ] || _worktree_carry_included "$base_dir" "$wt_dir" "$_CS_WORKTREEINCLUDE_LIST" \
+        || warn "Could not read the list cs made of the files $base_dir/.worktreeinclude names, so none of them was copied" >&2
 
     if [ "$mode" = "ignored" ]; then
         bootstrap_worktree_meta "$wt_dir" "$base_name" "$task" "$base_dir"
@@ -1249,22 +1256,23 @@ _finish_progress_exit() {  # exit status
 # Move the worktree's ignored files that are not regenerable to the system
 # trash, so retiring it deletes nothing git keeps no copy of; files under a
 # regenerable directory (CS_REGENERABLE_DIRS) go with the worktree, and so
-# does a file the base holds byte for byte (_base_held_filter). Leaves
+# does a file the base holds byte for byte (_mark_base_held). Leaves
 # what it moved in _RETIRE_TRASHED_COUNT and _RETIRE_TRASHED_LINES (one line
 # per entry, by absolute path) for _retire_trashed_note. Refuses, having
 # removed nothing, when no trash command is installed or its first call
 # fails; when a later call fails, refuses naming what the earlier calls
 # moved.
 _retire_trash_ignored_work() {  # wt_dir task base_dir
-    local wt_dir="$1" task="$2" base_dir="$3" ignored trash_paths regenerable held input entries listing count them=them nl=$'\n'
+    local wt_dir="$1" task="$2" base_dir="$3" ignored trash_paths regenerable marked held input entries listing count them=them nl=$'\n'
     ignored=$(_worktree_others "$wt_dir" --ignored) \
         || error "Could not list the ignored files in $wt_dir; nothing was removed"
     [ -n "$ignored" ] || return 0
     trash_paths=$(printf '%s\n' "$ignored" | _regenerable_filter other)
     [ -n "$trash_paths" ] || return 0
     regenerable=$(printf '%s\n' "$ignored" | _regenerable_filter regenerable)
-    held=$(printf '%s\n' "$trash_paths" | _base_held_filter held "$wt_dir" "$base_dir")
-    trash_paths=$(printf '%s\n' "$trash_paths" | _base_held_filter other "$wt_dir" "$base_dir")
+    marked=$(printf '%s\n' "$trash_paths" | _mark_base_held "$wt_dir" "$base_dir")
+    held=$(printf '%s\n' "$marked" | env LC_ALL=C sed -n 's/^held //p')
+    trash_paths=$(printf '%s\n' "$marked" | env LC_ALL=C sed -n 's/^other //p')
     [ -n "$trash_paths" ] || return 0
     [ -z "$held" ] || regenerable="${regenerable:+$regenerable$nl}$held"
     input=$(_untracked_listing_input "$wt_dir" "$trash_paths" "$regenerable") \
@@ -1653,7 +1661,8 @@ $missing"
         local delete_flag=-d
         [ -z "$force" ] || delete_flag=-D
         local by_hand="Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch $delete_flag $branch"
-        local lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $_CS_HAND_FUSE_LEAVES_OUT"
+        local lacks
+        lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), $(_hand_fuse_rules "$base_dir" "$task")"
         local kept="The worktree still holds every session record the feature left uncommitted, so cs deleted the copy it made of them"
         if [ "$mode" = "ignored" ] && ! _worktree_is_checkout "$wt_dir"; then
             # The records moved out before the removal began, so $aside/cs
@@ -1682,7 +1691,7 @@ $remove_err${trashed:+$nl$trashed}"
             # git deletes what it can before it fails, so the copy can be
             # the only one of a record by now.
             [ "$spare" = 0 ] \
-                || error "git worktree remove failed for $wt_dir after deleting part of it, and $known. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, $_CS_HAND_FUSE_LEAVES_OUT, then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
+                || error "git worktree remove failed for $wt_dir after deleting part of it, and $known. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, $(_hand_fuse_rules "$base_dir" "$task"), then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
 $remove_err${trashed:+$nl$trashed}"
             rm -rf "$aside"
         fi
@@ -1698,7 +1707,7 @@ $remove_err${trashed:+$nl$trashed}"
     fi
     _cs_unlock "$wt_dir/.cs/session.mutex.lock"
     ( fuse_session_records "$aside/cs" "$base_dir/.cs" "$task" ) \
-        || error "The worktree $wt_dir is removed, but its session records could not be fused into $base_dir/.cs: they are at $aside/cs. Fuse what is missing by hand, $_CS_HAND_FUSE_LEAVES_OUT, then delete that directory.${trashed:+$nl$trashed}"
+        || error "The worktree $wt_dir is removed, but its session records could not be fused into $base_dir/.cs: they are at $aside/cs. Fuse what is missing by hand, $(_hand_fuse_rules "$base_dir" "$task"), then delete that directory.${trashed:+$nl$trashed}"
     rm -rf "$aside"
     if [ -n "$force" ]; then
         git -C "$base_dir" branch -D "$branch" >/dev/null 2>&1 \
@@ -2606,12 +2615,16 @@ _fuse_walk_skips() {  # rel
 }
 
 # What the messages that say to fuse a feature's records by hand tell the
-# reader to leave out, as a clause: the files _fuse_walk_skips passes over,
-# but the log, which the fuse appends to the base's, and the frontmatter of
-# a narrative the base holds too, which the fuse never appends. The copy of
-# a tracked feature's records has both: the sums under local/inherited, and
-# an empty frontmatter atop a narrative that has none (_stage_log_delta).
-_CS_HAND_FUSE_LEAVES_OUT="leaving out what cs keeps for itself (session.lock, session.mutex.lock, everything under local but session.log, whose lines go after the base's own, and the frontmatter that opens a narrative the base holds too, down to its second --- line)"
+# reader, as a clause, for the base at <base_dir> and the feature <task>:
+# what to leave out (every file _fuse_walk_skips passes over but the logs,
+# and the frontmatter of a narrative the base holds too, which the fuse
+# never appends), where the logs go (CS_FUSED_LOGS), and where the feature's
+# README and summary go (_fuse_feature_dest). The copy of a tracked
+# feature's records holds the sums under local/inherited, and an empty
+# frontmatter atop a narrative that has none (_stage_log_delta).
+_hand_fuse_rules() {  # base_dir task
+    printf '%s' "leaving out what cs keeps for itself (session.lock, session.mutex.lock, .narrative-reminder-cooldown, every .DS_Store, everything under local but session.log, and the frontmatter that opens a narrative the base holds too, down to its second --- line), putting the lines of logs/session.log and then of local/session.log after those of the base's own session.log, and the feature's README.md and summary.md in $1/.cs/features/$2/ (README.2.md and on when an earlier feature of that name left one there), never into the base's own"
+}
 
 # The files of a feature's .cs that fuse_session_records merges into the
 # same path of the base's by a rule of its own: the timeline, the narratives,
