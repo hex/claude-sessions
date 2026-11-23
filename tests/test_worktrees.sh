@@ -5016,6 +5016,44 @@ test_retire_tracked_mode_remedy_after_a_part_way_removal_ends_in_a_retire() {
 
 run_test test_retire_tracked_mode_remedy_after_a_part_way_removal_ends_in_a_retire
 
+# A removal that deleted tracked files, left a checkout and kept every
+# record: the worktree holds what the copy does, so the copy goes, and the
+# next /finish would refuse over the deleted files. The refusal says so and
+# gives the command that puts them back; followed, it ends in a retire that
+# carries each of the feature's lines once.
+test_retire_tracked_mode_says_how_to_put_back_what_a_removal_deleted_beside_whole_records() {
+    local base_dir wt sha narrative bin output status=0 token="$RANDOM$RANDOM"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    echo "- feature line $token" >> "$wt/$narrative"
+    printf '{"event":"from-feature-%s"}\n' "$token" >> "$wt/.cs/timeline.jsonl"
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    bin=$(_git_failing_removal "rm -f \"$wt/feature.txt\"")
+    output=$(PATH="$bin:$PATH" "$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "a removal that fails is a refusal: $output" || return 1
+    assert_not_exists "$wt/feature.txt" "fixture: the removal deleted a tracked file" || return 1
+    assert_eq "$(cd "$wt" && pwd -P)" "$(git -C "$wt" rev-parse --show-toplevel 2>/dev/null)" "fixture: what is left is a checkout" || return 1
+    assert_eq "1" "$(grep -c -F -- "- feature line $token" "$wt/$narrative")" "fixture: the worktree keeps its narrative line" || return 1
+    assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')" "the copy is deleted: the worktree holds each record" || return 1
+    assert_output_not_contains "$output" "nothing was fused or deleted" "the refusal does not say nothing was deleted" || return 1
+    assert_output_contains "$output" "git worktree remove failed for $wt after deleting part of it. The worktree still holds every session record the feature left uncommitted, so cs deleted the copy it made of them, and the base's records are as they were. Put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish fix-auth again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --" \
+        "the refusal says what is known and how to put the deleted files back" || return 1
+    assert_file_not_contains "$base_dir/$narrative" "feature line $token" "the base narrative is untouched" || return 1
+    git -C "$wt" ls-files -z --deleted | xargs -0 git -C "$wt" checkout --
+    status=0
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire goes through once the files are back: $output" || return 1
+    assert_not_exists "$wt" "the worktree is removed" || return 1
+    assert_eq "1" "$(grep -c -F -- "- feature line $token" "$base_dir/$narrative")" "the narrative line is in the base once" || return 1
+    assert_eq "1" "$(grep -c -F "from-feature-$token" "$base_dir/.cs/timeline.jsonl")" "the timeline line is in the base once" || return 1
+}
+
+run_test test_retire_tracked_mode_says_how_to_put_back_what_a_removal_deleted_beside_whole_records
+
 # A trash command that fails ends the retire of a tracked feature like any
 # other refusal: the copy it made of the feature's records goes too.
 test_retire_tracked_mode_leaves_no_copy_when_the_trash_command_fails() {
