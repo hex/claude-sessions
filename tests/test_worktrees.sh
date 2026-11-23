@@ -2465,6 +2465,48 @@ MEMORY.md: appended 1 pointer(s) from the feature (base lines kept)" "$(printf '
     assert_eq "" "$(git -C "$base_dir" status --porcelain -- .cs/memory)" "the index landed committed" || return 1
 }
 
+# A pointer the feature took out of the index with the topic it deleted
+# stays out when the feature lands.
+test_integrate_lands_without_the_pointer_to_a_topic_the_feature_deleted() {
+    local base_dir wt sha index=".cs/memory/MEMORY.md" output status=0
+    base_dir=$(_tracked_base proja) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    echo "base topic" > "$base_dir/.cs/memory/topic-x.md"
+    echo "- [Topic x](topic-x.md): the base's" >> "$base_dir/$index"
+    (cd "$base_dir" && git add .cs/memory && git commit -q -m "base topic")
+    cs_launch "proja@fix-auth"
+    wt="$CS_SESSIONS_ROOT/proja@fix-auth"
+    grep -v -F '(topic-x.md)' "$wt/$index" > "$TEST_TMPDIR/index" && cp "$TEST_TMPDIR/index" "$wt/$index"
+    (cd "$wt" && git rm -q .cs/memory/topic-x.md && git add "$index" && git commit -q -m "the topic is gone")
+    sha=$(git -C "$wt" rev-parse HEAD)
+    output=$("$CS_BIN" proja -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "the deletion lands: $output" || return 1
+    assert_eq "0" "$(git -C "$base_dir" show "HEAD:$index" | grep -c -F '(topic-x.md)')" "the landed index has no pointer to the deleted topic" || return 1
+    assert_not_exists "$base_dir/.cs/memory/topic-x.md" "the topic is deleted in the base" || return 1
+    assert_eq "" "$(printf '%s\n' "$output" | grep -F 'MEMORY.md:')" "the integrate added nothing to the index" || return 1
+}
+
+# A pointer the feature's /wrap moved from the index to the memory archive
+# stays out of the index when the feature lands.
+test_integrate_lands_without_the_pointer_the_feature_archived() {
+    local base_dir wt sha index=".cs/memory/MEMORY.md" archive=".cs/memory/reference_memory_archive.md" output status=0
+    base_dir=$(_tracked_base projb) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    echo "base topic" > "$base_dir/.cs/memory/topic-y.md"
+    echo "- [Topic y](topic-y.md): the base's" >> "$base_dir/$index"
+    (cd "$base_dir" && git add .cs/memory && git commit -q -m "base topic")
+    cs_launch "projb@fix-auth"
+    wt="$CS_SESSIONS_ROOT/projb@fix-auth"
+    grep -F '(topic-y.md)' "$wt/$index" > "$wt/$archive"
+    grep -v -F '(topic-y.md)' "$wt/$index" > "$TEST_TMPDIR/index" && cp "$TEST_TMPDIR/index" "$wt/$index"
+    (cd "$wt" && git add "$index" "$archive" && git commit -q -m "the pointer is archived")
+    sha=$(git -C "$wt" rev-parse HEAD)
+    output=$("$CS_BIN" projb -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "the archived pointer lands: $output" || return 1
+    assert_eq "0" "$(git -C "$base_dir" show "HEAD:$index" | grep -c -F '(topic-y.md)')" "the landed index has no pointer the archive holds" || return 1
+    assert_eq "1" "$(git -C "$base_dir" show "HEAD:$archive" | grep -c -F '(topic-y.md)')" "the landed archive holds it once" || return 1
+    assert_file_exists "$base_dir/.cs/memory/topic-y.md" "the archived topic is still in the base" || return 1
+    assert_eq "" "$(printf '%s\n' "$output" | grep -F 'MEMORY.md:')" "the integrate added nothing to the index" || return 1
+}
+
 test_integrate_refuses_foreign_live_base_lock() {
     local sha base_dir
     sha=$(integrate_fixture myproj fix-auth)
@@ -2626,6 +2668,8 @@ run_test test_integrate_lands_over_base_session_records_it_does_not_touch
 run_test test_integrate_refuses_a_landing_that_overwrites_base_session_records
 run_test test_integrate_rechecks_session_records_the_gate_dirtied
 run_test test_integrate_keeps_the_base_memory_pointers_a_feature_merge_dropped
+run_test test_integrate_lands_without_the_pointer_to_a_topic_the_feature_deleted
+run_test test_integrate_lands_without_the_pointer_the_feature_archived
 run_test test_integrate_refuses_foreign_live_base_lock
 run_test test_integrate_reads_the_base_lock_by_the_one_lock_rule
 run_test test_integrate_cleanup_releases_the_lock_only_once
