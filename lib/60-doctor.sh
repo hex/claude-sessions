@@ -1074,6 +1074,58 @@ _doctor_pid_verdict() {  # pid (digits)
     fi
 }
 
+# Beside "branch -d" in a row for a retire that is gone: doctor cannot read
+# whether that retire ran with --force, which deletes its branch with -D.
+_DOCTOR_FORCED_BRANCH_NOTE="(git refuses -d when the base does not hold every commit of the branch, as after a squash merge that /finish retired with --force; -D deletes it then)"
+
+# The row for a retire's directory marked as a copy, by what it holds and
+# what the worktree is now. Returns 1, having said nothing, for a copy with
+# records whose worktree is gone: the row of records set aside fits it.
+# - No record copied: the directory is only deleted, with rm -r, since rmdir
+#   fails on one holding the mark.
+# - A checkout: /finish runs there again, once the tracked files a removal
+#   killed part-way deleted are back; before that, what only the copy holds
+#   is fused by hand, unless the worktree holds each record as the copy does.
+# - A directory git reads no checkout in: no /finish runs there, and nothing
+#   tells which records it still holds, so all the copy and its .cs hold go
+#   to the base by hand before either is deleted.
+_doctor_retire_copy_row() {  # aside worktree_name pid
+    local d="$1" wt="$2" pid="$3"
+    local base="${wt%%@*}" task="${wt#*@}" wt_dir="$SESSIONS_ROOT/$wt" spare=0
+    local base_dir="$SESSIONS_ROOT/$base" copied lead held="" known
+    copied=$(find "$d/cs" -type f 2>/dev/null | head -n 1)
+    lead="Retire leftovers: $d holds a copy of the session records of $wt, captured by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone."
+    [ -n "$copied" ] \
+        || lead="Retire leftovers: $d was made by a /finish retire of $wt (pid $pid) to hold a copy of its session records, which this process cannot see; that retire is probably gone, and it copied none. Delete it with: rm -r \"$d\""
+    local rerun="Then put back any tracked file that retire's removal deleted, which leaves every other file as it is, and run /finish $task in $base again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --"
+    local by_hand="Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
+    local lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks)"
+    if [ ! -d "$wt_dir" ]; then
+        [ -z "$copied" ] || return 1
+        _doctor_warn "$lead"
+    elif _worktree_is_checkout "$wt_dir"; then
+        if [ -z "$copied" ]; then
+            _doctor_warn "$lead. $rerun"
+            return 0
+        fi
+        _retire_copy_is_spare "$wt_dir" "$base_dir/.cs" "$task" "$d" || spare=$?
+        case "$spare" in
+            0) _doctor_warn "$lead The worktree holds each of them as the copy does, so delete $d. $rerun"
+               return 0 ;;
+            1) known="The worktree no longer holds each of them as the copy does" ;;
+            *) known="cs could not copy the worktree's session records again to compare" ;;
+        esac
+        _doctor_warn "$lead $known, so the copy may be the only one: fuse into $base_dir/.cs by hand what $d/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, then delete $d. $rerun"
+    elif [ -n "$copied" ]; then
+        held="$d/cs holds"
+        [ ! -d "$wt_dir/.cs" ] || held="$d/cs or $wt_dir/.cs holds"
+        _doctor_warn "$lead $wt_dir is no longer a git checkout, so /finish $task cannot run there again and cs cannot tell which of those records it still holds: fuse into $base_dir/.cs by hand what $held and $lacks, then delete $d and what is left of $wt_dir. $by_hand"
+    else
+        [ ! -d "$wt_dir/.cs" ] || held="fuse into $base_dir/.cs by hand what $wt_dir/.cs holds and $lacks, then "
+        _doctor_warn "$lead. $wt_dir is no longer a git checkout, so /finish $task cannot run there again: ${held}delete what is left of $wt_dir. $by_hand"
+    fi
+}
+
 # /finish's retire makes $SESSIONS_ROOT/.retire-<worktree>.<pid>, moves the
 # worktree's .cs into it as cs, removes the worktree, fuses the records into
 # the base from there, deletes the directory and then the branch; a retire
@@ -1081,10 +1133,8 @@ _doctor_pid_verdict() {  # pid (digits)
 # it. Which step it reached shows in what is there: an empty directory means
 # nothing moved, and a missing worktree means /finish cannot run again. For
 # a feature whose repo tracks .cs the retire copies the records it will fuse
-# and marks the directory with a file named copy first: beside a worktree
-# that still holds each record in it (_retire_copy_is_spare), such a
-# directory is only deleted, and beside one that does not, it is what to
-# fuse by hand. Only
+# and marks the directory with a file named copy first: such a directory
+# gets a row of its own (_doctor_retire_copy_row). Only
 # a directory whose retire is gone is reported: a live one is a retire in
 # progress, and one cs cannot judge gets no remedy. The pid is hedged as the
 # integrate lock's is: ESRCH is absence only in this pid namespace.
@@ -1100,10 +1150,8 @@ _doctor_check_retire_asides() {
         verdict=$(_doctor_pid_verdict "$pid")
         [ "$verdict" = stale ] || continue
         base="${wt%%@*}" task="${wt#*@}"
-        if [ -e "$d/copy" ] && _retire_copy_is_spare "$SESSIONS_ROOT/$wt" "$SESSIONS_ROOT/$base/.cs" "$task" "$d"; then
-            _doctor_warn "Retire leftovers: $d holds a copy of the session records of $wt, captured by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree keeps its own .cs, so delete $d and run /finish $task in $base again"
-        elif [ -e "$d/copy" ] && [ -d "$SESSIONS_ROOT/$wt" ]; then
-            _doctor_warn "Retire leftovers: $d holds a copy of the session records of $wt, captured by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree no longer holds each of them as the copy does, so the copy may be the only one: fuse into $SESSIONS_ROOT/$base/.cs by hand what $d/cs holds and neither $SESSIONS_ROOT/$base/.cs nor $SESSIONS_ROOT/$wt/.cs does, then delete $d. If git still lists the worktree (git -C \"$SESSIONS_ROOT/$base\" worktree list), run /finish $task in $base again; if not, delete what is left of $SESSIONS_ROOT/$wt and then the branch with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task"
+        if [ -e "$d/copy" ] && _doctor_retire_copy_row "$d" "$wt" "$pid"; then
+            continue
         elif [ ! -d "$d/cs" ]; then
             if [ -d "$SESSIONS_ROOT/$wt" ]; then
                 _doctor_warn "Retire leftovers: $d was made by a /finish retire of $wt (pid $pid), which this process cannot see; that retire is probably gone, and it moved nothing: the worktree keeps its .cs. Delete the empty directory with rmdir and run /finish $task in $base again"
@@ -1113,7 +1161,7 @@ _doctor_check_retire_asides() {
         elif [ -d "$SESSIONS_ROOT/$wt" ]; then
             _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is still there, so move $d/cs back to $SESSIONS_ROOT/$wt/.cs by hand, delete the empty $d, and run /finish $task in $base again"
         else
-            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is gone, and /finish $task cannot run again without it, so finish the retire by hand: fuse what is missing from $d/cs into $SESSIONS_ROOT/$base/.cs, delete $d, then delete the branch the retire would have removed with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task"
+            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is gone, and /finish $task cannot run again without it, so finish the retire by hand: fuse what is missing from $d/cs into $SESSIONS_ROOT/$base/.cs, delete $d, then delete the branch the retire would have removed with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
         fi
     done
 }

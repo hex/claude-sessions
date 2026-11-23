@@ -4977,7 +4977,9 @@ run_test test_retire_tracked_mode_says_to_fuse_what_a_dead_checkout_still_holds
 
 # A removal that deleted tracked files and left a checkout: the next /finish
 # refuses over the deletions, so the refusal and cs -doctor say how to put
-# them back. Followed to the letter, the steps end in a retire that carries
+# them back, and neither calls the record lost: a tracked record that is
+# gone refuses the second copy, so cs has compared nothing. Followed to the
+# letter, the steps end in a retire that carries
 # each of the feature's lines once: the one whose record the removal deleted
 # by hand from the copy, the one the worktree kept by the retire.
 test_retire_tracked_mode_remedy_after_a_part_way_removal_ends_in_a_retire() {
@@ -4996,9 +4998,9 @@ test_retire_tracked_mode_remedy_after_a_part_way_removal_ends_in_a_retire() {
     assert_eq "1" "$status" "a removal that fails is a refusal: $output" || return 1
     aside=$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')
     remedy="Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt/.cs does, then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish fix-auth again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --"
-    assert_output_contains "$output" "git worktree remove failed for $wt after deleting part of it, and the worktree no longer holds every session record the feature left uncommitted. The copy cs made of them is at $aside/cs, and the base's records are as they were. $remedy" \
+    assert_output_contains "$output" "git worktree remove failed for $wt after deleting part of it, and cs could not copy the worktree's session records again, so it cannot tell whether the worktree still holds every one the feature left uncommitted. The copy cs made of them is at $aside/cs, and the base's records are as they were. $remedy" \
         "the refusal says what to fuse and how to put the deleted files back" || return 1
-    assert_output_contains "$("$CS_BIN" -doctor 2>&1)" "The worktree no longer holds each of them as the copy does, so the copy may be the only one: fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt/.cs does, then delete $aside. Then put back any tracked file that retire's removal deleted, which leaves every other file as it is, and run /finish fix-auth in myproj again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --" \
+    assert_output_contains "$("$CS_BIN" -doctor 2>&1)" "cs could not copy the worktree's session records again to compare, so the copy may be the only one: fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt/.cs does, then delete $aside. Then put back any tracked file that retire's removal deleted, which leaves every other file as it is, and run /finish fix-auth in myproj again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --" \
         "cs -doctor gives the same steps" || return 1
     assert_file_contains "$aside/cs/${narrative#.cs/}" "feature line $token" "fixture: the copy holds the line of the deleted narrative" || return 1
     echo "- feature line $token" >> "$base_dir/$narrative"
