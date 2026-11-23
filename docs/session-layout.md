@@ -439,7 +439,9 @@ change to a file the feature also changed. For `timeline.jsonl` and
 `narrative.*.md`, `/finish` sets the lines the base holds past its last
 commit aside, lands, and appends them after the feature's, uncommitted. It
 refuses, naming the paths, for any other record, and for a log whose
-committed lines the base changed.
+committed lines the base changed. Two known limits: the landing loses a line another writer appends to one of
+these files in the moment between the set-aside and the fast-forward, and
+lines the base had staged come back unstaged.
 
 Git merges only what the feature committed. The retire commits nothing, so
 when `/finish` retires a feature whose base tracks `.cs/`, it fuses what
