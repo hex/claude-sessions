@@ -1516,7 +1516,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "b4af9c3b88f45f5c5a412cacc4e82df4b22c63c2c284eebec3eb1c61a9ab3eac  bin/cs"
+    "9cc6e8fdaac2c66ba9093c957d7839554fbec1255b7c0676056b24b38370f118  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "4cfed2e36463e06c222bf9ed3573a0d66c4ecff25000b5c9aa28a4da3bbc1e20  bin/cs-statusline"
     "324691a50519294a125520ee96e279bb02a08b1a4c2e4804cf9347c617521044  bin/cs-subagent-statusline"
@@ -1549,7 +1549,7 @@ CS_PAYLOAD_SHA256=(
     "470bbdd41fe312195f002bd68ef833b299c0bc2eae8ccb9f6891bfaac07c58c9  skills/write-as-me/SKILL.md"
     "a8abe8e196ab085c28a30db08b3a52781d14c14ed1134cea5464a75ef03486b6  skills/write-as-me/scripts/build-corpus.sh"
     "a8a14c22510b49f89557b401730875996064682af719a85322215b61d046b054  skills/write-as-me/scripts/corpus-check.sh"
-    "7e81f7914f86931c071017287a65c3fdb9bc6c20b302c1d96dba7fccb925457d  skills/finish/scripts/finish.sh"
+    "1eaad7ffaff943e06f5457c37298ad8ecf49ecde58a09ee39ad9793febd051cb  skills/finish/scripts/finish.sh"
     "a999b85473187e2d79fa94f8e3f5532a4510939114032f692e2e9003a155f40b  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
     "2c30d6aaa382e627f18be78b5c7c8e4556e30553c074760b9aeb0b71ead377d2  mods/cs/hooks/register.tsx"

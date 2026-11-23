@@ -201,8 +201,8 @@ pr_lookup() {  # base_dir branch
 
 # Everything uncommitted in the worktree, as porcelain lines, unfiltered.
 # Integrate carries no uncommitted work, so every path here stays out of what
-# lands; the retire then fuses the .cs records among them into the base's
-# working tree, uncommitted, and refuses over the rest.
+# lands; the retire then fuses the .cs records among them that it can carry
+# into the base's working tree, uncommitted, and refuses over the rest.
 dirt_lines() {  # dir
     local dirt
     dirt=$(git -C "$1" status --porcelain 2>/dev/null || true)

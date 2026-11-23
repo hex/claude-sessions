@@ -139,7 +139,7 @@ _record_inherited() {  # meta rel
 
 # True when a checkout has uncommitted changes to tracked files outside .cs
 # (staged or unstaged). The conversation and its hooks write the session
-# records under .cs, and cs commits none of them, so a change there is no
+# records under .cs and leave them uncommitted, so a change there is no
 # sign of project work left unfinished. Untracked files are a separate
 # question with per-site messages.
 _project_tree_is_dirty() {
@@ -151,7 +151,7 @@ _project_tree_is_dirty() {
 # lists every path the landing changes, one per line: "untracked <path>" for
 # one git does not track there, "changed <path>" for a tracked one with
 # uncommitted changes, staged or not. git merge --ff-only refuses over either,
-# with a message that blames the wrong cause. Fails when git cannot list the
+# and the landing would report that as the base having moved. Fails when git cannot list the
 # base's files.
 _landing_overwrites() {  # base_dir touched_file
     [ -s "$2" ] || return 0
@@ -747,8 +747,10 @@ _feature_readiness() {  # base_name task
     # that links out of the session when a rule would be written through it,
     # and a git that cannot say whether a checkout tracks the file.
     # A locked base vault is the retire's refusal before the records are
-    # classified, and every record bound for it would read as at risk, so the
-    # records are not classified then.
+    # classified, and every record bound for it would read as at risk, so an
+    # ignored feature's records are not classified then; a tracked feature's
+    # are, and the vault is asked only when one would be carried
+    # (_tracked_record_refusals).
     local others conflicts="" vault_locked=""
     others=$(_worktree_untracked_at_risk "$wt_dir") \
         || error "Could not list the untracked files in $wt_dir"
@@ -1374,9 +1376,10 @@ ${wt_listing#*"$nl"}"
     fi
     refusal=$(printf '%s\n' "$conflicts" | _record_refusal_message "$wt_dir" "$base_dir" "$task" "$mode")
     [ -z "$refusal" ] || error "$refusal"
-    # The base's own .cs/ bookkeeping is exempt: in tracked mode the integrate
-    # that just landed this feature wrote a timeline event there, and removing
-    # a worktree touches no base file, so that dirt is no reason to refuse.
+    # Session records the base left uncommitted are no reason to refuse
+    # (_project_tree_is_dirty): in tracked mode the integrate that just landed
+    # this feature wrote a timeline event there, the removal touches no base
+    # file, and the fuse only adds to them.
     if _project_tree_is_dirty "$base_dir"; then
         error "Base session has uncommitted changes; commit them in $base_dir first"
     fi
@@ -1388,8 +1391,9 @@ ${wt_listing#*"$nl"}"
     # moved aside whole and moved back on a failure; of a tracked one, the
     # records the feature left uncommitted are copied (_capture_tracked_records)
     # and the copy is deleted on a failure.
-    # The staging directory sits beside the worktree, on its filesystem, so
-    # both moves are renames: nothing is half-copied on a failure.
+    # For an ignored .cs the staging directory sits beside the worktree, on
+    # its filesystem, so both moves are renames: nothing is half-copied on a
+    # failure.
     # A fuse that refuses after the removal would strand the records in the
     # staging directory, so its one refusal is asked before anything moves.
     # Asked whether or not the worktree has a log: a locked vault takes the
@@ -1968,7 +1972,7 @@ $advice"
     # An untracked file in the base at a path the merge touches, or an
     # uncommitted change to a session record the merge touches, passes
     # _project_tree_is_dirty and the temp merge itself, then aborts the
-    # ff-only landing with a message that blames the wrong cause. Caught
+    # ff-only landing, which reads as the base having moved. Caught
     # here, before the gate spends any cost on a doomed landing.
     local overwrites entry collisions="" changed=""
     _INTEGRATE_TOUCHED=$(mktemp "${TMPDIR:-/tmp}/cs-touched.XXXXXX")
@@ -2544,16 +2548,16 @@ $blocked"
 # How a retire treats one path under the .cs of a feature whose repo tracks
 # .cs, given relative to it:
 #   bookkeeping  cs's machine-local files, which go with the worktree
-#   legacy-log   the log cs once kept at logs/, which only an ignored
-#                feature's fuse carries
+#   logs-dir-log logs/session.log, which only an ignored feature's fuse
+#                carries
 #   log          the timeline and the narratives, which the fuse appends
 #   index        the memory index and the memory archive, pointer unions
 #   prose        the feature's own README and summary
 #   record       every other file, carried by _record_verdict
-# The predicates are the ones the fuse of an ignored .cs reads, so the two
-# cannot disagree about which file merges how.
+# Reads the predicates of an ignored .cs's fuse (_fuse_walk_skips,
+# _fuse_merged_record, _fuse_feature_prose).
 _tracked_record_kind() {  # rel
-    if [ "$1" = logs/session.log ]; then echo legacy-log
+    if [ "$1" = logs/session.log ]; then echo logs-dir-log
     elif _fuse_walk_skips "$1"; then echo bookkeeping
     elif [ "$1" = memory/MEMORY.md ] || [ "$1" = memory/reference_memory_archive.md ]; then echo index
     elif _fuse_merged_record "$1"; then echo log
@@ -2619,7 +2623,7 @@ _head_blob_is_prefix() {  # wt_dir rel
 # Fails when the last commit's copy, or the file, cannot be read.
 _tracked_record_verdict() {  # wt_dir base_meta task status rel kind
     local meta="$1/.cs" status="$4" rel="$5" kind="$6" was
-    if [ "$kind" = legacy-log ]; then echo conflict; return 0; fi
+    if [ "$kind" = logs-dir-log ]; then echo conflict; return 0; fi
     case "$rel" in */) echo conflict; return 0 ;; esac
     case "$status" in
         D) echo deleted; return 0 ;;

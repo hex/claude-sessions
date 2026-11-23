@@ -4594,7 +4594,7 @@ test_retire_tracked_mode_fuses_every_kind_of_uncommitted_record() {
     _session_hook end "$wt" "myproj@fix-auth" "$id"
     output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
     assert_eq "0" "$status" "the retire goes through: $output" || return 1
-    # The walk's order is the file system's, so the lines are compared sorted.
+    # The MEMORY.md line prints after the walk's lines, so the lines are compared sorted.
     assert_eq "MEMORY.md: appended 1 pointer(s) from the feature (base lines kept)
 The feature's README.md is kept at $base_dir/.cs/features/fix-auth/README.md
 The feature's summary.md is kept at $base_dir/.cs/features/fix-auth/summary.md
