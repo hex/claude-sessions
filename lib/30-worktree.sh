@@ -1788,7 +1788,7 @@ _integrate_set_logs_aside() {  # base_dir wt_name paths
 
 # Settle what _integrate_set_logs_aside set aside, wherever the landing
 # stopped. Once the commit in _INTEGRATE_CARRY_ONTO is in the base, each log
-# gains its lines back, unless it ends with them already. Before that, each
+# gains its lines back. Before that, each
 # log that is no longer what it was gets its whole copy back. Deletes the
 # directory when every log is settled; keeps it and says where it is when
 # one is not. Forgets the directory first, so once a call has run, settled
@@ -1804,7 +1804,7 @@ _integrate_put_logs_back() {
         file="$base/.cs/$rel"
         if [ -z "$landed" ]; then
             cmp -s "$aside/whole/$rel" "$file" || cs_write_atomic "$file" cat "$aside/whole/$rel" || status=1
-        elif [ -s "$lines" ] && ! tail -c "$(wc -c < "$lines" | tr -d ' ')" "$file" | cmp -s - "$lines"; then
+        elif [ -s "$lines" ]; then
             _terminate_jsonl "$file"
             cs_append_inside "$file" cat "$lines" || status=1
         fi
