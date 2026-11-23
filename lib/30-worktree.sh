@@ -2606,6 +2606,8 @@ _head_blob_sum() {  # wt_dir rel
 _head_blob_is_prefix() {  # wt_dir rel
     local size
     size=$(git -C "$1" cat-file -s "HEAD:.cs/$2" 2>/dev/null) || return 1
+    # BSD head refuses a count of 0, and every file opens with no bytes.
+    [ "$size" != 0 ] || return 0
     git -C "$1" cat-file blob "HEAD:.cs/$2" | cmp -s - <(head -c "$size" "$1/.cs/$2")
 }
 
