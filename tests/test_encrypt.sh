@@ -1194,6 +1194,26 @@ test_open_names_what_it_could_not_remove_outside_the_vault() {
     assert_output_contains "$out" "enc: the vault holds whole copies of this session's conversations, but cs could not remove them all from outside it. What is left in $proj is in plain text; remove it by hand. Removing it failed with: rmdir: " "names what is left outside" || return 1
 }
 
+# An empty folder in the vault holds nothing to lose either: the folder from
+# outside takes its place.
+test_open_moves_a_folder_over_an_empty_one_in_the_vault() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj vault out rc=0
+    proj=$(_plain_conversation enc "$id" "before the vault")
+    mkdir -p "$proj/memory"
+    echo "note" > "$proj/memory/n.md"
+    vault=$(_vault_projects enc)
+    mkdir -p "$vault/memory"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open reaches claude: $out" || return 1
+    assert_output_not_contains "$out" "is in the vault too" "an empty folder in the vault is no clash" || return 1
+    assert_eq "note" "$(cat "$vault/memory/n.md" 2>/dev/null)" "the folder from outside is the vault's now" || return 1
+    assert_eq "n.md" "$(ls -A "$vault/memory")" "and holds only what it held outside" || return 1
+    assert_file_contains "$vault/$id.jsonl" "before the vault" "the conversation moved too" || return 1
+    [ ! -e "$proj" ] || { echo "  FAIL: plaintext conversations left at $proj"; return 1; }
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1438,6 +1458,7 @@ run_test test_open_leaves_no_cut_conversation_in_a_vault_without_room
 run_test test_encrypt_leaves_no_cut_conversation_in_a_vault_without_room
 run_test test_open_removes_a_copy_outside_that_the_vault_already_holds
 run_test test_open_names_what_it_could_not_remove_outside_the_vault
+run_test test_open_moves_a_folder_over_an_empty_one_in_the_vault
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
