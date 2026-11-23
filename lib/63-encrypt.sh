@@ -467,10 +467,10 @@ _foreign_conversation_refusal() {  # session_dir, plain_dir
 # and says so; the folder is gone after, so the next open has nothing to do.
 # A link, a name on both sides, a claude writing there, or a conversation of
 # another path in the folder is named instead, and the open goes on with
-# nothing moved. The move runs under the openers'
-# mutex, so a second open started beside this one finds the folder gone
-# rather than copying it again into the one this open just made; an open
-# that cannot take the mutex stops, as its launch would.
+# nothing moved. The move runs under the openers' mutex, so a second open
+# started beside this one finds the folder gone rather than copying it again
+# into the one this open just made; an open that cannot take the mutex
+# stops, as its launch would.
 _move_plain_conversations_at_open() {  # session_name, session_dir
     local meta="$2/.cs" plain mutex="$2/.cs/session.mutex.lock"
     [ -f "$meta/local/vault" ] && [ -L "$meta/claude-config" ] || return 0
