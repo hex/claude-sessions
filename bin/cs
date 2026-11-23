@@ -6725,7 +6725,7 @@ Move or delete these untracked files in $base_dir, then re-run /finish $task"
         rmdir "$no_hooks"
         error "Uncommitted changes in $base_dir are on paths the feature also changes, and landing would overwrite them; base untouched. Paths:
 $changed
-Commit them in $base_dir (cs never commits session records), then re-run /finish $task"
+Commit them in $base_dir (cs leaves session records for you to commit), then re-run /finish $task"
     fi
     # Submodules after the merge, so the gates see the MERGED gitlinks: a
     # feature that adds or bumps a submodule is otherwise gated against
@@ -6817,7 +6817,7 @@ Commit the generated output on the feature branch, then re-run /finish $task"
     if [ -n "$overwrites" ]; then
         error "Base $base_dir changed during the gates on paths the feature also changes; base untouched at $B. Paths:
 $(printf '%s\n' "$overwrites" | sed 's/^[a-z]* //')
-Commit them in $base_dir (cs never commits session records), then re-run /finish $task"
+Commit them in $base_dir (cs leaves session records for you to commit), then re-run /finish $task"
     fi
     # Fast-forward BEFORE removing the temp: until then the merge commit is
     # reachable only from the temp's detached HEAD.

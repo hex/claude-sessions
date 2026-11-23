@@ -2393,7 +2393,7 @@ test_integrate_refuses_a_landing_that_overwrites_base_session_records() {
     assert_eq "1" "$status" "the integrate refuses: $output" || return 1
     assert_eq "Error: Uncommitted changes in $base_dir are on paths the feature also changes, and landing would overwrite them; base untouched. Paths:
 $narrative
-Commit them in $base_dir (cs never commits session records), then re-run /finish fix-auth" "$output" "the refusal names the path" || return 1
+Commit them in $base_dir (cs leaves session records for you to commit), then re-run /finish fix-auth" "$output" "the refusal names the path" || return 1
     assert_not_exists "$TEST_TMPDIR/gate-ran" "no gate ran" || return 1
     assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
     assert_eq "$line" "$(tail -n 1 "$base_dir/$narrative")" "the base's uncommitted line is still there" || return 1
@@ -2417,7 +2417,7 @@ test_integrate_rechecks_session_records_the_gate_dirtied() {
     assert_eq "1" "$status" "the integrate refuses: $output" || return 1
     assert_eq "Error: Base $base_dir changed during the gates on paths the feature also changes; base untouched at $head. Paths:
 $narrative
-Commit them in $base_dir (cs never commits session records), then re-run /finish fix-auth" "$output" "the refusal names the path the gate wrote" || return 1
+Commit them in $base_dir (cs leaves session records for you to commit), then re-run /finish fix-auth" "$output" "the refusal names the path the gate wrote" || return 1
     assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
 
     base_dir=$(_tracked_base projb) || { echo "  FAIL: fixture: the second base tracks its narrative"; return 1; }
