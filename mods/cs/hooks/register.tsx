@@ -397,8 +397,10 @@ let settingsInFlight: Promise<void> | undefined
 let settingsComplaint: string | undefined
 
 // The rail. A prompt is a row of the transcript's live branch; its requestId
-// is the id the engine drew its UserMessage row under, once seen.
-export type Prompt = { uuid: string; text: string }
+// is the id the engine drew its UserMessage row under, once seen. `text` is
+// its first line as the rail shows it, cut to RAIL_TEXT_CHARS; `line` is
+// that whole line, which the typeahead searches.
+export type Prompt = { uuid: string; text: string; line: string }
 // How much of a prompt's first line a tick carries as its text.
 export const RAIL_TEXT_CHARS = 80
 // The fewest cells before the rail that name a prompt.
@@ -1769,21 +1771,27 @@ function fitRight(text: string, width: number): string {
 // The typeahead rows for the word at the cursor (`token`, starting at
 // `start` in the draft `text`) when it is the first argument of /cs: the
 // rail words it starts, then the newest PROMPT_ROWS prompts whose number it
-// starts or whose first line holds it, whatever the case. None for any
-// other draft, or while the rail has no prompts.
+// starts or whose whole first line holds it, whatever the case, each shown
+// by its rail text. None for any other draft, or while the rail has no
+// prompts.
 export function promptRows(list: Prompt[], text: string, start: number, token: string): { text: string; label: string; description: string }[] {
   if (list.length === 0 || !/^\/cs\s+$/.test(text.slice(0, start))) return []
   const typed = token.toLowerCase()
   const words = RAIL_WORDS.filter(w => w.word.startsWith(typed)).map(w => ({ text: w.word, label: w.word, description: w.goes }))
-  const matches = list.map((p, i) => ({ number: String(i + 1), line: p.text }))
-    .filter(p => p.number.startsWith(typed) || p.line.toLowerCase().includes(typed))
+  const matches = list.map((p, i) => ({ number: String(i + 1), prompt: p }))
+    .filter(m => m.number.startsWith(typed) || m.prompt.line.toLowerCase().includes(typed))
     .reverse().slice(0, PROMPT_ROWS)
-    .map(p => ({ text: p.number, label: p.number, description: p.line }))
+    .map(m => ({ text: m.number, label: m.number, description: m.prompt.text }))
   return [...words, ...matches]
 }
 
+// The first non-blank line of `text`, trimmed.
+function wholeFirstLine(text: string): string {
+  return text.split('\n').map(l => l.trim()).find(l => l !== '') ?? ''
+}
+
 function firstLine(text: string): string {
-  const line = text.split('\n').map(l => l.trim()).find(l => l !== '') ?? ''
+  const line = wholeFirstLine(text)
   const pieces = graphemes(line)
   return pieces.length > RAIL_TEXT_CHARS ? `${pieces.slice(0, RAIL_TEXT_CHARS - 1).join('')}\u2026` : line
 }
@@ -1913,7 +1921,7 @@ export function parsePrompts(jsonl: string): Prompt[] {
     if (text === undefined) continue
     const line = firstLine(text)
     if (line === '' || FRAMED.test(line) || INTERRUPT.test(line)) continue
-    out.push({ uuid: r.uuid, text: line })
+    out.push({ uuid: r.uuid, text: line, line: wholeFirstLine(text) })
   }
   return out
 }

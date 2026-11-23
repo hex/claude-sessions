@@ -658,7 +658,8 @@ the prompt being read, and `/cs first`, `/cs last` and `/cs N`, which go to
 that prompt, all mid-turn too, for keybindings. After `/cs ` the prompt
 box's typeahead lists the four words a typed prefix starts, then up to eight
 prompts, newest first, whose number the typed word starts or whose first line
-holds it; taking a row writes the word or the number. That hook
+holds it anywhere, though a row shows that line cut to 80 characters; taking
+a row writes the word or the number. That hook
 (`prompt.autocomplete`) needs Claude Code 2.1.292 or later, and an earlier
 one refuses the whole cs mod. A
 refusal is toasted once a session; a prompt no row has drawn since a resume
