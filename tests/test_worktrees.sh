@@ -984,21 +984,22 @@ warning: could not open directory 'local/inner/': Permission denied" \
         "$(printf '%s\n' "$output" | grep -F -A1 "git could not read every directory of")" "the launch says what git could not read" || return 1
 }
 
-# A stand-in git whose listing of the files .worktreeinclude names fails once
-# git worktree add has run; every other call goes to git. Prints the
+# A stand-in git that runs <commands> once git worktree add has made the
+# worktree, and fails the listing of the files .worktreeinclude names while
+# $TEST_TMPDIR/listing-fails exists; every other call goes to git. Prints the
 # directory to put first on PATH.
-_git_failing_listing_after_add() {
-    local bin="$TEST_TMPDIR/stand-in-git-listing" added="$TEST_TMPDIR/worktree-added"
+_git_after_worktree_add() {  # commands
+    local bin="$TEST_TMPDIR/stand-in-git-add"
     mkdir -p "$bin"
     cat > "$bin/git" << STUB
 #!/usr/bin/env bash
 case " \$* " in
     *" worktree add "*)
         "$(command -v git)" "\$@" || exit \$?
-        : > "$added"
+        $1
         exit 0 ;;
     *" ls-files "*"--exclude-from="*)
-        if [ -e "$added" ]; then
+        if [ -e "$TEST_TMPDIR/listing-fails" ]; then
             echo "fatal: stand-in listing failure" >&2
             exit 128
         fi ;;
@@ -1017,7 +1018,7 @@ test_worktree_create_lists_the_included_files_before_the_worktree_exists() {
     local base_dir="$CS_SESSIONS_ROOT/inconce" wt="$CS_SESSIONS_ROOT/inconce@task1" tmp="$TEST_TMPDIR/tmp-inconce"
     local bin output status=0
     mkdir -p "$tmp"
-    bin=$(_git_failing_listing_after_add)
+    bin=$(_git_after_worktree_add ": > \"$TEST_TMPDIR/listing-fails\"")
     output=$(PATH="$bin:$PATH" TMPDIR="$tmp" "$CS_BIN" "inconce@task1" < /dev/null 2>&1) || status=$?
     assert_eq "0" "$status" "the feature is created: $output" || return 1
     assert_eq "A=1" "$(cat "$wt/.env" 2>/dev/null)" "the named env file is copied" || return 1
@@ -1032,6 +1033,23 @@ test_worktree_create_lists_the_included_files_before_the_worktree_exists() {
     assert_eq "1" "$status" "a branch checked out elsewhere refuses: $output" || return 1
     assert_output_contains "$output" "git worktree add failed (is branch 'cs/task2' checked out in another worktree?)" "and says why" || return 1
     assert_eq "" "$(cd "$tmp" && find . -name 'cs-worktreeinclude.*')" "the list is gone after the refusal" || return 1
+}
+
+# A list of the files .worktreeinclude names that is gone by the time of the
+# copy (a cleaner emptied the temporary directory) leaves the feature whole,
+# and the launch says nothing was copied.
+test_worktree_create_goes_on_when_the_list_is_gone_after_the_add() {
+    _included_base "incgone" ".env"
+    local base_dir="$CS_SESSIONS_ROOT/incgone" wt="$CS_SESSIONS_ROOT/incgone@task1" tmp="$TEST_TMPDIR/tmp-incgone"
+    local bin output status=0
+    mkdir -p "$tmp"
+    bin=$(_git_after_worktree_add "rm -f \"$tmp\"/cs-worktreeinclude.*")
+    output=$(PATH="$bin:$PATH" TMPDIR="$tmp" "$CS_BIN" "incgone@task1" < /dev/null 2>&1) || status=$?
+    assert_eq "0" "$status" "the feature is created: $output" || return 1
+    assert_dir "$wt/.cs" "the feature has its records" || return 1
+    assert_file_exists "$wt/CLAUDE.local.md" "and its protocol file" || return 1
+    assert_eq "no" "$([ -e "$wt/.env" ] && echo yes || echo no)" "nothing is copied" || return 1
+    assert_output_contains "$output" "Could not read the list cs made of the files $base_dir/.worktreeinclude names, so none of them was copied" "and the launch says so" || return 1
 }
 
 # A .worktreeinclude git cannot read lists nothing, so the feature would
@@ -2432,6 +2450,7 @@ run_test test_worktree_create_keeps_a_file_the_feature_already_has
 run_test test_worktree_create_never_copies_the_permission_settings
 run_test test_worktree_create_lists_the_included_files_before_the_worktree_exists
 run_test test_worktree_create_says_which_directories_git_could_not_list
+run_test test_worktree_create_goes_on_when_the_list_is_gone_after_the_add
 run_test test_worktree_create_refuses_a_worktreeinclude_git_cannot_read
 run_test test_worktree_reopen_preserves_project_claude_md
 run_test test_worktree_reopen_refuses_a_symlinked_cs_local
