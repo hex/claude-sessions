@@ -2713,9 +2713,10 @@ _tracked_record_refusals() {  # wt_dir base_meta task
 # frontmatter, so those bytes must not be read as one. A narrative that no
 # longer opens with the last commit's bytes was rewritten (cs -narrative
 # rotate moves its oldest sections to an archive file): then the lines past
-# its frontmatter that the last commit holds nowhere, in their order.
+# its frontmatter that diff reads as added to the last commit's, so a line
+# the commit holds elsewhere is carried where the feature wrote it again.
 _stage_log_delta() {  # wt_dir rel out
-    local file="$1/.cs/$2" blob="HEAD:.cs/$2" size held status=0
+    local file="$1/.cs/$2" blob="HEAD:.cs/$2" size held body status=0
     if ! git -C "$1" cat-file -e "$blob" 2>/dev/null; then
         cp "$file" "$3"
         return
@@ -2735,14 +2736,18 @@ _stage_log_delta() {  # wt_dir rel out
         tail -c "+$((size + 1))" "$file" >> "$3"
         return
     fi
+    local past_frontmatter='NR == 1 && $0 != "---" { c = 2 }
+                            /^---$/ && c < 2 { c++; next }
+                            c >= 2 { print }'
     held=$(mktemp "${TMPDIR:-/tmp}/cs-record-held.XXXXXX") || return 1
-    git -C "$1" cat-file blob "$blob" > "$held" \
-        && env LC_ALL=C awk 'FILENAME == ARGV[1] { held[$0] = 1; next }
-                             FNR == 1 && $0 != "---" { c = 2 }
-                             /^---$/ && c < 2 { c++; next }
-                             c >= 2 && !($0 in held) { print }' "$held" "$file" >> "$3" \
+    body=$(mktemp "${TMPDIR:-/tmp}/cs-record-body.XXXXXX") || { rm -f "$held"; return 1; }
+    # diff exits 1 for files that differ, and -a reads either as text
+    # whatever bytes it holds.
+    git -C "$1" cat-file blob "$blob" | env LC_ALL=C awk "$past_frontmatter" > "$held" \
+        && env LC_ALL=C awk "$past_frontmatter" "$file" > "$body" \
+        && { diff -a "$held" "$body" || [ $? -eq 1 ]; } | sed -n 's/^> //p' >> "$3" \
         || status=1
-    rm -f "$held"
+    rm -f "$held" "$body"
     return "$status"
 }
 
