@@ -460,11 +460,15 @@ leaves it there uncommitted, for you to commit with the base's own records:
 - `README.md` and `summary.md`: the feature's copy goes to
   `.cs/features/<task>/`, and the base's own stays.
 - Any other file under `.cs/` (a plan, a narrative archive section, a memory
-  entry): copied when the base has no such file or an identical one.
+  entry): copied when the base has no such file. When the base holds the
+  version of the feature's last commit, as it does after a landing, the
+  feature's version replaces it and the retire names the file. The base
+  keeps a file it already holds with the same contents.
 
 The retire refuses, and removes nothing, when the feature deleted a tracked
 record without committing the deletion, rewrote `timeline.jsonl` instead of
-appending to it, or changed a file the base also holds with other contents.
+appending to it, or changed a file whose copy in the base is neither the
+version of the feature's last commit nor the same as the feature's.
 The refusal names each path and what to do with it.
 
 One known limit: after a worktree removal that fails part-way, a record line
