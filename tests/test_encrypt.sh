@@ -298,6 +298,18 @@ test_encrypt_builds_a_session_never_opened_on_this_machine() {
     assert_file_contains "$s/README.md" "^tags: \[encrypted\]$" "tagged encrypted" || return 1
 }
 
+# cs -encrypt reads the terminal's theme before it draws its rows, as an open
+# does: on a light terminal the new vault row takes the light palette's amber.
+# Nothing answers the pty's password prompt, so cs stops there.
+test_encrypt_prompt_follows_a_light_terminal() {
+    _stubs
+    _populated_session enc
+    local out light_amber
+    light_amber=$(printf '\033[38;2;162;122;58m')
+    out=$(export COLORFGBG='0;15'; _pty_run "$CS_BIN" -encrypt enc 2>&1) || true
+    assert_output_contains "$out" "${light_amber}new vault" "the new vault row is drawn in the light palette (output: $out)" || return 1
+}
+
 # An open while cs -encrypt asks for passwords would race its moves; the
 # session lock holds it off, and is gone once cs -encrypt ends.
 test_encrypt_holds_the_session_lock_while_it_works() {
@@ -1117,6 +1129,7 @@ run_test test_encrypt_refuses_an_existing_pre_open
 run_test test_encrypt_refuses_an_existing_container
 run_test test_encrypt_builds_the_vault_and_detaches
 run_test test_encrypt_builds_a_session_never_opened_on_this_machine
+run_test test_encrypt_prompt_follows_a_light_terminal
 run_test test_encrypt_holds_the_session_lock_while_it_works
 run_test test_encrypt_releases_the_session_lock_when_it_stops
 run_test test_encrypt_releases_the_lock_under_a_root_with_quotes
