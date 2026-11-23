@@ -1317,6 +1317,55 @@ test_encrypt_leaves_conversations_a_running_claude_writes() {
     [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
 }
 
+# Claude Code names a project folder after its path with every character
+# that is no letter or digit turned into a dash, so two paths can share one
+# folder. A conversation there records the folder its claude ran in: one that
+# names the other path is not this session's, and cs moves none of the folder.
+_conversation_of_a_path_sharing_the_folder() {  # name, id -> writes it beside the session's; prints the other path
+    local other proj
+    other="$(cd "$CS_SESSIONS_ROOT" && pwd -P)-$1"
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$CS_SESSIONS_ROOT/$1")"
+    mkdir -p "$proj"
+    printf '{"type":"user","entrypoint":"cli","cwd":"%s","message":{"role":"user","content":"of the other path"}}\n' "$other" > "$proj/$2.jsonl"
+    printf '%s' "$other"
+}
+
+test_open_moves_nothing_from_a_folder_another_path_shares() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 theirs=77777777-7777-4777-8777-777777777777 proj other dir out rc=0
+    proj=$(_plain_conversation enc "$id" "of this session")
+    dir=$(cd "$CS_SESSIONS_ROOT/enc" && pwd -P)
+    printf '{"type":"user","entrypoint":"cli","cwd":"%s","message":{"role":"user","content":"of this session"}}\n{"type":"user","cwd":"%s/sub"}\n' "$dir" "$dir" > "$proj/$id.jsonl"
+    other=$(_conversation_of_a_path_sharing_the_folder enc "$theirs")
+    assert_eq "${proj##*/}" "$(_encode_cwd_for_claude_test "$other")" "the fixture's other path shares the folder" || return 1
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_file_contains "$proj/$theirs.jsonl" "of the other path" "the other path's conversation is untouched" || return 1
+    assert_file_contains "$proj/$id.jsonl" "of this session" "and so is this session's" || return 1
+    [ ! -e "$(_vault_projects enc)" ] || { echo "  FAIL: the vault has a folder for the session"; return 1; }
+    assert_output_contains "$out" "enc: $proj/$theirs.jsonl is a conversation claude held in $other, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $proj into the vault. They stay outside it, in plain text.$" "names the conversation and the path it belongs to" || return 1
+    rm "$proj/$theirs.jsonl"
+    rc=0
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the second open goes on: $out" || return 1
+    assert_file_contains "$(_vault_projects enc)/$id.jsonl" "of this session" "without it, this session's conversation moves, a change of folder inside it included" || return 1
+}
+
+test_encrypt_moves_nothing_from_a_folder_another_path_shares() {
+    _stubs
+    _populated_session enc
+    local s="$CS_SESSIONS_ROOT/enc/.cs" theirs=77777777-7777-4777-8777-777777777777 proj other out rc=0
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$CS_SESSIONS_ROOT/enc")"
+    other=$(_conversation_of_a_path_sharing_the_folder enc "$theirs")
+    out=$(_encrypt enc 2>&1) || rc=$?
+    assert_file_contains "$proj/$theirs.jsonl" "of the other path" "the other path's conversation is untouched" || return 1
+    assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of it" || return 1
+    assert_eq "0" "$rc" "cs -encrypt finishes: $out" || return 1
+    assert_output_contains "$out" "enc: $proj/$theirs.jsonl is a conversation claude held in $other, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $proj into the vault. They stay outside it, in plain text.$" "names the conversation and the path it belongs to" || return 1
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1566,6 +1615,8 @@ run_test test_open_says_it_moved_conversations_only_when_it_moved_one
 run_test test_open_moves_nothing_while_another_cs_holds_the_openers_mutex
 run_test test_open_moves_past_a_claude_file_whose_pid_names_another_process
 run_test test_encrypt_leaves_conversations_a_running_claude_writes
+run_test test_open_moves_nothing_from_a_folder_another_path_shares
+run_test test_encrypt_moves_nothing_from_a_folder_another_path_shares
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
