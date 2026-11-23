@@ -5212,24 +5212,24 @@ _regenerable_filter() {  # regenerable|other
         }'
 }
 
-# The paths given one per line on stdin (_names_as_lines) that name a file
-# of the worktree the base holds byte for byte at the same path (keep=held)
-# or that do not (keep=other). Removing a held one with the worktree loses
+# Each path given one per line on stdin (_names_as_lines), after "held " when
+# it names a file of the worktree the base holds byte for byte at the same
+# path, else after "other ". Removing a held one with the worktree loses
 # nothing, whoever put it there; the .worktreeinclude copy at the feature's
 # creation leaves such files, and the base's own is compared at the retire
 # because a record of that copy would still name a file the base has since
 # changed or deleted. A link on either side, or on the way to the base's
 # file, is never held: the bytes behind it are not the base's to keep.
-_base_held_filter() {  # held|other wt_dir base_dir
-    local line name held
+_mark_base_held() {  # wt_dir base_dir
+    local line name
     while IFS= read -r line; do
         printf -v name '%b' "$line"
-        held=other
-        if [ -f "$2/$name" ] && [ ! -L "$2/$name" ] && [ -f "$3/$name" ] \
-            && ! _path_goes_through_a_link "$3" "$name" && cmp -s "$2/$name" "$3/$name"; then
-            held=held
+        if [ -f "$1/$name" ] && [ ! -L "$1/$name" ] && [ -f "$2/$name" ] \
+            && ! _path_goes_through_a_link "$2" "$name" && cmp -s "$1/$name" "$2/$name"; then
+            printf 'held %s\n' "$line"
+        else
+            printf 'other %s\n' "$line"
         fi
-        [ "$held" != "$1" ] || printf '%s\n' "$line"
     done
 }
 
@@ -5984,22 +5984,23 @@ _finish_progress_exit() {  # exit status
 # Move the worktree's ignored files that are not regenerable to the system
 # trash, so retiring it deletes nothing git keeps no copy of; files under a
 # regenerable directory (CS_REGENERABLE_DIRS) go with the worktree, and so
-# does a file the base holds byte for byte (_base_held_filter). Leaves
+# does a file the base holds byte for byte (_mark_base_held). Leaves
 # what it moved in _RETIRE_TRASHED_COUNT and _RETIRE_TRASHED_LINES (one line
 # per entry, by absolute path) for _retire_trashed_note. Refuses, having
 # removed nothing, when no trash command is installed or its first call
 # fails; when a later call fails, refuses naming what the earlier calls
 # moved.
 _retire_trash_ignored_work() {  # wt_dir task base_dir
-    local wt_dir="$1" task="$2" base_dir="$3" ignored trash_paths regenerable held input entries listing count them=them nl=$'\n'
+    local wt_dir="$1" task="$2" base_dir="$3" ignored trash_paths regenerable marked held input entries listing count them=them nl=$'\n'
     ignored=$(_worktree_others "$wt_dir" --ignored) \
         || error "Could not list the ignored files in $wt_dir; nothing was removed"
     [ -n "$ignored" ] || return 0
     trash_paths=$(printf '%s\n' "$ignored" | _regenerable_filter other)
     [ -n "$trash_paths" ] || return 0
     regenerable=$(printf '%s\n' "$ignored" | _regenerable_filter regenerable)
-    held=$(printf '%s\n' "$trash_paths" | _base_held_filter held "$wt_dir" "$base_dir")
-    trash_paths=$(printf '%s\n' "$trash_paths" | _base_held_filter other "$wt_dir" "$base_dir")
+    marked=$(printf '%s\n' "$trash_paths" | _mark_base_held "$wt_dir" "$base_dir")
+    held=$(printf '%s\n' "$marked" | env LC_ALL=C sed -n 's/^held //p')
+    trash_paths=$(printf '%s\n' "$marked" | env LC_ALL=C sed -n 's/^other //p')
     [ -n "$trash_paths" ] || return 0
     [ -z "$held" ] || regenerable="${regenerable:+$regenerable$nl}$held"
     input=$(_untracked_listing_input "$wt_dir" "$trash_paths" "$regenerable") \
