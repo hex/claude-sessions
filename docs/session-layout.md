@@ -285,7 +285,10 @@ alone. To move a bundle, change the path in that file, not in `pre-open`. Where
 `diskutil` has no `image` verbs, the open keeps the `pre-open` it finds.
 
 From then on every open asks for the password in the terminal: cs asks, and
-passes the answer to `diskutil image attach` on stdin. `pre-open` refuses to
+passes the answer to `diskutil image attach` on stdin. The prompt shows the
+session as the status line does, with `vault locked` beside it and a
+`password ›` row under it. cs asks up to three times when the password is
+wrong; an empty one, or Ctrl-C at the prompt, ends the open. `pre-open` refuses to
 open the session without a terminal, because `diskutil`, left to ask, shows a
 dialog that offers to save the password in the keychain. When the lead
 conversation ends (not on `/clear` or `/resume`), the SessionEnd hook waits for

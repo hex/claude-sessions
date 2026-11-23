@@ -47,6 +47,14 @@
     {
       "id": "cs.write-as-me-fold",
       "text": "/write-as-me drafts a long PR description or issue reply as a short opener in your voice, with the full text folded under a Full description summary"
+    },
+    {
+      "id": "cs.prompt-typeahead",
+      "text": "to find an earlier prompt, type /cs, a space and a word from it: the typeahead lists the prompts whose first line holds it, newest first, and taking one then Enter scrolls the transcript back to it"
+    },
+    {
+      "id": "cs.worktreeinclude",
+      "text": "a feature made with cs <base>@<feature> starts without your ignored files; name them, such as .env, in a .worktreeinclude in the base and cs copies them into each new feature"
     }
   ]
 }
