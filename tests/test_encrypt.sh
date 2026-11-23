@@ -1293,6 +1293,30 @@ test_open_moves_past_a_claude_file_whose_pid_names_another_process() {
     assert_file_contains "$(_vault_projects enc)/$id.jsonl" "outside" "the conversation is in the vault" || return 1
 }
 
+# cs -encrypt holds the session lock, so a claude running in the session is
+# one started outside cs, with its conversation open outside the vault.
+test_encrypt_leaves_conversations_a_running_claude_writes() {
+    _stubs
+    _populated_session enc
+    local s="$CS_SESSIONS_ROOT/enc/.cs" id=44444444-4444-4444-8444-444444444444 out rc=0 proj dir started
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$CS_SESSIONS_ROOT/enc")"
+    mkdir -p "$proj"
+    echo "conversation" > "$proj/$id.jsonl"
+    dir=$(cd "$CS_SESSIONS_ROOT/enc" && pwd -P)
+    sleep 300 &
+    local live=$!
+    mkdir -p "$HOME/.claude/sessions"
+    started=$(LC_ALL=C TZ=UTC /bin/ps -o lstart= -p "$live" | sed 's/^ *//; s/ *$//')
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1795371270300,"procStart":"%s","kind":"interactive"}' "$live" "$id" "$dir" "$started" > "$HOME/.claude/sessions/$live.json"
+    out=$(_encrypt enc 2>&1) || rc=$?
+    kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+    assert_eq "conversation" "$(cat "$proj/$id.jsonl" 2>/dev/null)" "the conversation is where the claude writes it" || return 1
+    assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of it" || return 1
+    assert_eq "0" "$rc" "cs -encrypt finishes: $out" || return 1
+    assert_output_contains "$out" "enc: a claude (pid $live) runs in this session outside cs and writes its conversations to $proj, so cs moved none of them into the vault. The next open moves them once it has ended.$" "names the running claude and when they move" || return 1
+    [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1541,6 +1565,7 @@ run_test test_open_moves_a_folder_over_an_empty_one_in_the_vault
 run_test test_open_says_it_moved_conversations_only_when_it_moved_one
 run_test test_open_moves_nothing_while_another_cs_holds_the_openers_mutex
 run_test test_open_moves_past_a_claude_file_whose_pid_names_another_process
+run_test test_encrypt_leaves_conversations_a_running_claude_writes
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
