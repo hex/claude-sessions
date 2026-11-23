@@ -4858,7 +4858,7 @@ run_test test_retire_tracked_mode_fuses_nothing_when_removal_fails_and_retry_fus
 # deleted. The copy the retire made is then the only one: it stays, and the
 # refusal says where it is.
 test_retire_tracked_mode_keeps_its_copy_when_the_removal_deleted_the_records() {
-    local base_dir wt sha narrative aside kept output status=0 token="$RANDOM$RANDOM"
+    local base_dir wt sha narrative aside pid kept output status=0 token="$RANDOM$RANDOM"
     base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
     narrative=$(_narrative_rel "$base_dir")
     echo "node_modules/" >> "$base_dir/.gitignore"
@@ -4877,13 +4877,15 @@ test_retire_tracked_mode_keeps_its_copy_when_the_removal_deleted_the_records() {
     assert_eq "1" "$status" "a worktree holding a file git cannot delete is not removed: $output" || return 1
     assert_not_exists "$wt/$narrative" "fixture: the removal deleted the worktree's narrative before it failed" || return 1
     aside=$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')
+    pid="${aside##*.}"
     kept=$(grep -rl -F -- "- feature line $token" "$aside" 2>/dev/null || true)
     assert_eq "$aside/cs/${narrative#.cs/}" "$kept" "the copy still holds the feature's narrative line: $output" || return 1
     assert_output_not_contains "$output" "nothing was fused" "the refusal does not read as one that left the worktree whole" || return 1
-    assert_output_contains "$output" "The copy cs made of them is at $aside/cs" "the refusal says where the records are" || return 1
+    assert_output_contains "$output" "git worktree remove failed for $wt after deleting part of it, and what is left is no git checkout, so /finish fix-auth cannot run again and cs cannot tell which of the session records the feature left uncommitted are still there. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and $base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), then delete $aside and what is left of $wt. Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch -d cs/fix-auth" \
+        "the refusal says where the records are and what to do with them" || return 1
     assert_file_not_contains "$base_dir/$narrative" "feature line $token" "the base narrative is untouched" || return 1
-    assert_output_contains "$("$CS_BIN" -doctor 2>&1)" "Retire leftovers: $aside holds a copy of the session records of myproj@fix-auth, captured by a /finish retire (pid ${aside##*.}), which this process cannot see; that retire is probably gone. The worktree no longer holds each of them as the copy does, so the copy may be the only one: fuse into $CS_SESSIONS_ROOT/myproj/.cs by hand what $aside/cs holds and neither $CS_SESSIONS_ROOT/myproj/.cs nor $CS_SESSIONS_ROOT/myproj@fix-auth/.cs does, then delete $aside. If git still lists the worktree (git -C \"$CS_SESSIONS_ROOT/myproj\" worktree list), run /finish fix-auth in myproj again; if not, delete what is left of $CS_SESSIONS_ROOT/myproj@fix-auth and then the branch with: git -C \"$CS_SESSIONS_ROOT/myproj\" branch -d cs/fix-auth" \
-        "cs -doctor names the copy and says to fuse what it alone holds" || return 1
+    assert_output_contains "$("$CS_BIN" -doctor 2>&1)" "Retire leftovers: $aside holds a copy of the session records of myproj@fix-auth, captured by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. $wt is no longer a git checkout, so /finish fix-auth cannot run there again and cs cannot tell which of those records it still holds: fuse into $base_dir/.cs by hand what $aside/cs holds and $base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), then delete $aside and what is left of $wt. Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch -d cs/fix-auth (git refuses -d when the base does not hold every commit of the branch, as after a squash merge that /finish retired with --force; -D deletes it then)" \
+        "cs -doctor names the copy and says to fuse what it holds" || return 1
 }
 
 run_test test_retire_tracked_mode_keeps_its_copy_when_the_removal_deleted_the_records
@@ -4925,6 +4927,92 @@ STUB
 }
 
 run_test test_retire_tracked_mode_keeps_its_copy_when_stopped_during_the_removal
+
+# A stand-in git whose worktree removal runs <commands> and fails; every
+# other call goes to git. Prints the directory to put first on PATH.
+_git_failing_removal() {  # commands
+    local bin="$TEST_TMPDIR/stand-in-git"
+    mkdir -p "$bin"
+    cat > "$bin/git" << STUB
+#!/usr/bin/env bash
+case " \$* " in
+    *" worktree remove "*)
+        $1
+        exit 1 ;;
+esac
+exec "$(command -v git)" "\$@"
+STUB
+    chmod +x "$bin/git"
+    printf '%s\n' "$bin"
+}
+
+# git worktree remove stops at the first file it cannot delete and forgets
+# the worktree all the same, so what is left can still hold every record and
+# be no checkout: no /finish runs there again. The refusal then says what cs
+# knows, and to fuse what that .cs holds too before deleting it; a retire
+# run with --force names the branch deletion that works for its branch.
+test_retire_tracked_mode_says_to_fuse_what_a_dead_checkout_still_holds() {
+    local base_dir wt sha narrative bin aside output status=0 token="$RANDOM$RANDOM"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    echo "- feature line $token" >> "$wt/$narrative"
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    bin=$(_git_failing_removal "rm -f \"$wt/feature.txt\"; rm -rf \"$base_dir/.git/worktrees\"")
+    output=$(PATH="$bin:$PATH" "$CS_BIN" myproj -retire-feature fix-auth "$sha" --force 2>&1) || status=$?
+    assert_eq "1" "$status" "a removal that fails is a refusal: $output" || return 1
+    assert_eq "1" "$(grep -c -F -- "- feature line $token" "$wt/$narrative")" "fixture: what is left still holds the narrative line" || return 1
+    aside=$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')
+    assert_output_contains "$output" "git worktree remove failed for $wt after deleting part of it, and what is left is no git checkout, so /finish fix-auth cannot run again and cs cannot tell which of the session records the feature left uncommitted are still there. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs or $wt/.cs holds and $base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), then delete $aside and what is left of $wt. Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch -D cs/fix-auth" \
+        "the refusal says to fuse what the copy or what is left holds, and names -D for a forced retire" || return 1
+    assert_output_not_contains "$output" "no longer holds every session record" "the refusal does not say the worktree lost a record" || return 1
+    assert_output_contains "$("$CS_BIN" -doctor 2>&1)" "Retire leftovers: $aside holds a copy of the session records of myproj@fix-auth, captured by a /finish retire (pid ${aside##*.}), which this process cannot see; that retire is probably gone. $wt is no longer a git checkout, so /finish fix-auth cannot run there again and cs cannot tell which of those records it still holds: fuse into $base_dir/.cs by hand what $aside/cs or $wt/.cs holds and $base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), then delete $aside and what is left of $wt. Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch -d cs/fix-auth (git refuses -d when the base does not hold every commit of the branch, as after a squash merge that /finish retired with --force; -D deletes it then)" \
+        "cs -doctor says the same of what is left" || return 1
+}
+
+run_test test_retire_tracked_mode_says_to_fuse_what_a_dead_checkout_still_holds
+
+# A removal that deleted tracked files and left a checkout: the next /finish
+# refuses over the deletions, so the refusal and cs -doctor say how to put
+# them back. Followed to the letter, the steps end in a retire that carries
+# each of the feature's lines once: the one whose record the removal deleted
+# by hand from the copy, the one the worktree kept by the retire.
+test_retire_tracked_mode_remedy_after_a_part_way_removal_ends_in_a_retire() {
+    local base_dir wt sha narrative bin aside remedy output status=0 token="$RANDOM$RANDOM"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    echo "- feature line $token" >> "$wt/$narrative"
+    printf '{"event":"from-feature-%s"}\n' "$token" >> "$wt/.cs/timeline.jsonl"
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    bin=$(_git_failing_removal "rm -f \"$wt/feature.txt\" \"$wt/$narrative\"")
+    output=$(PATH="$bin:$PATH" "$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "a removal that fails is a refusal: $output" || return 1
+    aside=$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.retire-*')
+    remedy="Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt/.cs does, then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish fix-auth again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --"
+    assert_output_contains "$output" "git worktree remove failed for $wt after deleting part of it, and the worktree no longer holds every session record the feature left uncommitted. The copy cs made of them is at $aside/cs, and the base's records are as they were. $remedy" \
+        "the refusal says what to fuse and how to put the deleted files back" || return 1
+    assert_output_contains "$("$CS_BIN" -doctor 2>&1)" "The worktree no longer holds each of them as the copy does, so the copy may be the only one: fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt/.cs does, then delete $aside. Then put back any tracked file that retire's removal deleted, which leaves every other file as it is, and run /finish fix-auth in myproj again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --" \
+        "cs -doctor gives the same steps" || return 1
+    assert_file_contains "$aside/cs/${narrative#.cs/}" "feature line $token" "fixture: the copy holds the line of the deleted narrative" || return 1
+    echo "- feature line $token" >> "$base_dir/$narrative"
+    rm -rf "$aside"
+    git -C "$wt" ls-files -z --deleted | xargs -0 git -C "$wt" checkout --
+    status=0
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire goes through once the steps are followed: $output" || return 1
+    assert_not_exists "$wt" "the worktree is removed" || return 1
+    assert_eq "1" "$(grep -c -F -- "- feature line $token" "$base_dir/$narrative")" "the narrative line is in the base once" || return 1
+    assert_eq "1" "$(grep -c -F "from-feature-$token" "$base_dir/.cs/timeline.jsonl")" "the timeline line is in the base once" || return 1
+}
+
+run_test test_retire_tracked_mode_remedy_after_a_part_way_removal_ends_in_a_retire
 
 # A trash command that fails ends the retire of a tracked feature like any
 # other refusal: the copy it made of the feature's records goes too.

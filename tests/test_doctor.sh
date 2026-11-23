@@ -1576,24 +1576,50 @@ test_doctor_empty_retire_aside_says_nothing_moved() {
     assert_dir "$aside" "doctor reports and never deletes" || return 1
 }
 
+# A feature checkout of the session setup() made, as git worktree add makes
+# one, holding a plan nobody committed.
+_feature_checkout() {
+    local wt="$CS_SESSIONS_ROOT/test-session@feat"
+    git -C "$CLAUDE_SESSION_DIR" worktree add -q -b cs/feat "$wt" || return 1
+    mkdir -p "$wt/.cs/plans" || return 1
+    echo "a plan nobody committed" > "$wt/.cs/plans/next.md"
+}
+
+# An aside a retire that is gone marked as a copy, holding no record yet.
+# Sets aside and dead.
+_marked_retire_copy() {
+    sh -c 'exit 0' & dead=$!
+    wait "$dead"
+    aside="$CS_SESSIONS_ROOT/.retire-test-session@feat.$dead"
+    mkdir -p "$aside"
+    : > "$aside/copy"
+}
+
 # A retire of a feature whose repo tracks .cs copies the records it will fuse
 # and leaves the worktree's own .cs where it is. Killed before the removal, it
 # leaves the copy beside a whole worktree: moving it back would overwrite the
 # worktree's records with a part of them. The copy is marked before its cs
-# directory is made, so a marked aside without one gets the same remedy.
+# directory is made, so a marked aside without one is deleted too, and not
+# with rmdir, which fails on a directory holding the mark. A removal killed
+# part-way leaves tracked files deleted, which the next /finish refuses over,
+# so each row says how to put them back.
 test_doctor_retire_copy_with_its_worktree_says_delete_it() {
-    local dead aside output holds
-    mkdir -p "$CS_SESSIONS_ROOT/test-session@feat/.cs"
+    local dead aside output holds wt="$CS_SESSIONS_ROOT/test-session@feat" rerun
+    _feature_checkout || { echo "  FAIL: fixture: a feature checkout"; return 1; }
+    rerun="Then put back any tracked file that retire's removal deleted, which leaves every other file as it is, and run /finish feat in test-session again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --"
     for holds in records nothing; do
-        sh -c 'exit 0' & dead=$!
-        wait "$dead"
-        aside="$CS_SESSIONS_ROOT/.retire-test-session@feat.$dead"
-        mkdir -p "$aside"
-        : > "$aside/copy"
-        [ "$holds" = nothing ] || mkdir "$aside/cs"
-        output=$("$CS_BIN" -doctor 2>&1) || true
-        assert_output_contains "$output" "Retire leftovers: $aside holds a copy of the session records of test-session@feat, captured by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. The worktree keeps its own .cs, so delete $aside and run /finish feat in test-session again" \
-            "a copy holding $holds: the row says to delete it and run /finish again" || return 1
+        _marked_retire_copy
+        if [ "$holds" = records ]; then
+            mkdir -p "$aside/cs/plans"
+            cp "$wt/.cs/plans/next.md" "$aside/cs/plans/next.md"
+            output=$("$CS_BIN" -doctor 2>&1) || true
+            assert_output_contains "$output" "Retire leftovers: $aside holds a copy of the session records of test-session@feat, captured by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. The worktree holds each of them as the copy does, so delete $aside. $rerun" \
+                "a copy of a record the worktree holds: the row says to delete it and run /finish again" || return 1
+        else
+            output=$("$CS_BIN" -doctor 2>&1) || true
+            assert_output_contains "$output" "Retire leftovers: $aside was made by a /finish retire of test-session@feat (pid $dead) to hold a copy of its session records, which this process cannot see; that retire is probably gone, and it copied none. Delete it with: rm -r \"$aside\". $rerun" \
+                "a marked aside holding nothing: the row says to delete it and run /finish again" || return 1
+        fi
         assert_output_not_contains "$output" "move $aside/cs back" \
             "a copy holding $holds: the row never says to move the copy over the worktree's records" || return 1
         assert_output_not_contains "$output" "rmdir" \
@@ -1604,26 +1630,81 @@ test_doctor_retire_copy_with_its_worktree_says_delete_it() {
 }
 
 # The removal a retire runs deletes what it can before it fails or is killed,
-# so a worktree directory can outlive its .cs, or keep a .cs that lost a
-# record. The copy is then the only one of what is gone, and the row never
-# says to delete it unread.
+# so a worktree can outlive its .cs, or keep a .cs that lost a record or holds
+# other bytes of one. The copy is then the only one of what is gone, and the
+# row never says to delete it unread. Nor does it say the worktree lost a
+# record when cs could not copy its records again to compare.
 test_doctor_retire_copy_beside_a_worktree_that_lost_its_records_says_keep_it() {
-    local dead aside output holds wt="$CS_SESSIONS_ROOT/test-session@feat"
-    for holds in no-cs a-cs-without-the-record; do
+    local dead aside output holds wt="$CS_SESSIONS_ROOT/test-session@feat" known
+    _feature_checkout || { echo "  FAIL: fixture: a feature checkout"; return 1; }
+    for holds in other-bytes-of-the-record a-cs-without-the-record a-record-cs-cannot-carry no-cs; do
+        known="The worktree no longer holds each of them as the copy does, so the copy may be the only one"
+        case "$holds" in
+            other-bytes-of-the-record) echo "one more line" >> "$wt/.cs/plans/next.md" ;;
+            a-cs-without-the-record) rm "$wt/.cs/plans/next.md" ;;
+            a-record-cs-cannot-carry)
+                rm "$wt/.cs/README.md"
+                known="cs could not copy the worktree's session records again to compare, so the copy may be the only one" ;;
+            no-cs) rm -rf "$wt/.cs" ;;
+        esac
+        _marked_retire_copy
+        mkdir -p "$aside/cs/plans"
+        echo "a plan nobody committed" > "$aside/cs/plans/next.md"
+        output=$("$CS_BIN" -doctor 2>&1) || true
+        assert_output_contains "$output" "Retire leftovers: $aside holds a copy of the session records of test-session@feat, captured by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. $known: fuse into $CS_SESSIONS_ROOT/test-session/.cs by hand what $aside/cs holds and neither $CS_SESSIONS_ROOT/test-session/.cs nor $wt/.cs does, then delete $aside. Then put back any tracked file that retire's removal deleted, which leaves every other file as it is, and run /finish feat in test-session again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --" \
+            "a worktree with $holds: the row says to fuse what the copy alone holds before deleting it" || return 1
+        assert_output_not_contains "$output" "The worktree holds each of them as the copy does" \
+            "a worktree with $holds: the row does not say the worktree has its records" || return 1
+        assert_dir "$aside" "doctor reports and never deletes" || return 1
+        rm -rf "$aside"
+    done
+}
+
+# A removal that fails part-way can leave a directory git no longer reads as
+# a checkout, with or without its .cs. No /finish runs there again, so
+# whatever its .cs still holds is fused by nothing: the row says to fuse what
+# the copy or that .cs holds before deleting either, and never that the
+# worktree lost a record, which cs cannot tell.
+test_doctor_retire_copy_beside_what_is_no_checkout_says_fuse_all_of_it() {
+    local dead aside output holds wt="$CS_SESSIONS_ROOT/test-session@feat" from
+    for holds in its-cs no-cs; do
         rm -rf "$wt"
         mkdir -p "$wt"
         [ "$holds" = no-cs ] || mkdir "$wt/.cs"
-        sh -c 'exit 0' & dead=$!
-        wait "$dead"
-        aside="$CS_SESSIONS_ROOT/.retire-test-session@feat.$dead"
+        _marked_retire_copy
         mkdir -p "$aside/cs/memory"
-        : > "$aside/copy"
         echo "- a line nobody committed" > "$aside/cs/memory/narrative.alice.md"
+        from="$aside/cs holds"
+        [ "$holds" = no-cs ] || from="$aside/cs or $wt/.cs holds"
         output=$("$CS_BIN" -doctor 2>&1) || true
-        assert_output_contains "$output" "Retire leftovers: $aside holds a copy of the session records of test-session@feat, captured by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. The worktree no longer holds each of them as the copy does, so the copy may be the only one: fuse into $CS_SESSIONS_ROOT/test-session/.cs by hand what $aside/cs holds and neither $CS_SESSIONS_ROOT/test-session/.cs nor $CS_SESSIONS_ROOT/test-session@feat/.cs does, then delete $aside. If git still lists the worktree (git -C \"$CS_SESSIONS_ROOT/test-session\" worktree list), run /finish feat in test-session again; if not, delete what is left of $CS_SESSIONS_ROOT/test-session@feat and then the branch with: git -C \"$CS_SESSIONS_ROOT/test-session\" branch -d cs/feat" \
-            "a worktree with $holds: the row says to fuse what the copy alone holds before deleting it" || return 1
-        assert_output_not_contains "$output" "The worktree keeps its own .cs" \
-            "a worktree with $holds: the row does not say the worktree has its records" || return 1
+        assert_output_contains "$output" "Retire leftovers: $aside holds a copy of the session records of test-session@feat, captured by a /finish retire (pid $dead), which this process cannot see; that retire is probably gone. $wt is no longer a git checkout, so /finish feat cannot run there again and cs cannot tell which of those records it still holds: fuse into $CS_SESSIONS_ROOT/test-session/.cs by hand what $from and $CS_SESSIONS_ROOT/test-session/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), then delete $aside and what is left of $wt. Then run git -C \"$CS_SESSIONS_ROOT/test-session\" worktree prune and delete the branch with: git -C \"$CS_SESSIONS_ROOT/test-session\" branch -d cs/feat (git refuses -d when the base does not hold every commit of the branch, as after a squash merge that /finish retired with --force; -D deletes it then)" \
+            "what is left with $holds: the row says to fuse all the copy and the directory hold before deleting them" || return 1
+        assert_output_not_contains "$output" "no longer holds each of them" \
+            "what is left with $holds: the row does not say the worktree lost a record" || return 1
+        assert_dir "$aside" "doctor reports and never deletes" || return 1
+        rm -rf "$aside"
+    done
+}
+
+# A marked aside holding no record, whose worktree is gone or is no checkout
+# any more: the remedy deletes a directory that holds the mark, and names no
+# cs directory the aside lacks.
+test_doctor_marked_retire_aside_without_records_or_worktree_says_delete_it() {
+    local dead aside output holds wt="$CS_SESSIONS_ROOT/test-session@feat" rest
+    for holds in no-worktree what-is-no-checkout; do
+        rest=""
+        if [ "$holds" = what-is-no-checkout ]; then
+            mkdir -p "$wt/.cs"
+            rest=". $wt is no longer a git checkout, so /finish feat cannot run there again: fuse into $CS_SESSIONS_ROOT/test-session/.cs by hand what $wt/.cs holds and $CS_SESSIONS_ROOT/test-session/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), then delete what is left of $wt. Then run git -C \"$CS_SESSIONS_ROOT/test-session\" worktree prune and delete the branch with: git -C \"$CS_SESSIONS_ROOT/test-session\" branch -d cs/feat (git refuses -d when the base does not hold every commit of the branch, as after a squash merge that /finish retired with --force; -D deletes it then)"
+        fi
+        _marked_retire_copy
+        output=$("$CS_BIN" -doctor 2>&1) || true
+        assert_output_contains "$output" "Retire leftovers: $aside was made by a /finish retire of test-session@feat (pid $dead) to hold a copy of its session records, which this process cannot see; that retire is probably gone, and it copied none. Delete it with: rm -r \"$aside\"$rest" \
+            "a marked aside with $holds: the row says how to delete it" || return 1
+        assert_output_not_contains "$output" "rmdir" \
+            "a marked aside with $holds: the row names no rmdir, which fails on a directory holding the mark" || return 1
+        assert_output_not_contains "$output" "$aside/cs" \
+            "a marked aside with $holds: the row names no cs directory the aside does not hold" || return 1
         assert_dir "$aside" "doctor reports and never deletes" || return 1
         rm -rf "$aside"
     done
@@ -1898,6 +1979,8 @@ run_test test_doctor_retire_aside_with_its_worktree_says_move_the_records_back
 run_test test_doctor_empty_retire_aside_says_nothing_moved
 run_test test_doctor_retire_copy_with_its_worktree_says_delete_it
 run_test test_doctor_retire_copy_beside_a_worktree_that_lost_its_records_says_keep_it
+run_test test_doctor_retire_copy_beside_what_is_no_checkout_says_fuse_all_of_it
+run_test test_doctor_marked_retire_aside_without_records_or_worktree_says_delete_it
 run_test test_doctor_warns_on_a_landing_aside_whose_run_is_gone
 run_test test_doctor_leaves_a_retire_aside_alone_while_its_run_lives
 run_test test_doctor_leaves_a_retire_aside_alone_when_its_pid_cannot_be_judged
