@@ -4898,6 +4898,17 @@ _landing_overwrites() {  # base_dir touched_file
     [ -z "$changed" ] || printf '%s\n' "$changed" | { grep -Fxf "$2" || [ $? -eq 1 ]; } | sed 's/^/changed /'
 }
 
+# The paths a landing of <branch> into a base can change, one per line: those
+# the branch changed since it forked from the base that still differ from the
+# base's HEAD. None once the branch's content is in the base, however it
+# landed, and none for a branch that shares no commit with the base.
+_predicted_landing_paths() {  # base_dir branch
+    local fork
+    fork=$(git -C "$1" merge-base HEAD "$2" 2>/dev/null) || return 0
+    { git -C "$1" diff --name-only "$fork" "$2" && git -C "$1" diff --name-only HEAD "$2"; } \
+        | env LC_ALL=C sort | uniq -d
+}
+
 # The names `git ls-files -z` prints, read on stdin, one per line. A name may
 # hold any byte, so a backslash in one is written "\\" and a newline "\n":
 # each line stands for exactly one name, and printf's %b gives the name back.
@@ -5443,7 +5454,22 @@ _feature_readiness() {  # base_name task
     hidden=$(_hidden_tracked_edits "$wt_dir") \
         || error "Could not list the index of $wt_dir"
     [ -z "$hidden" ] || wt_dirty=1
-    _tree_is_dirty "$base_dir" && base_dirty=1
+    # The integrate refuses over project work the base left uncommitted, and
+    # over a session record or an untracked file the landing would overwrite.
+    if _project_tree_is_dirty "$base_dir"; then
+        base_dirty=1
+    else
+        local landing overwrites
+        landing=$(mktemp "${TMPDIR:-/tmp}/cs-landing.XXXXXX") \
+            || error "Could not create a temporary file under ${TMPDIR:-/tmp}"
+        if ! _predicted_landing_paths "$base_dir" "$branch" > "$landing" \
+            || ! overwrites=$(_landing_overwrites "$base_dir" "$landing"); then
+            rm -f "$landing"
+            error "Could not list what landing $branch would change in $base_dir"
+        fi
+        rm -f "$landing"
+        [ -z "$overwrites" ] || base_dirty=1
+    fi
 
     # The screen does not read either checkout's .claude/settings.local.json,
     # so it predicts none of the refusals the retire makes over them, each
