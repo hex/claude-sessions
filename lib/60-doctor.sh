@@ -1131,7 +1131,9 @@ _doctor_retire_copy_row() {  # aside worktree_name pid
 # the base from there, deletes the directory and then the branch; a retire
 # killed anywhere in that run leaves the directory, and nothing else reads
 # it. Which step it reached shows in what is there: an empty directory means
-# nothing moved, and a missing worktree means /finish cannot run again. For
+# nothing moved, and a missing worktree, or what a removal that failed
+# part-way left of one, which git reads no checkout in, means /finish cannot
+# run again. For
 # a feature whose repo tracks .cs the retire copies the records it will fuse
 # and marks the directory with a file named copy first: such a directory
 # gets its row from _doctor_retire_copy_row, except one holding records
@@ -1159,6 +1161,8 @@ _doctor_check_retire_asides() {
             else
                 _doctor_warn "Retire leftovers: $d was made by a /finish retire of $wt (pid $pid), which this process cannot see; that retire is probably gone, and the directory holds no records. Delete it with rmdir"
             fi
+        elif [ -d "$SESSIONS_ROOT/$wt" ] && ! _worktree_is_checkout "$SESSIONS_ROOT/$wt"; then
+            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. $SESSIONS_ROOT/$wt is no longer a git checkout, so /finish $task cannot run there again: fuse into $SESSIONS_ROOT/$base/.cs by hand what $d/cs holds and $SESSIONS_ROOT/$base/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), then delete $d and what is left of $SESSIONS_ROOT/$wt. Then run git -C \"$SESSIONS_ROOT/$base\" worktree prune and delete the branch with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
         elif [ -d "$SESSIONS_ROOT/$wt" ]; then
             _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is still there, so move $d/cs back to $SESSIONS_ROOT/$wt/.cs by hand, delete the empty $d, and run /finish $task in $base again"
         else

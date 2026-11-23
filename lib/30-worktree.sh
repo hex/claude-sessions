@@ -1651,19 +1651,30 @@ $missing"
     _RETIRE_COPY=""
     local remove_err
     if ! remove_err=$(git -C "$base_dir" worktree remove --force "$wt_dir" 2>&1); then
-        if [ "$mode" = "ignored" ]; then
+        local delete_flag=-d
+        [ -z "$force" ] || delete_flag=-D
+        local by_hand="Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch $delete_flag $branch"
+        local lacks="$base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks)"
+        local kept="The worktree still holds every session record the feature left uncommitted, so cs deleted the copy it made of them"
+        if [ "$mode" = "ignored" ] && ! _worktree_is_checkout "$wt_dir"; then
+            # The records moved out before the removal began, so $aside/cs
+            # holds every one; what is left of the worktree takes none back,
+            # since no /finish fuses from there again.
+            error "git worktree remove failed for $wt_dir after deleting part of it, and what is left is no git checkout, so /finish $task cannot run again. The feature's session records are all at $aside/cs, where cs set them aside before the removal, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and $lacks, then delete $aside and what is left of $wt_dir. $by_hand
+$remove_err${trashed:+$nl$trashed}"
+        elif [ "$mode" = "ignored" ]; then
             mv "$aside/cs" "$wt_dir/.cs" \
                 || error "git worktree remove failed for $wt_dir, and its session records could not be put back: they are at $aside/cs (move that directory to $wt_dir/.cs by hand)
 $remove_err${trashed:+$nl$trashed}"
             rmdir "$aside" 2>/dev/null
+            kept="Its session records are back in $wt_dir/.cs"
         elif ! _worktree_is_checkout "$wt_dir"; then
             # git forgets a worktree whose removal it began, whatever the
             # removal left: no /finish runs there again, so what its .cs
             # still holds reaches the base by hand or not at all.
-            local held="$aside/cs holds" delete_flag=-d
+            local held="$aside/cs holds"
             [ ! -d "$wt_dir/.cs" ] || held="$aside/cs or $wt_dir/.cs holds"
-            [ -z "$force" ] || delete_flag=-D
-            error "git worktree remove failed for $wt_dir after deleting part of it, and what is left is no git checkout, so /finish $task cannot run again and cs cannot tell which of the session records the feature left uncommitted are still there. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $held and $base_dir/.cs lacks (a file it has no copy of, or the lines of one that its copy lacks), then delete $aside and what is left of $wt_dir. Then run git -C \"$base_dir\" worktree prune and delete the branch with: git -C \"$base_dir\" branch $delete_flag $branch
+            error "git worktree remove failed for $wt_dir after deleting part of it, and what is left is no git checkout, so /finish $task cannot run again and cs cannot tell which of the session records the feature left uncommitted are still there. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $held and $lacks, then delete $aside and what is left of $wt_dir. $by_hand
 $remove_err${trashed:+$nl$trashed}"
         else
             local spare=0 known="the worktree no longer holds every session record the feature left uncommitted"
@@ -1675,13 +1686,13 @@ $remove_err${trashed:+$nl$trashed}"
                 || error "git worktree remove failed for $wt_dir after deleting part of it, and $known. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
 $remove_err${trashed:+$nl$trashed}"
             rm -rf "$aside"
-            # A removal that deleted tracked files leaves the next /finish
-            # refusing over them.
-            local deleted
-            if ! deleted=$(git -C "$wt_dir" ls-files --deleted 2>/dev/null) || [ -n "$deleted" ]; then
-                error "git worktree remove failed for $wt_dir after deleting part of it. The worktree still holds every session record the feature left uncommitted, so cs deleted the copy it made of them, and the base's records are as they were. Put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
+        fi
+        # A removal that deleted tracked files leaves the next /finish
+        # refusing over them.
+        local deleted
+        if ! deleted=$(git -C "$wt_dir" ls-files --deleted 2>/dev/null) || [ -n "$deleted" ]; then
+            error "git worktree remove failed for $wt_dir after deleting part of it. $kept, and the base's records are as they were. Put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
 $remove_err${trashed:+$nl$trashed}"
-            fi
         fi
         error "git worktree remove failed for $wt_dir; nothing was fused or deleted
 $remove_err${trashed:+$nl$trashed}"
