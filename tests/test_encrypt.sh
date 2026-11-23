@@ -1325,7 +1325,7 @@ _conversation_of_a_path_sharing_the_folder() {  # name, id -> writes it beside t
     local other proj
     other="$(cd "$CS_SESSIONS_ROOT" && pwd -P)-$1"
     proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$CS_SESSIONS_ROOT/$1")"
-    mkdir -p "$proj"
+    mkdir -p "$proj" "$other"
     printf '{"type":"user","entrypoint":"cli","cwd":"%s","message":{"role":"user","content":"of the other path"}}\n' "$other" > "$proj/$2.jsonl"
     printf '%s' "$other"
 }
