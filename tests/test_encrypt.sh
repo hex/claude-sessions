@@ -1009,15 +1009,17 @@ test_open_moves_conversations_left_outside_the_vault() {
 }
 
 # A session opened since it was encrypted has a folder of its own in the
-# vault already: the conversations from outside join it.
+# vault already: the conversations from outside join it. Claude Code makes an
+# empty memory/ in every project folder, so both sides have one; an empty
+# folder holds nothing to lose, and it is no reason to move nothing.
 test_open_moves_conversations_beside_those_in_the_vault() {
     _encrypted_session enc || return 1
     local old=44444444-4444-4444-8444-444444444444 new=55555555-5555-4555-8555-555555555555 proj vault out rc=0
     proj=$(_plain_conversation enc "$old" "before the vault")
-    mkdir -p "$proj/$old/subagents"
+    mkdir -p "$proj/$old/subagents" "$proj/memory"
     echo "agent" > "$proj/$old/subagents/agent-a.jsonl"
     vault=$(_vault_projects enc)
-    mkdir -p "$vault"
+    mkdir -p "$vault/memory"
     echo "in the vault" > "$vault/$new.jsonl"
     out=$(_open enc "${VAULT_PW_LINE}n
 " 2>&1) || rc=$?
