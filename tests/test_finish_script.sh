@@ -4,6 +4,10 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/test_lib.sh"
+# prepare asks cs for the feature's readiness and finds it through CS_BIN, as a
+# conversation cs launched does. Exported, so no test asks a cs installed on
+# this machine.
+export CS_BIN
 
 FINISH="$SCRIPT_DIR/../skills/finish/scripts/finish.sh"
 
@@ -73,6 +77,41 @@ test_prepare_in_base_captures_sha_branch_and_dirt() {
     assert_output_contains "$out" "dirt: ?? scratch.txt" "dirt is listed as porcelain" || return 1
     assert_output_contains "$out" "dirt: ?? .cs/plans/" "session records under .cs/ are reported" || return 1
     assert_eq "none" "$(key "$out" pr_state)" "no PR" || return 1
+}
+
+# prepare reads the feature's record from cs's features screen, so the skill
+# knows before it lands anything whether the integrate or the retire will
+# refuse. Without a cs to ask it says so and never reads as ready.
+test_prepare_predicts_the_retire_from_the_features_record() {
+    local out wt="$CS_SESSIONS_ROOT/myproj@fix-auth" dir clean=""
+    finish_fixture myproj fix-auth > /dev/null
+    stub_gh '[]'
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "0" "$(key "$out" base_dirty)" "a clean base: $out" || return 1
+    assert_eq "0" "$(key "$out" feature_dirty)" "a clean feature: $out" || return 1
+    assert_eq "0" "$(key "$out" feature_untracked)" "nothing untracked: $out" || return 1
+    assert_eq "ready" "$(key "$out" feature_state)" "the feature is ready: $out" || return 1
+
+    echo "uncommitted" > "$wt/scratch.txt"
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "untracked" "$(key "$out" feature_state)" "an untracked file is named by the state: $out" || return 1
+    assert_eq "1" "$(key "$out" feature_untracked)" "and counted: $out" || return 1
+
+    # A live conversation in the feature comes first in the state word, and
+    # the counts still say what its retire will refuse over.
+    echo "$$" > "$wt/.cs/session.lock"
+    out=$(CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    rm -f "$wt/.cs/session.lock"
+    assert_eq "locked" "$(key "$out" feature_state)" "a live feature conversation is named by the state: $out" || return 1
+    assert_eq "1" "$(key "$out" feature_untracked)" "the untracked file is still counted: $out" || return 1
+
+    while IFS= read -r -d : dir; do
+        [ -x "$dir/cs" ] || clean="$clean${clean:+:}$dir"
+    done <<< "$PATH:"
+    out=$(env -u CS_BIN PATH="$clean" CLAUDE_SESSION_DIR="$CS_SESSIONS_ROOT/myproj" CLAUDE_SESSION_NAME="myproj" bash "$FINISH" prepare fix-auth 2>&1)
+    assert_eq "unknown" "$(key "$out" feature_state)" "no cs to ask: $out" || return 1
+    assert_eq "no cs found (CS_BIN, PATH, ~/.local/bin/cs), so the feature's readiness was not read" "$(key "$out" feature_state_reason)" "and the reason: $out" || return 1
+    assert_eq "" "$(key "$out" base_dirty)" "no field is guessed: $out" || return 1
 }
 
 test_prepare_in_a_plain_checkout_says_so() {
@@ -754,6 +793,7 @@ test_report_says_error_when_the_content_check_counts_no_paths() {
 
 run_test test_prepare_in_feature_session_hands_off
 run_test test_prepare_in_base_captures_sha_branch_and_dirt
+run_test test_prepare_predicts_the_retire_from_the_features_record
 run_test test_prepare_in_a_plain_checkout_says_so
 run_test test_prepare_refuses_a_worktree_off_its_branch
 # A PR opened from a fork carries the fork's own branch of the same name.

@@ -1516,7 +1516,7 @@ CS_KNOWN_SHA256=(
 # runs it, so a payload file that does not
 # match is not the file that was released.
 CS_PAYLOAD_SHA256=(
-    "80a19b44e4f4193497434b17e73874768adb51e9e4a00f02672046ecd99a6a65  bin/cs"
+    "4580fc7638ed572dd92da78db5f312e57872244582d288033cbe8c3b9ac203cd  bin/cs"
     "b32d0e75fbb6f077e4a90ae157f973bedb90f74ce587a35065f00b65ed95743f  bin/cs-secrets"
     "4cfed2e36463e06c222bf9ed3573a0d66c4ecff25000b5c9aa28a4da3bbc1e20  bin/cs-statusline"
     "324691a50519294a125520ee96e279bb02a08b1a4c2e4804cf9347c617521044  bin/cs-subagent-statusline"
@@ -1544,12 +1544,12 @@ CS_PAYLOAD_SHA256=(
     "3449835309c77b8b3cb7f1023401591e38cad230ae124161f1cde2b7bbe6e798  skills/store-secret/SKILL.md"
     "eaf2ade4ce76f74b8d6ab979f536007606e77308a0c33dfedf28d31befd1eaec  skills/prose-hygiene/SKILL.md"
     "eb10294a1ea23043b20460606c9b378bfbd657180da55d9e446b29cf116df0dc  skills/rotate/SKILL.md"
-    "0d88656291eb6078b08187204807c72bd926b93c360041767cdbc26e64567353  skills/finish/SKILL.md"
+    "103439e73af5175eaa55293ec22eede314f7223c080e5e46a3bdecfb4ff4c472  skills/finish/SKILL.md"
     "938985c6dbc9166170d1e0d7e632cd3c4a4089d5cdd5b2cf5f0702600f29110f  skills/feature/SKILL.md"
     "470bbdd41fe312195f002bd68ef833b299c0bc2eae8ccb9f6891bfaac07c58c9  skills/write-as-me/SKILL.md"
     "a8abe8e196ab085c28a30db08b3a52781d14c14ed1134cea5464a75ef03486b6  skills/write-as-me/scripts/build-corpus.sh"
     "a8a14c22510b49f89557b401730875996064682af719a85322215b61d046b054  skills/write-as-me/scripts/corpus-check.sh"
-    "a5559ef37221d283ffbfcbeeed118126aca8d707e096bd159deeb1ab1d1902a8  skills/finish/scripts/finish.sh"
+    "1eaad7ffaff943e06f5457c37298ad8ecf49ecde58a09ee39ad9793febd051cb  skills/finish/scripts/finish.sh"
     "a999b85473187e2d79fa94f8e3f5532a4510939114032f692e2e9003a155f40b  mods/cs/.claude-plugin/plugin.json"
     "529fd7aa9b22d012870c0a106899b65f6a37eac022c7ffb77898042038e03167  mods/cs/hooks/hooks.json"
     "2c30d6aaa382e627f18be78b5c7c8e4556e30553c074760b9aeb0b71ead377d2  mods/cs/hooks/register.tsx"

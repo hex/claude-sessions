@@ -199,16 +199,57 @@ pr_lookup() {  # base_dir branch
     printf '%s' "$json" | jq -r 'first | "pr_number: \(.number)\npr_url: \(.url)"'
 }
 
-# Everything uncommitted in the worktree, as porcelain lines, unfiltered. The
-# retire verb's untracked filter (lib/30-worktree.sh _worktree_untracked_at_risk)
-# is a REMOVAL-risk filter that drops records because retirement fuses them;
-# integrate fuses nothing, so a new tracked-mode plan or memory file under
-# .cs/ is exactly the dirt the user must hear about.
+# Everything uncommitted in the worktree, as porcelain lines, unfiltered.
+# Integrate carries no uncommitted work, so every path here stays out of what
+# lands; the retire then fuses the .cs records among them that it can carry
+# into the base's working tree, uncommitted, and refuses over the rest.
 dirt_lines() {  # dir
     local dirt
     dirt=$(git -C "$1" status --porcelain 2>/dev/null || true)
     echo "dirt_count: $(printf '%s' "$dirt" | grep -c . || true)"
     [ -z "$dirt" ] || printf '%s\n' "$dirt" | sed 's/^/dirt: /'
+}
+
+# What the integrate and the retire will make of the feature, read from the
+# record cs's features screen prints for it (cs <base> -features --porcelain:
+# task branch ahead merged ff wt_dirty untracked base_dirty lock state), so
+# this script holds no copy of cs's rules. base_dirty is the integrate's
+# refusal over the base; feature_dirty and feature_untracked are the retire's
+# over the worktree, counted whatever lock the state word names first.
+# cs is the one that launched this conversation (CS_BIN), else the one on
+# PATH, else where install.sh puts it. Without an answer the state is
+# "unknown" with the reason, never "ready".
+readiness_lines() {  # base task
+    local cs="${CS_BIN:-}" err records fields status=0
+    [ -n "$cs" ] || cs=$(command -v cs 2>/dev/null || true)
+    [ -n "$cs" ] || [ ! -x "$HOME/.local/bin/cs" ] || cs="$HOME/.local/bin/cs"
+    if [ -z "$cs" ]; then
+        echo "feature_state: unknown"
+        echo "feature_state_reason: no cs found (CS_BIN, PATH, ~/.local/bin/cs), so the feature's readiness was not read"
+        return 0
+    fi
+    err=$(mktemp "${TMPDIR:-/tmp}/finish-cs.XXXXXX")
+    records=$("$cs" "$1" -features --porcelain 2>"$err") || status=$?
+    if [ "$status" != 0 ]; then
+        echo "feature_state: unknown"
+        echo "feature_state_reason: $cs $1 -features --porcelain failed (exit $status): $(head -c 200 "$err" | tr '\n' ' ')"
+        rm -f "$err"
+        return 0
+    fi
+    rm -f "$err"
+    fields=$(printf '%s\n' "$records" | awk -F'\t' -v task="$2" '
+        $1 == task && NF == 10 {
+            printf "feature_dirty: %s\nfeature_untracked: %s\nbase_dirty: %s\nfeature_state: %s\n", $6, $7, $8, $10
+            found = 1
+            exit
+        }
+        END { exit !found }') || fields=""
+    if [ -z "$fields" ]; then
+        echo "feature_state: unknown"
+        echo "feature_state_reason: $cs $1 -features --porcelain printed no ten-field record for $2"
+        return 0
+    fi
+    printf '%s\n' "$fields"
 }
 
 cmd_prepare() {  # [feature]
@@ -251,6 +292,7 @@ cmd_prepare() {  # [feature]
     fi
     echo "sha: $(git -C "$wt" rev-parse HEAD)"
     dirt_lines "$wt"
+    readiness_lines "$session_name" "$task"
     pr_lookup "$session_dir" "cs/$task"
 }
 
