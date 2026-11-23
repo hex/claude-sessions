@@ -2278,6 +2278,118 @@ test_integrate_refuses_dirty_base() {
     assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
 }
 
+# A base cs made itself: its first commit tracks its README, its memory index
+# and its narrative. Prints the base dir.
+_tracked_base() {  # name
+    local dir="$CS_SESSIONS_ROOT/$1" narrative
+    "$CS_BIN" "$1" <<< "" >/dev/null 2>&1
+    narrative=$(_narrative_rel "$dir") || return 1
+    git -C "$dir" ls-files --error-unmatch .cs/README.md .cs/memory/MEMORY.md "$narrative" >/dev/null 2>&1 || return 1
+    printf '%s\n' "$dir"
+}
+
+# The one narrative of a session, relative to its directory.
+_narrative_rel() {  # session_dir
+    (cd "$1" && ls .cs/memory/narrative.*.md)
+}
+
+# A conversation's SessionStart or SessionEnd hook, as the lead of the session
+# at <dir>, with the built cs on PATH.
+_session_hook() {  # start|end session_dir session_name conversation_id
+    local input script=session-start.sh
+    input=$(printf '{"session_id":"%s","source":"startup","hook_event_name":"SessionStart"}' "$4")
+    if [ "$1" = end ]; then
+        script=session-end.sh
+        input=$(printf '{"session_id":"%s","reason":"other","hook_event_name":"SessionEnd"}' "$4")
+    fi
+    printf '%s\n' "$input" \
+        | CLAUDE_SESSION_NAME="$3" CLAUDE_SESSION_DIR="$2" CLAUDE_SESSION_META_DIR="$2/.cs" \
+          CS_LEAD_PID=$$ CLAUDE_PID=$$ PATH="$(cd "$(dirname "$CS_BIN")" && pwd):$PATH" \
+          bash "$SCRIPT_DIR/../hooks/$script" >/dev/null 2>&1
+}
+
+# The base's conversation writes its narrative and its hooks write the
+# timeline, and nobody commits either. A feature that changes neither lands
+# over them, and they stay as they were, uncommitted.
+test_integrate_lands_over_base_session_records_it_does_not_touch() {
+    local base_dir wt sha narrative output status=0 line="- base note $RANDOM$RANDOM"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "feature work" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    sha=$(git -C "$wt" rev-parse HEAD)
+    _session_hook start "$base_dir" myproj 5d2c1f0a-7b3e-4c1d-9e2f-0a1b2c3d4e5f
+    printf '%s\n' "$line" >> "$base_dir/$narrative"
+    _session_hook end "$base_dir" myproj 5d2c1f0a-7b3e-4c1d-9e2f-0a1b2c3d4e5f
+    assert_eq " M $narrative" "$(git -C "$base_dir" status --porcelain -- .cs/memory)" "fixture: the base narrative is changed and uncommitted" || return 1
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- true 2>&1) || status=$?
+    assert_eq "0" "$status" "the integrate lands: $output" || return 1
+    assert_eq "integrated fix-auth $sha -> $(git -C "$base_dir" rev-parse HEAD)" "$(printf '%s\n' "$output" | tail -n 1)" "the machine line names the landing" || return 1
+    assert_file_exists "$base_dir/feature.txt" "the feature's file is in the base" || return 1
+    assert_eq " M $narrative" "$(git -C "$base_dir" status --porcelain -- .cs/memory)" "the narrative is still changed and uncommitted" || return 1
+    assert_eq "$line" "$(tail -n 1 "$base_dir/$narrative")" "the base's line is still its last" || return 1
+}
+
+# A feature that committed a line to the narrative the base has an uncommitted
+# line in cannot land: the fast-forward would overwrite the base's line. The
+# refusal names the path before any gate runs.
+test_integrate_refuses_a_landing_that_overwrites_base_session_records() {
+    local base_dir wt sha narrative head output status=0 line="- base note $RANDOM$RANDOM"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "- feature note" >> "$wt/$narrative"
+    (cd "$wt" && git add "$narrative" && git commit -q -m "feature narrative")
+    sha=$(git -C "$wt" rev-parse HEAD)
+    printf '%s\n' "$line" >> "$base_dir/$narrative"
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'echo ran > "$0"' "$TEST_TMPDIR/gate-ran" 2>&1) || status=$?
+    assert_eq "1" "$status" "the integrate refuses: $output" || return 1
+    assert_eq "Error: Uncommitted changes in $base_dir are on paths the feature also changes, and landing would overwrite them; base untouched. Paths:
+$narrative
+Commit them in $base_dir (cs never commits session records), then re-run /finish fix-auth" "$output" "the refusal names the path" || return 1
+    assert_not_exists "$TEST_TMPDIR/gate-ran" "no gate ran" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+    assert_eq "$line" "$(tail -n 1 "$base_dir/$narrative")" "the base's uncommitted line is still there" || return 1
+}
+
+# A gate that writes a base session record is refused only when the feature
+# changes that record too: then the landing would overwrite what the gate
+# wrote. A record the feature leaves alone stays as the gate left it, and the
+# feature lands.
+test_integrate_rechecks_session_records_the_gate_dirtied() {
+    local base_dir wt sha narrative head output status=0
+    base_dir=$(_tracked_base proja) || { echo "  FAIL: fixture: the first base tracks its narrative"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "proja@fix-auth"
+    wt="$CS_SESSIONS_ROOT/proja@fix-auth"
+    echo "- feature note" >> "$wt/$narrative"
+    (cd "$wt" && git add "$narrative" && git commit -q -m "feature narrative")
+    sha=$(git -C "$wt" rev-parse HEAD)
+    head=$(git -C "$base_dir" rev-parse HEAD)
+    output=$("$CS_BIN" proja -integrate-feature fix-auth "$sha" -- sh -c 'echo "- gate note" >> "$0"' "$base_dir/$narrative" 2>&1) || status=$?
+    assert_eq "1" "$status" "the integrate refuses: $output" || return 1
+    assert_eq "Error: Base $base_dir changed during the gates on paths the feature also changes; base untouched at $head. Paths:
+$narrative
+Commit them in $base_dir (cs never commits session records), then re-run /finish fix-auth" "$output" "the refusal names the path the gate wrote" || return 1
+    assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
+
+    base_dir=$(_tracked_base projb) || { echo "  FAIL: fixture: the second base tracks its narrative"; return 1; }
+    cs_launch "projb@fix-auth"
+    wt="$CS_SESSIONS_ROOT/projb@fix-auth"
+    echo "feature work" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    sha=$(git -C "$wt" rev-parse HEAD)
+    status=0
+    output=$("$CS_BIN" projb -integrate-feature fix-auth "$sha" -- sh -c 'echo "- gate note" >> "$0"' "$base_dir/$narrative" 2>&1) || status=$?
+    assert_eq "0" "$status" "a record the feature leaves alone does not stop the landing: $output" || return 1
+    assert_eq "integrated fix-auth $sha -> $(git -C "$base_dir" rev-parse HEAD)" "$(printf '%s\n' "$output" | tail -n 1)" "the machine line names the landing" || return 1
+    assert_eq "- gate note" "$(tail -n 1 "$base_dir/$narrative")" "what the gate wrote is still there" || return 1
+}
+
 test_integrate_refuses_foreign_live_base_lock() {
     local sha base_dir
     sha=$(integrate_fixture myproj fix-auth)
@@ -2435,6 +2547,9 @@ run_test test_integrate_refuses_sha_not_on_feature_branch
 run_test test_integrate_reports_already_integrated_and_does_nothing
 run_test test_integrate_names_a_commit_the_base_lacks
 run_test test_integrate_refuses_dirty_base
+run_test test_integrate_lands_over_base_session_records_it_does_not_touch
+run_test test_integrate_refuses_a_landing_that_overwrites_base_session_records
+run_test test_integrate_rechecks_session_records_the_gate_dirtied
 run_test test_integrate_refuses_foreign_live_base_lock
 run_test test_integrate_reads_the_base_lock_by_the_one_lock_rule
 run_test test_integrate_cleanup_releases_the_lock_only_once
