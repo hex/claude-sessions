@@ -1266,6 +1266,33 @@ test_open_moves_nothing_while_another_cs_holds_the_openers_mutex() {
     assert_output_contains "$out" "enc: another cs is opening this session ($meta/session.mutex.lock is held), so cs moved none of its conversations into the vault; try again in a moment." "names the held mutex" || return 1
 }
 
+# Claude Code records when the process started beside its pid, as ps prints
+# it in UTC. A pid that now names another process has another start time: its
+# file is one a claude that is gone left behind, and no reason to move nothing.
+test_open_moves_past_a_claude_file_whose_pid_names_another_process() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj out rc=0 dir started
+    proj=$(_plain_conversation enc "$id" "outside")
+    dir=$(cd "$CS_SESSIONS_ROOT/enc" && pwd -P)
+    sleep 300 &
+    local live=$!
+    mkdir -p "$HOME/.claude/sessions"
+    started=$(LC_ALL=C TZ=UTC /bin/ps -o lstart= -p "$live" | sed 's/^ *//; s/ *$//')
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1795371270300,"procStart":"%s","kind":"interactive"}' "$live" "$id" "$dir" "$started" > "$HOME/.claude/sessions/$live.json"
+    out=$(TZ=Asia/Tokyo _open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open goes on: $out" || { kill "$live" 2>/dev/null; return 1; }
+    assert_output_contains "$out" "enc: a claude (pid $live) runs in this session outside cs" "the start time Claude Code recorded names the running claude, whatever the shell's time zone" || { kill "$live" 2>/dev/null; return 1; }
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s","startedAt":1795371270300,"procStart":"Thu Jan  1 00:00:00 1970","kind":"interactive"}' "$live" "$id" "$dir" > "$HOME/.claude/sessions/$live.json"
+    rc=0
+    out=$(TZ=Asia/Tokyo _open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+    assert_eq "0" "$rc" "the second open goes on: $out" || return 1
+    assert_output_contains "$out" "enc: moved this session's conversations from $proj into its vault." "another start time is another process, so the move runs" || return 1
+    assert_file_contains "$(_vault_projects enc)/$id.jsonl" "outside" "the conversation is in the vault" || return 1
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1513,6 +1540,7 @@ run_test test_open_names_what_it_could_not_remove_outside_the_vault
 run_test test_open_moves_a_folder_over_an_empty_one_in_the_vault
 run_test test_open_says_it_moved_conversations_only_when_it_moved_one
 run_test test_open_moves_nothing_while_another_cs_holds_the_openers_mutex
+run_test test_open_moves_past_a_claude_file_whose_pid_names_another_process
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
