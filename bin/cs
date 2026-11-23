@@ -14631,7 +14631,7 @@ _doctor_check_retire_asides() {
         elif [ -d "$SESSIONS_ROOT/$wt" ]; then
             _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is still there, so move $d/cs back to $SESSIONS_ROOT/$wt/.cs by hand, delete the empty $d, and run /finish $task in $base again"
         else
-            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is gone, and /finish $task cannot run again without it, so finish the retire by hand: fuse what is missing from $d/cs into $SESSIONS_ROOT/$base/.cs, delete $d, then delete the branch the retire would have removed with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
+            _doctor_warn "Retire leftovers: $d holds the session records of $wt, set aside by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone. The worktree is gone, and /finish $task cannot run again without it, so finish the retire by hand: fuse what is missing from $d/cs into $SESSIONS_ROOT/$base/.cs, delete $d, then run git -C \"$SESSIONS_ROOT/$base\" worktree prune and delete the branch the retire would have removed with: git -C \"$SESSIONS_ROOT/$base\" branch -d cs/$task $_DOCTOR_FORCED_BRANCH_NOTE"
         fi
     done
 }
