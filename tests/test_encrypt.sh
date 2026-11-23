@@ -1214,6 +1214,42 @@ test_open_moves_a_folder_over_an_empty_one_in_the_vault() {
     [ ! -e "$proj" ] || { echo "  FAIL: plaintext conversations left at $proj"; return 1; }
 }
 
+# The open says what it did: that it moved conversations only when it moved
+# one, what else it moved by name, and what it only removed outside.
+test_open_says_it_moved_conversations_only_when_it_moved_one() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj vault out rc=0
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$CS_SESSIONS_ROOT/enc")"
+    vault=$(_vault_projects enc)
+    mkdir -p "$proj/memory" "$vault"
+    echo "in the vault" > "$vault/$id.jsonl"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open reaches claude: $out" || return 1
+    [ ! -e "$proj" ] || { echo "  FAIL: the empty folder is left at $proj"; return 1; }
+    assert_output_not_contains "$out" "moved" "an empty folder outside is removed without a word" || return 1
+
+    mkdir -p "$proj"
+    echo "index" > "$proj/sessions-index.json"
+    rc=0
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the second open reaches claude: $out" || return 1
+    assert_eq "index" "$(cat "$vault/sessions-index.json" 2>/dev/null)" "the file moved" || return 1
+    assert_output_contains "$out" "enc: moved sessions-index.json from $proj into its vault.$" "names what moved" || return 1
+    assert_output_not_contains "$out" "conversations" "and calls it no conversation" || return 1
+
+    mkdir -p "$proj"
+    cp -p "$vault/$id.jsonl" "$proj/$id.jsonl"
+    rc=0
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the third open reaches claude: $out" || return 1
+    [ ! -e "$proj" ] || { echo "  FAIL: the copy is left at $proj"; return 1; }
+    assert_output_contains "$out" "enc: removed from $proj what its vault already holds: $id.jsonl.$" "names the copy it removed outside" || return 1
+    assert_output_not_contains "$out" "moved" "and moved nothing" || return 1
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1459,6 +1495,7 @@ run_test test_encrypt_leaves_no_cut_conversation_in_a_vault_without_room
 run_test test_open_removes_a_copy_outside_that_the_vault_already_holds
 run_test test_open_names_what_it_could_not_remove_outside_the_vault
 run_test test_open_moves_a_folder_over_an_empty_one_in_the_vault
+run_test test_open_says_it_moved_conversations_only_when_it_moved_one
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
