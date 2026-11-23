@@ -760,6 +760,26 @@ Error: cannot fuse the worktree's records: $base_dir/.cs/private is not a direct
     done
 }
 
+# The base's conversation writes its session records and nobody commits
+# them, so they are no reason to stop a feature from being created. Project
+# work the base left uncommitted still is.
+test_worktree_create_goes_ahead_over_uncommitted_base_session_records() {
+    local base_dir narrative output status=0
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    echo "- base note" >> "$base_dir/$narrative"
+    output=$("$CS_BIN" "myproj@fix-auth" < /dev/null 2>&1) || status=$?
+    assert_eq "0" "$status" "the feature is created: $output" || return 1
+    assert_dir "$CS_SESSIONS_ROOT/myproj@fix-auth" "worktree created" || return 1
+    assert_eq "- base note" "$(tail -n 1 "$base_dir/$narrative")" "the base's line is still there, uncommitted" || return 1
+    echo "# an edit" >> "$base_dir/.gitignore"
+    status=0
+    output=$("$CS_BIN" "myproj@other" < /dev/null 2>&1) || status=$?
+    assert_eq "1" "$status" "project work left uncommitted still refuses: $output" || return 1
+    assert_output_contains "$output" "Session 'myproj' has uncommitted changes; commit them first (a worktree materializes committed state only)" "and says why" || return 1
+    assert_not_exists "$CS_SESSIONS_ROOT/myproj@other" "no worktree is created for it" || return 1
+}
+
 test_worktree_of_worktree_refused() {
     create_test_session_with_git "myproj" > /dev/null
     cs_launch "myproj@fix-auth"
@@ -2201,6 +2221,7 @@ run_test test_untracked_listing_renders_the_shared_fixture
 run_test test_printable_name_keeps_a_lead_byte_that_starts_no_c1_control
 run_test test_worktree_of_worktree_refused
 run_test test_worktree_create_succeeds_with_untracked_base
+run_test test_worktree_create_goes_ahead_over_uncommitted_base_session_records
 run_test test_worktree_create_carries_the_ignored_files_worktreeinclude_names
 run_test test_worktree_create_without_worktreeinclude_copies_nothing
 run_test test_worktree_create_copies_nothing_through_a_link_in_the_feature
