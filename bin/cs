@@ -6931,11 +6931,11 @@ Commit them in $base_dir (cs leaves session records for you to commit), then re-
     # fast-forward puts the files back as they were, and one after it
     # appends the lines (_integrate_cleanup).
     if [ -n "$carried" ]; then
-        local -a logs=()
-        while IFS= read -r entry; do logs+=("$entry"); done <<< "$carried"
+        local -a carried_paths=()
+        while IFS= read -r entry; do carried_paths+=("$entry"); done <<< "$carried"
         _INTEGRATE_CARRY_ONTO="$R"
         _integrate_set_logs_aside "$base_dir" "${wt_dir##*/}" "$carried" \
-            && git -C "$base_dir" checkout -q HEAD -- "${logs[@]}" \
+            && git -C "$base_dir" checkout -q HEAD -- "${carried_paths[@]}" \
             || error "Could not set aside the lines the narrative and timeline of $base_dir hold uncommitted; base untouched at $B"
     fi
     _finish_progress_write fast-forward
