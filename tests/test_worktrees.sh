@@ -5788,6 +5788,30 @@ test_features_untracked_is_not_reported_as_dirty() {
 
 run_test test_features_untracked_is_not_reported_as_dirty
 
+# The features screen reads the base as dirty only where the integrate would
+# refuse: a session record the base left uncommitted counts once the feature
+# changes that record too.
+test_features_ignores_base_session_records_the_landing_leaves_alone() {
+    local base_dir wt narrative line
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    narrative=$(_narrative_rel "$base_dir")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "feature work" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    echo "- base note" >> "$base_dir/$narrative"
+    line=$("$CS_BIN" myproj -features --porcelain 2>&1)
+    assert_eq "0" "$(_feat_field "$line" 8)" "a record the feature leaves alone is not base dirt: $line" || return 1
+    assert_eq "ready" "$(_feat_field "$line" 10)" "the feature reads as ready: $line" || return 1
+    echo "- feature note" >> "$wt/$narrative"
+    (cd "$wt" && git add "$narrative" && git commit -q -m "feature narrative")
+    line=$("$CS_BIN" myproj -features --porcelain 2>&1)
+    assert_eq "1" "$(_feat_field "$line" 8)" "a record the landing would overwrite is base dirt: $line" || return 1
+    assert_eq "base-dirty" "$(_feat_field "$line" 10)" "the feature reads as blocked by the base: $line" || return 1
+}
+
+run_test test_features_ignores_base_session_records_the_landing_leaves_alone
+
 # Readiness agrees with the retire gate: an ignored file does not block a
 # retire (it goes to the trash), so it is not counted as untracked work.
 test_features_does_not_count_ignored_files_as_untracked() {
