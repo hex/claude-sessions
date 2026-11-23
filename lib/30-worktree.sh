@@ -952,9 +952,12 @@ _path_goes_through_a_link() {  # root, relative path
 # names and git ignores (an env file, a local config), which a checkout never
 # carries. The file reads as a .gitignore does, as Claude Code reads it for
 # the worktrees it makes itself. Left where they are: a file the feature
-# already has, cs's own records, a link (cs writes some of these files later,
-# and a write through a copied link lands on the base's file), and a path
-# that passes through a link in the feature. One check-ignore answers for the
+# already has, cs's own records, .claude/settings.local.json (cs writes the
+# feature's, and the retire adds every permission rule it holds to the
+# base's, so a copy would hand the base back a rule it dropped meanwhile), a
+# link (cs writes some of these files later, and a write through a copied
+# link lands on the base's file), and a path that passes through a link in
+# the feature. One check-ignore answers for the
 # whole list. Runs command-substituted with its caller, so every line it says
 # goes to stderr.
 _worktree_carry_included() {  # base_dir wt_dir
@@ -962,6 +965,10 @@ _worktree_carry_included() {  # base_dir wt_dir
     [ -f "$base/.worktreeinclude" ] || return 0
     while IFS= read -r -d '' f; do
         case "$f" in */|.cs/*|CLAUDE.local.md) continue ;; esac
+        if [ "$f" = .claude/settings.local.json ]; then
+            warn "Not copied: $f (cs manages it)" >&2
+            continue
+        fi
         dest="$wt/$f"
         if [ -L "$base/$f" ]; then
             warn "Not copied: $(_printable_name "$f") (a link)" >&2
