@@ -1893,37 +1893,6 @@ test_retire_ignored_mode_keeps_the_records_aside_when_the_removal_left_no_checko
         "cs -doctor names the records and says to fuse them" || return 1
 }
 
-# A removal stopped after it deleted tracked files, with the worktree still a
-# checkout: an ignored feature's records go back into it, and the next
-# /finish would refuse over the deleted files, so the refusal gives the
-# command that puts them back. Followed, it ends in a retire that fuses once.
-test_retire_ignored_mode_says_how_to_put_back_what_a_removal_deleted() {
-    local base_dir="$CS_SESSIONS_ROOT/proj" wt="$CS_SESSIONS_ROOT/proj@t1" sha bin output status=0 token="$RANDOM$RANDOM"
-    mkdir -p "$base_dir/.cs"/{memory,local}
-    echo "# P" > "$base_dir/README.md"
-    printf '.cs/\n.claude/settings.local.json\n' > "$base_dir/.gitignore"
-    (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
-    cs_launch "proj@t1"
-    echo "done" > "$wt/result.txt"
-    (cd "$wt" && git add result.txt && git commit -q -m "task")
-    printf '{"event":"from-task-%s"}\n' "$token" > "$wt/.cs/timeline.jsonl"
-    sha=$(land_feature proj t1) || { echo "  FAIL: integrate fixture"; return 1; }
-    bin=$(_git_failing_removal "rm -f \"$wt/result.txt\"")
-    output=$(PATH="$bin:$PATH" "$CS_BIN" proj -retire-feature t1 "$sha" 2>&1) || status=$?
-    assert_eq "1" "$status" "a removal that fails is a refusal: $output" || return 1
-    assert_not_exists "$wt/result.txt" "fixture: the removal deleted a tracked file" || return 1
-    assert_eq "1" "$(grep -c -F "from-task-$token" "$wt/.cs/timeline.jsonl")" "the worktree has its records back" || return 1
-    assert_output_not_contains "$output" "nothing was fused or deleted" "the refusal does not say nothing was deleted" || return 1
-    assert_output_contains "$output" "git worktree remove failed for $wt after deleting part of it. Its session records are back in $wt/.cs, and the base's records are as they were. Put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish t1 again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --" \
-        "the refusal says where the records are and how to put the deleted files back" || return 1
-    git -C "$wt" ls-files -z --deleted | xargs -0 git -C "$wt" checkout --
-    status=0
-    output=$("$CS_BIN" proj -retire-feature t1 "$sha" 2>&1) || status=$?
-    assert_eq "0" "$status" "the retire goes through once the files are back: $output" || return 1
-    assert_not_exists "$wt" "the worktree is removed" || return 1
-    assert_eq "1" "$(grep -c -F "from-task-$token" "$base_dir/.cs/timeline.jsonl")" "the timeline line is in the base once" || return 1
-}
-
 # An encrypted base keeps its log behind .cs/private, and a locked vault
 # cannot take the worktree's. Retire refuses before anything moves: the
 # worktree stays whole with its records, nothing is stranded in a .retire-*
@@ -2436,7 +2405,6 @@ run_test test_retire_force_still_refuses_untracked_work
 run_test test_retire_force_refuses_commits_after_the_captured_one
 run_test test_retire_fuses_nothing_when_removal_fails_and_retry_fuses_once
 run_test test_retire_ignored_mode_keeps_the_records_aside_when_the_removal_left_no_checkout
-run_test test_retire_ignored_mode_says_how_to_put_back_what_a_removal_deleted
 run_test test_retire_with_a_locked_base_vault_leaves_the_worktree_whole
 run_test test_retire_keeps_the_records_when_a_fuse_write_fails
 run_test test_retire_refusal_for_an_open_session_comes_after_the_landing_check
@@ -5219,6 +5187,39 @@ test_retire_tracked_mode_says_how_to_put_back_what_a_removal_deleted_beside_whol
 }
 
 run_test test_retire_tracked_mode_says_how_to_put_back_what_a_removal_deleted_beside_whole_records
+
+# A removal stopped after it deleted tracked files, with the worktree still a
+# checkout: an ignored feature's records go back into it, and the next
+# /finish would refuse over the deleted files, so the refusal gives the
+# command that puts them back. Followed, it ends in a retire that fuses once.
+test_retire_ignored_mode_says_how_to_put_back_what_a_removal_deleted() {
+    local base_dir="$CS_SESSIONS_ROOT/proj" wt="$CS_SESSIONS_ROOT/proj@t1" sha bin output status=0 token="$RANDOM$RANDOM"
+    mkdir -p "$base_dir/.cs"/{memory,local}
+    echo "# P" > "$base_dir/README.md"
+    printf '.cs/\n.claude/settings.local.json\n' > "$base_dir/.gitignore"
+    (cd "$base_dir" && git init -q && git config core.autocrlf false && git add -A && git commit -q -m init)
+    cs_launch "proj@t1"
+    echo "done" > "$wt/result.txt"
+    (cd "$wt" && git add result.txt && git commit -q -m "task")
+    printf '{"event":"from-task-%s"}\n' "$token" > "$wt/.cs/timeline.jsonl"
+    sha=$(land_feature proj t1) || { echo "  FAIL: integrate fixture"; return 1; }
+    bin=$(_git_failing_removal "rm -f \"$wt/result.txt\"")
+    output=$(PATH="$bin:$PATH" "$CS_BIN" proj -retire-feature t1 "$sha" 2>&1) || status=$?
+    assert_eq "1" "$status" "a removal that fails is a refusal: $output" || return 1
+    assert_not_exists "$wt/result.txt" "fixture: the removal deleted a tracked file" || return 1
+    assert_eq "1" "$(grep -c -F "from-task-$token" "$wt/.cs/timeline.jsonl")" "the worktree has its records back" || return 1
+    assert_output_not_contains "$output" "nothing was fused or deleted" "the refusal does not say nothing was deleted" || return 1
+    assert_output_contains "$output" "git worktree remove failed for $wt after deleting part of it. Its session records are back in $wt/.cs, and the base's records are as they were. Put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish t1 again: git -C \"$wt\" ls-files -z --deleted | xargs -0 git -C \"$wt\" checkout --" \
+        "the refusal says where the records are and how to put the deleted files back" || return 1
+    git -C "$wt" ls-files -z --deleted | xargs -0 git -C "$wt" checkout --
+    status=0
+    output=$("$CS_BIN" proj -retire-feature t1 "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire goes through once the files are back: $output" || return 1
+    assert_not_exists "$wt" "the worktree is removed" || return 1
+    assert_eq "1" "$(grep -c -F "from-task-$token" "$base_dir/.cs/timeline.jsonl")" "the timeline line is in the base once" || return 1
+}
+
+run_test test_retire_ignored_mode_says_how_to_put_back_what_a_removal_deleted
 
 # A trash command that fails ends the retire of a tracked feature like any
 # other refusal: the copy it made of the feature's records goes too.
