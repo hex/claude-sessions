@@ -4881,8 +4881,8 @@ _project_tree_is_dirty() {
 # lists every path the landing changes, one per line: "untracked <path>" for
 # one git does not track there, "changed <path>" for a tracked one with
 # uncommitted changes, staged or not. git merge --ff-only refuses over either,
-# and the landing would report that as the base having moved. Fails when git cannot list the
-# base's files.
+# and the landing would report that as the base having moved. Fails when git
+# cannot list the base's files.
 _landing_overwrites() {  # base_dir touched_file
     [ -s "$2" ] || return 0
     local untracked changed
@@ -5582,9 +5582,9 @@ _require_base_commit() {  # base_dir base_name
 
 # Gate worktree creation on the base checkout's tracked project files
 # (_project_tree_is_dirty: its session records under .cs are never a reason
-# to stop). Runs in the
-# main shell so a declined consent can exit cs cleanly (the creator is
-# command-substituted, where an exit only leaves the subshell). Clean base
+# to stop). Runs in the main shell so a declined consent can exit cs cleanly
+# (the creator is command-substituted, where an exit only leaves the
+# subshell). Clean base
 # returns; dirty base asks for informed consent on interactive terminals
 # (the feature branches from the last commit and will not include uncommitted
 # changes) and refuses everywhere else.

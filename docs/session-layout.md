@@ -432,13 +432,13 @@ and gains each feature pointer whose target it does not name, and a base with
 no archive takes the feature's whole. A feature that never changed the
 archive it inherited brings nothing back, so the base's deletions stand.
 
-Git merges only what the feature committed. `/finish` commits no session
-record, so when it retires a feature whose base tracks `.cs/`, it fuses what
+Git merges only what the feature committed. The retire commits nothing, so
+when `/finish` retires a feature whose base tracks `.cs/`, it fuses what
 the feature left uncommitted under `.cs/` into the base's working tree and
 leaves it there uncommitted, for you to commit with the base's own records:
 
-- `timeline.jsonl` and `local/session.log`: the base's file gains the lines
-  after the feature's last commit.
+- `timeline.jsonl`: the base's file gains the lines after the feature's
+  last commit.
 - `narrative.*.md`: the same, and after `cs -narrative rotate` in the
   feature, the lines the feature's last commit lacks.
 - `MEMORY.md` and `reference_memory_archive.md`: the base's copy gains each
