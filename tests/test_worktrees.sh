@@ -4753,8 +4753,10 @@ run_test test_retire_tracked_mode_carries_a_log_committed_empty
 
 # /wrap rotates a narrative over its budget: the oldest sections move to an
 # archive file and the narrative is rewritten without them. The retire
-# carries the lines the feature's last commit lacks and the archive file, so
-# a feature that wrapped retires like any other.
+# carries the lines the feature added since its last commit and the archive
+# file, so a feature that wrapped retires like any other: a section the
+# commit holds and the narrative kept is not carried again, and a new line
+# equal to a committed one is.
 test_retire_tracked_mode_carries_a_rotated_narrative() {
     local base_dir wt sha narrative output status=0 token="$RANDOM$RANDOM" section n archive
     base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
@@ -4762,23 +4764,24 @@ test_retire_tracked_mode_carries_a_rotated_narrative() {
     cs_launch "myproj@fix-auth"
     wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
     for section in 1 2 3 4 5 6; do
-        printf '\n## 2026-01-0%s section %s\n\n' "$section" "$section" >> "$wt/$narrative"
+        printf '\n## 2026-01-0%s section %s\n\n- done\n' "$section" "$section" >> "$wt/$narrative"
         n=0
         while [ "$n" -lt 40 ]; do
             n=$((n + 1))
             echo "- note $section.$n $token, long enough to fill a narrative past its budget" >> "$wt/$narrative"
         done
-        if [ "$section" = 3 ]; then
+        if [ "$section" = 4 ]; then
             echo "fix" > "$wt/feature.txt"
-            (cd "$wt" && git add feature.txt "$narrative" && git commit -q -m "feature work and three sections")
+            (cd "$wt" && git add feature.txt "$narrative" && git commit -q -m "feature work and four sections")
             sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
         fi
     done
     output=$(cd "$wt" && CLAUDE_SESSION_NAME="myproj@fix-auth" CLAUDE_SESSION_DIR="$wt" CLAUDE_SESSION_META_DIR="$wt/.cs" \
-        CS_NARRATIVE_MAX_BYTES=8000 CS_NARRATIVE_KEEP_BYTES=4000 "$CS_BIN" -narrative rotate 2>&1) \
+        CS_NARRATIVE_MAX_BYTES=12000 CS_NARRATIVE_KEEP_BYTES=9000 "$CS_BIN" -narrative rotate 2>&1) \
         || { echo "  FAIL: fixture: the rotation runs: $output"; return 1; }
     archive=$(cd "$wt" && ls .cs/narrative-archive/*/*.md) || { echo "  FAIL: fixture: the rotation wrote an archive file: $output"; return 1; }
     assert_eq "0" "$(grep -c -F -- "- note 1.1 $token" "$wt/$narrative")" "fixture: a committed section left the narrative" || return 1
+    assert_eq "1" "$(grep -c -F -- "- note 4.1 $token" "$wt/$narrative")" "fixture: a committed section stayed in the narrative" || return 1
     assert_eq "1" "$(grep -c -F -- "- note 6.40 $token" "$wt/$narrative")" "fixture: the newest section stayed" || return 1
     cp "$wt/$archive" "$TEST_TMPDIR/archive.md"
     output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
@@ -4788,6 +4791,10 @@ test_retire_tracked_mode_carries_a_rotated_narrative() {
     assert_eq "1" "$(grep -c -F -- "- note 6.1 $token" "$base_dir/$narrative")" "the first new line the narrative kept is in the base once" || return 1
     assert_eq "1" "$(grep -c -F -- "- note 6.40 $token" "$base_dir/$narrative")" "the last new line is in the base once" || return 1
     assert_eq "1" "$(grep -c -x -F '## 2026-01-06 section 6' "$base_dir/$narrative")" "with its heading" || return 1
+    assert_eq "1" "$(grep -c -F -- "- note 4.1 $token" "$base_dir/$narrative")" "a committed section the narrative kept is not fused a second time" || return 1
+    assert_eq "6" "$(grep -c -x -F -- '- done' "$base_dir/$narrative")" "a new line equal to a committed one is carried: four landed, two new" || return 1
+    assert_eq "" "$(awk '/^## 2026-01-0[56] /' "$base_dir/$narrative" | sort | uniq -d)" "each new heading is there once" || return 1
+    assert_eq "2" "$(awk 'prev == "" && /^## 2026-01-0[56] / { n++ } { prev = $0 } END { print n + 0 }' "$base_dir/$narrative")" "each new section keeps the empty line above its heading" || return 1
     cmp -s "$TEST_TMPDIR/archive.md" "$base_dir/$archive" \
         || { echo "  FAIL: the archive file is not in the base as the rotation wrote it"; return 1; }
     assert_eq "1" "$(jq -c 'select(.event == "narrative_rotated")' "$base_dir/.cs/timeline.jsonl" | grep -c .)" "the rotation's event is in the base timeline once" || return 1
