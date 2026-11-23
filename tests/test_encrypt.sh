@@ -1247,7 +1247,7 @@ test_open_says_it_moved_conversations_only_when_it_moved_one() {
     assert_eq "0" "$rc" "the third open reaches claude: $out" || return 1
     [ ! -e "$proj" ] || { echo "  FAIL: the copy is left at $proj"; return 1; }
     assert_output_contains "$out" "enc: removed from $proj what its vault already holds: $id.jsonl.$" "names the copy it removed outside" || return 1
-    assert_output_not_contains "$out" "moved" "and moved nothing" || return 1
+    assert_output_not_contains "$out" ": moved" "and moved nothing" || return 1
 }
 
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
