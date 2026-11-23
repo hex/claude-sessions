@@ -1088,6 +1088,56 @@ test_open_moves_nothing_while_a_claude_writes_outside_the_vault() {
     [ ! -e "$(_vault_projects enc)/$id.jsonl" ] || { echo "  FAIL: the conversation was moved while claude wrote it"; return 1; }
 }
 
+# A vault with no room: cp and mv, asked to carry something out of the
+# conversations folder outside the vault, write each file cut short where it
+# would land, then fail as a full disk makes them. Everything else they do
+# for real.
+_vault_without_room() {
+    local d="$TEST_TMPDIR/stub" tool real
+    for tool in cp mv; do
+        real=$(PATH=/bin:/usr/bin command -v "$tool")
+        cat > "$d/$tool" <<EOF
+#!/bin/sh
+for last in "\$@"; do :; done
+case "\$last" in "\$CS_TRANSCRIPTS_DIR"/*) exec $real "\$@" ;; esac
+crossing=0
+for arg in "\$@"; do
+    case "\$arg" in
+        "\$CS_TRANSCRIPTS_DIR"/*)
+            crossing=1
+            land=\$last
+            [ -d "\$last" ] && land="\$last/\${arg##*/}"
+            /bin/cp -pPR "\$arg" "\$last"
+            find "\$land" -type f -exec sh -c ': > "\$1"' _ {} \;
+            ;;
+    esac
+done
+[ "\$crossing" = 1 ] || exec $real "\$@"
+echo "$tool: \$last: No space left on device" >&2
+exit 1
+EOF
+        chmod +x "$d/$tool"
+    done
+}
+
+# A copy into the vault that stops part-way leaves the conversations outside
+# whole and nothing of them under the session's folder in the vault, where
+# the next open would bind a conversation cut short.
+test_open_leaves_no_cut_conversation_in_a_vault_without_room() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj vault out rc=0
+    proj=$(_plain_conversation enc "$id" "before the vault")
+    vault=$(_vault_projects enc)
+    _vault_without_room
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "" "$(find "$FAKE_MNT" -name '*.jsonl')" "the vault holds nothing of the conversation" || return 1
+    [ ! -e "$vault" ] || { echo "  FAIL: the vault has a folder for the session"; return 1; }
+    assert_file_contains "$proj/$id.jsonl" "before the vault" "the conversation outside is whole" || return 1
+    assert_eq "1" "$rc" "the open stops: $out" || return 1
+    assert_output_contains "$out" "enc: could not copy the session's conversations from $proj into its vault. They are all still in $proj, whole, and the vault holds none of them. cp said: cp: " "names the whole copy" || return 1
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1328,6 +1378,7 @@ run_test test_open_moves_conversations_beside_those_in_the_vault
 run_test test_open_moves_nothing_when_a_conversation_is_on_both_sides
 run_test test_open_moves_nothing_through_a_linked_conversations_folder
 run_test test_open_moves_nothing_while_a_claude_writes_outside_the_vault
+run_test test_open_leaves_no_cut_conversation_in_a_vault_without_room
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
