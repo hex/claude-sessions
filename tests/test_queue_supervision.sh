@@ -129,23 +129,24 @@ test_drain_waits_for_background_agents() {
     assert_eq "1" "$(_qlen)" "the finished task is popped" || return 1
 }
 
-# A cloud session (an Agent run with remote isolation) and an in-process
-# teammate are background agents too: Claude Code labels them "cloud session"
-# and "teammate" in the Stop input, and lists them while running or pending.
-test_drain_waits_for_cloud_sessions_and_teammates() {
+# A cloud session (an Agent run with remote isolation) is a background agent
+# too: Claude Code labels it "cloud session" in the Stop input and lists it
+# while running or pending. An in-process teammate, labelled "teammate", does
+# not hold the run: Claude Code lists an idle one as running until it shuts
+# down, so it would hold the queue for the life of the team.
+test_drain_waits_for_cloud_sessions_but_not_teammates() {
     _qs_session "bgremote"
     _arm_queue "task one" "task two"
     local out
     out=$(_stop_turn) || return 1
-    out=$(_stop_turn "$(jq -nc '{hook_event_name: "Stop", background_tasks: [{id: "r1", type: "cloud session", status: "pending", description: "remote work"}]}')") || return 1
-    assert_output_contains "$out" "cs task queue: 1 background agent still running" "a pending cloud session holds the run" || return 1
+    out=$(_stop_turn "$(jq -nc '{hook_event_name: "Stop", background_tasks: [{id: "r1", type: "cloud session", status: "pending", description: "remote work"}, {id: "m1", type: "teammate", status: "running", description: "reviewer"}]}')") || return 1
+    assert_output_contains "$out" "cs task queue: 1 background agent still running" "a pending cloud session holds the run, the teammate beside it uncounted" || return 1
     assert_eq "2" "$(_qlen)" "nothing is popped while a cloud session runs" || return 1
+    assert_output_not_contains "$(_inbox)" '"event":"task_done"' "nothing is logged done while a cloud session runs" || return 1
     out=$(_stop_turn_with_background teammate) || return 1
-    assert_output_contains "$out" "cs task queue: 1 background agent still running" "a running teammate holds the run" || return 1
-    assert_eq "2" "$(_qlen)" "nothing is popped while a teammate runs" || return 1
-    assert_output_not_contains "$(_inbox)" '"event":"task_done"' "nothing is logged done while either runs" || return 1
-    out=$(_stop_turn) || return 1
-    assert_output_contains "$out" "next task" "the run goes on once nothing is in flight" || return 1
+    assert_output_not_contains "$out" "still running" "a running teammate does not hold the run" || return 1
+    assert_output_contains "$out" "next task" "the run goes on beside a teammate" || return 1
+    assert_eq "1" "$(_qlen)" "the finished task is popped" || return 1
 }
 
 test_drain_goes_on_past_a_background_shell() {
@@ -645,7 +646,7 @@ run_test test_failure_counter_ignores_a_stale_tmp
 run_test test_failure_counter_still_logs_to_session_log
 run_test test_drain_writes_lifecycle_events
 run_test test_drain_waits_for_background_agents
-run_test test_drain_waits_for_cloud_sessions_and_teammates
+run_test test_drain_waits_for_cloud_sessions_but_not_teammates
 run_test test_drain_goes_on_past_a_background_shell
 run_test test_drain_parks_a_failed_task_while_background_agents_run
 run_test test_task_text_with_quotes_survives_jq_append
