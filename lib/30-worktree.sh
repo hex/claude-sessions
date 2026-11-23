@@ -137,17 +137,11 @@ _record_inherited() {  # meta rel
     return 0
 }
 
-# True when a checkout has uncommitted changes to tracked files (staged or
-# unstaged). Untracked files are a separate question with per-site messages.
-_tree_is_dirty() {
-    ! git -C "$1" diff --quiet 2>/dev/null \
-        || ! git -C "$1" diff --cached --quiet 2>/dev/null
-}
-
 # True when a checkout has uncommitted changes to tracked files outside .cs
 # (staged or unstaged). The conversation and its hooks write the session
 # records under .cs, and cs commits none of them, so a change there is no
-# sign of project work left unfinished.
+# sign of project work left unfinished. Untracked files are a separate
+# question with per-site messages.
 _project_tree_is_dirty() {
     ! git -C "$1" diff --quiet -- . ':(exclude).cs' 2>/dev/null \
         || ! git -C "$1" diff --cached --quiet -- . ':(exclude).cs' 2>/dev/null
@@ -854,7 +848,9 @@ _require_base_commit() {  # base_dir base_name
         || error "Session '$2' has no commit yet, so a feature has nothing to branch from or land on. Make a first commit in $1 (cs commits nothing for you), then try again."
 }
 
-# Gate worktree creation on the base checkout's tracked state. Runs in the
+# Gate worktree creation on the base checkout's tracked project files
+# (_project_tree_is_dirty: its session records under .cs are never a reason
+# to stop). Runs in the
 # main shell so a declined consent can exit cs cleanly (the creator is
 # command-substituted, where an exit only leaves the subshell). Clean base
 # returns; dirty base asks for informed consent on interactive terminals
@@ -864,7 +860,7 @@ confirm_clean_worktree_base() {
     local base_dir="$1" base_name="$2"
     git -C "$base_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
     _require_base_commit "$base_dir" "$base_name"
-    _tree_is_dirty "$base_dir" || return 0
+    _project_tree_is_dirty "$base_dir" || return 0
     if cs_interactive; then
         printf '\n    %b⚠%b  %s has uncommitted changes; the feature branches from the\n       last commit and will not include them.\n' \
             "$YELLOW" "$NC" "$base_name"

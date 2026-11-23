@@ -2733,7 +2733,7 @@ test_integrate_red_gate_leaves_base_untouched() {
 }
 
 # An untracked base file colliding with a path the feature adds must be caught
-# before the gate runs at all: _tree_is_dirty only sees tracked dirt, so
+# before the gate runs at all: _project_tree_is_dirty only sees tracked dirt, so
 # without this check the gate would run to completion and only THEN hit an
 # un-diagnosable ff-only abort.
 test_integrate_refuses_untracked_collision_before_the_gate() {
@@ -6047,7 +6047,7 @@ test_features_excludes_a_lookalike_whose_name_prefixes_a_real_one() {
 run_test test_features_excludes_a_lookalike_whose_name_prefixes_a_real_one
 
 test_features_untracked_is_not_reported_as_dirty() {
-    # _tree_is_dirty deliberately excludes untracked files: a worktree holding
+    # _project_tree_is_dirty deliberately excludes untracked files: a worktree holding
     # only untracked files is NOT dirty, but is still refused, by a different
     # gate with a different message. A porcelain-non-empty test would conflate
     # them and the screen would disagree with the gate.
