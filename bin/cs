@@ -6336,6 +6336,13 @@ $remove_err${trashed:+$nl$trashed}"
                 || error "git worktree remove failed for $wt_dir after deleting part of it, and $known. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
 $remove_err${trashed:+$nl$trashed}"
             rm -rf "$aside"
+            # A removal that deleted tracked files leaves the next /finish
+            # refusing over them.
+            local deleted
+            if ! deleted=$(git -C "$wt_dir" ls-files --deleted 2>/dev/null) || [ -n "$deleted" ]; then
+                error "git worktree remove failed for $wt_dir after deleting part of it. The worktree still holds every session record the feature left uncommitted, so cs deleted the copy it made of them, and the base's records are as they were. Put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
+$remove_err${trashed:+$nl$trashed}"
+            fi
         fi
         error "git worktree remove failed for $wt_dir; nothing was fused or deleted
 $remove_err${trashed:+$nl$trashed}"
@@ -14486,7 +14493,7 @@ _doctor_retire_copy_row() {  # aside worktree_name pid
     local d="$1" wt="$2" pid="$3"
     local base="${wt%%@*}" task="${wt#*@}" wt_dir="$SESSIONS_ROOT/$wt" spare=0
     local base_dir="$SESSIONS_ROOT/$base" copied lead held="" known
-    copied=$(find "$d/cs" -type f 2>/dev/null | head -n 1)
+    copied=$(find "$d/cs" -type f 2>/dev/null) || true
     lead="Retire leftovers: $d holds a copy of the session records of $wt, captured by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone."
     [ -n "$copied" ] \
         || lead="Retire leftovers: $d was made by a /finish retire of $wt (pid $pid) to hold a copy of its session records, which this process cannot see; that retire is probably gone, and it copied none. Delete it with: rm -r \"$d\""

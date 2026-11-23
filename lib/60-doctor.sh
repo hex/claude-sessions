@@ -1093,7 +1093,7 @@ _doctor_retire_copy_row() {  # aside worktree_name pid
     local d="$1" wt="$2" pid="$3"
     local base="${wt%%@*}" task="${wt#*@}" wt_dir="$SESSIONS_ROOT/$wt" spare=0
     local base_dir="$SESSIONS_ROOT/$base" copied lead held="" known
-    copied=$(find "$d/cs" -type f 2>/dev/null | head -n 1)
+    copied=$(find "$d/cs" -type f 2>/dev/null) || true
     lead="Retire leftovers: $d holds a copy of the session records of $wt, captured by a /finish retire (pid $pid), which this process cannot see; that retire is probably gone."
     [ -n "$copied" ] \
         || lead="Retire leftovers: $d was made by a /finish retire of $wt (pid $pid) to hold a copy of its session records, which this process cannot see; that retire is probably gone, and it copied none. Delete it with: rm -r \"$d\""

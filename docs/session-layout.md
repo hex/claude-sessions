@@ -464,6 +464,11 @@ record without committing the deletion, rewrote `timeline.jsonl` instead of
 appending to it, or changed a file the base also holds with other contents.
 The refusal names each path and what to do with it.
 
+One known limit: after a worktree removal that fails part-way, a record line
+the feature had staged with `git add` can reach the base twice when you
+follow the printed steps, once fused by hand from the copy and once by the
+next `/finish`; the base loses no line.
+
 Human-authored prose (`README.md`, `summary.md`) uses the default merge — a
 genuine divergence there is a real conflict a person should reconcile. In a
 session whose `.gitignore` lists `.cs`, the record fuse never merges them:

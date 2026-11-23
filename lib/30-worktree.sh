@@ -1606,6 +1606,13 @@ $remove_err${trashed:+$nl$trashed}"
                 || error "git worktree remove failed for $wt_dir after deleting part of it, and $known. The copy cs made of them is at $aside/cs, and the base's records are as they were. Fuse into $base_dir/.cs by hand what $aside/cs holds and neither $base_dir/.cs nor $wt_dir/.cs does, then delete $aside. Then put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
 $remove_err${trashed:+$nl$trashed}"
             rm -rf "$aside"
+            # A removal that deleted tracked files leaves the next /finish
+            # refusing over them.
+            local deleted
+            if ! deleted=$(git -C "$wt_dir" ls-files --deleted 2>/dev/null) || [ -n "$deleted" ]; then
+                error "git worktree remove failed for $wt_dir after deleting part of it. The worktree still holds every session record the feature left uncommitted, so cs deleted the copy it made of them, and the base's records are as they were. Put back any tracked file the removal deleted, which leaves every other file as it is, and run /finish $task again: git -C \"$wt_dir\" ls-files -z --deleted | xargs -0 git -C \"$wt_dir\" checkout --
+$remove_err${trashed:+$nl$trashed}"
+            fi
         fi
         error "git worktree remove failed for $wt_dir; nothing was fused or deleted
 $remove_err${trashed:+$nl$trashed}"
