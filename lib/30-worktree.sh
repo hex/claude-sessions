@@ -148,18 +148,42 @@ _project_tree_is_dirty() {
 }
 
 # The files of a base checkout a landing would overwrite, given a file that
-# lists every path the landing changes, one per line: "untracked <path>" for
-# one git does not track there, "changed <path>" for a tracked one with
-# uncommitted changes, staged or not. git merge --ff-only refuses over either,
-# and the landing would report that as the base having moved. Fails when git
-# cannot list the base's files.
-_landing_overwrites() {  # base_dir touched_file
+# lists every path the landing changes, one per line, and the commit it
+# lands: "untracked <path>" for one git does not track there, "changed <path>"
+# for a tracked one with uncommitted changes, staged or not, and "carried
+# <path>" for such a one whose uncommitted lines the landing sets aside and
+# puts back (_landing_carries). git merge --ff-only refuses over any, and the
+# landing would report that as the base having moved. Fails when git cannot
+# list the base's files.
+_landing_overwrites() {  # base_dir touched_file landed
     [ -s "$2" ] || return 0
-    local untracked changed
+    local untracked changed path
     untracked=$(git -C "$1" ls-files --others --exclude-standard) || return 1
     changed=$(git -C "$1" diff --name-only HEAD) || return 1
     [ -z "$untracked" ] || printf '%s\n' "$untracked" | { grep -Fxf "$2" || [ $? -eq 1 ]; } | sed 's/^/untracked /'
-    [ -z "$changed" ] || printf '%s\n' "$changed" | { grep -Fxf "$2" || [ $? -eq 1 ]; } | sed 's/^/changed /'
+    [ -z "$changed" ] || printf '%s\n' "$changed" | { grep -Fxf "$2" || [ $? -eq 1 ]; } | while IFS= read -r path; do
+        if _landing_carries "$1" "$path" "$3"; then
+            printf 'carried %s\n' "$path"
+        else
+            printf 'changed %s\n' "$path"
+        fi
+    done
+}
+
+# Whether a landing of <landed> can carry what a base left uncommitted in
+# <path> where it would otherwise overwrite it: the path is the base's
+# timeline or one of its narratives, a plain file there and in <landed>, and
+# it still opens with every byte the base's last commit holds, so what
+# follows is lines to put back after the landing's.
+_landing_carries() {  # base_dir path landed
+    local rel="${2#.cs/}"
+    [ "$2" != "$rel" ] && [ "$(_tracked_record_kind "$rel")" = log ] || return 1
+    [ -f "$1/$2" ] && [ ! -L "$1/$2" ] || return 1
+    case "$(git -C "$1" ls-tree "$3" -- "$2" 2>/dev/null)" in
+        "100644 blob "*|"100755 blob "*) ;;
+        *) return 1 ;;
+    esac
+    _head_blob_is_prefix "$1" "$rel"
 }
 
 # The paths a landing of <branch> into a base can change, one per line: those
@@ -723,7 +747,8 @@ _feature_readiness() {  # base_name task
         || error "Could not list the index of $wt_dir"
     [ -z "$hidden" ] || wt_dirty=1
     # The integrate refuses over project work the base left uncommitted, and
-    # over a session record or an untracked file the landing would overwrite.
+    # over a session record or an untracked file the landing would overwrite,
+    # but for the narrative and timeline lines it carries.
     if _project_tree_is_dirty "$base_dir"; then
         base_dirty=1
     else
@@ -731,12 +756,12 @@ _feature_readiness() {  # base_name task
         landing=$(mktemp "${TMPDIR:-/tmp}/cs-landing.XXXXXX") \
             || error "Could not create a temporary file under ${TMPDIR:-/tmp}"
         if ! _predicted_landing_paths "$base_dir" "$branch" > "$landing" \
-            || ! overwrites=$(_landing_overwrites "$base_dir" "$landing"); then
+            || ! overwrites=$(_landing_overwrites "$base_dir" "$landing" "$branch"); then
             rm -f "$landing"
             error "Could not list what landing $branch would change in $base_dir"
         fi
         rm -f "$landing"
-        [ -z "$overwrites" ] || base_dirty=1
+        [ -z "$(printf '%s\n' "$overwrites" | grep -v '^carried ' || [ $? -eq 1 ])" ] || base_dirty=1
     fi
 
     # The screen does not read either checkout's .claude/settings.local.json,
@@ -1704,6 +1729,9 @@ _make_base_claude_dir() {  # base_dir
 # integrate_feature_worktree, including error's exit 1. Globals because an
 # EXIT trap runs after the function's locals are gone.
 _integrate_cleanup() {
+    # First, while the mutex is still held: a landing that ended between
+    # setting the base's log lines aside and putting them back.
+    _integrate_put_logs_back || true
     if [ -n "${_INTEGRATE_TMP:-}" ]; then
         # Remove if present, then prune regardless: a directory gone with its
         # registration surviving is exactly what prune exists for. A temp
@@ -1733,6 +1761,59 @@ _integrate_cleanup() {
     _INTEGRATE_GATE_LOG=""
     _INTEGRATE_TOUCHED=""
     return 0
+}
+
+# Set aside what a base left uncommitted in the logs a landing is about to
+# change (_landing_carries), given as paths one per line, in
+# $SESSIONS_ROOT/.landing-<worktree>.<pid>: each file whole under whole/, and
+# under cs/ what follows the base's last commit in it. cs/ appears by one
+# rename once every file is copied, so a directory that holds it holds every
+# line. _INTEGRATE_CARRY names the directory from its first moment, for
+# _integrate_put_logs_back.
+_integrate_set_logs_aside() {  # base_dir wt_name paths
+    local aside="$SESSIONS_ROOT/.landing-$2.$$" path rel dir
+    mkdir "$aside" || return 1
+    _INTEGRATE_CARRY="$aside"
+    while IFS= read -r path; do
+        rel="${path#.cs/}"
+        dir=""
+        case "$rel" in */*) dir="/${rel%/*}" ;; esac
+        mkdir -p "$aside/whole$dir" "$aside/lines$dir" \
+            && cp "$1/$path" "$aside/whole/$rel" \
+            && _log_after_head "$1" "$rel" "$aside/whole/$rel" "$aside/lines/$rel" \
+            || return 1
+    done <<< "$3"
+    mv "$aside/lines" "$aside/cs"
+}
+
+# Settle what _integrate_set_logs_aside set aside, wherever the landing
+# stopped. Once the commit in _INTEGRATE_CARRY_ONTO is in the base, each log
+# gains its lines back, unless it ends with them already. Before that, each
+# log that is no longer what it was gets its whole copy back. Deletes the
+# directory when every log is settled; keeps it and says where it is when
+# one is not. Forgets the directory first, so the cleanup handler does
+# nothing after the landing, or an earlier pass of its own, settled it.
+_integrate_put_logs_back() {
+    local aside="${_INTEGRATE_CARRY:-}" base="${_INTEGRATE_BASE_DIR:-}" lines rel file landed="" status=0
+    [ -n "$aside" ] || return 0
+    _INTEGRATE_CARRY=""
+    ! git -C "$base" merge-base --is-ancestor "$_INTEGRATE_CARRY_ONTO" HEAD 2>/dev/null || landed=1
+    for lines in "$aside/cs/timeline.jsonl" "$aside"/cs/memory/narrative.*.md; do
+        [ -f "$lines" ] || continue
+        rel="${lines#"$aside/cs/"}"
+        file="$base/.cs/$rel"
+        if [ -z "$landed" ]; then
+            cmp -s "$aside/whole/$rel" "$file" || cs_write_atomic "$file" cat "$aside/whole/$rel" || status=1
+        elif [ -s "$lines" ] && ! tail -c "$(wc -c < "$lines" | tr -d ' ')" "$file" | cmp -s - "$lines"; then
+            _terminate_jsonl "$file"
+            cs_append_inside "$file" cat "$lines" || status=1
+        fi
+    done
+    if [ "$status" != 0 ]; then
+        warn "Could not put back what the narrative and timeline of $base held uncommitted. $aside holds it: each file as it was under whole/, and under cs/ the lines past its last commit. Put back what $base/.cs lacks, then delete $aside" >&2
+        return 1
+    fi
+    rm -rf "$aside"
 }
 
 # Integrate a feature worktree's captured commit into the base session while
@@ -1847,6 +1928,8 @@ integrate_feature_worktree() {  # base_name task sha [--from-remote [--ci-green]
     _INTEGRATE_TMP=""
     _INTEGRATE_GATE_LOG=""
     _INTEGRATE_TOUCHED=""
+    _INTEGRATE_CARRY=""
+    _INTEGRATE_CARRY_ONTO=""
     # EXIT alone is not enough: a TERM/INT'd bash skips the EXIT trap
     # (measured: exit 143, no cleanup), stranding the mutex and the temp.
     # Same shape as lib/75-launch.sh:112-113. Armed before the pid write: a
@@ -1981,11 +2064,13 @@ $advice"
     # uncommitted change to a session record the merge touches, passes
     # _project_tree_is_dirty and the temp merge itself, then aborts the
     # ff-only landing, which reads as the base having moved. Caught
-    # here, before the gate spends any cost on a doomed landing.
+    # here, before the gate spends any cost on a doomed landing. Lines a
+    # narrative or the timeline gained are no reason to refuse: the landing
+    # carries them, once the gate is through.
     local overwrites entry collisions="" changed=""
     _INTEGRATE_TOUCHED=$(mktemp "${TMPDIR:-/tmp}/cs-touched.XXXXXX")
     git -C "$tmp" diff --name-only "$B" HEAD > "$_INTEGRATE_TOUCHED"
-    overwrites=$(_landing_overwrites "$base_dir" "$_INTEGRATE_TOUCHED") \
+    overwrites=$(_landing_overwrites "$base_dir" "$_INTEGRATE_TOUCHED" "$M") \
         || { rmdir "$no_hooks"; error "Could not list the uncommitted files in $base_dir; base untouched"; }
     while IFS= read -r entry; do
         case "$entry" in
@@ -2090,17 +2175,38 @@ Commit the generated output on the feature branch, then re-run /finish $task"
     fi
     # A session record or an untracked file written while the gate ran is in
     # the way only when the landing changes that path.
-    overwrites=$(_landing_overwrites "$base_dir" "$_INTEGRATE_TOUCHED") \
+    overwrites=$(_landing_overwrites "$base_dir" "$_INTEGRATE_TOUCHED" "$M") \
         || error "Could not list the uncommitted files in $base_dir; base untouched at $B"
-    if [ -n "$overwrites" ]; then
+    local carried="" refused=""
+    while IFS= read -r entry; do
+        case "$entry" in
+            "") ;;
+            "carried "*) carried="$carried${carried:+$'\n'}${entry#carried }" ;;
+            *) refused="$refused${refused:+$'\n'}${entry#* }" ;;
+        esac
+    done <<< "$overwrites"
+    if [ -n "$refused" ]; then
         error "Base $base_dir changed during the gates on paths the feature also changes; base untouched at $B. Paths:
-$(printf '%s\n' "$overwrites" | sed 's/^[a-z]* //')
+$refused
 Commit them in $base_dir (cs leaves session records for you to commit), then re-run /finish $task"
     fi
     # Fast-forward BEFORE removing the temp: until then the merge commit is
     # reachable only from the temp's detached HEAD.
     local R ff_err ff_status=0
     R="$M"
+    # The fast-forward refuses over the lines the base's narrative and
+    # timeline hold uncommitted where the feature changed those files too.
+    # They are set aside, the files go back to the base's last commit, and
+    # the lines are put back once the feature's are in; any exit before
+    # that puts the files back as they were (_integrate_cleanup).
+    if [ -n "$carried" ]; then
+        local -a logs=()
+        while IFS= read -r entry; do logs+=("$entry"); done <<< "$carried"
+        _INTEGRATE_CARRY_ONTO="$R"
+        _integrate_set_logs_aside "$base_dir" "${wt_dir##*/}" "$carried" \
+            && git -C "$base_dir" checkout -q HEAD -- "${logs[@]}" \
+            || error "Could not set aside the lines the narrative and timeline of $base_dir hold uncommitted; base untouched at $B"
+    fi
     _finish_progress_write fast-forward
     ff_err=$(git -C "$base_dir" merge --ff-only "$R" 2>&1 >/dev/null) || ff_status=$?
     if [ "$ff_status" != 0 ]; then
@@ -2116,6 +2222,8 @@ ${ff_err:-(no output from git merge --ff-only)}"
     if [ "$landed" != "$R" ]; then
         warn "A post-merge hook moved $base_dir to $landed after landing $R"
     fi
+    _integrate_put_logs_back \
+        || error "$sha is landed in $base_dir at $landed, but its narrative and timeline lack the lines set aside for the landing (above)"
     # Keep _INTEGRATE_TMP until the removal is verified, so the EXIT cleanup
     # still has the path if this removal fails; a leftover temp is reported,
     # never silently forgotten.
@@ -2710,12 +2818,24 @@ _tracked_record_refusals() {  # wt_dir base_meta task
     rm -f "$plan"
 }
 
+# Write to <out> the bytes of <file> past those a checkout's last commit
+# holds at <rel> under .cs: what a log gained since. A commit whose last
+# line has no newline was ended by the next append, so the empty line that
+# leaves in front is dropped.
+_log_after_head() {  # dir rel file out
+    local blob="HEAD:.cs/$2" size
+    size=$(git -C "$1" cat-file -s "$blob") || return 1
+    if [ -n "$(git -C "$1" cat-file blob "$blob" | tail -c 1)" ]; then
+        tail -c "+$((size + 1))" "$3" | sed '1{/^$/d;}' > "$4"
+    else
+        tail -c "+$((size + 1))" "$3" > "$4"
+    fi
+}
+
 # Write to <out> what a tracked feature appended to the log at <rel> under
 # its .cs since its last commit, in the shape fuse_session_records reads a
 # feature's log in. A log the last commit lacks is copied whole.
-# The timeline: the bytes after the last commit's. A commit whose last line
-# has no newline was ended by the next append, so the empty line that leaves
-# in front is dropped.
+# The timeline: the bytes after the last commit's (_log_after_head).
 # A narrative: its frontmatter (an empty one when it has none), then the
 # bytes after the last commit's; the fuse appends what follows a narrative's
 # frontmatter, so those bytes must not be read as one. A narrative that no
@@ -2729,15 +2849,11 @@ _stage_log_delta() {  # wt_dir rel out
         cp "$file" "$3"
         return
     fi
-    size=$(git -C "$1" cat-file -s "$blob") || return 1
     if [ "$2" = timeline.jsonl ]; then
-        if [ -n "$(git -C "$1" cat-file blob "$blob" | tail -c 1)" ]; then
-            tail -c "+$((size + 1))" "$file" | sed '1{/^$/d;}' > "$3"
-        else
-            tail -c "+$((size + 1))" "$file" > "$3"
-        fi
+        _log_after_head "$1" "$2" "$file" "$3"
         return
     fi
+    size=$(git -C "$1" cat-file -s "$blob") || return 1
     env LC_ALL=C awk 'NR == 1 && $0 != "---" { print "---"; print "---"; exit }
                       { print } NR > 1 && /^---$/ { exit }' "$file" > "$3" || return 1
     if _head_blob_is_prefix "$1" "$2"; then

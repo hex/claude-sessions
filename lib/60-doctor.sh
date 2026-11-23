@@ -1114,6 +1114,32 @@ _doctor_check_retire_asides() {
     done
 }
 
+# /finish's landing sets aside the lines the base's narrative and timeline
+# hold uncommitted, in $SESSIONS_ROOT/.landing-<worktree>.<pid>, when the
+# feature changed those files too, and puts them back once the feature's are
+# in; a landing that exits puts them back first, so only one killed outright
+# leaves the directory. Its cs holds the lines, one file per record, and
+# appears once all are copied: without it no record was touched. Reported
+# under the same rule as a retire's directory: only when the pid is gone.
+_doctor_check_landing_asides() {
+    local d name wt pid base task
+    for d in "$SESSIONS_ROOT"/.landing-*.*; do
+        [ -d "$d" ] || continue
+        name=$(basename "$d")
+        wt="${name#.landing-}"
+        pid="${wt##*.}"
+        wt="${wt%.*}"
+        case "$pid" in ''|*[!0-9]*) continue ;; esac
+        [ "$(_doctor_pid_verdict "$pid")" = stale ] || continue
+        base="${wt%%@*}" task="${wt#*@}"
+        if [ -d "$d/cs" ]; then
+            _doctor_warn "Landing leftovers: $d holds the lines the session records of $base held uncommitted, set aside by a /finish landing of $task (pid $pid), which this process cannot see; that landing is probably gone. Each file under $d/cs holds the lines of the file at the same path under $SESSIONS_ROOT/$base/.cs: append those that file lacks, then delete $d"
+        else
+            _doctor_warn "Landing leftovers: $d was made by a /finish landing of $task into $base (pid $pid), which this process cannot see; that landing is probably gone, and it set no line aside. Delete $d"
+        fi
+    done
+}
+
 # finish-progress.json ends at landed, refused or retired (the outcomes the cs
 # mod's FINISH_OUTCOMES names); a record left at any other step by a pid that
 # is gone belongs to a /finish a signal ended before it wrote one. A live pid
@@ -1251,6 +1277,7 @@ run_doctor() {
     _doctor_check_iterm2
     _doctor_check_spawn
     _doctor_check_retire_asides
+    _doctor_check_landing_asides
     _doctor_check_remote
     _doctor_check_config
     _doctor_check_hook_authority

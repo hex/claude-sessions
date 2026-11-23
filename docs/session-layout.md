@@ -434,6 +434,13 @@ and gains each feature pointer whose target it does not name, and a base with
 no archive takes the feature's whole. A feature that never changed the
 archive it inherited brings nothing back, so the base's deletions stand.
 
+The landing fast-forwards the base, which git refuses over an uncommitted
+change to a file the feature also changed. For `timeline.jsonl` and
+`narrative.*.md`, `/finish` sets the lines the base holds past its last
+commit aside, lands, and appends them after the feature's, uncommitted. It
+refuses, naming the paths, for any other record, and for a log whose
+committed lines the base changed.
+
 Git merges only what the feature committed. The retire commits nothing, so
 when `/finish` retires a feature whose base tracks `.cs/`, it fuses what
 the feature left uncommitted under `.cs/` into the base's working tree and
@@ -442,7 +449,7 @@ leaves it there uncommitted, for you to commit with the base's own records:
 - `timeline.jsonl`: the base's file gains the lines after the feature's
   last commit.
 - `narrative.*.md`: the same, and after `cs -narrative rotate` in the
-  feature, the lines the feature's last commit lacks.
+  feature, the lines the feature added to those of its last commit.
 - `MEMORY.md` and `reference_memory_archive.md`: the base's copy gains each
   pointer whose target it does not name.
 - `README.md` and `summary.md`: the feature's copy goes to

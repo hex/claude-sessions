@@ -2375,48 +2375,56 @@ test_integrate_lands_over_base_session_records_it_does_not_touch() {
     assert_eq "$line" "$(tail -n 1 "$base_dir/$narrative")" "the base's line is still its last" || return 1
 }
 
-# A feature that committed a line to the narrative the base has an uncommitted
-# line in cannot land: the fast-forward would overwrite the base's line. The
-# refusal names the path before any gate runs.
+# A feature that committed a change to a record the base holds an uncommitted
+# change in cannot land when the record is not a log cs appends to: the
+# fast-forward would overwrite the base's change. The refusal names the path
+# before any gate runs. So does a narrative whose committed lines the base
+# rewrote: what it holds uncommitted is then not lines to put back.
 test_integrate_refuses_a_landing_that_overwrites_base_session_records() {
-    local base_dir wt sha narrative head output status=0 line="- base note $RANDOM$RANDOM"
+    local base_dir wt sha narrative readme=".cs/README.md" head output status=0 line="the base's objective $RANDOM$RANDOM"
     base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
     narrative=$(_narrative_rel "$base_dir")
     cs_launch "myproj@fix-auth"
     wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "the feature's objective" >> "$wt/$readme"
     echo "- feature note" >> "$wt/$narrative"
-    (cd "$wt" && git add "$narrative" && git commit -q -m "feature narrative")
+    (cd "$wt" && git add "$readme" "$narrative" && git commit -q -m "feature records")
     sha=$(git -C "$wt" rev-parse HEAD)
-    printf '%s\n' "$line" >> "$base_dir/$narrative"
+    printf '%s\n' "$line" >> "$base_dir/$readme"
+    printf -- '- the narrative, rewritten\n' > "$base_dir/$narrative"
+    cp "$base_dir/$narrative" "$TEST_TMPDIR/narrative"
     head=$(git -C "$base_dir" rev-parse HEAD)
     output=$("$CS_BIN" myproj -integrate-feature fix-auth "$sha" -- sh -c 'echo ran > "$0"' "$TEST_TMPDIR/gate-ran" 2>&1) || status=$?
     assert_eq "1" "$status" "the integrate refuses: $output" || return 1
     assert_eq "Error: Uncommitted changes in $base_dir are on paths the feature also changes, and landing would overwrite them; base untouched. Paths:
+$readme
 $narrative
-Commit them in $base_dir (cs leaves session records for you to commit), then re-run /finish fix-auth" "$output" "the refusal names the path" || return 1
+Commit them in $base_dir (cs leaves session records for you to commit), then re-run /finish fix-auth" "$output" "the refusal names both paths" || return 1
     assert_not_exists "$TEST_TMPDIR/gate-ran" "no gate ran" || return 1
     assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
-    assert_eq "$line" "$(tail -n 1 "$base_dir/$narrative")" "the base's uncommitted line is still there" || return 1
+    assert_eq "$line" "$(tail -n 1 "$base_dir/$readme")" "the base's uncommitted README line is still there" || return 1
+    cmp -s "$TEST_TMPDIR/narrative" "$base_dir/$narrative" || { echo "  FAIL: the rewritten narrative is not what it was"; return 1; }
+    assert_eq "" "$(find "$CS_SESSIONS_ROOT" -maxdepth 1 -name '.landing-*')" "nothing was set aside" || return 1
 }
 
 # A gate that writes a base session record is refused only when the feature
-# changes that record too: then the landing would overwrite what the gate
-# wrote. A record the feature leaves alone stays as the gate left it, and the
-# feature lands.
+# changes that record too and it is not a log cs appends to: then the landing
+# would overwrite what the gate wrote. A record the feature leaves alone
+# stays as the gate left it, and the feature lands.
 test_integrate_rechecks_session_records_the_gate_dirtied() {
-    local base_dir wt sha narrative head output status=0
+    local base_dir wt sha narrative readme=".cs/README.md" head output status=0
     base_dir=$(_tracked_base proja) || { echo "  FAIL: fixture: the first base tracks its narrative"; return 1; }
     narrative=$(_narrative_rel "$base_dir")
     cs_launch "proja@fix-auth"
     wt="$CS_SESSIONS_ROOT/proja@fix-auth"
-    echo "- feature note" >> "$wt/$narrative"
-    (cd "$wt" && git add "$narrative" && git commit -q -m "feature narrative")
+    echo "the feature's objective" >> "$wt/$readme"
+    (cd "$wt" && git add "$readme" && git commit -q -m "feature README")
     sha=$(git -C "$wt" rev-parse HEAD)
     head=$(git -C "$base_dir" rev-parse HEAD)
-    output=$("$CS_BIN" proja -integrate-feature fix-auth "$sha" -- sh -c 'echo "- gate note" >> "$0"' "$base_dir/$narrative" 2>&1) || status=$?
+    output=$("$CS_BIN" proja -integrate-feature fix-auth "$sha" -- sh -c 'echo "the gate was here" >> "$0"' "$base_dir/$readme" 2>&1) || status=$?
     assert_eq "1" "$status" "the integrate refuses: $output" || return 1
     assert_eq "Error: Base $base_dir changed during the gates on paths the feature also changes; base untouched at $head. Paths:
-$narrative
+$readme
 Commit them in $base_dir (cs leaves session records for you to commit), then re-run /finish fix-auth" "$output" "the refusal names the path the gate wrote" || return 1
     assert_eq "$head" "$(git -C "$base_dir" rev-parse HEAD)" "base HEAD unchanged" || return 1
 

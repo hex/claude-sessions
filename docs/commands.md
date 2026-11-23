@@ -106,7 +106,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 | Doctor area | Checks |
 |---|---|
 | Installation | Secrets backend, hooks, and statusline registration. |
-| Session | Shadow refs, memory writability, project tokens, and migration stamp. `/finish` leftovers it names but never deletes, once their pid is gone: a `.retire-<base>@<task>.<pid>` directory at the sessions root and a `finish-progress.json` stopped before an outcome. |
+| Session | Shadow refs, memory writability, project tokens, and migration stamp. `/finish` leftovers it names but never deletes, once their pid is gone: a `.retire-<base>@<task>.<pid>` or `.landing-<base>@<task>.<pid>` directory at the sessions root and a `finish-progress.json` stopped before an outcome. |
 | Claude Code | Settings counts and cs/cs-update runtime markers. |
 | Settings files | How many settings this machine's and this session's files hold, each line they skip and why, and each value your environment hides from a file. |
 | Authority | Context-injecting hooks and their opt-outs, and where each switch your environment or a settings file sets comes from. |
@@ -161,6 +161,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 - Finish captures the feature commit, merges in a detached temporary worktree, fast-forwards the base, and reports any GitHub pull request.
 - Ordinary feature branches use a merge with `--no-ff`.
 - Finish runs no gate unless requested with `--gate`.
+- Where the feature committed lines to the base's `timeline.jsonl` or a `narrative.*.md` and the base holds lines of its own there uncommitted, the landing sets the base's lines aside in `<sessions root>/.landing-<base>@<task>.<pid>`, fast-forwards, and appends them after the feature's, still uncommitted. A landing that fails puts the files back as they were. One killed before it puts them back leaves the directory; `cs -doctor` names it once that pid is gone and says which lines to append by hand. Any other record both sides changed, and a log whose committed lines the base rewrote, still refuses by name.
 - It reports `gate skipped` only for an already-merged pull request with passing recorded merge checks and no extra base commits.
 - A clean gate checkout lacks ignored dependencies, environment files, and build output. A gate needing them must install them, for example `-- sh -c 'npm ci && npm test'`.
 - See [merge policy](session-layout.md#merge-policy) for record fusion, preserving the base's memory index, and `.cs/features/<task>/` outcomes.
