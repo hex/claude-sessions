@@ -433,12 +433,41 @@ _conversations_move_refusal() {  # session_dir, plain_dir, what to do about a ru
     return 1
 }
 
+# Claude Code names a project folder after the path its claude ran in, with
+# every character that is no letter or digit turned into a dash, so session
+# foo-bar and a claude run in foo/bar keep their conversations in one folder.
+# Each line of a conversation records that path as cwd. A conversation with
+# a cwd that is not the session's, yet takes the same folder name, belongs to
+# the other path: its file and that path go in CS_MOVE_REFUSAL's sentence,
+# and the folder stays, since what else it holds (memory/, the index) cannot
+# be told apart by owner. A cwd under another folder name is this session's
+# claude after a cd. Returns 1 when every conversation is the session's.
+_foreign_conversation_refusal() {  # session_dir, plain_dir
+    local f cwds cwd resolved
+    CS_MOVE_REFUSAL=""
+    resolved=$(cd -- "$1" 2>/dev/null && pwd -P) || resolved=$1
+    for f in "$2"/*.jsonl; do
+        [ -f "$f" ] || continue
+        cwds=$(LC_ALL=C grep -o '"cwd":"[^"]*"' "$f" 2>/dev/null | sort -u) || cwds=""
+        while IFS= read -r cwd; do
+            cwd=${cwd#\"cwd\":\"}
+            cwd=${cwd%\"}
+            [ -n "$cwd" ] && [ "$cwd" != "$1" ] && [ "$cwd" != "$resolved" ] || continue
+            [ "$(_claude_encode_path "$cwd")" = "${2##*/}" ] || continue
+            CS_MOVE_REFUSAL="$f is a conversation claude held in $cwd, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $2 into the vault. They stay outside it, in plain text."
+            return 0
+        done <<< "$cwds"
+    done
+    return 1
+}
+
 # A session cs -encrypt sealed before it moved conversations keeps them in
 # the shell's projects folder, where its claude, on the vault's config, never
 # looks. With the vault mounted, the open moves them in as cs -encrypt does,
 # and says so; the folder is gone after, so the next open has nothing to do.
-# A link, a name on both sides, or a claude writing there is named instead,
-# and the open goes on with nothing moved. The move runs under the openers'
+# A link, a name on both sides, a claude writing there, or a conversation of
+# another path in the folder is named instead, and the open goes on with
+# nothing moved. The move runs under the openers'
 # mutex, so a second open started beside this one finds the folder gone
 # rather than copying it again into the one this open just made; an open
 # that cannot take the mutex stops, as its launch would.
@@ -475,6 +504,10 @@ _move_plain_conversations_under_mutex() {  # session_name, session_dir, plain_di
         warn "$1: $entry is in the vault too, as .cs/claude-config/projects/${plain##*/}/${entry##*/}, so cs moved none of the conversations in $plain. Keep the copy you want in the vault, remove the other, then reopen."
         return 0
     done
+    if _foreign_conversation_refusal "$2" "$plain"; then
+        warn "$1: $CS_MOVE_REFUSAL"
+        return 0
+    fi
     _move_conversations_into_vault "$plain" "$vault" || rc=$?
     case "$rc" in
         0) ;;
@@ -555,10 +588,13 @@ run_encrypt() {
     # the vault mounted; a removal that stops leaves whole copies in the
     # vault, so cs -encrypt names what is left and finishes. A project dir
     # that is a link is left alone: moving the link would move no conversation.
-    # Conversations a running claude writes stay too, for the next open.
+    # Conversations a running claude writes stay too, for the next open, and
+    # so does a folder that holds another path's conversations.
     if [ ! -d "$transcripts" ] || [ -L "$transcripts" ]; then
         :
     elif _conversations_move_refusal "$SESSIONS_ROOT/$name" "$transcripts" "The next open moves them once it has ended."; then
+        warn "$name: $CS_MOVE_REFUSAL"
+    elif _foreign_conversation_refusal "$SESSIONS_ROOT/$name" "$transcripts"; then
         warn "$name: $CS_MOVE_REFUSAL"
     else
         _move_conversations_into_vault "$transcripts" "$mnt/claude-config/projects/${transcripts##*/}" || move_rc=$?
