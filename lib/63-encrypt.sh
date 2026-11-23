@@ -415,9 +415,12 @@ _plain_claude_writer() {  # session_dir
 # looks. With the vault mounted, the open moves them in as cs -encrypt does,
 # and says so; the folder is gone after, so the next open has nothing to do.
 # A link, a name on both sides, or a claude writing there is named instead,
-# and the open goes on with nothing moved.
+# and the open goes on with nothing moved. The move runs under the openers'
+# mutex, so a second open started beside this one finds the folder gone
+# rather than copying it again into the one this open just made; an open
+# that cannot take the mutex stops, as its launch would.
 _move_plain_conversations_at_open() {  # session_name, session_dir
-    local meta="$2/.cs" plain vault entry writer rc=0
+    local meta="$2/.cs" plain mutex="$2/.cs/session.mutex.lock"
     [ -f "$meta/local/vault" ] && [ -L "$meta/claude-config" ] || return 0
     _vault_mountpoint_if_mounted "$meta" >/dev/null || return 0
     plain=$(_plain_claude_project_dir "$2")
@@ -425,6 +428,15 @@ _move_plain_conversations_at_open() {  # session_name, session_dir
         warn "$1: $plain is a link, so cs moved nothing from it; the conversations in the folder it points to stay outside the vault, in plain text."
         return 0
     fi
+    [ -d "$plain" ] || return 0
+    _cs_lock "$mutex" \
+        || error "$1: another cs is opening this session ($mutex is held), so cs moved none of its conversations into the vault; try again in a moment."
+    _move_plain_conversations_under_mutex "$1" "$2" "$plain"
+    _cs_unlock "$mutex"
+}
+
+_move_plain_conversations_under_mutex() {  # session_name, session_dir, plain_dir
+    local meta="$2/.cs" plain="$3" vault entry writer rc=0
     [ -d "$plain" ] || return 0
     if writer=$(_plain_claude_writer "$2"); then
         warn "$1: a claude (pid $writer) runs in this session outside cs and writes its conversations to $plain, so cs moved none of them into the vault. Reopen once it has ended."
