@@ -963,6 +963,24 @@ test_worktree_create_never_copies_the_permission_settings() {
     assert_output_not_contains "$created" "that .worktreeinclude names" "and counts no copy" || return 1
 }
 
+# git lists the files .worktreeinclude names from every directory of the base
+# it can read and exits 0, warning of each it cannot. A file named under one
+# of those is not copied, and the launch says so with git's own lines.
+test_worktree_create_says_which_directories_git_could_not_list() {
+    _included_base "incdir" "local/*.json"
+    local base_dir="$CS_SESSIONS_ROOT/incdir" wt="$CS_SESSIONS_ROOT/incdir@task1" output status=0
+    mkdir -p "$base_dir/local/inner"
+    printf '{"k":2}\n' > "$base_dir/local/inner/t.json"
+    chmod 000 "$base_dir/local/inner"
+    output=$("$CS_BIN" "incdir@task1" < /dev/null 2>&1) || status=$?
+    chmod 755 "$base_dir/local/inner"
+    assert_eq "0" "$status" "the feature is created: $output" || return 1
+    assert_eq '{"k":1}' "$(cat "$wt/local/s.json" 2>/dev/null)" "a file git could list is copied" || return 1
+    assert_eq "git could not read every directory of $base_dir, so a file .worktreeinclude names in one of these is not copied:
+warning: could not open directory 'local/inner/': Permission denied" \
+        "$(printf '%s\n' "$output" | grep -F -A1 "git could not read every directory of")" "the launch says what git could not read" || return 1
+}
+
 # A stand-in git whose listing of the files .worktreeinclude names fails once
 # git worktree add has run; every other call goes to git. Prints the
 # directory to put first on PATH.
@@ -2410,6 +2428,7 @@ run_test test_worktree_create_copies_no_link
 run_test test_worktree_create_keeps_a_file_the_feature_already_has
 run_test test_worktree_create_never_copies_the_permission_settings
 run_test test_worktree_create_lists_the_included_files_before_the_worktree_exists
+run_test test_worktree_create_says_which_directories_git_could_not_list
 run_test test_worktree_create_refuses_a_worktreeinclude_git_cannot_read
 run_test test_worktree_reopen_preserves_project_claude_md
 run_test test_worktree_reopen_refuses_a_symlinked_cs_local
