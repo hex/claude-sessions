@@ -4726,6 +4726,31 @@ test_retire_tracked_mode_refuses_what_the_fuse_cannot_carry() {
 
 run_test test_retire_tracked_mode_refuses_what_the_fuse_cannot_carry
 
+# A log committed with nothing in it is a log like any other: the features
+# screen and the retire read what the feature appended to it and print
+# nothing else.
+test_retire_tracked_mode_carries_a_log_committed_empty() {
+    local base_dir wt sha line output status=0 token="$RANDOM$RANDOM"
+    base_dir=$(_tracked_base myproj) || { echo "  FAIL: fixture: the base tracks its narrative and index"; return 1; }
+    : > "$base_dir/.cs/timeline.jsonl"
+    (cd "$base_dir" && git add -f .cs/timeline.jsonl && git commit -q -m "an empty timeline")
+    cs_launch "myproj@fix-auth"
+    wt="$CS_SESSIONS_ROOT/myproj@fix-auth"
+    echo "fix" > "$wt/feature.txt"
+    (cd "$wt" && git add feature.txt && git commit -q -m "feature work")
+    printf '{"event":"from-feature-%s"}\n' "$token" >> "$wt/.cs/timeline.jsonl"
+    sha=$(land_feature myproj fix-auth) || { echo "  FAIL: integrate fixture"; return 1; }
+    assert_eq "0" "$(git -C "$wt" cat-file -s HEAD:.cs/timeline.jsonl)" "fixture: the feature's last commit holds an empty timeline" || return 1
+    line=$("$CS_BIN" myproj -features --porcelain 2>&1)
+    assert_eq "1" "$(printf '%s\n' "$line" | grep -c .)" "the features screen prints its one record and nothing else: $line" || return 1
+    output=$("$CS_BIN" myproj -retire-feature fix-auth "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire goes through: $output" || return 1
+    assert_eq "retired fix-auth $sha" "$output" "the retire prints its outcome and nothing else" || return 1
+    assert_eq "1" "$(grep -c -F "from-feature-$token" "$base_dir/.cs/timeline.jsonl")" "the line the feature appended is in the base once" || return 1
+}
+
+run_test test_retire_tracked_mode_carries_a_log_committed_empty
+
 # /wrap rotates a narrative over its budget: the oldest sections move to an
 # archive file and the narrative is rewritten without them. The retire
 # carries the lines the feature's last commit lacks and the archive file, so
