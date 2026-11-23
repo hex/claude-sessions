@@ -678,6 +678,48 @@ test_retire_lists_what_it_trashed_when_the_removal_then_fails() {
     assert_dir "$wt" "the worktree survives" || return 1
 }
 
+# A file the .worktreeinclude copy placed, still the base's bytes at the
+# retire, is no one's work: the base keeps it. It goes with the worktree,
+# out of the trash and out of the count, and it keeps the directory it is in
+# from going to the trash whole. A copy the feature changed is the user's.
+test_retire_leaves_out_of_the_trash_an_ignored_file_the_base_holds_byte_for_byte() {
+    _included_base "incret" ".env" "build.log" "local/*.json"
+    local base_dir="$CS_SESSIONS_ROOT/incret" wt="$CS_SESSIONS_ROOT/incret@task1" sha bin output status=0
+    cs_launch "incret@task1"
+    assert_eq '{"k":1}' "$(cat "$wt/local/s.json" 2>/dev/null)" "fixture: the create copied the named files" || return 1
+    echo "done" > "$wt/result.txt"
+    (cd "$wt" && git add result.txt && git commit -q -m "task")
+    sha=$(land_feature incret task1) || { echo "  FAIL: integrate fixture"; return 1; }
+    printf 'A=2\n' > "$wt/.env"
+    printf 'notes\n' > "$wt/local/mine.txt"
+    bin=$(fake_trash_bin moves trash)
+    output=$(PATH="$bin:$PATH" "$CS_BIN" incret -retire-feature task1 "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire succeeds: $output" || return 1
+    assert_eq "$wt/.env
+$wt/local/mine.txt" "$(cat "$TEST_TMPDIR/trash.log")" "the trash gets the changed copy and the feature's own file, and no unchanged copy" || return 1
+    assert_output_contains "$output" "Moved 2 ignored files to the system trash:" "the count leaves the unchanged copies out" || return 1
+    assert_not_exists "$wt" "the worktree is retired" || return 1
+    assert_eq "log" "$(cat "$base_dir/build.log")" "the base keeps its own file" || return 1
+}
+
+# With no trash command, a feature whose only ignored files are unchanged
+# copies of the base's still retires.
+test_retire_without_a_trash_command_goes_through_over_unchanged_copies() {
+    _included_base "incnotrash" ".env" "local/*.json"
+    local wt="$CS_SESSIONS_ROOT/incnotrash@task1" sha bin="$TEST_TMPDIR/no-trash-bin" output status=0
+    cs_launch "incnotrash@task1"
+    assert_eq "A=1" "$(cat "$wt/.env" 2>/dev/null)" "fixture: the create copied the env file" || return 1
+    echo "done" > "$wt/result.txt"
+    (cd "$wt" && git add result.txt && git commit -q -m "task")
+    sha=$(land_feature incnotrash task1) || { echo "  FAIL: integrate fixture"; return 1; }
+    link_path_without "$bin" trash
+    rm -f "$bin/gio"
+    output=$(PATH="$bin" "$CS_BIN" incnotrash -retire-feature task1 "$sha" 2>&1) || status=$?
+    assert_eq "0" "$status" "the retire goes through: $output" || return 1
+    assert_output_not_contains "$output" "system trash" "nothing is said of the trash" || return 1
+    assert_not_exists "$wt" "the worktree is retired" || return 1
+}
+
 # Where macOS's trash is missing, GLib's `gio trash` stands in.
 test_retire_moves_ignored_work_with_gio_when_trash_is_missing() {
     local wt="$CS_SESSIONS_ROOT/proj@task1" sha bin="$TEST_TMPDIR/no-trash-bin" gio output status=0
@@ -2195,6 +2237,8 @@ run_test test_retire_moves_ignored_work_to_the_system_trash
 run_test test_retire_deletes_regenerable_trees_with_the_worktree
 run_test test_retire_refuses_when_the_trash_command_fails
 run_test test_retire_refuses_without_a_trash_command
+run_test test_retire_leaves_out_of_the_trash_an_ignored_file_the_base_holds_byte_for_byte
+run_test test_retire_without_a_trash_command_goes_through_over_unchanged_copies
 run_test test_retire_moves_ignored_work_with_gio_when_trash_is_missing
 run_test test_retire_refuses_before_it_trashes_anything
 run_test test_retire_moves_an_ignored_file_whose_name_holds_a_newline
