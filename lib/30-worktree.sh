@@ -948,10 +948,30 @@ _path_goes_through_a_link() {  # root, relative path
     done
 }
 
+# Writes to <out> the base's files that its .worktreeinclude names and git
+# ignores, each ended by a NUL. Fails, leaving what git said in
+# _CS_WORKTREEINCLUDE_ERROR, when git cannot list them: an unreadable
+# .worktreeinclude would otherwise read as one that names nothing.
+_worktree_included_list() {  # base_dir out
+    local base="$1" named status=0
+    _CS_WORKTREEINCLUDE_ERROR=""
+    named=$(mktemp "${TMPDIR:-/tmp}/cs-worktreeinclude.XXXXXX") || return 1
+    if _CS_WORKTREEINCLUDE_ERROR=$(git -C "$base" ls-files -z --others --ignored \
+            --exclude-from="$base/.worktreeinclude" 2>&1 > "$named"); then
+        # check-ignore exits 1 when it names no path.
+        _CS_WORKTREEINCLUDE_ERROR=$(git -C "$base" check-ignore -z --stdin < "$named" 2>&1 > "$2") \
+            || [ $? -eq 1 ] || status=1
+    else
+        status=1
+    fi
+    rm -f "$named"
+    return "$status"
+}
+
 # Copies into a feature's checkout the base's files that its .worktreeinclude
 # names and git ignores (an env file, a local config), which a checkout never
 # carries. The file reads as a .gitignore does, as Claude Code reads it for
-# the worktrees it makes itself. Left where they are: a file the feature
+# the worktrees it makes itself (_worktree_included_list). Left where they are: a file the feature
 # already has, cs's own records, .claude/settings.local.json (cs writes the
 # feature's, and the retire adds every permission rule it holds to the
 # base's, so a copy would hand the base back a rule it dropped meanwhile), a
@@ -960,9 +980,16 @@ _path_goes_through_a_link() {  # root, relative path
 # the feature. One check-ignore answers for the
 # whole list. Runs command-substituted with its caller, so every line it says
 # goes to stderr.
+# Fails, having copied nothing, when git cannot list them
+# (_CS_WORKTREEINCLUDE_ERROR).
 _worktree_carry_included() {  # base_dir wt_dir
-    local base="$1" wt="$2" f dest copied=0
+    local base="$1" wt="$2" f dest copied=0 list
     [ -f "$base/.worktreeinclude" ] || return 0
+    list=$(mktemp "${TMPDIR:-/tmp}/cs-worktreeinclude.XXXXXX") || return 1
+    if ! _worktree_included_list "$base" "$list"; then
+        rm -f "$list"
+        return 1
+    fi
     while IFS= read -r -d '' f; do
         case "$f" in */|.cs/*|CLAUDE.local.md) continue ;; esac
         if [ "$f" = .claude/settings.local.json ]; then
@@ -984,8 +1011,8 @@ _worktree_carry_included() {  # base_dir wt_dir
         else
             warn "Not copied: $(_printable_name "$f")" >&2
         fi
-    done < <(git -C "$base" ls-files -z --others --ignored --exclude-from="$base/.worktreeinclude" \
-        | git -C "$base" check-ignore -z --stdin)
+    done < "$list"
+    rm -f "$list"
     [ "$copied" = 0 ] \
         || info "Copied $copied ignored file$([ "$copied" = 1 ] || printf s) that .worktreeinclude names" >&2
 }
@@ -1032,6 +1059,13 @@ create_worktree_session() {
         printf '%s\n' "$untracked" >&2
     fi
 
+    # Listed once before the worktree exists, so a .worktreeinclude git
+    # cannot read leaves nothing behind.
+    local included_error="Could not list the files that $base_dir/.worktreeinclude names"
+    [ ! -f "$base_dir/.worktreeinclude" ] || _worktree_included_list "$base_dir" /dev/null \
+        || error "$included_error, so no feature was created:
+$_CS_WORKTREEINCLUDE_ERROR"
+
     if git -C "$base_dir" rev-parse -q --verify "refs/heads/$branch" >/dev/null 2>&1; then
         # The branch's own tip, not the base's HEAD, is where the feature
         # starts; say so, with how far behind the base that tip sits.
@@ -1047,7 +1081,9 @@ create_worktree_session() {
     # The checkout can carry a committed link or per-actor state from the
     # base's history; refuse before the state writes below go through it.
     cs_assert_local_untracked "$wt_dir"
-    _worktree_carry_included "$base_dir" "$wt_dir"
+    _worktree_carry_included "$base_dir" "$wt_dir" \
+        || error "$included_error, so the feature at $wt_dir has none of them:
+$_CS_WORKTREEINCLUDE_ERROR"
 
     if [ "$mode" = "ignored" ]; then
         bootstrap_worktree_meta "$wt_dir" "$base_name" "$task" "$base_dir"
