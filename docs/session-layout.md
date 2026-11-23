@@ -304,6 +304,21 @@ only a volume a listed holder keeps, and otherwise unmounts the volume and
 asks for the password. An open that stops before Claude Code starts
 (a refusal, or a cancelled prompt) unmounts the volume it mounted.
 
+A session encrypted before cs moved conversations into the vault still keeps
+them in your config dir's `projects/<session path>/`, where its Claude Code no
+longer looks. The first open with the vault mounted moves them into the volume's
+`claude-config/projects/` before it works out which conversation to continue,
+and prints `<name>: moved this session's conversations from <folder> into its
+vault.` When the volume already holds a folder for the session, each entry joins
+it, and cs removes an empty folder outside (Claude Code makes an empty `memory/`
+in every project folder) instead. The open moves nothing, says why and opens the
+session anyway when the folder is a link (it warns at every open), when an entry
+with content is both outside and in the volume, or when Claude Code lists a running
+claude in `sessions/<pid>.json` under your config dir whose working directory is
+the session. If a move fails part-way, the open stops and lists what moved; since
+`mv` copies across volumes before it removes, the next open names anything left
+in both places.
+
 Every open that mounts or joins the volume adds its process id to
 `.cs/local/vault-holders`. A process that replaces itself with Claude Code
 keeps its id, so the entry stays valid while that conversation runs. cs
@@ -331,7 +346,7 @@ mounted, since the volume may then hold the only whole copy of them. Until you u
 what is still in plaintext from before: conversations started from another folder (a subfolder of the session, say) in `projects/` and the session's
 lines in `history.jsonl` under your Claude Code config dir (`$CLAUDE_CONFIG_DIR`,
 else `~/.claude`), its entries in `.claude.json` (inside `$CLAUDE_CONFIG_DIR`
-when you set it, else `~/.claude.json`) and that file's backups, what else Claude Code kept for its conversations there (`file-history/`, `tasks/`, `debug/`, `paste-cache/`), git history, and backups. It lists `.cs/summary.md` and `.cs/brief.md` apart, as files that always stay in plaintext.
+when you set it, else `~/.claude.json`) and that file's backups, what else Claude Code kept for its conversations there (`file-history/`, `tasks/`, `debug/`, `paste-cache/`), git history, and backups, and, when the session's conversations folder is a link, that link and the folder it points to, which `cs -encrypt` leaves where they are. It lists `.cs/summary.md` and `.cs/brief.md` apart, as files that always stay in plaintext.
 
 ### Setting it up by hand
 
