@@ -19587,6 +19587,9 @@ main() {
             return $?
             ;;
         -encrypt)
+            # The password rows follow the terminal's theme, as an open's do.
+            _export_term_theme
+            setup_palette
             shift
             run_encrypt "$@"
             return $?
