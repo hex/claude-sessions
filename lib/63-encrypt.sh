@@ -294,40 +294,113 @@ _plain_claude_project_dir() {  # session_dir
 
 # An empty folder holds nothing to move: Claude Code makes an empty memory/ in
 # every project folder, so the one outside and the one in the vault are no
-# clash, and the one outside is removed.
+# clash, and the one outside is removed. One in the vault makes way for a
+# folder of the same name from outside.
 _empty_real_dir() {  # path
     [ -d "$1" ] && [ ! -L "$1" ] && [ -z "$(ls -A -- "$1" 2>/dev/null)" ]
 }
 
-# Moves a session's conversations folder into the vault's. A vault without
-# one takes the whole folder in one mv; one that has it takes each entry, so
-# the caller checks first that no name is on both sides. mv across volumes
-# copies, then removes the source, and can stop in either half. On a failure,
-# CS_MOVE_ERROR holds what mv said and CS_MOVED_ENTRIES what moved before it.
+# True when two paths hold the same content: two links to one target, two
+# files byte for byte, or two folders entry for entry.
+_same_content() {  # path, path
+    if [ -L "$1" ] || [ -L "$2" ]; then
+        [ -L "$1" ] && [ -L "$2" ] && [ "$(readlink "$1")" = "$(readlink "$2")" ]
+    elif [ -d "$1" ] && [ -d "$2" ]; then
+        diff -r "$1" "$2" >/dev/null 2>&1
+    elif [ -f "$1" ] && [ -f "$2" ]; then
+        cmp -s "$1" "$2"
+    else
+        return 1
+    fi
+}
+
+# Ends a copy into the vault that stopped: removes the staging folder this
+# run made and leaves what the tool said in CS_MOVE_ERROR.
+_conversations_copy_stopped() {  # staging_dir, what the tool said
+    local out
+    CS_MOVE_ERROR=$2
+    out=$(rm -rf "$1" 2>&1) || CS_MOVE_ERROR="$2; removing $1 failed too: $out"
+}
+
+# Moves the entries of a session's conversations folder into the vault's.
+# The copy into the vault can stop part-way, on a full disk, so it lands in a
+# staging folder beside the vault's projects folder: an entry is renamed into
+# the session's folder only once all of them are copied, and what is outside
+# is removed only once all of them are in place. An entry whose name the
+# vault already holds is not copied: the caller checked that the vault's is
+# an empty folder, which makes way, or has the same content, so the one
+# outside only goes.
+# Returns 0 with nothing left outside; 1 with everything outside as it was;
+# 2 with whole copies in the vault and something outside that would not go.
+# CS_MOVED_ENTRIES names what reached the session's folder in the vault,
+# CS_REMOVED_COPIES what only went from outside, and CS_MOVE_ERROR holds what
+# the tool that stopped said.
 _move_conversations_into_vault() {  # plain_dir, vault_dir
-    local entry out
+    local staging="${2%/*}.cs-moving.$$" entry name out
+    local -a outside=() copied=()
     CS_MOVE_ERROR=""
     CS_MOVED_ENTRIES=""
-    if [ ! -e "$2" ] && [ ! -L "$2" ]; then
-        out=$(mkdir -p "${2%/*}" 2>&1 && mv "$1" "${2%/*}/" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
-        return 0
-    fi
+    CS_REMOVED_COPIES=""
     for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
         [ -e "$entry" ] || [ -L "$entry" ] || continue
-        if _empty_real_dir "$entry"; then
-            out=$(rmdir "$entry" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
-            continue
+        name=${entry##*/}
+        outside+=("$name")
+        _empty_real_dir "$entry" && continue
+        if [ -e "$2/$name" ] || [ -L "$2/$name" ]; then
+            _empty_real_dir "$2/$name" || { CS_REMOVED_COPIES="$CS_REMOVED_COPIES $name"; continue; }
         fi
-        out=$(mv "$entry" "$2/" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
-        CS_MOVED_ENTRIES="$CS_MOVED_ENTRIES ${entry##*/}"
+        copied+=("$name")
     done
-    out=$(rmdir "$1" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
+    if [ "${#copied[@]}" -gt 0 ]; then
+        out=$(mkdir -p "${2%/*}" 2>&1 && mkdir "$staging" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
+        for name in "${copied[@]}"; do
+            out=$(cp -pPR "$1/$name" "$staging/" 2>&1) \
+                || { _conversations_copy_stopped "$staging" "$out"; return 1; }
+        done
+        out=$(mkdir -p "$2" 2>&1) || { _conversations_copy_stopped "$staging" "$out"; return 1; }
+        for name in "${copied[@]}"; do
+            out=$( { [ ! -d "$2/$name" ] || rmdir "$2/$name"; } 2>&1 && mv "$staging/$name" "$2/$name" 2>&1) \
+                || { _conversations_copy_stopped "$staging" "$out"; return 1; }
+            CS_MOVED_ENTRIES="$CS_MOVED_ENTRIES $name"
+        done
+        out=$(rmdir "$staging" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
+    fi
+    if [ "${#outside[@]}" -gt 0 ]; then
+        for name in "${outside[@]}"; do
+            if _empty_real_dir "$1/$name"; then
+                out=$(rmdir "$1/$name" 2>&1) || { CS_MOVE_ERROR=$out; return 2; }
+            else
+                out=$(rm -rf -- "${1:?}/$name" 2>&1) || { CS_MOVE_ERROR=$out; return 2; }
+            fi
+        done
+    fi
+    out=$(rmdir "$1" 2>&1) || { CS_MOVE_ERROR=$out; return 2; }
+}
+
+# What the vault holds of the conversations after a copy that stopped.
+_conversations_in_vault_after_a_stop() {
+    if [ -n "$CS_MOVED_ENTRIES" ]; then
+        printf 'whole copies of%s and none of the rest' "$CS_MOVED_ENTRIES"
+    else
+        printf 'none of them'
+    fi
+}
+
+# What a move that could not remove everything outside the vault tells the
+# user: the vault's copies are whole, and what is left is in plain text.
+_warn_conversations_left_outside() {  # session_name, plain_dir
+    warn "$1: the vault holds whole copies of this session's conversations, but cs could not remove them all from outside it. What is left in $2 is in plain text; remove it by hand. Removing it failed with: $CS_MOVE_ERROR"
 }
 
 # The pid of a claude Claude Code lists as running in the session (sessions/
 # <pid>.json in its config dir), writing its conversations outside the vault.
+# The file outlives a claude that was killed, and its pid can come to name
+# another process: Claude Code records the start time beside it, procStart,
+# as `LC_ALL=C TZ=UTC ps -o lstart= -p <pid>` prints it, so a file whose
+# start time is not the process's is skipped. Without a recorded start time,
+# or an answer from ps, the pid being alive is enough.
 _plain_claude_writer() {  # session_dir
-    local f pid resolved
+    local f pid resolved recorded started
     resolved=$(cd -- "$1" 2>/dev/null && pwd -P) || resolved=$1
     for f in "$(_plain_claude_config_dir)"/sessions/*.json; do
         [ -f "$f" ] || continue
@@ -335,9 +408,55 @@ _plain_claude_writer() {  # session_dir
         pid=${pid%.json}
         case "$pid" in ''|0*|*[!0-9]*) continue ;; esac
         kill -0 "$pid" 2>/dev/null || continue
+        recorded=$(sed -n 's/.*"procStart":"\([^"]*\)".*/\1/p' "$f" 2>/dev/null) || recorded=""
+        if [ -n "$recorded" ]; then
+            started=$(LC_ALL=C TZ=UTC "${CS_PS_BIN:-ps}" -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//; s/ *$//') || started=""
+            [ -z "$started" ] || [ "$started" = "$recorded" ] || continue
+        fi
         grep -qF -e "\"cwd\":\"$1\"" -e "\"cwd\":\"$resolved\"" "$f" 2>/dev/null || continue
         printf '%s\n' "$pid"
         return 0
+    done
+    return 1
+}
+
+# Why a session's conversations must stay outside the vault for now, in
+# CS_MOVE_REFUSAL, ending with what the caller says of a running claude.
+# Returns 1 when nothing stands in the way.
+_conversations_move_refusal() {  # session_dir, plain_dir, what to do about a running claude
+    local writer
+    CS_MOVE_REFUSAL=""
+    if writer=$(_plain_claude_writer "$1"); then
+        CS_MOVE_REFUSAL="a claude (pid $writer) runs in this session outside cs and writes its conversations to $2, so cs moved none of them into the vault. $3"
+        return 0
+    fi
+    return 1
+}
+
+# Claude Code names a project folder after the path its claude ran in, with
+# every character that is no letter or digit turned into a dash, so session
+# foo-bar and a claude run in foo/bar keep their conversations in one folder.
+# Each line of a conversation records that path as cwd. A conversation with
+# a cwd that is not the session's, yet takes the same folder name, belongs to
+# the other path: its file and that path go in CS_MOVE_REFUSAL's sentence,
+# and the folder stays, since what else it holds (memory/, the index) cannot
+# be told apart by owner. A cwd under another folder name is this session's
+# claude after a cd. Returns 1 when every conversation is the session's.
+_foreign_conversation_refusal() {  # session_dir, plain_dir
+    local f cwds cwd resolved
+    CS_MOVE_REFUSAL=""
+    resolved=$(cd -- "$1" 2>/dev/null && pwd -P) || resolved=$1
+    for f in "$2"/*.jsonl; do
+        [ -f "$f" ] || continue
+        cwds=$(LC_ALL=C grep -o '"cwd":"[^"]*"' "$f" 2>/dev/null | sort -u) || cwds=""
+        while IFS= read -r cwd; do
+            cwd=${cwd#\"cwd\":\"}
+            cwd=${cwd%\"}
+            [ -n "$cwd" ] && [ "$cwd" != "$1" ] && [ "$cwd" != "$resolved" ] || continue
+            [ "$(_claude_encode_path "$cwd")" = "${2##*/}" ] || continue
+            CS_MOVE_REFUSAL="$f is a conversation claude held in $cwd, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $2 into the vault. They stay outside it, in plain text."
+            return 0
+        done <<< "$cwds"
     done
     return 1
 }
@@ -346,10 +465,14 @@ _plain_claude_writer() {  # session_dir
 # the shell's projects folder, where its claude, on the vault's config, never
 # looks. With the vault mounted, the open moves them in as cs -encrypt does,
 # and says so; the folder is gone after, so the next open has nothing to do.
-# A link, a name on both sides, or a claude writing there is named instead,
-# and the open goes on with nothing moved.
+# A link, a name on both sides, a claude writing there, or a conversation of
+# another path in the folder is named instead, and the open goes on with
+# nothing moved. The move runs under the openers' mutex, so a second open
+# started beside this one finds the folder gone rather than copying it again
+# into the one this open just made; an open that cannot take the mutex
+# stops, as its launch would.
 _move_plain_conversations_at_open() {  # session_name, session_dir
-    local meta="$2/.cs" plain vault entry writer
+    local meta="$2/.cs" plain mutex="$2/.cs/session.mutex.lock"
     [ -f "$meta/local/vault" ] && [ -L "$meta/claude-config" ] || return 0
     _vault_mountpoint_if_mounted "$meta" >/dev/null || return 0
     plain=$(_plain_claude_project_dir "$2")
@@ -358,8 +481,17 @@ _move_plain_conversations_at_open() {  # session_name, session_dir
         return 0
     fi
     [ -d "$plain" ] || return 0
-    if writer=$(_plain_claude_writer "$2"); then
-        warn "$1: a claude (pid $writer) runs in this session outside cs and writes its conversations to $plain, so cs moved none of them into the vault. Reopen once it has ended."
+    _cs_lock "$mutex" \
+        || error "$1: another cs is opening this session ($mutex is held), so cs moved none of its conversations into the vault; try again in a moment."
+    _move_plain_conversations_under_mutex "$1" "$2" "$plain"
+    _cs_unlock "$mutex"
+}
+
+_move_plain_conversations_under_mutex() {  # session_name, session_dir, plain_dir
+    local meta="$2/.cs" plain="$3" vault entry rc=0
+    [ -d "$plain" ] || return 0
+    if _conversations_move_refusal "$2" "$plain" "Reopen once it has ended."; then
+        warn "$1: $CS_MOVE_REFUSAL"
         return 0
     fi
     vault="$meta/claude-config/projects/${plain##*/}"
@@ -367,17 +499,33 @@ _move_plain_conversations_at_open() {  # session_name, session_dir
         [ -e "$entry" ] || [ -L "$entry" ] || continue
         _empty_real_dir "$entry" && continue
         [ -e "$vault/${entry##*/}" ] || [ -L "$vault/${entry##*/}" ] || continue
+        _empty_real_dir "$vault/${entry##*/}" && continue
+        _same_content "$entry" "$vault/${entry##*/}" && continue
         warn "$1: $entry is in the vault too, as .cs/claude-config/projects/${plain##*/}/${entry##*/}, so cs moved none of the conversations in $plain. Keep the copy you want in the vault, remove the other, then reopen."
         return 0
     done
-    _move_conversations_into_vault "$plain" "$vault" \
-        || error "$1: could not move the session's conversations from $plain into its vault. Already moved:${CS_MOVED_ENTRIES:- nothing}. mv copies across volumes before it removes, so the vault may hold the only whole copy of what it stopped on; the next open names anything on both sides. mv said: $CS_MOVE_ERROR"
-    info "$1: moved this session's conversations from $plain into its vault."
+    if _foreign_conversation_refusal "$2" "$plain"; then
+        warn "$1: $CS_MOVE_REFUSAL"
+        return 0
+    fi
+    _move_conversations_into_vault "$plain" "$vault" || rc=$?
+    case "$rc" in
+        0) ;;
+        1) error "$1: could not copy the session's conversations from $plain into its vault. They are all still in $plain, whole, and the vault holds $(_conversations_in_vault_after_a_stop). cp said: $CS_MOVE_ERROR" ;;
+        2) _warn_conversations_left_outside "$1" "$plain" ;;
+        *) error "_move_conversations_into_vault returned $rc for $plain" ;;
+    esac
+    case "$CS_MOVED_ENTRIES " in
+        " ") ;;
+        *".jsonl "*) info "$1: moved this session's conversations from $plain into its vault." ;;
+        *) info "$1: moved$CS_MOVED_ENTRIES from $plain into its vault." ;;
+    esac
+    [ -z "$CS_REMOVED_COPIES" ] || info "$1: removed from $plain what its vault already holds:$CS_REMOVED_COPIES."
 }
 
 run_encrypt() {
     [ $# -eq 1 ] || error "Usage: cs -encrypt <name>"
-    local name="$1" meta container mnt sub taken=0 password="" again="" out transcripts moved
+    local name="$1" meta container mnt sub taken=0 password="" again="" out transcripts moved move_rc=0
     _encrypt_refuse "$name"
     meta="$SESSIONS_ROOT/$name/.cs"
     # Hold the session lock while the password prompts run, so an open in
@@ -436,13 +584,26 @@ run_encrypt() {
     moved=$(_encrypt_moves "$meta" | awk '{ printf " .cs/%s", $1 }')
     _encrypt_move_content "$name" "$meta"
     # The conversations go last, so a .cs/ move that fails leaves them where
-    # Claude Code reads them. mv across volumes copies, then removes the
-    # source, and can stop in either half, so the vault stays mounted and
-    # the message says it may hold the only whole copy. A project dir that is
-    # a link is left alone: moving the link would move no conversation.
-    if [ -d "$transcripts" ] && [ ! -L "$transcripts" ]; then
-        _move_conversations_into_vault "$transcripts" "$mnt/claude-config/projects/${transcripts##*/}" \
-            || error "$name: could not move the session's conversations ($transcripts) into the vault. Already moved:${moved:- nothing}. The vault is still mounted at .cs/vault-mnt and may hold the only whole copy of the conversations: copy back from .cs/vault-mnt/claude-config/projects/ whatever $transcripts is missing, then finish by hand or move the rest back, and detach it. mv said: $CS_MOVE_ERROR"
+    # Claude Code reads them. A copy that stops leaves them whole outside and
+    # the vault mounted; a removal that stops leaves whole copies in the
+    # vault, so cs -encrypt names what is left and finishes. A project dir
+    # that is a link is left alone: moving the link would move no conversation.
+    # Conversations a running claude writes stay too, for the next open, and
+    # so does a folder that holds another path's conversations.
+    if [ ! -d "$transcripts" ] || [ -L "$transcripts" ]; then
+        :
+    elif _conversations_move_refusal "$SESSIONS_ROOT/$name" "$transcripts" "The next open moves them once it has ended."; then
+        warn "$name: $CS_MOVE_REFUSAL"
+    elif _foreign_conversation_refusal "$SESSIONS_ROOT/$name" "$transcripts"; then
+        warn "$name: $CS_MOVE_REFUSAL"
+    else
+        _move_conversations_into_vault "$transcripts" "$mnt/claude-config/projects/${transcripts##*/}" || move_rc=$?
+        case "$move_rc" in
+            0) ;;
+            1) error "$name: could not copy the session's conversations ($transcripts) into the vault. They are all still there, whole, and the vault holds $(_conversations_in_vault_after_a_stop). Already moved:${moved:- nothing}. The vault is still mounted at .cs/vault-mnt; finish by hand or move those back, then detach it. cp said: $CS_MOVE_ERROR" ;;
+            2) _warn_conversations_left_outside "$name" "$transcripts" ;;
+            *) error "_move_conversations_into_vault returned $move_rc for $transcripts" ;;
+        esac
     fi
     for sub in $CS_VAULT_LINKS; do
         ln -s "vault-mnt/$sub" "$meta/$sub"
