@@ -66,7 +66,7 @@ newer release is asked about afresh. Off a terminal nothing is asked.
 - A running lock process or a statusline heartbeat under 900 seconds old makes a session live. Presence is local, includes conversations opened outside cs, and uses no network presence service.
 - Destructive guards use the process lock. A heartbeat alone does not block removal.
 - From inside a session, `--force` cannot remove or archive another live session, except the base's own features. It also cannot target a base with a live feature unless run from that base.
-- Force with user files requires `--delete-files`.
+- Force with user files requires `--delete-files`. For a feature, an ignored file the base holds byte for byte at the same path, such as an unchanged `.worktreeinclude` copy, is not a user file: `cs -rm` does not list it, and `--force` removes it without `--delete-files`.
 - Removing a base also removes its age pins in `~/.cs-secrets/sessions/<name>/`. Removing a feature or adopted link keeps them.
 - [Remote-server protection](session-layout.md#machine-local-files-cslocal-gitignored) blocks opening and removal, including forced removal, until the server stops.
 - See [encrypted-session safeguards](session-layout.md#encrypted-sessions) for mounted-vault removal refusal and finish/uninstall protection.
