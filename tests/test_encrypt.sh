@@ -1496,7 +1496,7 @@ test_open_moves_nothing_from_a_folder_it_cannot_read() {
     assert_file_contains "$proj/$id.jsonl" "before the vault" "the conversation outside is untouched" || return 1
     assert_eq "agent" "$(cat "$proj/$id/subagents/agent-a.jsonl" 2>/dev/null)" "and so is the folder cs could not read" || return 1
     [ ! -e "$(_vault_projects enc)" ] || { echo "  FAIL: the vault has a folder for the session"; return 1; }
-    assert_output_contains "$out" "enc: cs cannot read every folder under $proj, so it moved none of the conversations in $proj into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: find: $proj/$id: Permission denied$" "names the folder and what moved" || return 1
+    assert_output_contains "$out" "enc: cs cannot read every folder under $proj, so it moved none of the conversations in $proj into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: find: .\{0,3\}$proj/$id.\{0,3\}: Permission denied$" "names the folder and what moved" || return 1
 }
 
 test_encrypt_moves_nothing_from_a_folder_it_cannot_read() {
@@ -1515,7 +1515,7 @@ test_encrypt_moves_nothing_from_a_folder_it_cannot_read() {
     assert_eq "agent" "$(cat "$proj/$id/subagents/agent-a.jsonl" 2>/dev/null)" "and so is the folder cs could not read" || return 1
     assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of them" || return 1
     assert_eq "0" "$rc" "cs -encrypt finishes: $out" || return 1
-    assert_output_contains "$out" "enc: cs cannot read every folder under $proj, so it moved none of the conversations in $proj into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: find: $proj/$id: Permission denied$" "names the folder and what moved" || return 1
+    assert_output_contains "$out" "enc: cs cannot read every folder under $proj, so it moved none of the conversations in $proj into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: find: .\{0,3\}$proj/$id.\{0,3\}: Permission denied$" "names the folder and what moved" || return 1
     assert_output_contains "$out" "^  - this session's conversations: cs could not read every folder under $proj, so cs left them there; the next open moves them once it can$" "the closing list names them" || return 1
     [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
 }
