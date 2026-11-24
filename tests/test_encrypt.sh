@@ -1520,6 +1520,31 @@ test_encrypt_moves_nothing_from_a_folder_it_cannot_read() {
     [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
 }
 
+# A folder cs can list but not enter hides what its files hold: the names
+# read, the content does not. cs cannot say the vault holds all of it.
+test_open_claims_no_whole_copy_of_a_folder_it_cannot_enter() {
+    [ "$(id -u)" != "0" ] || { echo "  SKIP: root enters a folder whatever its mode"; return 77; }
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj vault out rc=0
+    proj=$(_plain_conversation enc "$id" "moved before")
+    mkdir -p "$proj/$id/subagents"
+    echo "outside" > "$proj/$id/subagents/agent-a.jsonl"
+    vault=$(_vault_projects enc)
+    mkdir -p "$vault/$id/subagents"
+    cp -p "$proj/$id.jsonl" "$vault/"
+    echo "vault" > "$vault/$id/subagents/agent-a.jsonl"
+    chmod 600 "$proj/$id"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    chmod 755 "$proj/$id"
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_output_not_contains "$out" "the vault holds whole copies" "claims no whole copy in the vault" || return 1
+    assert_output_not_contains "$out" "what its vault already holds" "says it removed nothing" || return 1
+    assert_eq "outside" "$(cat "$proj/$id/subagents/agent-a.jsonl" 2>/dev/null)" "the file outside is untouched" || return 1
+    assert_eq "vault" "$(cat "$vault/$id/subagents/agent-a.jsonl" 2>/dev/null)" "and so is the vault's" || return 1
+    assert_file_contains "$proj/$id.jsonl" "moved before" "the conversation outside stays" || return 1
+}
+
 # A removal outside the vault that stopped inside a folder leaves a part of
 # it: fewer entries than the vault's whole copy, each with the same content.
 # The next open finishes that removal. An entry the vault's copy lacks is
@@ -1812,6 +1837,7 @@ run_test test_open_moves_nothing_while_a_claude_that_changed_folder_writes
 run_test test_open_moves_nothing_from_a_folder_a_path_of_another_case_shares
 run_test test_open_moves_nothing_from_a_folder_it_cannot_read
 run_test test_encrypt_moves_nothing_from_a_folder_it_cannot_read
+run_test test_open_claims_no_whole_copy_of_a_folder_it_cannot_enter
 run_test test_open_finishes_a_removal_that_stopped_inside_a_folder
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
