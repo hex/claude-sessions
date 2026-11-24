@@ -1493,9 +1493,11 @@ test_encrypt_leaves_conversations_past_an_empty_running_process_file() {
     [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
 }
 
-# Claude Code rewrites the cwd in sessions/<pid>.json when its claude changes
-# folder, while the conversation stays in the folder of the path it started
-# in. The file's sessionId names the conversation that claude writes: one in
+# The cwd in sessions/<pid>.json is the folder its claude started in: a cd
+# leaves it as it is, and only entering or leaving a worktree rewrites it,
+# while a resumed conversation stays in its own folder. So a claude resumed
+# in the session that then entered a worktree has its cwd elsewhere. The
+# file's sessionId names the conversation that claude writes: one in
 # the session's folder stops the move wherever the claude is now, and one that
 # is not there leaves a claude in a subfolder no reason to move nothing.
 test_open_moves_nothing_while_a_claude_that_changed_folder_writes() {

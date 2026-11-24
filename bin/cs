@@ -15712,10 +15712,13 @@ _older_than_process() {  # file, pid
 # <pid>.json in its config dir), writing its conversations outside the vault,
 # and leaves its pid in CS_PLAIN_WRITER. jq reads the file, so a path with a
 # quote or a backslash in it is the path and not its escape.
-# Claude Code rewrites the file's cwd when the claude changes folder, while
-# the conversation stays in the folder of the path it started in, so the
-# file's sessionId counts as well: a conversation of that name in the
-# session's folder, or its folder of subagents, is one the claude writes.
+# The file's cwd is the folder the claude started in: a cd leaves it as it
+# is, and only entering or leaving a worktree rewrites it. A claude that
+# resumed a conversation keeps writing it in that conversation's folder, so
+# one resumed in the session that then entered a worktree has its cwd
+# elsewhere. The file's sessionId counts as well: a conversation of that
+# name in the session's folder, or its folder of subagents, is one the
+# claude writes.
 # The file outlives a claude that was killed, and its pid can come to name
 # another process: Claude Code records the start time beside it, procStart,
 # as `LC_ALL=C TZ=UTC ps -o lstart= -p <pid>` prints it, so a file whose
