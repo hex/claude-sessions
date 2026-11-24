@@ -1366,6 +1366,45 @@ test_encrypt_moves_nothing_from_a_folder_another_path_shares() {
     assert_output_contains "$out" "enc: $proj/$theirs.jsonl is a conversation claude held in $other, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $proj into the vault. They stay outside it, in plain text.$" "names the conversation and the path it belongs to" || return 1
 }
 
+# Claude Code writes the path a claude runs in as JSON, so a quote or a
+# backslash in it is escaped where cs reads it: in each line of a
+# conversation, and in sessions/<pid>.json. cs reads the path, not its escape.
+test_open_reads_the_escaped_path_of_a_conversation_sharing_the_folder() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 theirs=77777777-7777-4777-8777-777777777777 proj other out rc=0
+    proj=$(_plain_conversation enc "$id" "of this session")
+    other="$(cd "$CS_SESSIONS_ROOT" && pwd -P)\"enc"
+    jq -nc --arg cwd "$other" '{type: "user", cwd: $cwd, message: {role: "user", content: "of the other path"}}' > "$proj/$theirs.jsonl"
+    assert_file_contains "$proj/$theirs.jsonl" '\\"enc"' "the fixture records the quote escaped" || return 1
+    assert_eq "${proj##*/}" "$(printf '%s' "$other" | sed 's/[^A-Za-z0-9]/-/g')" "the fixture's other path shares the folder" || return 1
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_file_contains "$proj/$theirs.jsonl" "of the other path" "the other path's conversation is untouched" || return 1
+    [ ! -e "$(_vault_projects enc)" ] || { echo "  FAIL: the vault has a folder for the session"; return 1; }
+    assert_output_contains "$out" "enc: $proj/$theirs.jsonl is a conversation claude held in $other, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $proj into the vault. They stay outside it, in plain text.$" "names the conversation and the path it belongs to" || return 1
+}
+
+test_open_reads_the_escaped_path_of_a_running_claude() {
+    export CS_SESSIONS_ROOT="$TEST_TMPDIR/odd \"q\" root"
+    mkdir -p "$CS_SESSIONS_ROOT"
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 fresh=88888888-8888-4888-8888-888888888888 proj out rc=0 dir
+    proj=$(_plain_conversation enc "$id" "outside")
+    dir=$(cd "$CS_SESSIONS_ROOT/enc" && pwd -P)
+    sleep 300 &
+    local live=$!
+    mkdir -p "$HOME/.claude/sessions"
+    jq -nc --argjson pid "$live" --arg id "$fresh" --arg cwd "$dir" '{pid: $pid, sessionId: $id, cwd: $cwd, kind: "interactive"}' > "$HOME/.claude/sessions/$live.json"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+    assert_file_contains "$HOME/.claude/sessions/$live.json" 'odd \\"q\\" root' "the fixture records the quotes escaped" || return 1
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_output_contains "$out" "enc: a claude (pid $live) runs in this session outside cs and writes its conversations to $proj, so cs moved none of them into the vault. Reopen once it has ended." "names the running claude" || return 1
+    assert_file_contains "$proj/$id.jsonl" "outside" "the conversation outside is untouched" || return 1
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1617,6 +1656,8 @@ run_test test_open_moves_past_a_claude_file_whose_pid_names_another_process
 run_test test_encrypt_leaves_conversations_a_running_claude_writes
 run_test test_open_moves_nothing_from_a_folder_another_path_shares
 run_test test_encrypt_moves_nothing_from_a_folder_another_path_shares
+run_test test_open_reads_the_escaped_path_of_a_conversation_sharing_the_folder
+run_test test_open_reads_the_escaped_path_of_a_running_claude
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
