@@ -1405,6 +1405,37 @@ test_open_reads_the_escaped_path_of_a_running_claude() {
     assert_file_contains "$proj/$id.jsonl" "outside" "the conversation outside is untouched" || return 1
 }
 
+# Claude Code rewrites the cwd in sessions/<pid>.json when its claude changes
+# folder, while the conversation stays in the folder of the path it started
+# in. The file's sessionId names the conversation that claude writes: one in
+# the session's folder stops the move wherever the claude is now, and one that
+# is not there leaves a claude in a subfolder no reason to move nothing.
+test_open_moves_nothing_while_a_claude_that_changed_folder_writes() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 elsewhere=88888888-8888-4888-8888-888888888888 proj out rc=0 dir started
+    proj=$(_plain_conversation enc "$id" "outside")
+    dir=$(cd "$CS_SESSIONS_ROOT/enc" && pwd -P)
+    mkdir -p "$dir/sub"
+    sleep 300 &
+    local live=$!
+    mkdir -p "$HOME/.claude/sessions"
+    started=$(LC_ALL=C TZ=UTC /bin/ps -o lstart= -p "$live" | sed 's/^ *//; s/ *$//')
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s/sub","startedAt":1795371270300,"procStart":"%s","kind":"interactive"}' "$live" "$id" "$dir" "$started" > "$HOME/.claude/sessions/$live.json"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open goes on: $out" || { kill "$live" 2>/dev/null; return 1; }
+    assert_file_contains "$proj/$id.jsonl" "outside" "the conversation the claude writes is untouched" || { kill "$live" 2>/dev/null; return 1; }
+    assert_output_contains "$out" "enc: a claude (pid $live) runs in this session outside cs and writes its conversations to $proj, so cs moved none of them into the vault. Reopen once it has ended." "names the running claude" || { kill "$live" 2>/dev/null; return 1; }
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s/sub","startedAt":1795371270300,"procStart":"%s","kind":"interactive"}' "$live" "$elsewhere" "$dir" "$started" > "$HOME/.claude/sessions/$live.json"
+    rc=0
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+    assert_eq "0" "$rc" "the second open goes on: $out" || return 1
+    assert_output_contains "$out" "enc: moved this session's conversations from $proj into its vault." "a claude writing a conversation kept elsewhere holds nothing back" || return 1
+    assert_file_contains "$(_vault_projects enc)/$id.jsonl" "outside" "the conversation is in the vault" || return 1
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1658,6 +1689,7 @@ run_test test_open_moves_nothing_from_a_folder_another_path_shares
 run_test test_encrypt_moves_nothing_from_a_folder_another_path_shares
 run_test test_open_reads_the_escaped_path_of_a_conversation_sharing_the_folder
 run_test test_open_reads_the_escaped_path_of_a_running_claude
+run_test test_open_moves_nothing_while_a_claude_that_changed_folder_writes
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
