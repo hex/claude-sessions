@@ -320,8 +320,10 @@ the copy stops, as on a full disk, cs removes the staging folder, the
 conversations outside are whole, the vault holds none of them cut short, and cs
 stops and says so. If the removal stops, the vault holds whole copies: cs names
 the folder whose contents are still in plain text and goes on. The next open
-finishes that removal, because the same content outside and in the volume is no
-clash: cs removes the copy outside and prints `<name>: removed from <folder> what
+finishes that removal. An entry outside is no clash when the volume's entry of
+that name holds everything in it: the same file, or a folder whose every entry the
+volume's folder holds too. A folder that the removal emptied only in part counts,
+so cs removes what is outside and prints `<name>: removed from <folder> what
 its vault already holds: <names>.` An empty folder on either side is no clash
 either. The open runs the move under the lock that serialises opens of one
 session, so a second open started beside the first finds nothing left to move;
@@ -330,22 +332,35 @@ try again.
 
 cs moves nothing, says why and goes on in these cases:
 
-- The folder is a link. The open warns at every open; `cs -encrypt` names it in
-  its closing list.
-- An entry with different content is both outside and in the volume (the open
-  only).
+- The folder is a link. The open warns at every open.
+- An entry outside is in the volume too, and holds something that the volume's
+  entry does not (the open only).
 - Claude Code lists a running claude in `sessions/<pid>.json` under your config
-  dir whose working directory is the session. cs compares the start time
-  recorded there with the process the pid names now, so a file that a killed
-  claude left behind does not hold the move back once another process has its
-  pid. `cs -encrypt` finishes without the conversations, and the next open moves
-  them.
+  dir that writes to the folder: its working directory is the session, or its
+  `sessionId` names a conversation in the folder. Claude Code rewrites the
+  working directory there when the claude changes folder and keeps the
+  conversation where the claude started, so cs reads both. cs compares the
+  start time recorded there with the process the pid names now, so a file that
+  a killed claude left behind does not hold the move back once another process
+  has its pid. A file of a running process that cs cannot read holds the move
+  back too, because it rules no claude out. The next open moves the
+  conversations.
+- cs cannot read a folder under the conversations folder, or under the
+  session's folder in the volume. Such a folder would read as an empty one, so
+  cs prints the line of `find` that names it and moves nothing until it can
+  read every folder.
 - The folder holds a conversation of another path. Claude Code names the folder
   after the path with every character that is not a letter or digit turned into
   `-`, so session `foo-bar` and a claude run in `foo/bar` share one folder.
-  cs reads the working directory each conversation recorded, names the
+  Where the filesystem takes names that differ only in letter case as
+  one, as a Mac's disk does unless formatted otherwise, `foo-bar` and `Foo/bar` share
+  one too. cs reads the working directory each conversation recorded, names the
   conversation that belongs to the other path, and leaves the whole folder
   outside the vault, in plain text, until you move that conversation away.
+
+`cs -encrypt` finishes in each of these cases, and its closing list of what is
+still in plain text names the one that applied. The list also names what cs
+could not remove from outside once the vault held whole copies.
 
 Every open that mounts or joins the volume adds its process id to
 `.cs/local/vault-holders`. A process that replaces itself with Claude Code
