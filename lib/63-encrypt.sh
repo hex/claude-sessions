@@ -396,6 +396,10 @@ _warn_conversations_left_outside() {  # session_name, plain_dir
 # <pid>.json in its config dir), writing its conversations outside the vault,
 # and leaves its pid in CS_PLAIN_WRITER. jq reads the file, so a path with a
 # quote or a backslash in it is the path and not its escape.
+# Claude Code rewrites the file's cwd when the claude changes folder, while
+# the conversation stays in the folder of the path it started in, so the
+# file's sessionId counts as well: a conversation of that name in the
+# session's folder, or its folder of subagents, is one the claude writes.
 # The file outlives a claude that was killed, and its pid can come to name
 # another process: Claude Code records the start time beside it, procStart,
 # as `LC_ALL=C TZ=UTC ps -o lstart= -p <pid>` prints it, so a file whose
@@ -404,8 +408,8 @@ _warn_conversations_left_outside() {  # session_name, plain_dir
 # Returns 1 when no such claude runs, and 2 when the file of a running
 # process cannot be read, with that file in CS_PLAIN_WRITER_FILE and jq's
 # words in CS_MOVE_ERROR: a claude nobody can rule out.
-_plain_claude_writer() {  # session_dir
-    local f pid fields recorded cwd started
+_plain_claude_writer() {  # session_dir, plain_dir
+    local f pid fields sid recorded cwd started
     CS_PLAIN_WRITER=""
     CS_PLAIN_WRITER_FILE=""
     for f in "$(_plain_claude_config_dir)"/sessions/*.json; do
@@ -416,6 +420,7 @@ _plain_claude_writer() {  # session_dir
         kill -0 "$pid" 2>/dev/null || continue
         CS_PLAIN_WRITER=$pid
         if ! fields=$(jq -r '
+                (.sessionId | if type == "string" and test("^[A-Za-z0-9_-]+$") then . else "-" end),
                 (.procStart | if type == "string" then gsub("[\n\r]"; " ") else "" end),
                 (.cwd | if type == "string" then gsub("[\n\r]"; " ") else "" end)' "$f" 2>&1) \
             || [ -z "$fields" ]; then
@@ -423,12 +428,13 @@ _plain_claude_writer() {  # session_dir
             CS_MOVE_ERROR=${fields:-jq read no JSON value in it}
             return 2
         fi
-        { IFS= read -r recorded; IFS= read -r cwd; } <<< "$fields" || true
+        { IFS= read -r sid; IFS= read -r recorded; IFS= read -r cwd; } <<< "$fields" || true
         if [ -n "$recorded" ]; then
             started=$(LC_ALL=C TZ=UTC "${CS_PS_BIN:-ps}" -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//; s/ *$//') || started=""
             [ -z "$started" ] || [ "$started" = "$recorded" ] || continue
         fi
-        [ "$cwd" = "$1" ] || [ "$cwd" -ef "$1" ] || continue
+        [ "$cwd" = "$1" ] || [ "$cwd" -ef "$1" ] \
+            || [ -e "$2/$sid.jsonl" ] || [ -d "$2/$sid" ] || continue
         return 0
     done
     CS_PLAIN_WRITER=""
@@ -441,7 +447,7 @@ _plain_claude_writer() {  # session_dir
 _conversations_move_refusal() {  # session_dir, plain_dir, what to do about a running claude
     local rc=0
     CS_MOVE_REFUSAL=""
-    _plain_claude_writer "$1" || rc=$?
+    _plain_claude_writer "$1" "$2" || rc=$?
     case "$rc" in
         0) CS_MOVE_REFUSAL="a claude (pid $CS_PLAIN_WRITER) runs in this session outside cs and writes its conversations to $2, so cs moved none of them into the vault. $3" ;;
         1) return 1 ;;
