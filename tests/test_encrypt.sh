@@ -1520,6 +1520,26 @@ test_encrypt_moves_nothing_from_a_folder_it_cannot_read() {
     [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
 }
 
+# A folder cs can list but not enter cannot be copied, though find walks past
+# it without a word. The move starts only when cs can enter every folder too.
+test_open_moves_nothing_from_a_folder_it_cannot_enter() {
+    [ "$(id -u)" != "0" ] || { echo "  SKIP: root enters a folder whatever its mode"; return 77; }
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj out rc=0
+    proj=$(_plain_conversation enc "$id" "before the vault")
+    mkdir -p "$proj/$id/subagents"
+    echo "agent" > "$proj/$id/subagents/agent-a.jsonl"
+    chmod 600 "$proj/$id"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    chmod 755 "$proj/$id"
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_file_contains "$proj/$id.jsonl" "before the vault" "the conversation outside is untouched" || return 1
+    assert_eq "agent" "$(cat "$proj/$id/subagents/agent-a.jsonl" 2>/dev/null)" "and so is the folder cs could not enter" || return 1
+    [ ! -e "$(_vault_projects enc)" ] || { echo "  FAIL: the vault has a folder for the session"; return 1; }
+    assert_output_contains "$out" "enc: cs cannot read every folder under $proj, so it moved none of the conversations in $proj into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. cs cannot enter $proj/$id.$" "names the folder and what moved" || return 1
+}
+
 # A folder cs can list but not enter hides what its files hold: the names
 # read, the content does not. cs cannot say the vault holds all of it.
 test_open_claims_no_whole_copy_of_a_folder_it_cannot_enter() {
@@ -1837,6 +1857,7 @@ run_test test_open_moves_nothing_while_a_claude_that_changed_folder_writes
 run_test test_open_moves_nothing_from_a_folder_a_path_of_another_case_shares
 run_test test_open_moves_nothing_from_a_folder_it_cannot_read
 run_test test_encrypt_moves_nothing_from_a_folder_it_cannot_read
+run_test test_open_moves_nothing_from_a_folder_it_cannot_enter
 run_test test_open_claims_no_whole_copy_of_a_folder_it_cannot_enter
 run_test test_open_finishes_a_removal_that_stopped_inside_a_folder
 run_test test_session_end_detaches_after_the_lead_exits
