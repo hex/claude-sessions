@@ -468,17 +468,32 @@ _conversations_move_refusal() {  # session_dir, plain_dir, what to do about a ru
 }
 
 # A folder cs cannot list reads as an empty one, with nothing in it to copy
-# and nothing the vault lacks, so nothing moves while find cannot walk the
-# conversations folder outside the vault or the session's folder in it. What
-# find said first, which names the folder, ends CS_MOVE_REFUSAL's sentence.
-# Returns 1 when it walked both.
+# and nothing the vault lacks, and one it can list but not enter cannot be
+# copied or compared. So nothing moves while the conversations folder outside
+# the vault, or the session's folder in it, holds a folder cs cannot both
+# list and enter, or one find cannot walk. find passes a folder it cannot
+# enter without a word, and words its errors by platform, so test asks of
+# each folder and cs names the first in its own words; find's first line
+# ends CS_MOVE_REFUSAL's sentence only when no folder failed that test.
+# Returns 1 when it walked both and every folder passed.
 _unreadable_conversations_refusal() {  # plain_dir, vault_dir
-    local dir said nl=$'\n'
+    local dir said folder why nl=$'\n'
+    local -a not_open=(-type d \( ! -exec test -r {} \; -o ! -exec test -x {} \; \) -print)
     CS_MOVE_REFUSAL=""
     for dir in "$1" "$2"; do
         [ -d "$dir" ] || continue
-        said=$(find "$dir" -type d 2>&1 >/dev/null) && [ -z "$said" ] && continue
-        CS_MOVE_REFUSAL="cs cannot read every folder under $dir, so it moved none of the conversations in $1 into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: ${said%%"$nl"*}"
+        said=$(find "$dir" "${not_open[@]}" 2>&1) && [ -z "$said" ] && continue
+        folder=$(find "$dir" "${not_open[@]}" 2>/dev/null) || true
+        folder=${folder%%"$nl"*}
+        if [ -z "$folder" ]; then
+            why="find said: ${said%%"$nl"*}"
+            [ -n "$said" ] || why="find failed and said nothing."
+        elif [ -r "$folder" ]; then
+            why="cs cannot enter $folder."
+        else
+            why="cs cannot list $folder."
+        fi
+        CS_MOVE_REFUSAL="cs cannot read every folder under $dir, so it moved none of the conversations in $1 into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. $why"
         return 0
     done
     return 1
