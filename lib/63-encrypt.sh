@@ -457,6 +457,23 @@ _conversations_move_refusal() {  # session_dir, plain_dir, what to do about a ru
     return 0
 }
 
+# A folder cs cannot list reads as an empty one, with nothing in it to copy
+# and nothing the vault lacks, so nothing moves while find cannot walk the
+# conversations folder outside the vault or the session's folder in it. What
+# find said first, which names the folder, ends CS_MOVE_REFUSAL's sentence.
+# Returns 1 when it walked both.
+_unreadable_conversations_refusal() {  # plain_dir, vault_dir
+    local dir said
+    CS_MOVE_REFUSAL=""
+    for dir in "$1" "$2"; do
+        [ -d "$dir" ] || continue
+        said=$(find "$dir" -type d 2>&1 >/dev/null) && [ -z "$said" ] && continue
+        CS_MOVE_REFUSAL="cs cannot read every folder under $dir, so it moved none of the conversations in $1 into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: ${said%%$'\n'*}"
+        return 0
+    done
+    return 1
+}
+
 # Claude Code names a project folder after the path its claude ran in, with
 # every character that is no letter or digit turned into a dash, so session
 # foo-bar and a claude run in foo/bar keep their conversations in one folder.
@@ -499,9 +516,9 @@ _foreign_conversation_refusal() {  # session_dir, plain_dir
 # the shell's projects folder, where its claude, on the vault's config, never
 # looks. With the vault mounted, the open moves them in as cs -encrypt does,
 # and says so; the folder is gone after, so the next open has nothing to do.
-# A link, a name on both sides, a claude writing there, or a conversation of
-# another path in the folder is named instead, and the open goes on with
-# nothing moved. The move runs under the openers' mutex, so a second open
+# A link, a name on both sides, a claude writing there, a folder cs cannot
+# read, or a conversation of another path in the folder is named instead,
+# and the open goes on with nothing moved. The move runs under the openers' mutex, so a second open
 # started beside this one finds the folder gone rather than copying it again
 # into the one this open just made; an open that cannot take the mutex
 # stops, as its launch would.
@@ -529,6 +546,10 @@ _move_plain_conversations_under_mutex() {  # session_name, session_dir, plain_di
         return 0
     fi
     vault="$meta/claude-config/projects/${plain##*/}"
+    if _unreadable_conversations_refusal "$plain" "$vault"; then
+        warn "$1: $CS_MOVE_REFUSAL"
+        return 0
+    fi
     for entry in "$plain"/* "$plain"/.[!.]* "$plain"/..?*; do
         [ -e "$entry" ] || [ -L "$entry" ] || continue
         _empty_real_dir "$entry" && continue
@@ -623,10 +644,13 @@ run_encrypt() {
     # vault, so cs -encrypt names what is left and finishes. A project dir
     # that is a link is left alone: moving the link would move no conversation.
     # Conversations a running claude writes stay too, for the next open, and
-    # so does a folder that holds another path's conversations.
+    # so does a folder cs cannot read all of, or one that holds another path's
+    # conversations.
     if [ ! -d "$transcripts" ] || [ -L "$transcripts" ]; then
         :
     elif _conversations_move_refusal "$SESSIONS_ROOT/$name" "$transcripts" "The next open moves them once it has ended."; then
+        warn "$name: $CS_MOVE_REFUSAL"
+    elif _unreadable_conversations_refusal "$transcripts" "$mnt/claude-config/projects/${transcripts##*/}"; then
         warn "$name: $CS_MOVE_REFUSAL"
     elif _foreign_conversation_refusal "$SESSIONS_ROOT/$name" "$transcripts"; then
         warn "$name: $CS_MOVE_REFUSAL"
