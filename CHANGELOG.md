@@ -4,13 +4,11 @@ All notable changes to cs are documented here. Release notes are also available 
 
 <!-- New entries group changes under Keep-a-Changelog headings (Added / Changed / Removed / Fixes / Docs), or Features / Performance where those fit the release. -->
 
-## Unreleased
+## 2026.11.8
 
-### Added
+### Features
 - After `/cs ` the prompt box's typeahead lists `next`, `prev`, `first` and `last`, and the prompts whose number or first line matches what you type, newest first, matching anywhere in a prompt's first line although a row shows only its first 80 characters. Taking a row writes the word or the prompt's number. The cs mod now needs Claude Code 2.1.292 or later.
 - `cs <base>@<feature>` copies into a new feature the ignored files that a `.worktreeinclude` in the base names, such as `.env`. The file reads as a `.gitignore` does, as it does for the worktrees Claude Code makes itself. cs never copies `.claude/settings.local.json` this way and says so (`Not copied: .claude/settings.local.json (cs manages it)`): it writes the feature's own, and `/finish` adds the rules granted there to the base's. A `.worktreeinclude` git cannot read refuses the feature with git's error before cs creates anything. At `/finish`, an ignored file the base holds byte for byte at the same path, such as an unchanged copy, goes with the worktree: cs neither moves it to the trash nor counts it, and it does not refuse the retire on a host with neither `trash` nor `gio`. A copy the feature changed still goes to the trash. If git lists the files but says anything while it does, as it does for each directory of the base it cannot read, the feature is still created, and the launch prints git's words under `git said this while it listed the files that <base>/.worktreeinclude names, so a file it names may not be copied:`.
-
-### Changed
 - `cs -encrypt` and every open of an encrypted session use `diskutil image` and `diskutil eject`, where they used the `hdiutil` verbs macOS now marks deprecated. cs asks for the vault password itself, once at each open and twice when encrypting (three prompts before), and passes it to `diskutil` on stdin. The terminal no longer shows the device table, the `created:` and `ejected` lines or the deprecation warnings; `diskutil`'s output shows only when a step fails. A vault an earlier cs built opens the same way: the open replaces the `pre-open` that cs wrote, and keeps it where `diskutil` has no `image` verbs. `cs -encrypt` needs those verbs.
 - The vault password prompt shows the session as the status line does, with `vault locked` beside it and a `password ›` row under it. A wrong password is asked for again, three times at most, and Ctrl-C at the prompt ends the open with no error line.
 - The list `cs -encrypt` ends on separates what is still in plaintext from before (prompt history, `.claude.json`, git history, backups) from the two files that always stay in plaintext, `.cs/summary.md` and `.cs/brief.md`.
