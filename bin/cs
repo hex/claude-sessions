@@ -15656,31 +15656,46 @@ _warn_conversations_left_outside() {  # session_name, plain_dir
     warn "$1: the vault holds whole copies of this session's conversations, but cs could not remove them all from outside it. What is left in $2 is in plain text; remove it by hand. Removing it failed with: $CS_MOVE_ERROR"
 }
 
-# The pid of a claude Claude Code lists as running in the session (sessions/
-# <pid>.json in its config dir), writing its conversations outside the vault.
+# Finds a claude Claude Code lists as running in the session (sessions/
+# <pid>.json in its config dir), writing its conversations outside the vault,
+# and leaves its pid in CS_PLAIN_WRITER. jq reads the file, so a path with a
+# quote or a backslash in it is the path and not its escape.
 # The file outlives a claude that was killed, and its pid can come to name
 # another process: Claude Code records the start time beside it, procStart,
 # as `LC_ALL=C TZ=UTC ps -o lstart= -p <pid>` prints it, so a file whose
 # start time is not the process's is skipped. Without a recorded start time,
 # or an answer from ps, the pid being alive is enough.
+# Returns 1 when no such claude runs, and 2 when the file of a running
+# process cannot be read, with that file in CS_PLAIN_WRITER_FILE and jq's
+# words in CS_MOVE_ERROR: a claude nobody can rule out.
 _plain_claude_writer() {  # session_dir
-    local f pid resolved recorded started
-    resolved=$(cd -- "$1" 2>/dev/null && pwd -P) || resolved=$1
+    local f pid fields recorded cwd started
+    CS_PLAIN_WRITER=""
+    CS_PLAIN_WRITER_FILE=""
     for f in "$(_plain_claude_config_dir)"/sessions/*.json; do
         [ -f "$f" ] || continue
         pid=${f##*/}
         pid=${pid%.json}
         case "$pid" in ''|0*|*[!0-9]*) continue ;; esac
         kill -0 "$pid" 2>/dev/null || continue
-        recorded=$(sed -n 's/.*"procStart":"\([^"]*\)".*/\1/p' "$f" 2>/dev/null) || recorded=""
+        CS_PLAIN_WRITER=$pid
+        if ! fields=$(jq -r '
+                (.procStart | if type == "string" then gsub("[\n\r]"; " ") else "" end),
+                (.cwd | if type == "string" then gsub("[\n\r]"; " ") else "" end)' "$f" 2>&1) \
+            || [ -z "$fields" ]; then
+            CS_PLAIN_WRITER_FILE=$f
+            CS_MOVE_ERROR=${fields:-jq read no JSON value in it}
+            return 2
+        fi
+        { IFS= read -r recorded; IFS= read -r cwd; } <<< "$fields" || true
         if [ -n "$recorded" ]; then
             started=$(LC_ALL=C TZ=UTC "${CS_PS_BIN:-ps}" -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//; s/ *$//') || started=""
             [ -z "$started" ] || [ "$started" = "$recorded" ] || continue
         fi
-        grep -qF -e "\"cwd\":\"$1\"" -e "\"cwd\":\"$resolved\"" "$f" 2>/dev/null || continue
-        printf '%s\n' "$pid"
+        [ "$cwd" = "$1" ] || [ "$cwd" -ef "$1" ] || continue
         return 0
     done
+    CS_PLAIN_WRITER=""
     return 1
 }
 
@@ -15688,13 +15703,16 @@ _plain_claude_writer() {  # session_dir
 # CS_MOVE_REFUSAL, ending with what the caller says of a running claude.
 # Returns 1 when nothing stands in the way.
 _conversations_move_refusal() {  # session_dir, plain_dir, what to do about a running claude
-    local writer
+    local rc=0
     CS_MOVE_REFUSAL=""
-    if writer=$(_plain_claude_writer "$1"); then
-        CS_MOVE_REFUSAL="a claude (pid $writer) runs in this session outside cs and writes its conversations to $2, so cs moved none of them into the vault. $3"
-        return 0
-    fi
-    return 1
+    _plain_claude_writer "$1" || rc=$?
+    case "$rc" in
+        0) CS_MOVE_REFUSAL="a claude (pid $CS_PLAIN_WRITER) runs in this session outside cs and writes its conversations to $2, so cs moved none of them into the vault. $3" ;;
+        1) return 1 ;;
+        2) CS_MOVE_REFUSAL="cs could not read $CS_PLAIN_WRITER_FILE, which Claude Code keeps for a running process (pid $CS_PLAIN_WRITER), so it cannot tell whether a claude writes the conversations in $2, and moved none of them into the vault. The next open moves them once that process has ended. jq said: $CS_MOVE_ERROR" ;;
+        *) error "_plain_claude_writer returned $rc for $1" ;;
+    esac
+    return 0
 }
 
 # Claude Code names a project folder after the path its claude ran in, with
@@ -15707,15 +15725,25 @@ _conversations_move_refusal() {  # session_dir, plain_dir, what to do about a ru
 # be told apart by owner. A cwd under another folder name is this session's
 # claude after a cd. Returns 1 when every conversation is the session's.
 _foreign_conversation_refusal() {  # session_dir, plain_dir
-    local f cwds cwd resolved
+    local f tokens cwds cwd resolved
     CS_MOVE_REFUSAL=""
     resolved=$(cd -- "$1" 2>/dev/null && pwd -P) || resolved=$1
     for f in "$2"/*.jsonl; do
         [ -f "$f" ] || continue
-        cwds=$(LC_ALL=C grep -o '"cwd":"[^"]*"' "$f" 2>/dev/null | sort -u) || cwds=""
+        # Each cwd as the JSON string the line holds, once; jq then reads
+        # those few, where a whole conversation would be megabytes.
+        tokens=$(LC_ALL=C grep -o -E '"cwd":"([^"\\]|\\.)*"' "$f" 2>/dev/null | sort -u) || tokens=""
+        [ -n "$tokens" ] || continue
+        cwds=$(printf '%s\n' "$tokens" | sed 's/^"cwd"://' | jq -r '"cwd:" + gsub("[\n\r]"; " ")' 2>&1) \
+            || cwds=${cwds:-jq failed and said nothing}
         while IFS= read -r cwd; do
-            cwd=${cwd#\"cwd\":\"}
-            cwd=${cwd%\"}
+            case "$cwd" in
+                cwd:*) cwd=${cwd#cwd:} ;;
+                *)
+                    CS_MOVE_REFUSAL="cs could not read the folder a claude ran in from $f, so it cannot tell whose conversation that is, and moved none of the conversations in $2 into the vault. They stay outside it, in plain text. jq said: $cwd"
+                    return 0
+                    ;;
+            esac
             [ -n "$cwd" ] && [ "$cwd" != "$1" ] && [ "$cwd" != "$resolved" ] || continue
             [ "$(_claude_encode_path "$cwd")" = "${2##*/}" ] || continue
             CS_MOVE_REFUSAL="$f is a conversation claude held in $cwd, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $2 into the vault. They stay outside it, in plain text."
