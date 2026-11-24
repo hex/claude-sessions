@@ -15692,10 +15692,13 @@ _read_claude_process_file() {  # file
 # takes: the file is then of an earlier process with that pid, which left
 # it. A file that is gone, or a process that ended since, holds nothing back
 # either. ps gives the time the process has run as [[dd-]hh:]mm:ss; when it
-# gives none for a process still there, the file is not called older.
+# gives none for a process still there, the file is not called older. The
+# clock is read before ps answers, so a wait between the two makes the file
+# look newer, never older.
 _older_than_process() {  # file, pid
     local ran now
     [ -f "$1" ] || return 0
+    now=$(date +%s)
     ran=$("${CS_PS_BIN:-ps}" -o etime= -p "$2" 2>/dev/null | awk '{
         n = split($1, t, /[-:]/); split("1 60 3600 86400", unit, " ")
         for (i = n; i >= 1; i--) s += t[i] * unit[n - i + 1]
@@ -15704,7 +15707,6 @@ _older_than_process() {  # file, pid
         ! kill -0 "$2" 2>/dev/null
         return
     fi
-    now=$(date +%s)
     [ $(( now - $(_epoch_mtime "$1") )) -gt $(( ran + 2 )) ]
 }
 
