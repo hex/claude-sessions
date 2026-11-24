@@ -587,7 +587,7 @@ _move_plain_conversations_under_mutex() {  # session_name, session_dir, plain_di
 
 run_encrypt() {
     [ $# -eq 1 ] || error "Usage: cs -encrypt <name>"
-    local name="$1" meta container mnt sub taken=0 password="" again="" out transcripts moved move_rc=0
+    local name="$1" meta container mnt sub taken=0 password="" again="" out transcripts moved move_rc=0 stayed=""
     _encrypt_refuse "$name"
     meta="$SESSIONS_ROOT/$name/.cs"
     # Hold the session lock while the password prompts run, so an open in
@@ -657,16 +657,20 @@ run_encrypt() {
         :
     elif _conversations_move_refusal "$SESSIONS_ROOT/$name" "$transcripts" "The next open moves them once it has ended."; then
         warn "$name: $CS_MOVE_REFUSAL"
+        stayed="claude"
+        [ -z "$CS_PLAIN_WRITER_FILE" ] || stayed="claude-unknown"
     elif _unreadable_conversations_refusal "$transcripts" "$mnt/claude-config/projects/${transcripts##*/}"; then
         warn "$name: $CS_MOVE_REFUSAL"
+        stayed="unreadable"
     elif _foreign_conversation_refusal "$SESSIONS_ROOT/$name" "$transcripts"; then
         warn "$name: $CS_MOVE_REFUSAL"
+        stayed="other-path"
     else
         _move_conversations_into_vault "$transcripts" "$mnt/claude-config/projects/${transcripts##*/}" || move_rc=$?
         case "$move_rc" in
             0) ;;
             1) error "$name: could not copy the session's conversations ($transcripts) into the vault. They are all still there, whole, and the vault holds $(_conversations_in_vault_after_a_stop). Already moved:${moved:- nothing}. The vault is still mounted at .cs/vault-mnt; finish by hand or move those back, then detach it. cp said: $CS_MOVE_ERROR" ;;
-            2) _warn_conversations_left_outside "$name" "$transcripts" ;;
+            2) _warn_conversations_left_outside "$name" "$transcripts"; stayed="unremoved" ;;
             *) error "_move_conversations_into_vault returned $move_rc for $transcripts" ;;
         esac
     fi
@@ -691,6 +695,15 @@ run_encrypt() {
     if [ -L "$transcripts" ]; then
         echo "  - this session's conversations: $transcripts is a link, so cs left it, and the folder it points to, outside the vault"
     fi
+    case "$stayed" in
+        "") ;;
+        claude) echo "  - this session's conversations: a claude was running in the session outside cs, so cs left them in $transcripts; the next open moves them once it has ended" ;;
+        claude-unknown) echo "  - this session's conversations: cs could not tell whether a running claude writes them, so cs left them in $transcripts; the next open moves them" ;;
+        unreadable) echo "  - this session's conversations: cs could not read every folder under $transcripts, so cs left them there; the next open moves them once it can" ;;
+        other-path) echo "  - this session's conversations: $transcripts holds a conversation of another path too, so cs left the whole folder outside the vault" ;;
+        unremoved) echo "  - what cs could not remove from $transcripts: the vault holds whole copies of this session's conversations, and what is left there is a copy in plain text" ;;
+        *) error "cs -encrypt has no closing line for conversations left outside the vault as '$stayed'" ;;
+    esac
     echo "Always in plaintext:"
     echo "  - .cs/summary.md and .cs/brief.md"
 }

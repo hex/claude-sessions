@@ -282,6 +282,8 @@ vault pw [8 bytes]" "$(cat "$FAKE_DISKUTIL_LOG.stdin")" "the password typed once
     # shellcheck disable=SC2088  # cs prints the literal ~ path
     assert_output_contains "$out" "  - this session's lines in ~/.claude/history.jsonl" "lists what stays in plaintext" || return 1
     assert_output_not_contains "$out" "this session's transcripts in" "the transcripts are not on that list: they moved" || return 1
+    assert_output_not_contains "$out" "  - this session's conversations: " "nor are its conversations, under any name" || return 1
+    assert_output_not_contains "$out" "  - what cs could not remove" "and nothing was left behind" || return 1
     assert_output_not_contains "$out" "Apple_APFS_Volume" "diskutil's device table is not shown" || return 1
     assert_output_not_contains "$out" "Disk ejected" "nor its eject line" || return 1
 }
@@ -494,6 +496,7 @@ test_encrypt_names_what_it_could_not_remove_outside_the_vault() {
     assert_eq "0" "$rc" "cs -encrypt goes on: $out" || return 1
     assert_eq "conversation" "$(cat "$s/vault-mnt/claude-config/projects/${proj##*/}/$id.jsonl" 2>/dev/null)" "the vault holds the whole conversation" || return 1
     assert_output_contains "$out" "enc: the vault holds whole copies of this session's conversations, but cs could not remove them all from outside it. What is left in $proj is in plain text; remove it by hand. Removing it failed with: rmdir: " "names what is left outside" || return 1
+    assert_output_contains "$out" "^  - what cs could not remove from $proj: the vault holds whole copies of this session's conversations, and what is left there is a copy in plain text$" "the closing list names what is left" || return 1
     [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
     assert_eq "image create blank --encrypt --stdinpassphrase --format UDSB --size 50g --volumeName cs-enc --fs APFS $c
 image attach --stdinpassphrase --nobrowse --mountPoint $s/vault-mnt $c
@@ -1314,6 +1317,7 @@ test_encrypt_leaves_conversations_a_running_claude_writes() {
     assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of it" || return 1
     assert_eq "0" "$rc" "cs -encrypt finishes: $out" || return 1
     assert_output_contains "$out" "enc: a claude (pid $live) runs in this session outside cs and writes its conversations to $proj, so cs moved none of them into the vault. The next open moves them once it has ended.$" "names the running claude and when they move" || return 1
+    assert_output_contains "$out" "^  - this session's conversations: a claude was running in the session outside cs, so cs left them in $proj; the next open moves them once it has ended$" "the closing list names them" || return 1
     [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
 }
 
@@ -1364,6 +1368,7 @@ test_encrypt_moves_nothing_from_a_folder_another_path_shares() {
     assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of it" || return 1
     assert_eq "0" "$rc" "cs -encrypt finishes: $out" || return 1
     assert_output_contains "$out" "enc: $proj/$theirs.jsonl is a conversation claude held in $other, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $proj into the vault. They stay outside it, in plain text.$" "names the conversation and the path it belongs to" || return 1
+    assert_output_contains "$out" "^  - this session's conversations: $proj holds a conversation of another path too, so cs left the whole folder outside the vault$" "the closing list names the folder" || return 1
 }
 
 # Claude Code writes the path a claude runs in as JSON, so a quote or a
@@ -1493,6 +1498,7 @@ test_encrypt_moves_nothing_from_a_folder_it_cannot_read() {
     assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of them" || return 1
     assert_eq "0" "$rc" "cs -encrypt finishes: $out" || return 1
     assert_output_contains "$out" "enc: cs cannot read every folder under $proj, so it moved none of the conversations in $proj into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: find: $proj/$id: Permission denied$" "names the folder and what moved" || return 1
+    assert_output_contains "$out" "^  - this session's conversations: cs could not read every folder under $proj, so cs left them there; the next open moves them once it can$" "the closing list names them" || return 1
     [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
 }
 
