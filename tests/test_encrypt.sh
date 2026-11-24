@@ -1436,6 +1436,26 @@ test_open_moves_nothing_while_a_claude_that_changed_folder_writes() {
     assert_file_contains "$(_vault_projects enc)/$id.jsonl" "outside" "the conversation is in the vault" || return 1
 }
 
+# Where the filesystem takes two names that differ only in the case of a
+# letter as one, as APFS does unless told otherwise, two paths that differ
+# so share a conversations folder too.
+test_open_moves_nothing_from_a_folder_a_path_of_another_case_shares() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 theirs=77777777-7777-4777-8777-777777777777 proj other theirs_dir out rc=0
+    proj=$(_plain_conversation enc "$id" "of this session")
+    other="$(cd "$TEST_TMPDIR" && pwd -P)/SESSIONS-enc"
+    theirs_dir="$CS_TRANSCRIPTS_DIR/$(printf '%s' "$other" | sed 's/[^A-Za-z0-9]/-/g')"
+    [ "$theirs_dir" -ef "$proj" ] || { echo "  SKIP: this filesystem tells names apart by case"; return 77; }
+    assert_eq "1" "$([ "${theirs_dir##*/}" = "${proj##*/}" ]; echo $?)" "the fixture's two folder names differ as text" || return 1
+    jq -nc --arg cwd "$other" '{type: "user", cwd: $cwd, message: {role: "user", content: "of the other path"}}' > "$theirs_dir/$theirs.jsonl"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_file_contains "$proj/$theirs.jsonl" "of the other path" "the other path's conversation is untouched" || return 1
+    [ ! -e "$(_vault_projects enc)" ] || { echo "  FAIL: the vault has a folder for the session"; return 1; }
+    assert_output_contains "$out" "enc: $proj/$theirs.jsonl is a conversation claude held in $other, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $proj into the vault. They stay outside it, in plain text.$" "names the conversation and the path it belongs to" || return 1
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1690,6 +1710,7 @@ run_test test_encrypt_moves_nothing_from_a_folder_another_path_shares
 run_test test_open_reads_the_escaped_path_of_a_conversation_sharing_the_folder
 run_test test_open_reads_the_escaped_path_of_a_running_claude
 run_test test_open_moves_nothing_while_a_claude_that_changed_folder_writes
+run_test test_open_moves_nothing_from_a_folder_a_path_of_another_case_shares
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
