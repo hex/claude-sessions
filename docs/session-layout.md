@@ -324,7 +324,8 @@ finishes that removal. An entry outside is no clash when the volume's entry of
 that name holds everything in it: the same file, or a folder whose every entry the
 volume's folder holds too. A folder that the removal emptied only in part counts,
 so cs removes what is outside and prints `<name>: removed from <folder> what
-its vault already holds: <names>.` An empty folder on either side is no clash
+its vault already holds: <names>.` That line names only what cs removed. An
+empty folder on either side is no clash
 either. The open runs the move under the lock that serialises opens of one
 session, so a second open started beside the first finds nothing left to move;
 an open that cannot take that lock within five seconds stops and asks you to
@@ -337,18 +338,24 @@ cs moves nothing, says why and goes on in these cases:
   entry does not (the open only).
 - Claude Code lists a running claude in `sessions/<pid>.json` under your config
   dir that writes to the folder: its working directory is the session, or its
-  `sessionId` names a conversation in the folder. Claude Code rewrites the
-  working directory there when the claude changes folder and keeps the
-  conversation where the claude started, so cs reads both. cs compares the
-  start time recorded there with the process the pid names now, so a file that
-  a killed claude left behind does not hold the move back once another process
-  has its pid. A file of a running process that cs cannot read holds the move
-  back too, because it rules no claude out. The next open moves the
-  conversations.
-- cs cannot read a folder under the conversations folder, or under the
-  session's folder in the volume. Such a folder would read as an empty one, so
-  cs prints the line of `find` that names it and moves nothing until it can
-  read every folder.
+  `sessionId` names a conversation in the folder. The working directory there is
+  the folder the claude started in: a `cd` leaves it unchanged, and only entering
+  or leaving a worktree rewrites it, while a resumed conversation stays in its
+  own folder. A claude resumed in the session that then entered a worktree has
+  its working directory elsewhere, so cs reads both. cs compares the start time
+  recorded there with the process the pid names now, so a file that a killed
+  claude left behind does not hold the move back once another process has its
+  pid. Claude Code writes the file in place, so cs reads one it cannot read a
+  second time after a pause, and skips one last written more than two seconds
+  before the process its pid names started. A file still unreadable and no older
+  than its process holds the move back, because it rules no claude out: cs names
+  it and ends with `jq said: <jq's words>` or `The file holds no JSON value.`
+  The next open moves the conversations once that process has ended.
+- cs cannot list or cannot enter a folder under the conversations folder, or
+  under the session's folder in the volume. A folder it cannot list would read
+  as an empty one, and one it cannot enter can be neither copied nor compared,
+  so cs names the first such folder (`cs cannot list <folder>.` or `cs cannot
+  enter <folder>.`) and moves nothing until it can read every folder.
 - The folder holds a conversation of another path. Claude Code names the folder
   after the path with every character that is not a letter or digit turned into
   `-`, so session `foo-bar` and a claude run in `foo/bar` share one folder.
