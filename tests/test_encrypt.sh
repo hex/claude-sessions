@@ -1448,6 +1448,51 @@ test_open_moves_nothing_past_a_running_process_file_it_cannot_read() {
     assert_output_contains "$out" "enc: cs could not read $HOME/.claude/sessions/$live.json, which Claude Code keeps for a running process (pid $live), so it cannot tell whether a claude writes the conversations in $proj, and moved none of them into the vault. The next open moves them once that process has ended. jq said: jq: parse error: " "names the file and what jq said" || return 1
 }
 
+# Claude Code writes sessions/<pid>.json in place, so a read can find it cut
+# short, and a claude that was killed can leave it so. A file last written
+# before the process its pid names started is such a leftover, of another
+# process, and holds nothing back.
+test_open_moves_past_a_cut_file_older_than_the_process_with_its_pid() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj out rc=0
+    proj=$(_plain_conversation enc "$id" "outside")
+    sleep 300 &
+    local live=$!
+    mkdir -p "$HOME/.claude/sessions"
+    printf '{"pid":%s,"sessionId":"%s","cw' "$live" "$id" > "$HOME/.claude/sessions/$live.json"
+    touch -t 202001010000 "$HOME/.claude/sessions/$live.json"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_output_contains "$out" "enc: moved this session's conversations from $proj into its vault." "a file older than the process is another process's, so the move runs" || return 1
+    assert_file_contains "$(_vault_projects enc)/$id.jsonl" "outside" "the conversation is in the vault" || return 1
+}
+
+# An empty sessions file of a running process is one cs cannot read, in cs's
+# words and not jq's, and cs -encrypt's closing list says when the
+# conversations move, as the warning does.
+test_encrypt_leaves_conversations_past_an_empty_running_process_file() {
+    _stubs
+    _populated_session enc
+    local s="$CS_SESSIONS_ROOT/enc/.cs" id=44444444-4444-4444-8444-444444444444 out rc=0 proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$CS_SESSIONS_ROOT/enc")"
+    mkdir -p "$proj"
+    echo "conversation" > "$proj/$id.jsonl"
+    sleep 300 &
+    local live=$!
+    mkdir -p "$HOME/.claude/sessions"
+    : > "$HOME/.claude/sessions/$live.json"
+    out=$(_encrypt enc 2>&1) || rc=$?
+    kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+    assert_eq "conversation" "$(cat "$proj/$id.jsonl" 2>/dev/null)" "the conversation outside is untouched" || return 1
+    assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of it" || return 1
+    assert_eq "0" "$rc" "cs -encrypt finishes: $out" || return 1
+    assert_output_contains "$out" "enc: cs could not read $HOME/.claude/sessions/$live.json, which Claude Code keeps for a running process (pid $live), so it cannot tell whether a claude writes the conversations in $proj, and moved none of them into the vault. The next open moves them once that process has ended. The file holds no JSON value.$" "names the file and says it is empty" || return 1
+    assert_output_contains "$out" "^  - this session's conversations: cs could not tell whether a running claude writes them, so cs left them in $proj; the next open moves them once that process has ended$" "the closing list says when they move" || return 1
+    [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
+}
+
 # Claude Code rewrites the cwd in sessions/<pid>.json when its claude changes
 # folder, while the conversation stays in the folder of the path it started
 # in. The file's sessionId names the conversation that claude writes: one in
@@ -1874,6 +1919,8 @@ run_test test_encrypt_moves_nothing_from_a_folder_another_path_shares
 run_test test_open_reads_the_escaped_path_of_a_conversation_sharing_the_folder
 run_test test_open_reads_the_escaped_path_of_a_running_claude
 run_test test_open_moves_nothing_past_a_running_process_file_it_cannot_read
+run_test test_open_moves_past_a_cut_file_older_than_the_process_with_its_pid
+run_test test_encrypt_leaves_conversations_past_an_empty_running_process_file
 run_test test_open_moves_nothing_while_a_claude_that_changed_folder_writes
 run_test test_open_moves_nothing_from_a_folder_a_path_of_another_case_shares
 run_test test_open_moves_nothing_from_a_folder_it_cannot_read
