@@ -282,6 +282,8 @@ vault pw [8 bytes]" "$(cat "$FAKE_DISKUTIL_LOG.stdin")" "the password typed once
     # shellcheck disable=SC2088  # cs prints the literal ~ path
     assert_output_contains "$out" "  - this session's lines in ~/.claude/history.jsonl" "lists what stays in plaintext" || return 1
     assert_output_not_contains "$out" "this session's transcripts in" "the transcripts are not on that list: they moved" || return 1
+    assert_output_not_contains "$out" "  - this session's conversations: " "nor are its conversations, under any name" || return 1
+    assert_output_not_contains "$out" "  - what cs could not remove" "and nothing was left behind" || return 1
     assert_output_not_contains "$out" "Apple_APFS_Volume" "diskutil's device table is not shown" || return 1
     assert_output_not_contains "$out" "Disk ejected" "nor its eject line" || return 1
 }
@@ -494,6 +496,7 @@ test_encrypt_names_what_it_could_not_remove_outside_the_vault() {
     assert_eq "0" "$rc" "cs -encrypt goes on: $out" || return 1
     assert_eq "conversation" "$(cat "$s/vault-mnt/claude-config/projects/${proj##*/}/$id.jsonl" 2>/dev/null)" "the vault holds the whole conversation" || return 1
     assert_output_contains "$out" "enc: the vault holds whole copies of this session's conversations, but cs could not remove them all from outside it. What is left in $proj is in plain text; remove it by hand. Removing it failed with: rmdir: " "names what is left outside" || return 1
+    assert_output_contains "$out" "^  - what cs could not remove from $proj: the vault holds whole copies of this session's conversations, and what is left there is a copy in plain text$" "the closing list names what is left" || return 1
     [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
     assert_eq "image create blank --encrypt --stdinpassphrase --format UDSB --size 50g --volumeName cs-enc --fs APFS $c
 image attach --stdinpassphrase --nobrowse --mountPoint $s/vault-mnt $c
@@ -1314,6 +1317,7 @@ test_encrypt_leaves_conversations_a_running_claude_writes() {
     assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of it" || return 1
     assert_eq "0" "$rc" "cs -encrypt finishes: $out" || return 1
     assert_output_contains "$out" "enc: a claude (pid $live) runs in this session outside cs and writes its conversations to $proj, so cs moved none of them into the vault. The next open moves them once it has ended.$" "names the running claude and when they move" || return 1
+    assert_output_contains "$out" "^  - this session's conversations: a claude was running in the session outside cs, so cs left them in $proj; the next open moves them once it has ended$" "the closing list names them" || return 1
     [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
 }
 
@@ -1364,6 +1368,190 @@ test_encrypt_moves_nothing_from_a_folder_another_path_shares() {
     assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of it" || return 1
     assert_eq "0" "$rc" "cs -encrypt finishes: $out" || return 1
     assert_output_contains "$out" "enc: $proj/$theirs.jsonl is a conversation claude held in $other, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $proj into the vault. They stay outside it, in plain text.$" "names the conversation and the path it belongs to" || return 1
+    assert_output_contains "$out" "^  - this session's conversations: $proj holds a conversation of another path too, so cs left the whole folder outside the vault$" "the closing list names the folder" || return 1
+}
+
+# Claude Code writes the path a claude runs in as JSON, so a quote or a
+# backslash in it is escaped where cs reads it: in each line of a
+# conversation, and in sessions/<pid>.json. cs reads the path, not its escape.
+test_open_reads_the_escaped_path_of_a_conversation_sharing_the_folder() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 theirs=77777777-7777-4777-8777-777777777777 proj other out rc=0
+    proj=$(_plain_conversation enc "$id" "of this session")
+    other="$(cd "$CS_SESSIONS_ROOT" && pwd -P)\"enc"
+    jq -nc --arg cwd "$other" '{type: "user", cwd: $cwd, message: {role: "user", content: "of the other path"}}' > "$proj/$theirs.jsonl"
+    assert_file_contains "$proj/$theirs.jsonl" '\\"enc"' "the fixture records the quote escaped" || return 1
+    assert_eq "${proj##*/}" "$(printf '%s' "$other" | sed 's/[^A-Za-z0-9]/-/g')" "the fixture's other path shares the folder" || return 1
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_file_contains "$proj/$theirs.jsonl" "of the other path" "the other path's conversation is untouched" || return 1
+    [ ! -e "$(_vault_projects enc)" ] || { echo "  FAIL: the vault has a folder for the session"; return 1; }
+    assert_output_contains "$out" "enc: $proj/$theirs.jsonl is a conversation claude held in $other, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $proj into the vault. They stay outside it, in plain text.$" "names the conversation and the path it belongs to" || return 1
+}
+
+test_open_reads_the_escaped_path_of_a_running_claude() {
+    export CS_SESSIONS_ROOT="$TEST_TMPDIR/odd \"q\" root"
+    mkdir -p "$CS_SESSIONS_ROOT"
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 fresh=88888888-8888-4888-8888-888888888888 proj out rc=0 dir
+    proj=$(_plain_conversation enc "$id" "outside")
+    dir=$(cd "$CS_SESSIONS_ROOT/enc" && pwd -P)
+    sleep 300 &
+    local live=$!
+    mkdir -p "$HOME/.claude/sessions"
+    jq -nc --argjson pid "$live" --arg id "$fresh" --arg cwd "$dir" '{pid: $pid, sessionId: $id, cwd: $cwd, kind: "interactive"}' > "$HOME/.claude/sessions/$live.json"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+    assert_file_contains "$HOME/.claude/sessions/$live.json" 'odd \\"q\\" root' "the fixture records the quotes escaped" || return 1
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_output_contains "$out" "enc: a claude (pid $live) runs in this session outside cs and writes its conversations to $proj, so cs moved none of them into the vault. Reopen once it has ended." "names the running claude" || return 1
+    assert_file_contains "$proj/$id.jsonl" "outside" "the conversation outside is untouched" || return 1
+}
+
+# A sessions file of a running process that jq cannot read rules no claude
+# out, so nothing moves and cs names the file.
+test_open_moves_nothing_past_a_running_process_file_it_cannot_read() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj out rc=0
+    proj=$(_plain_conversation enc "$id" "outside")
+    sleep 300 &
+    local live=$!
+    mkdir -p "$HOME/.claude/sessions"
+    printf '{"pid":%s,"sessionId":"%s","cw' "$live" "$id" > "$HOME/.claude/sessions/$live.json"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_file_contains "$proj/$id.jsonl" "outside" "the conversation outside is untouched" || return 1
+    assert_output_contains "$out" "enc: cs could not read $HOME/.claude/sessions/$live.json, which Claude Code keeps for a running process (pid $live), so it cannot tell whether a claude writes the conversations in $proj, and moved none of them into the vault. The next open moves them once that process has ended. jq said: jq: parse error: " "names the file and what jq said" || return 1
+}
+
+# Claude Code rewrites the cwd in sessions/<pid>.json when its claude changes
+# folder, while the conversation stays in the folder of the path it started
+# in. The file's sessionId names the conversation that claude writes: one in
+# the session's folder stops the move wherever the claude is now, and one that
+# is not there leaves a claude in a subfolder no reason to move nothing.
+test_open_moves_nothing_while_a_claude_that_changed_folder_writes() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 elsewhere=88888888-8888-4888-8888-888888888888 proj out rc=0 dir started
+    proj=$(_plain_conversation enc "$id" "outside")
+    dir=$(cd "$CS_SESSIONS_ROOT/enc" && pwd -P)
+    mkdir -p "$dir/sub"
+    sleep 300 &
+    local live=$!
+    mkdir -p "$HOME/.claude/sessions"
+    started=$(LC_ALL=C TZ=UTC /bin/ps -o lstart= -p "$live" | sed 's/^ *//; s/ *$//')
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s/sub","startedAt":1795371270300,"procStart":"%s","kind":"interactive"}' "$live" "$id" "$dir" "$started" > "$HOME/.claude/sessions/$live.json"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open goes on: $out" || { kill "$live" 2>/dev/null; return 1; }
+    assert_file_contains "$proj/$id.jsonl" "outside" "the conversation the claude writes is untouched" || { kill "$live" 2>/dev/null; return 1; }
+    assert_output_contains "$out" "enc: a claude (pid $live) runs in this session outside cs and writes its conversations to $proj, so cs moved none of them into the vault. Reopen once it has ended." "names the running claude" || { kill "$live" 2>/dev/null; return 1; }
+    printf '{"pid":%s,"sessionId":"%s","cwd":"%s/sub","startedAt":1795371270300,"procStart":"%s","kind":"interactive"}' "$live" "$elsewhere" "$dir" "$started" > "$HOME/.claude/sessions/$live.json"
+    rc=0
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+    assert_eq "0" "$rc" "the second open goes on: $out" || return 1
+    assert_output_contains "$out" "enc: moved this session's conversations from $proj into its vault." "a claude writing a conversation kept elsewhere holds nothing back" || return 1
+    assert_file_contains "$(_vault_projects enc)/$id.jsonl" "outside" "the conversation is in the vault" || return 1
+}
+
+# Where the filesystem takes two names that differ only in the case of a
+# letter as one, as APFS does unless told otherwise, two paths that differ
+# so share a conversations folder too.
+test_open_moves_nothing_from_a_folder_a_path_of_another_case_shares() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 theirs=77777777-7777-4777-8777-777777777777 proj other theirs_dir out rc=0
+    proj=$(_plain_conversation enc "$id" "of this session")
+    other="$(cd "$TEST_TMPDIR" && pwd -P)/SESSIONS-enc"
+    theirs_dir="$CS_TRANSCRIPTS_DIR/$(printf '%s' "$other" | sed 's/[^A-Za-z0-9]/-/g')"
+    [ "$theirs_dir" -ef "$proj" ] || { echo "  SKIP: this filesystem tells names apart by case"; return 77; }
+    assert_eq "1" "$([ "${theirs_dir##*/}" = "${proj##*/}" ]; echo $?)" "the fixture's two folder names differ as text" || return 1
+    jq -nc --arg cwd "$other" '{type: "user", cwd: $cwd, message: {role: "user", content: "of the other path"}}' > "$theirs_dir/$theirs.jsonl"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_file_contains "$proj/$theirs.jsonl" "of the other path" "the other path's conversation is untouched" || return 1
+    [ ! -e "$(_vault_projects enc)" ] || { echo "  FAIL: the vault has a folder for the session"; return 1; }
+    assert_output_contains "$out" "enc: $proj/$theirs.jsonl is a conversation claude held in $other, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $proj into the vault. They stay outside it, in plain text.$" "names the conversation and the path it belongs to" || return 1
+}
+
+# A folder cs cannot list reads as an empty one, with nothing in it to copy.
+# The move starts only when cs can read every folder on both sides.
+test_open_moves_nothing_from_a_folder_it_cannot_read() {
+    [ "$(id -u)" != "0" ] || { echo "  SKIP: root reads a folder whatever its mode"; return 77; }
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj out rc=0
+    proj=$(_plain_conversation enc "$id" "before the vault")
+    mkdir -p "$proj/$id/subagents"
+    echo "agent" > "$proj/$id/subagents/agent-a.jsonl"
+    chmod 000 "$proj/$id"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    chmod 755 "$proj/$id"
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_file_contains "$proj/$id.jsonl" "before the vault" "the conversation outside is untouched" || return 1
+    assert_eq "agent" "$(cat "$proj/$id/subagents/agent-a.jsonl" 2>/dev/null)" "and so is the folder cs could not read" || return 1
+    [ ! -e "$(_vault_projects enc)" ] || { echo "  FAIL: the vault has a folder for the session"; return 1; }
+    assert_output_contains "$out" "enc: cs cannot read every folder under $proj, so it moved none of the conversations in $proj into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: find: $proj/$id: Permission denied$" "names the folder and what moved" || return 1
+}
+
+test_encrypt_moves_nothing_from_a_folder_it_cannot_read() {
+    [ "$(id -u)" != "0" ] || { echo "  SKIP: root reads a folder whatever its mode"; return 77; }
+    _stubs
+    _populated_session enc
+    local s="$CS_SESSIONS_ROOT/enc/.cs" id=44444444-4444-4444-8444-444444444444 out rc=0 proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$CS_SESSIONS_ROOT/enc")"
+    mkdir -p "$proj/$id/subagents"
+    echo "conversation" > "$proj/$id.jsonl"
+    echo "agent" > "$proj/$id/subagents/agent-a.jsonl"
+    chmod 000 "$proj/$id"
+    out=$(_encrypt enc 2>&1) || rc=$?
+    chmod 755 "$proj/$id"
+    assert_eq "conversation" "$(cat "$proj/$id.jsonl" 2>/dev/null)" "the conversation outside is untouched" || return 1
+    assert_eq "agent" "$(cat "$proj/$id/subagents/agent-a.jsonl" 2>/dev/null)" "and so is the folder cs could not read" || return 1
+    assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of them" || return 1
+    assert_eq "0" "$rc" "cs -encrypt finishes: $out" || return 1
+    assert_output_contains "$out" "enc: cs cannot read every folder under $proj, so it moved none of the conversations in $proj into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: find: $proj/$id: Permission denied$" "names the folder and what moved" || return 1
+    assert_output_contains "$out" "^  - this session's conversations: cs could not read every folder under $proj, so cs left them there; the next open moves them once it can$" "the closing list names them" || return 1
+    [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
+}
+
+# A removal outside the vault that stopped inside a folder leaves a part of
+# it: fewer entries than the vault's whole copy, each with the same content.
+# The next open finishes that removal. An entry the vault's copy lacks is
+# still a clash, and nothing moves.
+test_open_finishes_a_removal_that_stopped_inside_a_folder() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj vault out rc=0
+    proj=$(_plain_conversation enc "$id" "moved before")
+    vault=$(_vault_projects enc)
+    mkdir -p "$proj/$id/subagents" "$vault/$id/subagents"
+    cp -p "$proj/$id.jsonl" "$vault/$id.jsonl"
+    echo "agent a" > "$vault/$id/subagents/agent-a.jsonl"
+    echo "agent b" > "$vault/$id/subagents/agent-b.jsonl"
+    echo "agent b" > "$proj/$id/subagents/agent-b.jsonl"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open reaches claude: $out" || return 1
+    assert_output_not_contains "$out" "is in the vault too" "a part of what the vault holds whole is no clash" || return 1
+    [ ! -e "$proj" ] || { echo "  FAIL: plaintext conversations left at $proj"; return 1; }
+    assert_eq "agent-a.jsonl agent-b.jsonl" "$(ls "$vault/$id/subagents" | tr '\n' ' ' | sed 's/ $//')" "the vault keeps its whole folder" || return 1
+    assert_output_contains "$out" "enc: removed from $proj what its vault already holds: $id $id.jsonl.$" "names what it removed outside" || return 1
+
+    mkdir -p "$proj/$id/subagents"
+    echo "agent b" > "$proj/$id/subagents/agent-b.jsonl"
+    echo "agent c" > "$proj/$id/subagents/agent-c.jsonl"
+    rc=0
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the second open goes on: $out" || return 1
+    assert_output_contains "$out" "enc: $proj/$id is in the vault too, as .cs/claude-config/projects/${proj##*/}/$id, so cs moved none of the conversations in $proj. Keep the copy you want in the vault, remove the other, then reopen." "an entry the vault lacks is a clash" || return 1
+    assert_eq "agent c" "$(cat "$proj/$id/subagents/agent-c.jsonl" 2>/dev/null)" "and stays outside, untouched" || return 1
+    [ ! -e "$vault/$id/subagents/agent-c.jsonl" ] || { echo "  FAIL: the clashing folder was merged into the vault"; return 1; }
 }
 
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
@@ -1617,6 +1805,14 @@ run_test test_open_moves_past_a_claude_file_whose_pid_names_another_process
 run_test test_encrypt_leaves_conversations_a_running_claude_writes
 run_test test_open_moves_nothing_from_a_folder_another_path_shares
 run_test test_encrypt_moves_nothing_from_a_folder_another_path_shares
+run_test test_open_reads_the_escaped_path_of_a_conversation_sharing_the_folder
+run_test test_open_reads_the_escaped_path_of_a_running_claude
+run_test test_open_moves_nothing_past_a_running_process_file_it_cannot_read
+run_test test_open_moves_nothing_while_a_claude_that_changed_folder_writes
+run_test test_open_moves_nothing_from_a_folder_a_path_of_another_case_shares
+run_test test_open_moves_nothing_from_a_folder_it_cannot_read
+run_test test_encrypt_moves_nothing_from_a_folder_it_cannot_read
+run_test test_open_finishes_a_removal_that_stopped_inside_a_folder
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads

@@ -968,7 +968,8 @@ test_worktree_create_never_copies_the_permission_settings() {
 
 # git lists the files .worktreeinclude names from every directory of the base
 # it can read and exits 0, warning of each it cannot. A file named under one
-# of those is not copied, and the launch says so with git's own lines.
+# of those is not copied. The launch shows git's own lines, as what git said
+# while it listed the files, and that a named file may not be copied.
 test_worktree_create_says_which_directories_git_could_not_list() {
     _included_base "incdir" "local/*.json"
     local base_dir="$CS_SESSIONS_ROOT/incdir" wt="$CS_SESSIONS_ROOT/incdir@task1" output status=0
@@ -979,9 +980,9 @@ test_worktree_create_says_which_directories_git_could_not_list() {
     chmod 755 "$base_dir/local/inner"
     assert_eq "0" "$status" "the feature is created: $output" || return 1
     assert_eq '{"k":1}' "$(cat "$wt/local/s.json" 2>/dev/null)" "a file git could list is copied" || return 1
-    assert_eq "git could not read every directory of $base_dir, so a file .worktreeinclude names in one of these is not copied:
+    assert_eq "git said this while it listed the files that $base_dir/.worktreeinclude names, so a file it names may not be copied:
 warning: could not open directory 'local/inner/': Permission denied" \
-        "$(printf '%s\n' "$output" | grep -F -A1 "git could not read every directory of")" "the launch says what git could not read" || return 1
+        "$(printf '%s\n' "$output" | grep -F -A1 "git said this while it listed the files that")" "the launch shows git's words as git's" || return 1
 }
 
 # A stand-in git that runs <commands> once git worktree add has made the
