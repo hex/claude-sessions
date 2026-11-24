@@ -1410,6 +1410,24 @@ test_open_reads_the_escaped_path_of_a_running_claude() {
     assert_file_contains "$proj/$id.jsonl" "outside" "the conversation outside is untouched" || return 1
 }
 
+# A sessions file of a running process that jq cannot read rules no claude
+# out, so nothing moves and cs names the file.
+test_open_moves_nothing_past_a_running_process_file_it_cannot_read() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj out rc=0
+    proj=$(_plain_conversation enc "$id" "outside")
+    sleep 300 &
+    local live=$!
+    mkdir -p "$HOME/.claude/sessions"
+    printf '{"pid":%s,"sessionId":"%s","cw' "$live" "$id" > "$HOME/.claude/sessions/$live.json"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_file_contains "$proj/$id.jsonl" "outside" "the conversation outside is untouched" || return 1
+    assert_output_contains "$out" "enc: cs could not read $HOME/.claude/sessions/$live.json, which Claude Code keeps for a running process (pid $live), so it cannot tell whether a claude writes the conversations in $proj, and moved none of them into the vault. The next open moves them once that process has ended. jq said: jq: error" "names the file and what jq said" || return 1
+}
+
 # Claude Code rewrites the cwd in sessions/<pid>.json when its claude changes
 # folder, while the conversation stays in the folder of the path it started
 # in. The file's sessionId names the conversation that claude writes: one in
@@ -1789,6 +1807,7 @@ run_test test_open_moves_nothing_from_a_folder_another_path_shares
 run_test test_encrypt_moves_nothing_from_a_folder_another_path_shares
 run_test test_open_reads_the_escaped_path_of_a_conversation_sharing_the_folder
 run_test test_open_reads_the_escaped_path_of_a_running_claude
+run_test test_open_moves_nothing_past_a_running_process_file_it_cannot_read
 run_test test_open_moves_nothing_while_a_claude_that_changed_folder_writes
 run_test test_open_moves_nothing_from_a_folder_a_path_of_another_case_shares
 run_test test_open_moves_nothing_from_a_folder_it_cannot_read
