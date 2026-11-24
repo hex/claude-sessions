@@ -1197,6 +1197,26 @@ test_open_names_what_it_could_not_remove_outside_the_vault() {
     assert_output_contains "$out" "enc: the vault holds whole copies of this session's conversations, but cs could not remove them all from outside it. What is left in $proj is in plain text; remove it by hand. Removing it failed with: rmdir: " "names what is left outside" || return 1
 }
 
+# What the open says it removed outside the vault is what went. A copy the
+# vault already holds that would not go is still outside, and is not named.
+test_open_names_as_removed_only_what_went() {
+    [ "$(id -u)" != "0" ] || { echo "  SKIP: root ignores the permission that makes the removal fail"; return 77; }
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj vault out rc=0
+    proj=$(_plain_conversation enc "$id" "moved before")
+    vault=$(_vault_projects enc)
+    mkdir -p "$vault"
+    cp -p "$proj/$id.jsonl" "$vault/"
+    chmod 555 "$proj"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    chmod 755 "$proj"
+    assert_eq "0" "$rc" "the open reaches claude: $out" || return 1
+    assert_file_contains "$proj/$id.jsonl" "moved before" "the copy outside is still there" || return 1
+    assert_output_contains "$out" "enc: the vault holds whole copies of this session's conversations, but cs could not remove them all from outside it. What is left in $proj is in plain text; remove it by hand. Removing it failed with: rm: " "names what is left outside" || return 1
+    assert_output_not_contains "$out" "removed from $proj" "names nothing as removed" || return 1
+}
+
 # An empty folder in the vault holds nothing to lose either: the folder from
 # outside takes its place.
 test_open_moves_a_folder_over_an_empty_one_in_the_vault() {
@@ -1843,6 +1863,7 @@ run_test test_open_leaves_no_cut_conversation_in_a_vault_without_room
 run_test test_encrypt_leaves_no_cut_conversation_in_a_vault_without_room
 run_test test_open_removes_a_copy_outside_that_the_vault_already_holds
 run_test test_open_names_what_it_could_not_remove_outside_the_vault
+run_test test_open_names_as_removed_only_what_went
 run_test test_open_moves_a_folder_over_an_empty_one_in_the_vault
 run_test test_open_says_it_moved_conversations_only_when_it_moved_one
 run_test test_open_moves_nothing_while_another_cs_holds_the_openers_mutex
