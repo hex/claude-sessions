@@ -1425,7 +1425,7 @@ test_open_moves_nothing_past_a_running_process_file_it_cannot_read() {
     kill "$live" 2>/dev/null; wait "$live" 2>/dev/null
     assert_eq "0" "$rc" "the open goes on: $out" || return 1
     assert_file_contains "$proj/$id.jsonl" "outside" "the conversation outside is untouched" || return 1
-    assert_output_contains "$out" "enc: cs could not read $HOME/.claude/sessions/$live.json, which Claude Code keeps for a running process (pid $live), so it cannot tell whether a claude writes the conversations in $proj, and moved none of them into the vault. The next open moves them once that process has ended. jq said: jq: error" "names the file and what jq said" || return 1
+    assert_output_contains "$out" "enc: cs could not read $HOME/.claude/sessions/$live.json, which Claude Code keeps for a running process (pid $live), so it cannot tell whether a claude writes the conversations in $proj, and moved none of them into the vault. The next open moves them once that process has ended. jq said: jq: parse error: " "names the file and what jq said" || return 1
 }
 
 # Claude Code rewrites the cwd in sessions/<pid>.json when its claude changes
