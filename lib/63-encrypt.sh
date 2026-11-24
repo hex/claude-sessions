@@ -300,13 +300,20 @@ _empty_real_dir() {  # path
     [ -d "$1" ] && [ ! -L "$1" ] && [ -z "$(ls -A -- "$1" 2>/dev/null)" ]
 }
 
-# True when two paths hold the same content: two links to one target, two
-# files byte for byte, or two folders entry for entry.
-_same_content() {  # path, path
+# True when the vault's path holds all that the one outside holds: two links
+# to one target, two files byte for byte, or a folder whose every entry the
+# vault's folder holds so. The vault's folder may hold more: a removal
+# outside that stopped inside a folder leaves a part of it there.
+_vault_holds_all_of() {  # path outside, path in the vault
+    local entry
     if [ -L "$1" ] || [ -L "$2" ]; then
         [ -L "$1" ] && [ -L "$2" ] && [ "$(readlink "$1")" = "$(readlink "$2")" ]
     elif [ -d "$1" ] && [ -d "$2" ]; then
-        diff -r "$1" "$2" >/dev/null 2>&1
+        for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+            [ -e "$entry" ] || [ -L "$entry" ] || continue
+            _vault_holds_all_of "$entry" "$2/${entry##*/}" || return 1
+        done
+        return 0
     elif [ -f "$1" ] && [ -f "$2" ]; then
         cmp -s "$1" "$2"
     else
@@ -328,7 +335,7 @@ _conversations_copy_stopped() {  # staging_dir, what the tool said
 # the session's folder only once all of them are copied, and what is outside
 # is removed only once all of them are in place. An entry whose name the
 # vault already holds is not copied: the caller checked that the vault's is
-# an empty folder, which makes way, or has the same content, so the one
+# an empty folder, which makes way, or holds all of the entry, so the one
 # outside only goes.
 # Returns 0 with nothing left outside; 1 with everything outside as it was;
 # 2 with whole copies in the vault and something outside that would not go.
@@ -555,7 +562,7 @@ _move_plain_conversations_under_mutex() {  # session_name, session_dir, plain_di
         _empty_real_dir "$entry" && continue
         [ -e "$vault/${entry##*/}" ] || [ -L "$vault/${entry##*/}" ] || continue
         _empty_real_dir "$vault/${entry##*/}" && continue
-        _same_content "$entry" "$vault/${entry##*/}" && continue
+        _vault_holds_all_of "$entry" "$vault/${entry##*/}" && continue
         warn "$1: $entry is in the vault too, as .cs/claude-config/projects/${plain##*/}/${entry##*/}, so cs moved none of the conversations in $plain. Keep the copy you want in the vault, remove the other, then reopen."
         return 0
     done
