@@ -15568,12 +15568,15 @@ _empty_real_dir() {  # path
 # True when the vault's path holds all that the one outside holds: two links
 # to one target, two files byte for byte, or a folder whose every entry the
 # vault's folder holds so. The vault's folder may hold more: a removal
-# outside that stopped inside a folder leaves a part of it there.
+# outside that stopped inside a folder leaves a part of it there. A folder
+# outside that cs cannot list or enter holds entries nobody compared, so the
+# vault is not said to hold it.
 _vault_holds_all_of() {  # path outside, path in the vault
     local entry
     if [ -L "$1" ] || [ -L "$2" ]; then
         [ -L "$1" ] && [ -L "$2" ] && [ "$(readlink "$1")" = "$(readlink "$2")" ]
     elif [ -d "$1" ] && [ -d "$2" ]; then
+        [ -r "$1" ] && [ -x "$1" ] || return 1
         for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
             [ -e "$entry" ] || [ -L "$entry" ] || continue
             _vault_holds_all_of "$entry" "$2/${entry##*/}" || return 1
