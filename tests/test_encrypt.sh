@@ -1456,6 +1456,46 @@ test_open_moves_nothing_from_a_folder_a_path_of_another_case_shares() {
     assert_output_contains "$out" "enc: $proj/$theirs.jsonl is a conversation claude held in $other, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $proj into the vault. They stay outside it, in plain text.$" "names the conversation and the path it belongs to" || return 1
 }
 
+# A folder cs cannot list reads as an empty one, with nothing in it to copy.
+# The move starts only when cs can read every folder on both sides.
+test_open_moves_nothing_from_a_folder_it_cannot_read() {
+    [ "$(id -u)" != "0" ] || { echo "  SKIP: root reads a folder whatever its mode"; return 77; }
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj out rc=0
+    proj=$(_plain_conversation enc "$id" "before the vault")
+    mkdir -p "$proj/$id/subagents"
+    echo "agent" > "$proj/$id/subagents/agent-a.jsonl"
+    chmod 000 "$proj/$id"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    chmod 755 "$proj/$id"
+    assert_eq "0" "$rc" "the open goes on: $out" || return 1
+    assert_file_contains "$proj/$id.jsonl" "before the vault" "the conversation outside is untouched" || return 1
+    assert_eq "agent" "$(cat "$proj/$id/subagents/agent-a.jsonl" 2>/dev/null)" "and so is the folder cs could not read" || return 1
+    [ ! -e "$(_vault_projects enc)" ] || { echo "  FAIL: the vault has a folder for the session"; return 1; }
+    assert_output_contains "$out" "enc: cs cannot read every folder under $proj, so it moved none of the conversations in $proj into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: find: $proj/$id: Permission denied$" "names the folder and what moved" || return 1
+}
+
+test_encrypt_moves_nothing_from_a_folder_it_cannot_read() {
+    [ "$(id -u)" != "0" ] || { echo "  SKIP: root reads a folder whatever its mode"; return 77; }
+    _stubs
+    _populated_session enc
+    local s="$CS_SESSIONS_ROOT/enc/.cs" id=44444444-4444-4444-8444-444444444444 out rc=0 proj
+    proj="$CS_TRANSCRIPTS_DIR/$(_encode_cwd_for_claude_test "$CS_SESSIONS_ROOT/enc")"
+    mkdir -p "$proj/$id/subagents"
+    echo "conversation" > "$proj/$id.jsonl"
+    echo "agent" > "$proj/$id/subagents/agent-a.jsonl"
+    chmod 000 "$proj/$id"
+    out=$(_encrypt enc 2>&1) || rc=$?
+    chmod 755 "$proj/$id"
+    assert_eq "conversation" "$(cat "$proj/$id.jsonl" 2>/dev/null)" "the conversation outside is untouched" || return 1
+    assert_eq "agent" "$(cat "$proj/$id/subagents/agent-a.jsonl" 2>/dev/null)" "and so is the folder cs could not read" || return 1
+    assert_eq "" "$(find "$s/vault-mnt" -name '*.jsonl')" "the vault holds nothing of them" || return 1
+    assert_eq "0" "$rc" "cs -encrypt finishes: $out" || return 1
+    assert_output_contains "$out" "enc: cs cannot read every folder under $proj, so it moved none of the conversations in $proj into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: find: $proj/$id: Permission denied$" "names the folder and what moved" || return 1
+    [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1711,6 +1751,8 @@ run_test test_open_reads_the_escaped_path_of_a_conversation_sharing_the_folder
 run_test test_open_reads_the_escaped_path_of_a_running_claude
 run_test test_open_moves_nothing_while_a_claude_that_changed_folder_writes
 run_test test_open_moves_nothing_from_a_folder_a_path_of_another_case_shares
+run_test test_open_moves_nothing_from_a_folder_it_cannot_read
+run_test test_encrypt_moves_nothing_from_a_folder_it_cannot_read
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
