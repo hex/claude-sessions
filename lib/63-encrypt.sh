@@ -470,12 +470,12 @@ _conversations_move_refusal() {  # session_dir, plain_dir, what to do about a ru
 # find said first, which names the folder, ends CS_MOVE_REFUSAL's sentence.
 # Returns 1 when it walked both.
 _unreadable_conversations_refusal() {  # plain_dir, vault_dir
-    local dir said
+    local dir said nl=$'\n'
     CS_MOVE_REFUSAL=""
     for dir in "$1" "$2"; do
         [ -d "$dir" ] || continue
         said=$(find "$dir" -type d 2>&1 >/dev/null) && [ -z "$said" ] && continue
-        CS_MOVE_REFUSAL="cs cannot read every folder under $dir, so it moved none of the conversations in $1 into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: ${said%%$'\n'*}"
+        CS_MOVE_REFUSAL="cs cannot read every folder under $dir, so it moved none of the conversations in $1 into the vault: they are all still there, and the vault holds what it held before. The next open moves them once cs can read every folder. find said: ${said%%"$nl"*}"
         return 0
     done
     return 1
