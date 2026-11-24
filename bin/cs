@@ -15725,15 +15725,15 @@ _conversations_move_refusal() {  # session_dir, plain_dir, what to do about a ru
 # every character that is no letter or digit turned into a dash, so session
 # foo-bar and a claude run in foo/bar keep their conversations in one folder.
 # Each line of a conversation records that path as cwd. A conversation with
-# a cwd that is not the session's, yet takes the same folder name, belongs to
-# the other path: its file and that path go in CS_MOVE_REFUSAL's sentence,
-# and the folder stays, since what else it holds (memory/, the index) cannot
-# be told apart by owner. A cwd under another folder name is this session's
+# a cwd that is not the session's, yet takes the same folder, belongs to the
+# other path; the filesystem says whether two names are one folder, as it
+# does for names that differ only in the case of a letter. The file and that
+# path go in CS_MOVE_REFUSAL's sentence, and the folder stays, since what
+# else it holds (memory/, the index) cannot be told apart by owner. A cwd under another folder name is this session's
 # claude after a cd. Returns 1 when every conversation is the session's.
 _foreign_conversation_refusal() {  # session_dir, plain_dir
-    local f tokens cwds cwd resolved
+    local f tokens cwds cwd
     CS_MOVE_REFUSAL=""
-    resolved=$(cd -- "$1" 2>/dev/null && pwd -P) || resolved=$1
     for f in "$2"/*.jsonl; do
         [ -f "$f" ] || continue
         # Each cwd as the JSON string the line holds, once; jq then reads
@@ -15750,8 +15750,8 @@ _foreign_conversation_refusal() {  # session_dir, plain_dir
                     return 0
                     ;;
             esac
-            [ -n "$cwd" ] && [ "$cwd" != "$1" ] && [ "$cwd" != "$resolved" ] || continue
-            [ "$(_claude_encode_path "$cwd")" = "${2##*/}" ] || continue
+            [ -n "$cwd" ] && [ "$cwd" != "$1" ] && [ ! "$cwd" -ef "$1" ] || continue
+            [ "${2%/*}/$(_claude_encode_path "$cwd")" -ef "$2" ] || continue
             CS_MOVE_REFUSAL="$f is a conversation claude held in $cwd, which Claude Code files under the same folder as this session, so cs moved none of the conversations in $2 into the vault. They stay outside it, in plain text."
             return 0
         done <<< "$cwds"
