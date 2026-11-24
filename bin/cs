@@ -5703,8 +5703,9 @@ _path_goes_through_a_link() {  # root, relative path
 # ignores, each ended by a NUL; one check-ignore answers for the whole list.
 # Leaves what git said in _CS_WORKTREEINCLUDE_GIT_SAID. Fails when git cannot
 # list them: an unreadable .worktreeinclude would otherwise read as one that
-# names nothing. Git lists the rest and exits 0 when it cannot read a
-# directory of the base, saying so for each.
+# names nothing. Git can list the files, exit 0 and still have said
+# something, as it does for each directory of the base it cannot read; the
+# caller shows those words as git's.
 _worktree_included_list() {  # base_dir out
     local base="$1" named said status=0 nl=$'\n'
     _CS_WORKTREEINCLUDE_GIT_SAID=""
@@ -5820,7 +5821,7 @@ create_worktree_session() {
             || error "Could not list the files that $base_dir/.worktreeinclude names, so no feature was created:
 $_CS_WORKTREEINCLUDE_GIT_SAID"
         [ -z "$_CS_WORKTREEINCLUDE_GIT_SAID" ] \
-            || warn "git could not read every directory of $base_dir, so a file .worktreeinclude names in one of these is not copied:
+            || warn "git said this while it listed the files that $base_dir/.worktreeinclude names, so a file it names may not be copied:
 $_CS_WORKTREEINCLUDE_GIT_SAID" >&2
     fi
 
