@@ -343,11 +343,12 @@ _conversations_copy_stopped() {  # staging_dir, what the tool said
 # Returns 0 with nothing left outside; 1 with everything outside as it was;
 # 2 with whole copies in the vault and something outside that would not go.
 # CS_MOVED_ENTRIES names what reached the session's folder in the vault,
-# CS_REMOVED_COPIES what only went from outside, and CS_MOVE_ERROR holds what
-# the tool that stopped said.
+# CS_REMOVED_COPIES what the vault held already and went from outside, each
+# named once it is gone, and CS_MOVE_ERROR holds what the tool that stopped
+# said.
 _move_conversations_into_vault() {  # plain_dir, vault_dir
-    local staging="${2%/*}.cs-moving.$$" entry name out
-    local -a outside=() copied=()
+    local staging="${2%/*}.cs-moving.$$" entry name out i
+    local -a outside=() copied=() held=()
     CS_MOVE_ERROR=""
     CS_MOVED_ENTRIES=""
     CS_REMOVED_COPIES=""
@@ -355,9 +356,10 @@ _move_conversations_into_vault() {  # plain_dir, vault_dir
         [ -e "$entry" ] || [ -L "$entry" ] || continue
         name=${entry##*/}
         outside+=("$name")
+        held+=("")
         _empty_real_dir "$entry" && continue
         if [ -e "$2/$name" ] || [ -L "$2/$name" ]; then
-            _empty_real_dir "$2/$name" || { CS_REMOVED_COPIES="$CS_REMOVED_COPIES $name"; continue; }
+            _empty_real_dir "$2/$name" || { held[${#held[@]}-1]=1; continue; }
         fi
         copied+=("$name")
     done
@@ -376,12 +378,14 @@ _move_conversations_into_vault() {  # plain_dir, vault_dir
         out=$(rmdir "$staging" 2>&1) || { CS_MOVE_ERROR=$out; return 1; }
     fi
     if [ "${#outside[@]}" -gt 0 ]; then
-        for name in "${outside[@]}"; do
+        for i in "${!outside[@]}"; do
+            name=${outside[$i]}
             if _empty_real_dir "$1/$name"; then
                 out=$(rmdir "$1/$name" 2>&1) || { CS_MOVE_ERROR=$out; return 2; }
             else
                 out=$(rm -rf -- "${1:?}/$name" 2>&1) || { CS_MOVE_ERROR=$out; return 2; }
             fi
+            [ -z "${held[$i]}" ] || CS_REMOVED_COPIES="$CS_REMOVED_COPIES $name"
         done
     fi
     out=$(rmdir "$1" 2>&1) || { CS_MOVE_ERROR=$out; return 2; }
