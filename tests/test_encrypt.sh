@@ -1496,6 +1496,40 @@ test_encrypt_moves_nothing_from_a_folder_it_cannot_read() {
     [ -L "$s/memory" ] || { echo "  FAIL: the session was not linked into the vault"; return 1; }
 }
 
+# A removal outside the vault that stopped inside a folder leaves a part of
+# it: fewer entries than the vault's whole copy, each with the same content.
+# The next open finishes that removal. An entry the vault's copy lacks is
+# still a clash, and nothing moves.
+test_open_finishes_a_removal_that_stopped_inside_a_folder() {
+    _encrypted_session enc || return 1
+    local id=44444444-4444-4444-8444-444444444444 proj vault out rc=0
+    proj=$(_plain_conversation enc "$id" "moved before")
+    vault=$(_vault_projects enc)
+    mkdir -p "$proj/$id/subagents" "$vault/$id/subagents"
+    cp -p "$proj/$id.jsonl" "$vault/$id.jsonl"
+    echo "agent a" > "$vault/$id/subagents/agent-a.jsonl"
+    echo "agent b" > "$vault/$id/subagents/agent-b.jsonl"
+    echo "agent b" > "$proj/$id/subagents/agent-b.jsonl"
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the open reaches claude: $out" || return 1
+    assert_output_not_contains "$out" "is in the vault too" "a part of what the vault holds whole is no clash" || return 1
+    [ ! -e "$proj" ] || { echo "  FAIL: plaintext conversations left at $proj"; return 1; }
+    assert_eq "agent-a.jsonl agent-b.jsonl" "$(ls "$vault/$id/subagents" | tr '\n' ' ' | sed 's/ $//')" "the vault keeps its whole folder" || return 1
+    assert_output_contains "$out" "enc: removed from $proj what its vault already holds: $id $id.jsonl.$" "names what it removed outside" || return 1
+
+    mkdir -p "$proj/$id/subagents"
+    echo "agent b" > "$proj/$id/subagents/agent-b.jsonl"
+    echo "agent c" > "$proj/$id/subagents/agent-c.jsonl"
+    rc=0
+    out=$(_open enc "${VAULT_PW_LINE}n
+" 2>&1) || rc=$?
+    assert_eq "0" "$rc" "the second open goes on: $out" || return 1
+    assert_output_contains "$out" "enc: $proj/$id is in the vault too, as .cs/claude-config/projects/${proj##*/}/$id, so cs moved none of the conversations in $proj. Keep the copy you want in the vault, remove the other, then reopen." "an entry the vault lacks is a clash" || return 1
+    assert_eq "agent c" "$(cat "$proj/$id/subagents/agent-c.jsonl" 2>/dev/null)" "and stays outside, untouched" || return 1
+    [ ! -e "$vault/$id/subagents/agent-c.jsonl" ] || { echo "  FAIL: the clashing folder was merged into the vault"; return 1; }
+}
+
 # SessionEnd leaves a waiter that detaches the vault once the lead claude
 # exits. The "claude" here is a sleep the test ends; the vault reads mounted.
 HOOK_SESSION_END="$SCRIPT_DIR/../hooks/session-end.sh"
@@ -1753,6 +1787,7 @@ run_test test_open_moves_nothing_while_a_claude_that_changed_folder_writes
 run_test test_open_moves_nothing_from_a_folder_a_path_of_another_case_shares
 run_test test_open_moves_nothing_from_a_folder_it_cannot_read
 run_test test_encrypt_moves_nothing_from_a_folder_it_cannot_read
+run_test test_open_finishes_a_removal_that_stopped_inside_a_folder
 run_test test_session_end_detaches_after_the_lead_exits
 run_test test_session_end_detach_pid_does_not_follow_a_link
 run_test test_session_end_leaves_the_vault_for_clear_resume_and_non_leads
